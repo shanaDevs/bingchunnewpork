@@ -52,15 +52,15 @@ export function assertProductionSecrets(): void {
   }
 }
 
-/** After DB is up: enforce live SMS and other runtime-only production gates. */
+/** After DB is up: report missing SMS without taking the API down. */
 export async function assertProductionRuntimeConfig(): Promise<void> {
   if (config.nodeEnv !== 'production') return;
 
   const { getSmsRuntimeConfig } = await import('./smsSettings');
   const sms = await getSmsRuntimeConfig();
   if (sms.provider !== 'smslenz' || !sms.enabled || !sms.configured) {
-    throw new Error(
-      'Production SMS must use SMSlenz with credentials configured and sending enabled (admin Settings → SMS)',
+    logger.error(
+      'Production SMS is not configured. The API will stay up, but OTP and SMS will not send until SMSlenz credentials are set in admin Settings.',
     );
   }
 }

@@ -59,7 +59,7 @@ describe('assertProductionRuntimeConfig', () => {
     expect(getSmsRuntimeConfig).not.toHaveBeenCalled();
   });
 
-  it('requires live SMSlenz in production', async () => {
+  it('stays up when SMSlenz is not configured', async () => {
     stubProdEnv();
     vi.mocked(getSmsRuntimeConfig).mockResolvedValue({
       enabled: false,
@@ -73,7 +73,7 @@ describe('assertProductionRuntimeConfig', () => {
       configured: false,
     });
     const { assertProductionRuntimeConfig } = await import('../../src/lib/productionSecrets');
-    await expect(assertProductionRuntimeConfig()).rejects.toThrow(/SMSlenz/);
+    await expect(assertProductionRuntimeConfig()).resolves.toBeUndefined();
   });
 
   it('accepts configured SMSlenz in production', async () => {
