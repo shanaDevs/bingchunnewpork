@@ -1,0 +1,132 @@
+# ============================================================
+# Trigger sync in bingchun-production
+# ============================================================
+# When developers push to `production`, this triggers:
+#   bingchun-production → Actions → "Sync from bingchung"
+# which merges into that repo's `main` using GITHUB_TOKEN.
+#
+# Secret on bingchung (Settings → Secrets → Actions):
+#   PRODUCTION_REPO_TOKEN
+#
+# REQUIRED token setup (classic PAT is most reliable):
+#   1. https://github.com/settings/tokens → Generate classic token
+#   2. Scope: repo (full control of private repositories)
+#   3. If org uses SSO: click "Configure SSO" → Authorize DC-PVT-LTD
+#   4. Paste into PRODUCTION_REPO_TOKEN on bingchung
+#
+# Fine-grained alternative (if classic is blocked):
+#   Resource owner: DC-PVT-LTD
+#   Only repo: bingchun-production
+#   Permissions: Actions = Read and write, Contents = Read and write
+#   Then Authorize SSO for DC-PVT-LTD
+#
+# Secret on bingchun-production:
+#   BINGCHUNG_READ_TOKEN — Contents:Read on bingchung (+ SSO)
+# ============================================================
+
+name: Sync to production repo
+
+on:
+  push:
+    branches:
+      - production
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-to-production-repo
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    name: Trigger bingchun-production sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check token
+        env:
+          PRODUCTION_REPO_TOKEN: ${{ secrets.PRODUCTION_REPO_TOKEN }}
+        run: |
+          if [ -z "${PRODUCTION_REPO_TOKEN:-}" ]; then
+            echo "Missing secret PRODUCTION_REPO_TOKEN on bingchung."
+            exit 1
+          fi
+
+      - name: Verify token can access bingchun-production
+        env:
+          PRODUCTION_REPO_TOKEN: ${{ secrets.PRODUCTION_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl -sS -o /tmp/repo.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${PRODUCTION_REPO_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/DC-PVT-LTD/bingchun-production")
+          echo "Repo access HTTP ${HTTP_CODE}"
+          if [ "${HTTP_CODE}" != "200" ]; then
+            echo "Token cannot access bingchun-production."
+            cat /tmp/repo.json
+            echo ""
+            echo "Fix:"
+            echo "  1. Use a classic PAT with 'repo' scope"
+            echo "  2. Authorize SSO for DC-PVT-LTD on the token"
+            echo "  3. Ensure your user has access to bingchun-production"
+            exit 1
+          fi
+          echo "Repo access OK: $(jq -r '.full_name' /tmp/repo.json)"
+
+      - name: Trigger Sync from bingchung workflow
+        env:
+          PRODUCTION_REPO_TOKEN: ${{ secrets.PRODUCTION_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          # workflow_dispatch needs Actions:Write (fine-grained) or repo (classic)
+          HTTP_CODE=$(curl -sS -o /tmp/dispatch-response.json -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${PRODUCTION_REPO_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/DC-PVT-LTD/bingchun-production/actions/workflows/sync-from-bingchung.yml/dispatches" \
+            -d "{\"ref\":\"main\",\"inputs\":{}}")
+          echo "workflow_dispatch HTTP ${HTTP_CODE}"
+          cat /tmp/dispatch-response.json || true
+          echo ""
+
+          if [ "${HTTP_CODE}" = "204" ] || [ "${HTTP_CODE}" = "200" ]; then
+            echo "Triggered successfully. Check:"
+            echo "https://github.com/DC-PVT-LTD/bingchun-production/actions/workflows/sync-from-bingchung.yml"
+            exit 0
+          fi
+
+          echo "workflow_dispatch failed. Trying repository_dispatch fallback..."
+          HTTP_CODE2=$(curl -sS -o /tmp/dispatch2.json -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${PRODUCTION_REPO_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/DC-PVT-LTD/bingchun-production/dispatches" \
+            -d "{\"event_type\":\"sync-from-bingchung\",\"client_payload\":{\"source_sha\":\"${{ github.sha }}\",\"source_ref\":\"production\"}}")
+          echo "repository_dispatch HTTP ${HTTP_CODE2}"
+          cat /tmp/dispatch2.json || true
+          echo ""
+
+          if [ "${HTTP_CODE2}" = "204" ] || [ "${HTTP_CODE2}" = "200" ]; then
+            echo "Triggered via repository_dispatch."
+            exit 0
+          fi
+
+          echo "============================================================"
+          echo "FAILED: Token cannot trigger workflows on bingchun-production"
+          echo "============================================================"
+          echo "Create a CLASSIC PAT (most reliable):"
+          echo "  https://github.com/settings/tokens"
+          echo "  → Generate new token (classic)"
+          echo "  → Enable scope: repo"
+          echo "  → Generate"
+          echo "  → Configure SSO → Authorize DC-PVT-LTD  ← required for orgs"
+          echo ""
+          echo "Then update secret PRODUCTION_REPO_TOKEN on bingchung:"
+          echo "  https://github.com/DC-PVT-LTD/bingchung/settings/secrets/actions"
+          echo "============================================================"
+          exit 1

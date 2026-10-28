@@ -1,0 +1,240 @@
+# ============================================================
+# Bing Chun — GitHub Actions CI/CD
+# ============================================================
+# Runs only when code lands on the production branch
+# (PR merge into production, or a direct push to production).
+#
+# Required GitHub secrets (Settings > Secrets and variables > Actions):
+#   CAPROVER_BACKEND_TOKEN   App token for bing-chun-b
+#   CAPROVER_FRONTEND_TOKEN  App token for bing-chun
+#
+# Setup guide: docs/13_Deployment_Guide.md
+#
+# One-time CapRover registry (so it can pull private GHCR images):
+#   CapRover > Cluster > Docker Registries > Add
+#     Registry Domain : ghcr.io
+#     Username        : a GitHub user/org that can read packages
+#     Password        : GitHub PAT with read:packages
+# ============================================================
+
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - production1
+  workflow_dispatch:
+    inputs:
+      deploy_backend:
+        description: Deploy backend to CapRover
+        type: boolean
+        default: true
+      deploy_frontend:
+        description: Deploy frontend to CapRover
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-production
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  CAPROVER_URL: https://captain.dartcodes.cloud
+  CAPROVER_BACKEND_APP: bing-chun-b
+  CAPROVER_FRONTEND_APP: bing-chun
+  BACKEND_URL: https://bing-chun-b.dartcodes.cloud
+  API_PROXY_URL: https://bing-chun-b.dartcodes.cloud
+
+jobs:
+  build-backend:
+    name: Build backend image
+    if: github.ref == 'refs/heads/production'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/backend"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          echo "${image}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "${image}:latest" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-frontend:
+    name: Build frontend image
+    if: github.ref == 'refs/heads/production'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/frontend"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          echo "${image}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "${image}:latest" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./Frontend
+          file: ./Frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=/api
+            BACKEND_URL=${{ env.BACKEND_URL }}
+            API_PROXY_URL=${{ env.API_PROXY_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-backend:
+    name: Deploy backend
+    if: >-
+      github.ref == 'refs/heads/production' &&
+      (github.event_name != 'workflow_dispatch' || inputs.deploy_backend)
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun-b
+      url: https://bing-chun-b.dartcodes.cloud
+    concurrency:
+      group: caprover-backend
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Package and deploy backend to CapRover
+        env:
+          CAPROVER_BACKEND_TOKEN: ${{ secrets.CAPROVER_BACKEND_TOKEN || secrets.CAPROVER_APP_TOKEN }}
+        run: |
+          set -euo pipefail
+          TOKEN="$(printf '%s' "$CAPROVER_BACKEND_TOKEN" | tr -d '[:space:]' | tr -d '"' | tr -d "'")"
+          if [ -z "$TOKEN" ]; then
+            echo "Missing GitHub secret CAPROVER_BACKEND_TOKEN on environment bing-chun-b"
+            echo "CapRover > Apps > bing-chun-b > Deployment > Enable App Token"
+            exit 1
+          fi
+          echo "App token length: ${#TOKEN}"
+          STAGE=/tmp/backend-stage
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/packages/db" "$STAGE/packages/delivery-domain" "$STAGE/packages/settlement" "$STAGE/backend" "$STAGE/delivery-service" "$STAGE/Frontend"
+          cp backend/deploy/Dockerfile "$STAGE/Dockerfile"
+          cp backend/deploy/captain-definition "$STAGE/captain-definition"
+          cp package.json "$STAGE/package.json"
+          cp package-lock.json "$STAGE/package-lock.json"
+          cp packages/db/package.json "$STAGE/packages/db/package.json"
+          cp packages/db/tsconfig.json "$STAGE/packages/db/tsconfig.json"
+          cp -R packages/db/prisma "$STAGE/packages/db/prisma"
+          cp -R packages/db/src "$STAGE/packages/db/src"
+          if [ -f packages/db/prisma.config.ts ]; then cp packages/db/prisma.config.ts "$STAGE/packages/db/prisma.config.ts"; fi
+          cp packages/delivery-domain/package.json "$STAGE/packages/delivery-domain/package.json"
+          cp -R packages/settlement/package.json packages/settlement/tsconfig.json packages/settlement/src "$STAGE/packages/settlement/"
+          cp delivery-service/package.json "$STAGE/delivery-service/package.json"
+          cp Frontend/package.json "$STAGE/Frontend/package.json"
+          cp -R backend/src backend/package.json backend/tsconfig.json backend/docker-entrypoint.sh "$STAGE/backend/"
+          if [ -d backend/prisma ]; then cp -R backend/prisma "$STAGE/backend/prisma"; fi
+          if [ -d backend/public ]; then cp -R backend/public "$STAGE/backend/public"; fi
+          sed -i 's/\r$//' "$STAGE/backend/docker-entrypoint.sh"
+          chmod +x "$STAGE/backend/docker-entrypoint.sh"
+          tar -czf /tmp/backend-deploy.tar -C "$STAGE" .
+          echo "Deploying source package to $CAPROVER_BACKEND_APP at $CAPROVER_URL"
+          npx -y caprover@2.2.3 deploy \
+            --caproverUrl "$CAPROVER_URL" \
+            --caproverApp "$CAPROVER_BACKEND_APP" \
+            --appToken "$TOKEN" \
+            --tarFile /tmp/backend-deploy.tar
+
+  deploy-frontend:
+    name: Deploy frontend
+    if: >-
+      github.ref == 'refs/heads/production' &&
+      (github.event_name != 'workflow_dispatch' || inputs.deploy_frontend)
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun
+      url: https://bing-chun.dartcodes.cloud
+    concurrency:
+      group: caprover-frontend
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Package and deploy frontend to CapRover
+        env:
+          CAPROVER_FRONTEND_TOKEN: ${{ secrets.CAPROVER_FRONTEND_TOKEN || secrets.CAPROVER_APP_TOKEN }}
+        run: |
+          set -euo pipefail
+          TOKEN="$(printf '%s' "$CAPROVER_FRONTEND_TOKEN" | tr -d '[:space:]' | tr -d '"' | tr -d "'")"
+          if [ -z "$TOKEN" ]; then
+            echo "Missing GitHub secret CAPROVER_FRONTEND_TOKEN on environment bing-chun"
+            echo "CapRover > Apps > bing-chun > Deployment > Enable App Token"
+            exit 1
+          fi
+          echo "App token length: ${#TOKEN}"
+          STAGE=/tmp/frontend-stage
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          cp -R Frontend/. "$STAGE/"
+          cp Frontend/deploy/captain-definition "$STAGE/captain-definition"
+          printf '{"schemaVersion":2,"dockerfilePath":"./Dockerfile"}\n' > "$STAGE/captain-definition"
+          tar -czf /tmp/frontend-deploy.tar -C "$STAGE" .
+          echo "Deploying source package to $CAPROVER_FRONTEND_APP at $CAPROVER_URL"
+          npx -y caprover@2.2.3 deploy \
+            --caproverUrl "$CAPROVER_URL" \
+            --caproverApp "$CAPROVER_FRONTEND_APP" \
+            --appToken "$TOKEN" \
+            --tarFile /tmp/frontend-deploy.tar
