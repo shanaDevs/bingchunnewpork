@@ -8,6 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:vibration/vibration.dart';
 
 import 'ride_alert.dart';
+import 'runtime_config.dart';
 import '../l10n/l10n.dart';
 
 /// Taps and action buttons on our notifications, delivered to the app.
@@ -181,6 +182,7 @@ class BcNotifications {
 
   /// Loud heads-up / full-screen alert for a new delivery ride.
   static Future<void> notifyNewJob(RideAlert alert) async {
+    final fullScreen = await RuntimeConfig.readFullScreenAlertsEnabled();
     final android = AndroidNotificationDetails(
       channelNewJob,
       tr('New delivery jobs'),
@@ -188,7 +190,7 @@ class BcNotifications {
       importance: Importance.max,
       priority: Priority.max,
       category: AndroidNotificationCategory.call,
-      fullScreenIntent: true,
+      fullScreenIntent: fullScreen,
       ongoing: true,
       autoCancel: false,
       onlyAlertOnce: true,

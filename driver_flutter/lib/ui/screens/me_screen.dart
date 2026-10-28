@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -47,7 +49,13 @@ class _MeBody extends StatefulWidget {
 }
 
 class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
-  List<DriverBranchRequest> _myBranchRequests = const [];
+  // Notifier so the open profile details sheet updates when a request is reviewed.
+  final _myBranchRequests = ValueNotifier<List<DriverBranchRequest>>(const []);
+  // Admin review sends no socket/push event, so poll while a request is pending.
+  static const _pendingPollInterval = Duration(seconds: 20);
+  Timer? _pendingPoll;
+  // Guards against repeated taps while the branch list loads or the sheet is open.
+  bool _branchRequestBusy = false;
 
   @override
   void initState() {
@@ -60,18 +68,34 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _pendingPoll?.cancel();
+    _myBranchRequests.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _loadBranchRequests();
+    if (state == AppLifecycleState.resumed) {
+      _loadBranchRequests();
+    } else if (state == AppLifecycleState.paused) {
+      _pendingPoll?.cancel();
+    }
   }
 
+  static bool _isPending(DriverBranchRequest r) => r.status.toUpperCase() == 'PENDING';
+
   Future<void> _loadBranchRequests() async {
+    final vm = context.read<JobsController>();
     try {
-      final list = await context.read<JobsController>().listMyBranchRequests();
-      if (mounted) setState(() => _myBranchRequests = list);
+      final list = await vm.listMyBranchRequests();
+      if (!mounted) return;
+      final wasPending = _myBranchRequests.value.where(_isPending).map((r) => r.id).toSet();
+      final reviewed = list.any((r) => wasPending.contains(r.id) && !_isPending(r));
+      _myBranchRequests.value = list;
+      // An approval changes the rider's branches/home, so refresh the profile too.
+      if (reviewed) vm.load();
+      _pendingPoll?.cancel();
+      if (list.any(_isPending)) _pendingPoll = Timer(_pendingPollInterval, _loadBranchRequests);
     } catch (_) {
       // Profile still works if request history fails to load.
     }
@@ -88,31 +112,37 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
   }
 
   Future<void> _requestBranchChange(JobsController vm, AuthController auth) async {
-    BcFeedback.tap();
-    final messenger = ScaffoldMessenger.of(context);
-    final branches = _branches(vm, auth);
-    List<BranchOption> stores;
+    if (_branchRequestBusy) return;
+    _branchRequestBusy = true;
     try {
-      final fromApi = await vm.listStoresForBranchRequest();
-      final known = branches.map((b) => BranchOption(id: b.id, name: b.name, city: b.city));
-      final seen = <String>{};
-      stores = [...fromApi, ...known].where((s) => s.id.trim().isNotEmpty && seen.add(s.id)).toList();
-    } catch (e) {
-      BcFeedback.error();
-      messenger.showSnackBar(SnackBar(content: Text('$e'.isEmpty ? tr('Could not load branches') : '$e')));
-      return;
-    }
-    if (!mounted) return;
-    final submitted = await showBranchRequestSheet(
-      context,
-      stores: stores,
-      accessibleStoreIds: branches.map((b) => b.id).where((id) => id.trim().isNotEmpty).toSet(),
-      homeStoreId: vm.profile?.storeId ?? auth.driver?.storeId,
-      onSubmit: (type, toStoreId, reason) => vm.createBranchRequest(type, toStoreId, reason),
-    );
-    if (submitted) {
-      BcFeedback.success();
-      _loadBranchRequests();
+      BcFeedback.tap();
+      final messenger = ScaffoldMessenger.of(context);
+      final branches = _branches(vm, auth);
+      List<BranchOption> stores;
+      try {
+        final fromApi = await vm.listStoresForBranchRequest();
+        final known = branches.map((b) => BranchOption(id: b.id, name: b.name, city: b.city));
+        final seen = <String>{};
+        stores = [...fromApi, ...known].where((s) => s.id.trim().isNotEmpty && seen.add(s.id)).toList();
+      } catch (e) {
+        BcFeedback.error();
+        messenger.showSnackBar(SnackBar(content: Text('$e'.isEmpty ? tr('Could not load branches') : '$e')));
+        return;
+      }
+      if (!mounted) return;
+      final submitted = await showBranchRequestSheet(
+        context,
+        stores: stores,
+        accessibleStoreIds: branches.map((b) => b.id).where((id) => id.trim().isNotEmpty).toSet(),
+        homeStoreId: vm.profile?.storeId ?? auth.driver?.storeId,
+        onSubmit: (type, toStoreId, reason) => vm.createBranchRequest(type, toStoreId, reason),
+      );
+      if (submitted) {
+        BcFeedback.success();
+        _loadBranchRequests();
+      }
+    } finally {
+      _branchRequestBusy = false;
     }
   }
 
@@ -122,7 +152,9 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
       await vm.setOnline(true);
       // Android 14+: prompt once to allow full-screen ride alerts.
       final prefs = await SharedPreferences.getInstance();
-      if (!await SystemSettings.canUseFullScreenIntent() && !(prefs.getBool('fsi_prompt_shown') ?? false)) {
+      if (RuntimeConfig.instance.fullScreenAlertsEnabled &&
+          !await SystemSettings.canUseFullScreenIntent() &&
+          !(prefs.getBool('fsi_prompt_shown') ?? false)) {
         await prefs.setBool('fsi_prompt_shown', true);
         if (mounted) showJobAlertsSheet(context);
       }
@@ -175,7 +207,7 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
           },
         ),
       ],
-      onRefresh: () => vm.load(),
+      onRefresh: () => Future.wait([vm.load(), _loadBranchRequests()]),
       children: [
         _DriverProfileCard(
           driverName: driverName,
@@ -284,7 +316,7 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
               iconTint: dark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED),
               title: tr('Sounds'),
               subtitle: tr('Job alerts and completion tones'),
-              trailing: _BcSwitch(
+              trailing: BcSwitch(
                 value: rc.soundEnabled,
                 onChanged: (v) {
                   BcFeedback.tap();
@@ -298,7 +330,7 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
               iconTint: dark ? const Color(0xFF34D399) : const Color(0xFF16A34A),
               title: tr('Haptics'),
               subtitle: tr('For claim, start, verify, and errors'),
-              trailing: _BcSwitch(
+              trailing: BcSwitch(
                 value: rc.hapticsEnabled,
                 onChanged: (v) {
                   BcFeedback.tap();
@@ -321,6 +353,22 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
         _SignOutCard(
           onTap: () async {
             BcFeedback.tap();
+            if (await vm.hasHeldJob()) {
+              if (!context.mounted) return;
+              BcFeedback.error();
+              await showBcConfirm(
+                context,
+                icon: Icons.delivery_dining_rounded,
+                tone: BcDialogTone.warning,
+                title: tr('Finish your ride first'),
+                message: tr(
+                  'You have a claimed ride that is not finished. Complete or reject it before signing out.',
+                ),
+                confirmLabel: tr('OK'),
+              );
+              return;
+            }
+            if (!context.mounted) return;
             final ok = await showBcConfirm(
               context,
               icon: Icons.logout_rounded,
@@ -348,19 +396,23 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
     String initial,
     String? meritStatus,
   ) {
-    final p = vm.profile;
+    _loadBranchRequests();
     showBcSheet<void>(
       context,
       builder: (_) => ChangeNotifierProvider.value(
         value: stats,
-        child: _ProfileDetailsSheet(
-          driverName: p?.name ?? auth.driver?.name ?? tr('Driver'),
-          initial: initial,
-          isOnline: vm.isOnline,
-          profile: p,
-          meritStatus: meritStatus,
-          branches: _branches(vm, auth),
-          branchRequests: _myBranchRequests,
+        // Rebuild on profile or request changes so a review shows without reopening.
+        child: ListenableBuilder(
+          listenable: Listenable.merge([vm, _myBranchRequests]),
+          builder: (_, _) => _ProfileDetailsSheet(
+            driverName: vm.profile?.name ?? auth.driver?.name ?? tr('Driver'),
+            initial: initial,
+            isOnline: vm.isOnline,
+            profile: vm.profile,
+            meritStatus: meritStatus,
+            branches: _branches(vm, auth),
+            branchRequests: _myBranchRequests.value,
+          ),
         ),
       ),
     );
@@ -635,7 +687,7 @@ class _DutyStatusCard extends StatelessWidget {
                   stroke: Color(0xFF94A3B8),
                 ),
           const SizedBox(width: 6),
-          _BcSwitch(value: on, onChanged: loading ? null : onToggle),
+          BcSwitch(value: on, onChanged: loading ? null : onToggle),
         ],
       ),
     );
@@ -643,27 +695,6 @@ class _DutyStatusCard extends StatelessWidget {
 }
 
 /// Brand switch used across the Me tab.
-class _BcSwitch extends StatelessWidget {
-  const _BcSwitch({required this.value, required this.onChanged});
-  final bool value;
-  final ValueChanged<bool>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    final dark = c.isDark;
-    return Switch(
-      value: value,
-      onChanged: onChanged,
-      activeThumbColor: Colors.white,
-      activeTrackColor: dark ? c.brand : c.brandDark,
-      inactiveThumbColor: dark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
-      inactiveTrackColor: dark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
-      trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
-    );
-  }
-}
-
 /// Preference row with a compact segmented choice on the right (theme, language).
 class _SegmentRow<T> extends StatelessWidget {
   const _SegmentRow({

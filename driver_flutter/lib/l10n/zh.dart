@@ -205,6 +205,7 @@ const Map<String, String> zhStrings = {
   // Stats tiles & reviews
   'Earned': '收入',
   'Customer reviews': '顾客评价',
+  '{stars} out of 5 stars': '{stars} 星（满分 5 星）',
   'Loading reviews…': '正在加载评价…',
   'No reviews yet': '暂无评价',
   'Order #{orderNumber}': '订单 #{orderNumber}',
@@ -395,6 +396,7 @@ const Map<String, String> zhStrings = {
   'No other branches available to add.': '没有可添加的其他门店。',
   'No removable branches (cannot remove home).': '没有可移除的门店（不能移除主门店）。',
   'No other branches available.': '没有其他可用门店。',
+  'You only have one assigned branch, so you cannot change your home branch.': '您只分配了一个门店，无法更改主门店。',
   'Search by name or city': '按名称或城市搜索',
   'No branches match that search.': '没有匹配的门店。',
   'Reason (optional)': '原因（选填）',
@@ -541,6 +543,10 @@ const Map<String, String> zhStrings = {
   'Report Failure': '报告故障',
   'Sign out': '退出登录',
   'Sign out?': '退出登录？',
+  'Finish your ride first': '请先完成当前行程',
+  'You have a claimed ride that is not finished. Complete or reject it before signing out.':
+      '您有一个已接单但尚未完成的行程。请先完成或拒绝该行程，再退出登录。',
+  'OK': '好的',
   'You are on duty. Signing out stops new job alerts on this phone until you sign in again.':
       '您当前在岗。退出登录后，本手机将不再接收新任务提醒，直到您重新登录。',
   'You will need an SMS code to sign in again. Your app lock will be turned off.': '重新登录需要短信验证码，应用锁将被关闭。',
@@ -573,6 +579,7 @@ const Map<String, String> zhStrings = {
   'Allow background running': '允许后台运行',
   'Full-Screen Ride Alerts': '全屏行程提醒',
   'Allowed. Incoming jobs can ring over the lock screen immediately.': '已允许。新任务可立即在锁屏上响铃。',
+  'Off. New jobs show as a normal notification instead of ringing over the lock screen.': '已关闭。新任务将以普通通知显示，不会在锁屏上全屏响铃。',
   'Permission required to pop up incoming jobs over locked screens.': '需要权限才能在锁屏上弹出新任务。',
   'Enabled': '已开启',
   'Allow full-screen alerts': '允许全屏提醒',

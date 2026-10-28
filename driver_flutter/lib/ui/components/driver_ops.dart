@@ -211,24 +211,35 @@ class _ReviewRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
+    final stars = review.stars.clamp(0, 5);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              children: [
-                for (var i = 0; i < 5; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 2),
-                    child: Icon(
-                      Icons.star_outline,
-                      size: 14,
-                      color: i < review.stars ? const Color(0xFFF59E0B) : c.textMuted.withValues(alpha: 0.35),
+            Semantics(
+              label: tr('{stars} out of 5 stars', {'stars': stars}),
+              excludeSemantics: true,
+              child: Row(
+                children: [
+                  // Earned stars filled, the rest outlined, so the count reads at a glance.
+                  for (var i = 0; i < 5; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 2),
+                      child: Icon(
+                        i < stars ? Icons.star_rounded : Icons.star_outline_rounded,
+                        size: 18,
+                        color: i < stars ? const Color(0xFFF59E0B) : c.textMuted.withValues(alpha: 0.45),
+                      ),
                     ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '$stars/5',
+                    style: BcType.caption.copyWith(color: c.text, fontWeight: FontWeight.w700),
                   ),
-              ],
+                ],
+              ),
             ),
             Text(Format.dateTime(review.createdAt), style: BcType.tiny.copyWith(color: c.textMuted)),
           ],

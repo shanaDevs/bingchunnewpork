@@ -158,6 +158,16 @@ class JobsController extends ChangeNotifier {
     _emit();
   }
 
+  /// True while the rider holds a claimed/active run — sign-out is blocked until it ends.
+  /// Asks the server so a ride claimed elsewhere still counts; falls back to the cached list offline.
+  Future<bool> hasHeldJob() async {
+    try {
+      return (await _c.jobsRepository.listJobs()).any((j) => _heldStatuses.contains(j.status));
+    } catch (_) {
+      return jobs.any((j) => _heldStatuses.contains(j.status));
+    }
+  }
+
   Future<List<BranchOption>> listStoresForBranchRequest() => _c.authRepository.listStores();
 
   Future<List<DriverBranchRequest>> listMyBranchRequests() => _c.authRepository.listBranchRequests();
