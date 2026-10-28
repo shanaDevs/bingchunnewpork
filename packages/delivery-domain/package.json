@@ -1,0 +1,19 @@
+{
+  "name": "@bingchun/delivery-domain",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@bingchun/db": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,734 @@
+{
+  "generatedAt": "2026-08-15T10:36:01.322Z",
+  "storeId": "store-bing-chun---anuradhapura",
+  "storeName": "Bing Chun - Anuradhapura",
+  "productIds": [
+    "5a9f9499-ad11-475e-a40c-946cf827c57f",
+    "ae2498a5-c997-471a-a8df-83d5217d3ec8",
+    "b22044f3-1acc-4dba-8e96-da7451e7e3b7"
+  ],
+  "products": [
+    {
+      "id": "5a9f9499-ad11-475e-a40c-946cf827c57f",
+      "name": "Mix Choco Vanilla Ice Cream",
+      "basePrice": 200
+    },
+    {
+      "id": "ae2498a5-c997-471a-a8df-83d5217d3ec8",
+      "name": "Vanilla Ice Cream",
+      "basePrice": 200
+    },
+    {
+      "id": "b22044f3-1acc-4dba-8e96-da7451e7e3b7",
+      "name": "Chocolate Ice Cream",
+      "basePrice": 200
+    }
+  ],
+  "users": [
+    {
+      "index": 1,
+      "id": "0d88ae57-c1fc-4b14-b218-c2a6a4716b75",
+      "phone": "0770000001",
+      "name": "Load Test User 001",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 2,
+      "id": "9f5b3204-a46a-4022-ae52-929f2f4652f8",
+      "phone": "0770000002",
+      "name": "Load Test User 002",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 3,
+      "id": "cf2848e8-ce96-466f-81bf-1f7684fec6c6",
+      "phone": "0770000003",
+      "name": "Load Test User 003",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 4,
+      "id": "abe63861-9fa4-4fc8-884b-3d2f6613aa4d",
+      "phone": "0770000004",
+      "name": "Load Test User 004",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 5,
+      "id": "134153f8-7abc-4a94-a78f-9dafa633214a",
+      "phone": "0770000005",
+      "name": "Load Test User 005",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 6,
+      "id": "941dc617-3858-429a-99a2-8fd74c698b64",
+      "phone": "0770000006",
+      "name": "Load Test User 006",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 7,
+      "id": "cb052fa8-a8bb-4f97-a0c3-905c0d0e36c2",
+      "phone": "0770000007",
+      "name": "Load Test User 007",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 8,
+      "id": "38d20cc3-04c0-4a58-93b9-98740719a1f8",
+      "phone": "0770000008",
+      "name": "Load Test User 008",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 9,
+      "id": "5decd9e6-241b-4c0f-9ae6-7ea88cadcea3",
+      "phone": "0770000009",
+      "name": "Load Test User 009",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 10,
+      "id": "07691bb8-a63f-4f31-a926-ba6ad60d626f",
+      "phone": "0770000010",
+      "name": "Load Test User 010",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 11,
+      "id": "226e4687-e031-4751-b00f-4d4dc2967df6",
+      "phone": "0770000011",
+      "name": "Load Test User 011",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 12,
+      "id": "2cdf741d-a58c-41c5-9fd3-22c7d287f236",
+      "phone": "0770000012",
+      "name": "Load Test User 012",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 13,
+      "id": "9769cfc1-1805-4ebd-a74b-e8580db2ddbf",
+      "phone": "0770000013",
+      "name": "Load Test User 013",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 14,
+      "id": "6fee27a4-b6dd-45a7-9bdc-4918349c365d",
+      "phone": "0770000014",
+      "name": "Load Test User 014",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 15,
+      "id": "aec46ca6-bc83-41a5-b193-6f37dc7968ee",
+      "phone": "0770000015",
+      "name": "Load Test User 015",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 16,
+      "id": "a9b12feb-6b19-4c3b-b538-d8146a62f919",
+      "phone": "0770000016",
+      "name": "Load Test User 016",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 17,
+      "id": "21f01320-b41e-48b8-a15e-f0a21c46f0fc",
+      "phone": "0770000017",
+      "name": "Load Test User 017",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 18,
+      "id": "a1077522-61e9-4288-ab6c-03808d30bf69",
+      "phone": "0770000018",
+      "name": "Load Test User 018",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 19,
+      "id": "b8615844-6bfc-45f6-ad78-f61b00847ca0",
+      "phone": "0770000019",
+      "name": "Load Test User 019",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 20,
+      "id": "935456c4-df4a-419a-9439-2c5f7bf2b53e",
+      "phone": "0770000020",
+      "name": "Load Test User 020",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 21,
+      "id": "7c6950ad-7c90-4dea-95bd-a86fab5915a2",
+      "phone": "0770000021",
+      "name": "Load Test User 021",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 22,
+      "id": "ca01c5d6-aff0-4129-b4ab-8d26956d07b7",
+      "phone": "0770000022",
+      "name": "Load Test User 022",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 23,
+      "id": "d5c1585e-1586-431c-b359-8af899bd93be",
+      "phone": "0770000023",
+      "name": "Load Test User 023",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 24,
+      "id": "87130428-7c11-4e82-8df3-e64e7a468038",
+      "phone": "0770000024",
+      "name": "Load Test User 024",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 25,
+      "id": "3cdbc283-8a5a-4a68-ba0e-97cd5102901a",
+      "phone": "0770000025",
+      "name": "Load Test User 025",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 26,
+      "id": "141f2752-01ca-4b7f-8594-c125ec13a18e",
+      "phone": "0770000026",
+      "name": "Load Test User 026",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 27,
+      "id": "1811436e-39dc-49ab-867c-6b2142b1a461",
+      "phone": "0770000027",
+      "name": "Load Test User 027",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 28,
+      "id": "b5d9d024-320d-452d-a582-c3ad18e588de",
+      "phone": "0770000028",
+      "name": "Load Test User 028",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 29,
+      "id": "b1b6c15a-ed51-4565-bb92-58849c4d20f7",
+      "phone": "0770000029",
+      "name": "Load Test User 029",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 30,
+      "id": "38442929-c270-4649-98a1-2025b0a6f548",
+      "phone": "0770000030",
+      "name": "Load Test User 030",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 31,
+      "id": "4fca8c84-c956-4bdc-a2e7-282b483930c1",
+      "phone": "0770000031",
+      "name": "Load Test User 031",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 32,
+      "id": "c58a4d72-8c33-4ff1-845e-6a6c9c01311f",
+      "phone": "0770000032",
+      "name": "Load Test User 032",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 33,
+      "id": "483e49c3-8c46-488a-9d53-b0f413e6762e",
+      "phone": "0770000033",
+      "name": "Load Test User 033",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 34,
+      "id": "f8e6c91f-0ca5-4b68-9be0-4363763d8e48",
+      "phone": "0770000034",
+      "name": "Load Test User 034",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 35,
+      "id": "a0e79e41-c7c3-4ffb-bee1-90b372263366",
+      "phone": "0770000035",
+      "name": "Load Test User 035",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 36,
+      "id": "1fc819e4-5450-442e-902c-ed087a41c831",
+      "phone": "0770000036",
+      "name": "Load Test User 036",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 37,
+      "id": "fe7d7845-5827-4851-8bcd-3a32fed30829",
+      "phone": "0770000037",
+      "name": "Load Test User 037",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 38,
+      "id": "981eed27-89c6-426a-b2bb-947b2b493c5a",
+      "phone": "0770000038",
+      "name": "Load Test User 038",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 39,
+      "id": "4702be1e-5179-40d5-aced-1eba2daa9290",
+      "phone": "0770000039",
+      "name": "Load Test User 039",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 40,
+      "id": "e66e051d-69b3-4bea-b68e-05e1642021ea",
+      "phone": "0770000040",
+      "name": "Load Test User 040",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 41,
+      "id": "3a994e68-88fb-4964-9935-0c584b756d5c",
+      "phone": "0770000041",
+      "name": "Load Test User 041",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 42,
+      "id": "b8df8895-0335-4c0a-88bb-8442e21500e6",
+      "phone": "0770000042",
+      "name": "Load Test User 042",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 43,
+      "id": "23e49be3-d478-45c0-8335-f13e614216f3",
+      "phone": "0770000043",
+      "name": "Load Test User 043",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 44,
+      "id": "67621d46-5740-490b-b3c7-16ea333482f2",
+      "phone": "0770000044",
+      "name": "Load Test User 044",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 45,
+      "id": "7ba58448-588d-44ab-b510-acb2de6d4aef",
+      "phone": "0770000045",
+      "name": "Load Test User 045",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 46,
+      "id": "3a3777c0-48c8-4e02-8cd0-73c3eb6482b1",
+      "phone": "0770000046",
+      "name": "Load Test User 046",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 47,
+      "id": "1475d81f-e356-4ca9-866e-08622f06556d",
+      "phone": "0770000047",
+      "name": "Load Test User 047",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 48,
+      "id": "95c7f3bf-f033-4011-82cd-12eea2bfec39",
+      "phone": "0770000048",
+      "name": "Load Test User 048",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 49,
+      "id": "c4c45900-1ce9-45cd-a6a4-213a18ed06f1",
+      "phone": "0770000049",
+      "name": "Load Test User 049",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 50,
+      "id": "b4729c78-54ec-4e6f-8608-cc6f6802f6b4",
+      "phone": "0770000050",
+      "name": "Load Test User 050",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 51,
+      "id": "e4ef5531-f7fa-416f-b246-5943dbd95a7b",
+      "phone": "0770000051",
+      "name": "Load Test User 051",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 52,
+      "id": "f8af6cb8-5e0c-4638-b27e-e0dbb7b90fcf",
+      "phone": "0770000052",
+      "name": "Load Test User 052",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 53,
+      "id": "66604d70-c955-49a6-add1-aaee9ac38e2c",
+      "phone": "0770000053",
+      "name": "Load Test User 053",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 54,
+      "id": "db82aab1-2ff0-4809-843a-34cc4bfb1115",
+      "phone": "0770000054",
+      "name": "Load Test User 054",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 55,
+      "id": "ee8109b5-19d0-4aa3-b3d4-324369fe9954",
+      "phone": "0770000055",
+      "name": "Load Test User 055",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 56,
+      "id": "e2be8a18-a19d-491f-bc1a-5f8e68d5ccc2",
+      "phone": "0770000056",
+      "name": "Load Test User 056",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 57,
+      "id": "7bfecc20-f844-4b77-aba7-46bb95fae774",
+      "phone": "0770000057",
+      "name": "Load Test User 057",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 58,
+      "id": "11439177-634a-49be-8b75-8ea4659d0695",
+      "phone": "0770000058",
+      "name": "Load Test User 058",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 59,
+      "id": "83fd7f1e-5c73-4bb0-b2bc-654a0a636b13",
+      "phone": "0770000059",
+      "name": "Load Test User 059",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 60,
+      "id": "31a6f919-70a6-4bfd-b834-bf9457781f1f",
+      "phone": "0770000060",
+      "name": "Load Test User 060",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 61,
+      "id": "e46a872e-9e74-4ceb-a065-2673d7cbe9fb",
+      "phone": "0770000061",
+      "name": "Load Test User 061",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 62,
+      "id": "91560559-04af-44e8-964b-5c607dd11b51",
+      "phone": "0770000062",
+      "name": "Load Test User 062",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 63,
+      "id": "f9610502-44ae-4ad8-8881-e458990d4535",
+      "phone": "0770000063",
+      "name": "Load Test User 063",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 64,
+      "id": "5a218c95-191a-4d01-ba2e-9d04f87fb4b5",
+      "phone": "0770000064",
+      "name": "Load Test User 064",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 65,
+      "id": "cfb92afd-aaa0-4665-9ffa-a2f63901d215",
+      "phone": "0770000065",
+      "name": "Load Test User 065",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 66,
+      "id": "43920753-0290-4186-b95e-458025b892fd",
+      "phone": "0770000066",
+      "name": "Load Test User 066",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 67,
+      "id": "edae96d1-aa53-4b26-a99c-51b4bc1fb157",
+      "phone": "0770000067",
+      "name": "Load Test User 067",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 68,
+      "id": "0dd1fc4c-759e-4a37-bec8-0088ae5137dd",
+      "phone": "0770000068",
+      "name": "Load Test User 068",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 69,
+      "id": "46e4aa51-70bb-4caa-9474-ed1efcaefd14",
+      "phone": "0770000069",
+      "name": "Load Test User 069",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 70,
+      "id": "4c6b6bb1-60b9-47ac-840c-9c9ac40ca975",
+      "phone": "0770000070",
+      "name": "Load Test User 070",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 71,
+      "id": "2650c8de-f37a-4528-92bc-ed664f5f2362",
+      "phone": "0770000071",
+      "name": "Load Test User 071",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 72,
+      "id": "7a1cae7d-1372-4e61-b741-262f5991a192",
+      "phone": "0770000072",
+      "name": "Load Test User 072",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 73,
+      "id": "2822fa78-f259-4f0c-9aff-7234aa94d6a2",
+      "phone": "0770000073",
+      "name": "Load Test User 073",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 74,
+      "id": "d4cf9803-ad7f-4f40-a18e-05163be78b16",
+      "phone": "0770000074",
+      "name": "Load Test User 074",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 75,
+      "id": "aff3532d-00b6-4634-b547-12e628789fcc",
+      "phone": "0770000075",
+      "name": "Load Test User 075",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 76,
+      "id": "f7edca51-cf7d-4f99-92e7-f7f9c0974dac",
+      "phone": "0770000076",
+      "name": "Load Test User 076",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 77,
+      "id": "d0f8ca0d-8ce1-4090-a2b4-5d6f2bf727b3",
+      "phone": "0770000077",
+      "name": "Load Test User 077",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 78,
+      "id": "d3f2d282-66d5-4210-b740-54e56eb4ad9f",
+      "phone": "0770000078",
+      "name": "Load Test User 078",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 79,
+      "id": "2be375a8-0afb-46cd-af29-83fbe4a5211c",
+      "phone": "0770000079",
+      "name": "Load Test User 079",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 80,
+      "id": "ba06658d-aab3-4995-920b-ccd1a9dfd00f",
+      "phone": "0770000080",
+      "name": "Load Test User 080",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 81,
+      "id": "b8df96e3-e519-47a6-adcf-9a5616446192",
+      "phone": "0770000081",
+      "name": "Load Test User 081",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 82,
+      "id": "140a21b6-d549-4315-ae72-4f90e24be12b",
+      "phone": "0770000082",
+      "name": "Load Test User 082",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 83,
+      "id": "3832fe0b-0b04-4a0d-b390-304c728c7ece",
+      "phone": "0770000083",
+      "name": "Load Test User 083",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 84,
+      "id": "20e0a343-f817-4aff-a541-2c2d958e0691",
+      "phone": "0770000084",
+      "name": "Load Test User 084",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 85,
+      "id": "f7b005c7-b44b-4833-8f68-108052f11bdd",
+      "phone": "0770000085",
+      "name": "Load Test User 085",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 86,
+      "id": "8a7ea982-fe4a-4a0d-a01a-32b1358b14c3",
+      "phone": "0770000086",
+      "name": "Load Test User 086",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 87,
+      "id": "16165a08-68c8-4009-a09a-e57ad9e43331",
+      "phone": "0770000087",
+      "name": "Load Test User 087",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 88,
+      "id": "ba2a15fd-c7d8-4a65-b5fa-1417e9f32dbf",
+      "phone": "0770000088",
+      "name": "Load Test User 088",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 89,
+      "id": "f2d6e10a-4af8-4dde-b5fb-9ab68abe3e3e",
+      "phone": "0770000089",
+      "name": "Load Test User 089",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 90,
+      "id": "39182487-54d2-41f2-9376-414319f8c28a",
+      "phone": "0770000090",
+      "name": "Load Test User 090",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 91,
+      "id": "7d563947-f6b7-468a-8089-2952fbfd643c",
+      "phone": "0770000091",
+      "name": "Load Test User 091",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 92,
+      "id": "5ba2691e-d1c6-4460-9f7a-b46160668a75",
+      "phone": "0770000092",
+      "name": "Load Test User 092",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 93,
+      "id": "56ca67d7-a92f-4140-91c8-4254fab55798",
+      "phone": "0770000093",
+      "name": "Load Test User 093",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 94,
+      "id": "4b925da7-e34e-4517-bab2-2b05d75d3fa2",
+      "phone": "0770000094",
+      "name": "Load Test User 094",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 95,
+      "id": "470eecb9-13d4-46db-bdbe-9fd360f04a2c",
+      "phone": "0770000095",
+      "name": "Load Test User 095",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 96,
+      "id": "f4c329c4-5965-4419-8a88-97d4bc758e6d",
+      "phone": "0770000096",
+      "name": "Load Test User 096",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 97,
+      "id": "5111db37-61c0-467f-ada9-f3d4b868724b",
+      "phone": "0770000097",
+      "name": "Load Test User 097",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 98,
+      "id": "a47d3028-f20e-4208-b04d-927823b8149f",
+      "phone": "0770000098",
+      "name": "Load Test User 098",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 99,
+      "id": "16eadc04-31d1-440e-9244-13a0e64d2e6c",
+      "phone": "0770000099",
+      "name": "Load Test User 099",
+      "password": "LoadTest123!"
+    },
+    {
+      "index": 100,
+      "id": "e9a9da7d-ad34-4597-a2d3-302a7c296090",
+      "phone": "0770000100",
+      "name": "Load Test User 100",
+      "password": "LoadTest123!"
+    }
+  ],
+  "config": {
+    "userCount": 100,
+    "phonePrefix": "0770000",
+    "password": "LoadTest123!"
+  }
+}

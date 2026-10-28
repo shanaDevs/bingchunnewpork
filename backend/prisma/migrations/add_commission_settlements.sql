@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS `commission_settlements` (
+  `id` VARCHAR(191) NOT NULL,
+  `statementRef` VARCHAR(191) NOT NULL,
+  `storeId` VARCHAR(191) NOT NULL,
+  `periodFrom` DATETIME(3) NOT NULL,
+  `periodTo` DATETIME(3) NOT NULL,
+  `status` ENUM('PENDING_VERIFICATION', 'VERIFIED', 'REJECTED') NOT NULL DEFAULT 'PENDING_VERIFICATION',
+  `paymentMethod` ENUM('BANK_TRANSFER', 'CASH', 'CHECK', 'ONLINE') NOT NULL,
+  `receiptUrl` VARCHAR(191) NULL,
+  `breakdown` JSON NOT NULL,
+  `totalCommission` INT NOT NULL,
+  `totalProviderFee` INT NOT NULL,
+  `submittedById` VARCHAR(191) NULL,
+  `verifiedById` VARCHAR(191) NULL,
+  `verifiedAt` DATETIME(3) NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `commission_settlements_statementRef_key` (`statementRef`),
+  INDEX `commission_settlement_store_period` (`storeId`, `periodFrom`, `periodTo`),
+  CONSTRAINT `commission_settlements_storeId_fkey` FOREIGN KEY (`storeId`) REFERENCES `stores`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

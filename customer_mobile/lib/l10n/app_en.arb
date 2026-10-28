@@ -1,0 +1,343 @@
+{
+  "@@locale": "en",
+  "appName": "Bing Chun",
+  "tabHome": "Home",
+  "tabMenu": "Menu",
+  "tabOrders": "Orders",
+  "tabAccount": "Account",
+  "cupLabel": "Cup",
+  "splashTagline": "Your cup, your way",
+  "loginTitle": "Sign in",
+  "loginSubtitle": "We'll send a 6-digit code to your mobile.",
+  "phoneLabel": "Mobile number",
+  "phoneHint": "07XXXXXXXX",
+  "phoneInvalid": "Enter a valid Sri Lankan mobile number.",
+  "sendOtp": "Send code",
+  "otpTitle": "Enter code",
+  "otpSubtitle": "Sign in with the OTP sent to your phone.",
+  "otpInvalid": "Enter the 6-digit code.",
+  "verifyOtp": "Verify",
+  "resendOtp": "Resend code",
+  "registerTitle": "Create account",
+  "registerSubtitle": "New to Bing Chun? Verify your phone to get started.",
+  "nameLabel": "Your name",
+  "nameHint": "At least 2 characters",
+  "nameTooShort": "Name must be at least 2 characters.",
+  "continueAction": "Continue",
+  "alreadyHaveAccount": "Already have an account? Sign in",
+  "newHere": "New here? Create an account",
+  "existingPhone": "This number is already registered. Sign in instead.",
+  "unknownPhone": "No account for this number. Create one to continue.",
+  "logout": "Sign out",
+  "logoutConfirm": "Sign out of Bing Chun?",
+  "cancel": "Cancel",
+  "retry": "Retry",
+  "goHome": "Go home",
+  "notFoundTitle": "Page not found",
+  "notFoundBody": "That link isn't available in the app.",
+  "comingSoon": "Coming soon",
+  "homePlaceholder": "Choose Delivery or Takeaway and browse the menu in the next update.",
+  "menuPlaceholder": "Your branch menu will appear here.",
+  "ordersPlaceholder": "Your orders will appear here.",
+  "accountSignedIn": "Signed in",
+  "accountGuestTitle": "You're browsing as a guest",
+  "accountGuestBody": "Sign in to see orders, addresses, and rewards.",
+  "continueBrowsing": "Continue browsing",
+  "offlineBlock": "Connect to the internet to continue.",
+  "genericError": "Something went wrong. Please try again.",
+  "otpRateLimited": "Too many OTP requests. Please try again after 15 minutes.",
+  "cupEmpty": "Your cup is empty",
+  "browseMenu": "Browse menu",
+  "heroBadge": "Since 2012",
+  "heroTitleLead": "Freshly Brewed",
+  "heroTitleAccent": "Bubble Tea & Ice Cream",
+  "heroSubtitle": "Premium ingredients, crafted with love",
+  "orderNow": "Order Now",
+  "viewMenu": "View Menu",
+  "mostPopular": "Most Popular",
+  "viewAll": "View All",
+  "todaysOffers": "Today's Offers",
+  "searchMenu": "Search drinks",
+  "allItems": "All Items",
+  "outOfStock": "Out of stock",
+  "lowStock": "Low stock",
+  "noProducts": "No drinks just now.",
+  "noDrinksBody": "The menu is empty right now.",
+  "heroBadgeStores": "Since 2012 · {count} stores",
+  "@heroBadgeStores": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "heroTask": "Freshly brewed bubble tea & ice cream",
+  "chooseFulfillment": "Choose how you get your cup",
+  "modeDelivery": "Delivery",
+  "modeTakeaway": "Takeaway",
+  "notNow": "Not now",
+  "howYouGetCup": "How will you get your cup?",
+  "orderModeStepBadge": "STEP 1 OF 2",
+  "orderModeTitle": "How would you like to order?",
+  "orderModeSubtitle": "Choose delivery or pickup — like Pizza Hut, quick and easy.",
+  "orderModeDeliverySub": "Hot & fresh to your door",
+  "orderModeTakeawaySub": "Pick up from a store",
+  "selectDelivery": "Select Delivery",
+  "selectPickup": "Select Pickup",
+  "skipForNow": "Skip for now — you can set this later",
+  "closeSheet": "Close",
+  "searchMenuTooltip": "Search menu",
+  "todaysSpecial": "Today's special",
+  "specialCheckoutNote": "Checkout charges the regular price.",
+  "storesTitle": "Stores",
+  "storesCount": "{count} locations",
+  "@storesCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "offlineSavedMenu": "You're offline. Showing saved menu.",
+  "saveWishlist": "Save to wishlist",
+  "removeWishlist": "Remove from wishlist",
+  "signInToWishlist": "Sign in to save favourites.",
+  "addToCup": "Add to cup",
+  "promotionsTitle": "Offers",
+  "viewAllOffers": "View all",
+  "pickTakeawayStore": "Choose a store",
+  "orderModeStep2Badge": "STEP 2 OF 2",
+  "takeawayTitle": "Choose your pickup store",
+  "takeawaySubtitle": "We'll select the closest branch. You can switch to another anytime.",
+  "findingNearestStore": "Finding the nearest outlet...",
+  "locationDeniedHint": "Allow location to pick the closest store, or choose a branch below.",
+  "locationUnavailable": "Couldn't get your location. Choose a store below.",
+  "useMyLocation": "Use my location",
+  "nearestChip": "Nearest",
+  "nearestToYou": "Nearest to you",
+  "otherBranches": "Or choose another store",
+  "allBranches": "All branches",
+  "takeawaySearchHint": "Search a store or area",
+  "confirmPickup": "Confirm pickup",
+  "confirmPickupFrom": "Confirm pickup from {name}",
+  "@confirmPickupFrom": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "noStores": "No branches available.",
+  "deliveryPinTitle": "Delivery pin",
+  "deliveryPinBody": "Confirm a pin on the map to set delivery. We never assume a city for you.",
+  "busyBadge": "Busy",
+  "addToCupTitle": "Add to cup",
+  "qtyLabel": "Quantity",
+  "menuLoaded": "Menu loaded, {count} drinks",
+  "@menuLoaded": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "cupItems": "Cup, {count} items",
+  "@cupItems": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "wishlistTitle": "Wishlist",
+  "allCategories": "All",
+  "offerPrev": "Previous offer",
+  "offerNext": "Next offer",
+  "deliverySearchHint": "Search an address in Sri Lanka",
+  "deliveryNotFound": "Could not find this address.",
+  "confirmDelivery": "Confirm delivery",
+  "deliveryFee": "Delivery fee {amount}",
+  "@deliveryFee": {
+    "placeholders": {
+      "amount": { "type": "String" }
+    }
+  },
+  "deliveryMinOrder": "Minimum order {amount}",
+  "@deliveryMinOrder": {
+    "placeholders": {
+      "amount": { "type": "String" }
+    }
+  },
+  "changeFulfillment": "Change",
+  "subtotal": "Subtotal",
+  "deliveryFeeLabel": "Delivery fee",
+  "total": "Total",
+  "proceedCheckout": "Proceed to Checkout",
+  "checkoutTitle": "Checkout",
+  "contactDetails": "Contact",
+  "paymentMethod": "Payment",
+  "placeOrder": "Place order",
+  "signInToPlace": "Verify your mobile number to place this order.",
+  "noPaymentMethods": "No payment methods available for this order.",
+  "convenienceFee": "Convenience fee",
+  "pickupTime": "Pickup time",
+  "pickupInMinutes": "In {minutes} min",
+  "@pickupInMinutes": {
+    "placeholders": {
+      "minutes": { "type": "int" }
+    }
+  },
+  "payOnlineTitle": "Pay online",
+  "continueToPayment": "Continue to payment",
+  "openingPayment": "Opening secure payment…",
+  "cancelPayment": "Cancel payment",
+  "paymentOpenFailed": "Could not open the payment page.",
+  "paymentStayInCup": "Close without paying keeps your items in the cup. This will not place the order again.",
+  "orderPlacedTitle": "Order placed",
+  "orderPlacedBody": "Your order number",
+  "spinTitle": "Spin & Win",
+  "spinSriLanka": "Sri Lanka",
+  "spinTryYourLuck": "Try your luck!",
+  "spinSubtitle": "Spin for free delivery, gifts & discounts.",
+  "spinSubtitlePractice": "One more spin — your reward is waiting!",
+  "spinSubtitleCooldown": "Your daily spin is on cooldown.",
+  "spinNow": "Spin Now",
+  "spinning": "Spinning…",
+  "spinAgain": "Spin Again",
+  "spinYouWon": "You won",
+  "spinTryAgain": "Try Again!",
+  "spinTryAgainBody": "Spin once more for your real prize.",
+  "spinBetterLuck": "Better luck next time",
+  "spinUnavailable": "Spin unavailable",
+  "spinCooldown": "You can spin again after {when}",
+  "@spinCooldown": {
+    "placeholders": {
+      "when": { "type": "String" }
+    }
+  },
+  "spinFooter": "One spin per day. Rewards expire in 7 days.",
+  "spinHide": "Hide",
+  "spinUseAtCheckout": "Use at checkout",
+  "spinContinueShopping": "Continue shopping",
+  "spinNotConfigured": "Spin wheel is not configured yet.",
+  "spinDiscount": "Spin discount",
+  "spinFreeDelivery": "Free delivery",
+  "spinGift": "Gift",
+  "spinChipPercent": "% Off",
+  "spinChipDelivery": "Free Delivery",
+  "spinChipGifts": "Gifts",
+  "spinChipCash": "Cash Off",
+  "spinResult": "Result",
+  "spinClose": "Close",
+  "limitedTime": "Limited time",
+  "trustRatings": "Ratings",
+  "trustRatingsValue": "4.9",
+  "trustDelivery": "Fast Delivery",
+  "trustDeliveryValue": "20 Min",
+  "trustStores": "Stores nationwide",
+  "trustCustomers": "Happy Customers",
+  "trustCustomersValue": "100K+",
+  "storeCountPlus": "{count}+",
+  "@storeCountPlus": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "myRewards": "My Rewards",
+  "availablePoints": "Available Points",
+  "redeemNow": "Redeem Now",
+  "tierProgressTo": "{amount} to {tier}",
+  "@tierProgressTo": {
+    "placeholders": {
+      "amount": { "type": "String" },
+      "tier": { "type": "String" }
+    }
+  },
+  "findAStore": "Find a Store Near You",
+  "kmAway": "{km} km away",
+  "@kmAway": {
+    "placeholders": {
+      "km": { "type": "String" }
+    }
+  },
+  "getDirections": "Get Directions",
+  "lovedByEveryone": "Loved by Everyone",
+  "reviewChamath": "Best bubble tea in Sri Lanka! The brown sugar boba is absolutely amazing.",
+  "reviewChamathAuthor": "Chamath N.",
+  "reviewDilani": "Super fast delivery and the drinks always arrive fresh. My go-to treat!",
+  "reviewDilaniAuthor": "Dilani P.",
+  "reviewKasun": "Love the strawberry mango tea — perfect balance of sweet and tangy.",
+  "reviewKasunAuthor": "Kasun R.",
+  "menuHeroLead": "Discover Your",
+  "menuHeroPerfect": "Perfect",
+  "menuHeroAccent": "Bubble Tea",
+  "menuHeroSubtitle": "Handcrafted drinks, islandwide stores — made for your cup.",
+  "showingItems": "Showing {count} items",
+  "@showingItems": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "sortAndFilter": "Sort & tags",
+  "sortLabel": "Sort",
+  "tagLabel": "Tags",
+  "sortNameAsc": "A-Z",
+  "sortNameDesc": "Z-A",
+  "sortPriceLow": "Price low to high",
+  "sortPriceHigh": "Price high to low",
+  "sortTopRated": "Top Rated",
+  "sortNewest": "Newest",
+  "gridView": "Grid view",
+  "listView": "List view",
+  "tagAll": "All",
+  "tagNew": "New",
+  "tagBestSeller": "Best Seller",
+  "tagPopular": "Popular",
+  "tagClassic": "Classic",
+  "tagSignature": "Signature",
+  "tagRs200": "Rs.200 Only",
+  "fromPrice": "From {amount}",
+  "@fromPrice": {
+    "placeholders": {
+      "amount": { "type": "String" }
+    }
+  },
+  "basePrice": "Base price",
+  "toppingsLabel": "Toppings",
+  "branchAvailable": "{count} available at your branch",
+  "@branchAvailable": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "addForPrice": "Add · {amount}",
+  "@addForPrice": {
+    "placeholders": {
+      "amount": { "type": "String" }
+    }
+  },
+  "decreaseQty": "Decrease quantity",
+  "increaseQty": "Increase quantity",
+  "checkoutStepFulfillment": "Fulfillment",
+  "checkoutStepContact": "Contact",
+  "checkoutStepPayment": "Payment",
+  "checkoutStepSummary": "Summary",
+  "deliveringFrom": "Delivering from",
+  "pickingUpFrom": "Picking up from",
+  "etaMinutes": "{minutes} min",
+  "@etaMinutes": {
+    "placeholders": {
+      "minutes": { "type": "int" }
+    }
+  },
+  "orderSummary": "Order Summary",
+  "discountLabel": "Discount",
+  "convenienceFeeOfItems": "Convenience fee (7.5% of items)",
+  "promoApplied": "Promo applied",
+  "applyPromo": "Apply promo",
+  "verifyPhoneToPlace": "Verify phone to place order",
+  "payAndPlaceOrder": "Pay & Place Order",
+  "placingOrder": "Placing Order...",
+  "securedCheckout": "Secured checkout",
+  "guestCheckoutHelper": "Verify your mobile number in step 2 to enable checkout.",
+  "checkoutFullName": "Full Name *",
+  "checkoutMobile": "Mobile Number * (07XXXXXXXX)",
+  "checkoutEmailOptional": "Email (optional)",
+  "checkoutCheckingAccount": "Checking your account…",
+  "checkoutNewNumberHint": "New number — verify with OTP before placing your order.",
+  "checkoutExistingHint": "Enter your 10-digit mobile number. Existing accounts sign in automatically.",
+  "checkoutSendOtp": "Send OTP",
+  "checkoutOtpHint": "6-digit OTP",
+  "checkoutVerifyOtp": "Verify OTP",
+  "checkoutSignedInHint": "Signed in — your orders appear in order history."
+}

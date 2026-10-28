@@ -1,0 +1,1067 @@
+import crypto from 'crypto';
+import { prisma } from './prisma';
+import { AppError } from '../middleware/errorHandler';
+import {
+  computeBreakdownForPeriod,
+  getOrCreateWallet,
+  getWalletSummary,
+  refreshWalletCaches,
+  type PeriodBreakdown,
+} from './walletService';
+import { creditPlatformEarning } from './platformEarningsService';
+import { ensurePlatformEarningsSchema } from './platformEarningsSchema';
+import { ensurePlatformPaybackSchema } from './platformPaybackSchema';
+import { buildPeriodChannelPreview } from './periodChannelPreview';
+import {
+  computeFinalPayoutAmountCents,
+  computeSharedPromoContribution,
+  mergeSharedPromoIntoBreakdown,
+  parseSharedPromoFromBreakdown,
+  resolveFinalPayoutAmountFromBreakdown,
+} from './sharedPromoContribution';
+import {
+  attachPromoOwnershipTotals,
+  loadPromoOwnershipTotalsForPeriod,
+} from './promoOwnershipTotals';
+import { resolvePlatformProviderReceivableFromBreakdown } from '../internal/paymentClient';
+import {
+  assertJasonBalanceCoversContribution,
+  computeJasonNetBalance,
+  recordJasonSppcExpense,
+} from './jasonBalance';
+import type {
+  Prisma,
+  SettlementPaymentMethod,
+  StoreWithdrawal,
+  WithdrawalStatus,
+} from '@prisma/client';
+import { centsToDecimal } from './moneyDecimal';
+import { withdrawalAmountCents } from './walletApiMoney';
+import {
+  parseLockedStoreWallet,
+  walletDataAfterDebit,
+  type LockedStoreWallet,
+} from './walletStoreUpdates';
+
+/** Serialize payouts for one branch. Must run inside the caller's transaction. */
+async function lockStoreWallet(tx: Prisma.TransactionClient, storeId: string): Promise<LockedStoreWallet> {
+  const rows = await tx.$queryRaw<Array<{ balance: unknown; totalWithdrawn: unknown }>>`
+    SELECT "balance", "totalWithdrawn"
+    FROM "store_wallets"
+    WHERE "storeId" = ${storeId}
+    FOR UPDATE
+  `;
+  const row = rows[0];
+  if (!row) throw new AppError('Wallet not found', 404);
+  return parseLockedStoreWallet(row);
+}
+
+type LockedStoreWithdrawal = {
+  id: string;
+  status: WithdrawalStatus;
+};
+
+/** Serialize approval for one withdrawal row. Must run inside the caller's transaction. */
+async function lockStoreWithdrawal(
+  tx: Prisma.TransactionClient,
+  withdrawalId: string,
+): Promise<LockedStoreWithdrawal> {
+  const rows = await tx.$queryRaw<Array<{ id: string; status: WithdrawalStatus }>>`
+    SELECT "id", "status"
+    FROM "store_withdrawals"
+    WHERE "id" = ${withdrawalId}
+    FOR UPDATE
+  `;
+  const row = rows[0];
+  if (!row) throw new AppError('Withdrawal not found', 404);
+  return row;
+}
+
+export type CreateApprovedWithdrawalInput = {
+  storeId: string;
+  amount: number;
+  remarks?: string | null;
+  requestedById: string;
+  reviewedById: string;
+  walletTransactionId: string;
+  periodFrom?: Date | null;
+  periodTo?: Date | null;
+  breakdown?: unknown;
+};
+
+export async function listWithdrawals(opts: {
+  storeId?: string;
+  status?: WithdrawalStatus;
+  id?: string;
+  page?: number;
+  limit?: number;
+  from?: string;
+  to?: string;
+}) {
+  const page = opts.page ?? 1;
+  const limit = opts.limit ?? 20;
+  const skip = (page - 1) * limit;
+
+  const createdAt =
+    opts.from || opts.to
+      ? {
+          ...(opts.from ? { gte: new Date(`${opts.from}T00:00:00.000Z`) } : {}),
+          ...(opts.to ? { lte: new Date(`${opts.to}T23:59:59.999Z`) } : {}),
+        }
+      : undefined;
+
+  const where = {
+    ...(opts.id ? { id: opts.id } : {}),
+    ...(opts.storeId ? { storeId: opts.storeId } : {}),
+    ...(opts.status ? { status: opts.status } : {}),
+    ...(createdAt ? { createdAt } : {}),
+  };
+
+  const [items, total] = await Promise.all([
+    prisma.storeWithdrawal.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.storeWithdrawal.count({ where }),
+  ]);
+
+  return {
+    items,
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit) || 1,
+    },
+  };
+}
+
+export async function getWithdrawalById(id: string, storeId?: string) {
+  return prisma.storeWithdrawal.findFirst({
+    where: {
+      id,
+      ...(storeId ? { storeId } : {}),
+    },
+  });
+}
+
+function toDateStr(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+function dayAfterDateStr(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return toDateStr(d);
+}
+
+export function addDaysToDateStr(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return toDateStr(d);
+}
+
+export function todayDateStr(): string {
+  return toDateStr(new Date());
+}
+
+export const PAYOUT_PERIOD_DAYS = [15, 30, 40] as const;
+export type PayoutPeriodDays = (typeof PAYOUT_PERIOD_DAYS)[number];
+
+export type ResolvedPayoutPeriod = {
+  days: PayoutPeriodDays;
+  from: string;
+  to: string;
+  capped: boolean;
+};
+
+function isValidPayoutPeriodDays(days: number): days is PayoutPeriodDays {
+  return (PAYOUT_PERIOD_DAYS as readonly number[]).includes(days);
+}
+
+/** Earliest PAID order date for the store, or null if none. */
+async function getEarliestPaidOrderDate(storeId: string): Promise<string | null> {
+  const earliest = await prisma.order.findFirst({
+    where: { storeId, paymentStatus: 'PAID' },
+    orderBy: { createdAt: 'asc' },
+    select: { createdAt: true },
+  });
+  if (!earliest) return null;
+  return toDateStr(earliest.createdAt);
+}
+
+/** Resolve rolling payout window from last payout (or first sale) through N days (capped at today). */
+export async function resolvePayoutPeriod(
+  storeId: string,
+  days: PayoutPeriodDays,
+): Promise<ResolvedPayoutPeriod> {
+  const nextStart = await getNextPayoutStartDate(storeId);
+  const earliestOrder = nextStart ? null : await getEarliestPaidOrderDate(storeId);
+  const from = nextStart ?? earliestOrder ?? todayDateStr();
+  const today = todayDateStr();
+  const idealTo = addDaysToDateStr(from, days - 1);
+  const to = idealTo <= today ? idealTo : today;
+  return {
+    days,
+    from,
+    to,
+    capped: idealTo > today,
+  };
+}
+
+export async function resolvePayoutPeriodOptions(
+  storeId: string,
+): Promise<ResolvedPayoutPeriod[]> {
+  return Promise.all(PAYOUT_PERIOD_DAYS.map((days) => resolvePayoutPeriod(storeId, days)));
+}
+
+/**
+ * Walks successive N-day windows from the payout anchor until the open cycle (ideal end after today).
+ * Unlike `resolvePayoutPeriod`, this reaches the current in-progress window when older cycles are still unpaid.
+ */
+export async function resolveOpenRollingPayoutWindow(
+  storeId: string,
+  days: PayoutPeriodDays = 15,
+): Promise<ResolvedPayoutPeriod | null> {
+  let from = await getNextPayoutStartDate(storeId);
+  if (!from) {
+    from = await getEarliestPaidOrderDate(storeId);
+  }
+  if (!from) return null;
+
+  const today = todayDateStr();
+  for (let i = 0; i < 400; i++) {
+    const idealTo = addDaysToDateStr(from, days - 1);
+    if (idealTo > today) {
+      return {
+        days,
+        from,
+        to: today,
+        capped: true,
+      };
+    }
+    from = dayAfterDateStr(idealTo);
+  }
+  return null;
+}
+
+/** Stores whose N-day rolling window has fully elapsed (`capped === false`). */
+export async function listDuePayoutStoreIds(
+  storeIds: string[],
+  days: PayoutPeriodDays = 15,
+): Promise<Array<ResolvedPayoutPeriod & { storeId: string }>> {
+  const resolved = await Promise.all(
+    storeIds.map(async (storeId) => {
+      const period = await resolvePayoutPeriod(storeId, days);
+      return { storeId, ...period };
+    }),
+  );
+  return resolved.filter((period) => !period.capped);
+}
+
+/**
+ * Successive fully-elapsed N-day windows from last payout (or first sale).
+ * Does not include the current in-progress / capped window.
+ */
+/**
+ * Pure elapsed 15/30/40-day windows from a known period start.
+ * Optional overlap filter skips windows outside the wallet date range (avoids
+ * heavy period breakdown work for payouts-due).
+ */
+export function buildElapsedPayoutWindowsFromStart(
+  startFrom: string | null | undefined,
+  days: PayoutPeriodDays = 15,
+  max = 12,
+  overlap?: { from: string; to: string },
+): ResolvedPayoutPeriod[] {
+  if (!startFrom) return [];
+
+  const today = todayDateStr();
+  const windows: ResolvedPayoutPeriod[] = [];
+  let from = startFrom;
+
+  while (windows.length < max) {
+    const idealTo = addDaysToDateStr(from, days - 1);
+    if (idealTo > today) break;
+    if (overlap && from > overlap.to) break;
+
+    const overlaps =
+      !overlap || (from <= overlap.to && idealTo >= overlap.from);
+    if (overlaps) {
+      windows.push({ days, from, to: idealTo, capped: false });
+    }
+    from = dayAfterDateStr(idealTo);
+  }
+
+  return windows;
+}
+
+export async function listElapsedPayoutWindows(
+  storeId: string,
+  days: PayoutPeriodDays = 15,
+  max = 12,
+  overlap?: { from: string; to: string },
+): Promise<ResolvedPayoutPeriod[]> {
+  const nextStart = await getNextPayoutStartDate(storeId);
+  const earliestOrder = nextStart ? null : await getEarliestPaidOrderDate(storeId);
+  const from = nextStart ?? earliestOrder;
+  return buildElapsedPayoutWindowsFromStart(from, days, max, overlap);
+}
+
+/** Valid calendar payout period starts: 1st or 16th of a month. @deprecated Use rolling payout periods. */
+export function isCalendarPeriodStart(dateStr: string): boolean {
+  const day = Number(dateStr.slice(8, 10));
+  return day === 1 || day === 16;
+}
+
+function lastDayOfMonthStr(year: number, month: number): string {
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return String(lastDay).padStart(2, '0');
+}
+
+/** End date for a calendar half-month period starting on the 1st or 16th. @deprecated */
+export function getCalendarPeriodEnd(startDateStr: string): string {
+  const year = Number(startDateStr.slice(0, 4));
+  const month = Number(startDateStr.slice(5, 7));
+  const day = Number(startDateStr.slice(8, 10));
+  const monthStr = startDateStr.slice(0, 7);
+
+  if (day === 1) return `${monthStr}-15`;
+  if (day === 16) return `${monthStr}-${lastDayOfMonthStr(year, month)}`;
+
+  throw new Error(`Invalid payout period start: ${startDateStr} (must be 1st or 16th)`);
+}
+
+export function getPayoutPeriodEndDate(startDateStr: string): string {
+  return getCalendarPeriodEnd(startDateStr);
+}
+
+/** Day after the latest non-rejected withdrawal period end, or null for first request. */
+export async function getNextPayoutStartDate(storeId: string): Promise<string | null> {
+  const latest = await prisma.storeWithdrawal.findFirst({
+    where: {
+      storeId,
+      status: { in: ['PENDING', 'APPROVED'] },
+      periodTo: { not: null },
+    },
+    orderBy: { periodTo: 'desc' },
+    select: { periodTo: true },
+  });
+  if (!latest?.periodTo) return null;
+  return dayAfterDateStr(toDateStr(latest.periodTo));
+}
+
+const PENDING_WITHDRAWAL_UNIQUE = 'withdrawal_one_pending_per_store';
+
+function isPendingWithdrawalUniqueViolation(err: unknown): boolean {
+  const prismaErr = err as { code?: string; meta?: { target?: string | string[] } };
+  if (prismaErr.code !== 'P2002') return false;
+  const target = prismaErr.meta?.target;
+  if (!target) return true;
+  const fields = Array.isArray(target) ? target : [target];
+  return fields.some((field) => String(field).includes(PENDING_WITHDRAWAL_UNIQUE));
+}
+
+export async function requestWithdrawal(
+  storeId: string,
+  amount: number,
+  remarks: string | undefined,
+  requestedById: string,
+  periodDays: PayoutPeriodDays,
+  isAdvance = false,
+): Promise<StoreWithdrawal> {
+  const store = await prisma.store.findUnique({
+    where: { id: storeId },
+    select: { isActive: true },
+  });
+  if (!store?.isActive) {
+    throw new AppError('This branch is deactivated and cannot request withdrawals', 403);
+  }
+
+  const { fromStr, toStr, breakdown } = await validatePayoutRequest(
+    storeId,
+    amount,
+    periodDays,
+    isAdvance,
+  );
+
+  try {
+    return await prisma.storeWithdrawal.create({
+      data: {
+        id: crypto.randomUUID(),
+        storeId,
+        amount: centsToDecimal(amount),
+        status: 'PENDING',
+        remarks: remarks?.trim() || null,
+        periodFrom: new Date(`${fromStr}T00:00:00.000Z`),
+        periodTo: new Date(`${toStr}T23:59:59.999Z`),
+        requestedById,
+        isAdvance,
+        breakdown,
+      },
+    });
+  } catch (err) {
+    if (isPendingWithdrawalUniqueViolation(err)) {
+      throw new AppError('A pending withdrawal already exists for this branch', 409);
+    }
+    throw err;
+  }
+}
+
+type StoredWithdrawalBreakdown = PeriodBreakdown & {
+  /** Locked calculated period net at request time (cents). Same as netAmount. */
+  periodNetAmount: number;
+  /** Branch wallet request submitted on Request (cents). */
+  branchRequestNetAmount: number;
+  channelBreakdown: Awaited<ReturnType<typeof buildPeriodChannelPreview>>['breakdown'];
+  /** Locked 4-step platform provider receivable at request time. */
+  platformProviderReceivable: Awaited<
+    ReturnType<typeof resolvePlatformProviderReceivableFromBreakdown>
+  >;
+};
+
+/** Keys locked in the withdrawal JSON snapshot for Super Admin approval display. */
+const WITHDRAWAL_SNAPSHOT_NUMERIC_KEYS = [
+  'customerLateCancelSubtotal',
+  'customerLateCancelGatewayDeduction',
+  'customerLateCancelNetAmount',
+  'refundConvenienceFee',
+  'refundDeliveryFee',
+  'rejectedRefundSubtotal',
+  'rejectedRefundGatewayDeduction',
+  'rejectedRefundNetAmount',
+  'rejectedRefundConvenienceFee',
+  'rejectedRefundDeliveryFee',
+  'gatewayRatePct',
+  'gatewayRate',
+  'periodLoyaltyDiscountTotal',
+] as const satisfies readonly (keyof PeriodBreakdown)[];
+
+function assertWithdrawalBreakdownSnapshot(period: PeriodBreakdown): void {
+  for (const key of WITHDRAWAL_SNAPSHOT_NUMERIC_KEYS) {
+    const value = period[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(`Payout breakdown snapshot missing ${key}`);
+    }
+  }
+}
+
+/** Build the JSON snapshot stored on StoreWithdrawal (request + approve flows). */
+export async function buildStoredWithdrawalBreakdown(
+  period: PeriodBreakdown,
+  channelBreakdown: Awaited<ReturnType<typeof buildPeriodChannelPreview>>['breakdown'],
+  opts?: { branchRequestAmountCents?: number },
+): Promise<StoredWithdrawalBreakdown> {
+  assertWithdrawalBreakdownSnapshot(period);
+  const branchRequestAmountCents = opts?.branchRequestAmountCents ?? period.netAmount;
+  const finalPayoutAmount = computeFinalPayoutAmountCents(
+    branchRequestAmountCents,
+    period.sharedPromoJasonContributionAmount ?? 0,
+  );
+  const platformProviderReceivable = await resolvePlatformProviderReceivableFromBreakdown(period);
+  return {
+    ...period,
+    periodNetAmount: period.netAmount,
+    branchRequestNetAmount: branchRequestAmountCents,
+    finalPayoutAmount,
+    channelBreakdown,
+    platformProviderReceivable,
+  };
+}
+
+export type PayoutPeriodBounds = { from: string; to: string };
+
+async function resolveValidatedPayoutBounds(
+  storeId: string,
+  periodDays: PayoutPeriodDays,
+  periodBounds?: PayoutPeriodBounds | null,
+): Promise<{ fromStr: string; toStr: string }> {
+  const today = todayDateStr();
+  let fromStr: string;
+  let toStr: string;
+
+  if (periodBounds?.from && periodBounds?.to) {
+    fromStr = periodBounds.from;
+    toStr = periodBounds.to;
+    if (fromStr > toStr) {
+      throw new AppError('Start date must be on or before end date', 400);
+    }
+  } else {
+    const resolved = await resolvePayoutPeriod(storeId, periodDays);
+    fromStr = resolved.from;
+    toStr = resolved.to;
+  }
+
+  if (toStr > today) {
+    throw new AppError('Payout period cannot be in the future', 400);
+  }
+
+  const nextStart = await getNextPayoutStartDate(storeId);
+  if (nextStart && fromStr !== nextStart) {
+    throw new AppError(
+      `Payout period must start on ${nextStart} (the day after your last payout request).`,
+      400,
+    );
+  }
+
+  if (periodBounds?.from && periodBounds?.to) {
+    const elapsed = await listElapsedPayoutWindows(storeId, periodDays, 24);
+    const eligible = elapsed.some((window) => window.from === fromStr && window.to === toStr);
+    if (!eligible) {
+      throw new AppError('Selected payout period is not eligible for settlement', 400);
+    }
+  }
+
+  return { fromStr, toStr };
+}
+
+async function validatePayoutRequest(
+  storeId: string,
+  amount: number,
+  periodDays: PayoutPeriodDays,
+  isAdvance: boolean,
+  periodBounds?: PayoutPeriodBounds | null,
+): Promise<{ fromStr: string; toStr: string; breakdown: StoredWithdrawalBreakdown }> {
+  if (amount <= 0) throw new AppError('Withdrawal amount must be greater than zero', 400);
+
+  if (!isValidPayoutPeriodDays(periodDays)) {
+    throw new AppError(`Invalid payout period. Choose one of: ${PAYOUT_PERIOD_DAYS.join(', ')} days`, 400);
+  }
+
+  const summary = await getWalletSummary(storeId);
+
+  if (amount > summary.availableBalance) {
+    throw new AppError(
+      `Insufficient available balance. Available: LKR ${(summary.availableBalance / 100).toFixed(2)}`,
+      400,
+    );
+  }
+
+  const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
+
+  const [breakdown, channelPreview, sharedPromo, promoOwnership] = await Promise.all([
+    computeBreakdownForPeriod(storeId, fromStr, toStr),
+    buildPeriodChannelPreview(storeId, fromStr, toStr),
+    computeSharedPromoContribution(storeId, fromStr, toStr),
+    loadPromoOwnershipTotalsForPeriod(storeId, fromStr, toStr),
+  ]);
+  const periodWithDiscountReport = attachPromoOwnershipTotals(
+    mergeSharedPromoIntoBreakdown(breakdown, sharedPromo),
+    promoOwnership,
+  );
+  const periodNet = periodWithDiscountReport.netAmount;
+
+  if (!isAdvance && amount > periodNet) {
+    throw new AppError(
+      `Amount exceeds net for the selected period (LKR ${(periodNet / 100).toFixed(2)}). Enable "custom amount" to request an advance.`,
+      400,
+    );
+  }
+
+  return {
+    fromStr,
+    toStr,
+    breakdown: await buildStoredWithdrawalBreakdown(periodWithDiscountReport, channelPreview.breakdown, {
+      branchRequestAmountCents: amount,
+    }),
+  };
+}
+
+export async function initiateAndApproveWithdrawal(
+  storeId: string,
+  amount: number,
+  remarks: string | undefined,
+  initiatorId: string,
+  periodDays: PayoutPeriodDays,
+  paymentMethod: SettlementPaymentMethod,
+  proofUrl: string | null,
+  isAdvance = false,
+  extras?: ApproveWithdrawalExtras,
+): Promise<StoreWithdrawal> {
+  const { fromStr, toStr, breakdown } = await validatePayoutRequest(
+    storeId,
+    amount,
+    periodDays,
+    isAdvance,
+    extras?.periodBounds ?? null,
+  );
+  const periodFrom = new Date(`${fromStr}T00:00:00.000Z`);
+  const periodTo = new Date(`${toStr}T23:59:59.999Z`);
+
+  const wallet = await getOrCreateWallet(storeId);
+  const summary = await getWalletSummary(storeId);
+  const remainingNet = summary.netTransferableEarnings - summary.totalWithdrawn;
+
+  if (remainingNet < amount) {
+    throw new AppError('Insufficient net transferable balance to approve this payout', 400);
+  }
+
+  const sppc = parseSharedPromoFromBreakdown(breakdown);
+  const sppcJasonCents = sppc.sharedPromoJasonContributionAmount;
+  const paymentCents = resolveFinalPayoutAmountFromBreakdown(breakdown, amount);
+  const jasonNet = await computeJasonNetBalance();
+  assertJasonBalanceCoversContribution(jasonNet, sppcJasonCents);
+
+  const withdrawalId = crypto.randomUUID();
+  const txnId = crypto.randomUUID();
+  const now = new Date();
+  void wallet;
+  const checkNum =
+    paymentMethod === 'CHECK' ? extras?.checkNumber?.trim() || null : null;
+  const checkDt =
+    paymentMethod === 'CHECK' ? extras?.checkDate ?? null : null;
+
+  await ensurePlatformEarningsSchema();
+
+  const approvedWithdrawal = await prisma.$transaction(async (tx) => {
+    const locked = await lockStoreWallet(tx, storeId);
+    const freshSummary = await getWalletSummary(storeId);
+    const lockedWithdrawn = Number(locked.totalWithdrawn.toFixed(0));
+    if (freshSummary.netTransferableEarnings - lockedWithdrawn < amount) {
+      throw new AppError('Insufficient net transferable balance to approve this payout', 400);
+    }
+    const afterDebit = walletDataAfterDebit(locked, amount);
+    const lockedBalance = Number(afterDebit.balance.toFixed(0));
+
+    // Single create (APPROVED) — avoids create-then-update P2025 under PgBouncer
+    // when an interactive transaction briefly loses the row mid-flight.
+    await tx.storeWithdrawal.create({
+      data: {
+        id: withdrawalId,
+        storeId,
+        amount: centsToDecimal(amount),
+        status: 'APPROVED',
+        remarks: remarks?.trim() || null,
+        periodFrom,
+        periodTo,
+        requestedById: initiatorId,
+        reviewedById: initiatorId,
+        reviewedAt: now,
+        walletTransactionId: txnId,
+        paymentMethod,
+        proofUrl,
+        checkNumber: checkNum,
+        checkDate: checkDt,
+        isAdvance,
+        breakdown,
+      },
+    });
+
+    await tx.storeWallet.update({
+      where: { storeId },
+      data: {
+        balance: afterDebit.balance,
+        totalWithdrawn: afterDebit.totalWithdrawn,
+      },
+    });
+
+    await createApprovalWalletLedgerEntries(tx, {
+      storeId,
+      walletBalanceAfterDebit: lockedBalance,
+      paymentCents,
+      sppcJasonCents,
+      payoutTxnId: txnId,
+      payoutDescription: remarks?.trim() || 'Branch withdrawal',
+      payoutReference: `WD-${withdrawalId.slice(0, 8)}`,
+      createdById: initiatorId,
+    });
+
+    return tx.storeWithdrawal.findUniqueOrThrow({
+      where: { id: withdrawalId },
+    });
+  });
+
+  await creditPlatformEarning({
+    storeWithdrawalId: approvedWithdrawal.id,
+    storeId: approvedWithdrawal.storeId,
+    breakdown: approvedWithdrawal.breakdown,
+    periodFrom: approvedWithdrawal.periodFrom,
+    periodTo: approvedWithdrawal.periodTo,
+    approvedAt: approvedWithdrawal.reviewedAt ?? now,
+  });
+
+  if (sppcJasonCents > 0) {
+    const storeRow = await prisma.store.findUnique({
+      where: { id: storeId },
+      select: { name: true },
+    });
+    await recordJasonSppcExpense({
+      storeId,
+      storeWithdrawalId: approvedWithdrawal.id,
+      amountCents: sppcJasonCents,
+      reviewerId: initiatorId,
+      approvedAt: approvedWithdrawal.reviewedAt ?? now,
+      branchName: storeRow?.name,
+    });
+  }
+
+  await refreshWalletCaches(storeId);
+  return approvedWithdrawal;
+}
+
+export type ApproveWithdrawalExtras = {
+  checkNumber?: string | null;
+  checkDate?: Date | null;
+  /** Super Admin initiate from Payouts Due — settle this exact elapsed window. */
+  periodBounds?: PayoutPeriodBounds;
+};
+
+function resolveApprovalPayoutAmounts(withdrawal: StoreWithdrawal): {
+  walletDebitCents: number;
+  paymentCents: number;
+  sppcPlatformCents: number;
+  sppcJasonCents: number;
+} {
+  const walletDebitCents = withdrawalAmountCents(withdrawal);
+  const paymentCents = resolveFinalPayoutAmountFromBreakdown(
+    withdrawal.breakdown,
+    walletDebitCents,
+  );
+  const sppc = parseSharedPromoFromBreakdown(withdrawal.breakdown);
+  return {
+    walletDebitCents,
+    paymentCents,
+    sppcPlatformCents: sppc.sharedPromoPlatformContributionAmount,
+    sppcJasonCents: sppc.sharedPromoJasonContributionAmount,
+  };
+}
+
+type ApprovalWalletLedgerInput = {
+  storeId: string;
+  walletBalanceAfterDebit: number;
+  paymentCents: number;
+  sppcJasonCents: number;
+  payoutTxnId: string;
+  payoutDescription: string;
+  payoutReference: string;
+  createdById: string;
+};
+
+/**
+ * Write SPPC ADJUSTMENT (when needed) then PAYOUT.
+ * PAYOUT.balanceAfter is the post-debit wallet cache; the optional ADJUSTMENT is an
+ * intermediate credit of +sppcJasonCents immediately before that payout debit.
+ */
+async function computeLivePeriodNetAmountCents(
+  storeId: string,
+  periodFrom: Date,
+  periodTo: Date,
+): Promise<number> {
+  const fromStr = toDateStr(periodFrom);
+  const toStr = toDateStr(periodTo);
+  const [breakdown, sharedPromo, promoOwnership] = await Promise.all([
+    computeBreakdownForPeriod(storeId, fromStr, toStr),
+    computeSharedPromoContribution(storeId, fromStr, toStr),
+    loadPromoOwnershipTotalsForPeriod(storeId, fromStr, toStr),
+  ]);
+  const periodWithDiscountReport = attachPromoOwnershipTotals(
+    mergeSharedPromoIntoBreakdown(breakdown, sharedPromo),
+    promoOwnership,
+  );
+  return periodWithDiscountReport.netAmount;
+}
+
+/** Recompute period net at approval time (same pipeline as validatePayoutRequest). */
+async function assertLivePeriodNetCoversWithdrawal(withdrawal: StoreWithdrawal): Promise<void> {
+  if (withdrawal.isAdvance) return;
+  if (!withdrawal.periodFrom || !withdrawal.periodTo) return;
+
+  const withdrawalCents = withdrawalAmountCents(withdrawal);
+  const liveNet = await computeLivePeriodNetAmountCents(
+    withdrawal.storeId,
+    withdrawal.periodFrom,
+    withdrawal.periodTo,
+  );
+  if (withdrawalCents > liveNet) {
+    throw new AppError(
+      'Live net for this period is lower than the requested amount. Reject and request again.',
+      400,
+    );
+  }
+}
+
+async function createApprovalWalletLedgerEntries(
+  tx: Prisma.TransactionClient,
+  input: ApprovalWalletLedgerInput,
+): Promise<void> {
+  const shared = {
+    storeId: input.storeId,
+    reference: input.payoutReference,
+    createdById: input.createdById,
+  };
+
+  if (input.sppcJasonCents > 0) {
+    await tx.walletTransaction.create({
+      data: {
+        ...shared,
+        id: crypto.randomUUID(),
+        type: 'ADJUSTMENT',
+        amount: centsToDecimal(input.sppcJasonCents),
+        balanceAfter: centsToDecimal(input.walletBalanceAfterDebit + input.sppcJasonCents),
+        description: 'Shared promo platform contribution (Jason top-up)',
+      },
+    });
+  }
+
+  await tx.walletTransaction.create({
+    data: {
+      ...shared,
+      id: input.payoutTxnId,
+      type: 'PAYOUT',
+      amount: centsToDecimal(-input.paymentCents),
+      balanceAfter: centsToDecimal(input.walletBalanceAfterDebit),
+      description: input.payoutDescription,
+    },
+  });
+}
+
+export async function approveWithdrawal(
+  withdrawalId: string,
+  reviewerId: string,
+  paymentMethod: SettlementPaymentMethod,
+  proofUrl: string | null,
+  extras?: ApproveWithdrawalExtras,
+): Promise<StoreWithdrawal> {
+  const withdrawal = await prisma.storeWithdrawal.findUnique({ where: { id: withdrawalId } });
+  if (!withdrawal) throw new AppError('Withdrawal not found', 404);
+  if (withdrawal.status !== 'PENDING') {
+    throw new AppError('Only pending withdrawals can be approved', 400);
+  }
+  if (withdrawal.requestedById === reviewerId) {
+    throw new AppError('You cannot approve a withdrawal you requested', 403);
+  }
+
+  await assertLivePeriodNetCoversWithdrawal(withdrawal);
+
+  const wallet = await getOrCreateWallet(withdrawal.storeId);
+  const summary = await getWalletSummary(withdrawal.storeId);
+  const remainingNet = summary.netTransferableEarnings - summary.totalWithdrawn;
+
+  const withdrawalCents = withdrawalAmountCents(withdrawal);
+  if (remainingNet < withdrawalCents) {
+    throw new AppError('Insufficient net transferable balance to approve this withdrawal', 400);
+  }
+
+  const { walletDebitCents, paymentCents, sppcJasonCents } = resolveApprovalPayoutAmounts(withdrawal);
+  const jasonNet = await computeJasonNetBalance();
+  assertJasonBalanceCoversContribution(jasonNet, sppcJasonCents);
+
+  void wallet;
+  const txnId = crypto.randomUUID();
+  const now = new Date();
+
+  await ensurePlatformEarningsSchema();
+  await ensurePlatformPaybackSchema();
+
+  const approvedWithdrawal = await prisma.$transaction(async (tx) => {
+    const lockedWithdrawal = await lockStoreWithdrawal(tx, withdrawalId);
+    if (lockedWithdrawal.status !== 'PENDING') {
+      throw new AppError('Only pending withdrawals can be approved', 409);
+    }
+
+    const locked = await lockStoreWallet(tx, withdrawal.storeId);
+    const freshSummary = await getWalletSummary(withdrawal.storeId);
+    const lockedWithdrawn = Number(locked.totalWithdrawn.toFixed(0));
+    if (freshSummary.netTransferableEarnings - lockedWithdrawn < withdrawalCents) {
+      throw new AppError('Insufficient net transferable balance to approve this withdrawal', 400);
+    }
+
+    const checkNum =
+      paymentMethod === 'CHECK' ? extras?.checkNumber?.trim() || null : null;
+    const checkDt =
+      paymentMethod === 'CHECK' ? extras?.checkDate ?? null : null;
+
+    const claimed = await tx.storeWithdrawal.updateMany({
+      where: { id: withdrawalId, status: 'PENDING' },
+      data: {
+        status: 'APPROVED',
+        reviewedById: reviewerId,
+        reviewedAt: now,
+        walletTransactionId: txnId,
+        paymentMethod,
+        proofUrl,
+        checkNumber: checkNum,
+        checkDate: checkDt,
+      },
+    });
+    if (claimed.count !== 1) {
+      throw new AppError('Only pending withdrawals can be approved', 409);
+    }
+
+    const afterDebit = walletDataAfterDebit(locked, walletDebitCents);
+    const walletBalanceAfterDebit = Number(afterDebit.balance.toFixed(0));
+    await tx.storeWallet.update({
+      where: { storeId: withdrawal.storeId },
+      data: {
+        balance: afterDebit.balance,
+        totalWithdrawn: afterDebit.totalWithdrawn,
+      },
+    });
+    await createApprovalWalletLedgerEntries(tx, {
+      storeId: withdrawal.storeId,
+      walletBalanceAfterDebit,
+      paymentCents,
+      sppcJasonCents,
+      payoutTxnId: txnId,
+      payoutDescription: withdrawal.remarks ?? 'Branch withdrawal',
+      payoutReference: `WD-${withdrawal.id.slice(0, 8)}`,
+      createdById: reviewerId,
+    });
+
+    return tx.storeWithdrawal.findUniqueOrThrow({ where: { id: withdrawalId } });
+  });
+
+  if (approvedWithdrawal.periodFrom && approvedWithdrawal.periodTo) {
+    const storeRow = await prisma.store.findUnique({
+      where: { id: withdrawal.storeId },
+      select: { platformDiscountPaybackEnabled: true },
+    });
+
+    const paybackWhere = {
+      storeId: withdrawal.storeId,
+      ownership: 'PLATFORM' as const,
+      platformPaybackSettledAt: null,
+      platformPaybackReversedAt: null,
+      order: {
+        paymentStatus: 'PAID' as const,
+        status: { not: 'CANCELLED' as const },
+        createdAt: {
+          gte: approvedWithdrawal.periodFrom,
+          lte: approvedWithdrawal.periodTo,
+        },
+      },
+      ...(storeRow?.platformDiscountPaybackEnabled
+        ? {}
+        : { platformPaybackEligible: true }),
+    };
+
+    await prisma.promotionUsage.updateMany({
+      where: paybackWhere,
+      data: {
+        platformPaybackSettledAt: now,
+        platformPaybackWithdrawalId: withdrawalId,
+        ...(storeRow?.platformDiscountPaybackEnabled ? { platformPaybackEligible: true } : {}),
+      },
+    });
+  }
+
+  await creditPlatformEarning({
+    storeWithdrawalId: approvedWithdrawal.id,
+    storeId: approvedWithdrawal.storeId,
+    breakdown: approvedWithdrawal.breakdown ?? withdrawal.breakdown,
+    periodFrom: approvedWithdrawal.periodFrom,
+    periodTo: approvedWithdrawal.periodTo,
+    approvedAt: approvedWithdrawal.reviewedAt ?? now,
+  });
+
+  if (sppcJasonCents > 0) {
+    const storeRow = await prisma.store.findUnique({
+      where: { id: withdrawal.storeId },
+      select: { name: true },
+    });
+    await recordJasonSppcExpense({
+      storeId: withdrawal.storeId,
+      storeWithdrawalId: approvedWithdrawal.id,
+      amountCents: sppcJasonCents,
+      reviewerId,
+      approvedAt: approvedWithdrawal.reviewedAt ?? now,
+      branchName: storeRow?.name,
+    });
+  }
+
+  await refreshWalletCaches(withdrawal.storeId);
+  return approvedWithdrawal;
+}
+
+export async function rejectWithdrawal(
+  withdrawalId: string,
+  reviewerId: string,
+  reason?: string,
+): Promise<StoreWithdrawal> {
+  const withdrawal = await prisma.storeWithdrawal.findUnique({ where: { id: withdrawalId } });
+  if (!withdrawal) throw new AppError('Withdrawal not found', 404);
+  if (withdrawal.status !== 'PENDING') {
+    throw new AppError('Only pending withdrawals can be rejected', 400);
+  }
+
+  const rejected = await prisma.storeWithdrawal.updateMany({
+    where: { id: withdrawalId, status: 'PENDING' },
+    data: {
+      status: 'REJECTED',
+      reviewedById: reviewerId,
+      reviewedAt: new Date(),
+      rejectionReason: reason?.trim() || null,
+    },
+  });
+  if (rejected.count !== 1) {
+    throw new AppError('Only pending withdrawals can be rejected', 409);
+  }
+  return prisma.storeWithdrawal.findUniqueOrThrow({ where: { id: withdrawalId } });
+}
+
+export async function cancelWithdrawal(
+  withdrawalId: string,
+  requesterId: string,
+): Promise<StoreWithdrawal> {
+  const withdrawal = await prisma.storeWithdrawal.findUnique({ where: { id: withdrawalId } });
+  if (!withdrawal) throw new AppError('Withdrawal not found', 404);
+  if (withdrawal.status !== 'PENDING') {
+    throw new AppError('Only pending withdrawals can be cancelled', 400);
+  }
+  if (withdrawal.requestedById !== requesterId) {
+    throw new AppError('You can only cancel your own withdrawal requests', 403);
+  }
+
+  const cancelled = await prisma.storeWithdrawal.updateMany({
+    where: { id: withdrawalId, status: 'PENDING', requestedById: requesterId },
+    data: { status: 'CANCELLED' },
+  });
+  if (cancelled.count !== 1) {
+    throw new AppError('Only pending withdrawals can be cancelled', 409);
+  }
+  return prisma.storeWithdrawal.findUniqueOrThrow({ where: { id: withdrawalId } });
+}
+
+/** Create an already-approved withdrawal linked to an existing PAYOUT transaction (settlement backfill). */
+export async function createApprovedWithdrawalRecord(
+  input: CreateApprovedWithdrawalInput,
+  tx?: Prisma.TransactionClient,
+): Promise<StoreWithdrawal> {
+  const db = tx ?? prisma;
+  const now = new Date();
+  const withdrawalId = crypto.randomUUID();
+
+  const withdrawal = await db.storeWithdrawal.create({
+    data: {
+      id: withdrawalId,
+      storeId: input.storeId,
+      amount: centsToDecimal(input.amount),
+      status: 'APPROVED',
+      remarks: input.remarks ?? null,
+      periodFrom: input.periodFrom ?? null,
+      periodTo: input.periodTo ?? null,
+      breakdown: (input.breakdown ?? {}) as object,
+      requestedById: input.requestedById,
+      reviewedById: input.reviewedById,
+      reviewedAt: now,
+      walletTransactionId: input.walletTransactionId,
+    },
+  });
+
+  await creditPlatformEarning(
+    {
+      storeWithdrawalId: withdrawal.id,
+      storeId: withdrawal.storeId,
+      breakdown: withdrawal.breakdown,
+      periodFrom: withdrawal.periodFrom,
+      periodTo: withdrawal.periodTo,
+      approvedAt: withdrawal.reviewedAt ?? now,
+    },
+    tx,
+  );
+
+  return withdrawal;
+}

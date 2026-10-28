@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "251896428006",
+    "project_id": "bing-chun-customer-app",
+    "storage_bucket": "bing-chun-customer-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:251896428006:android:4afe6f9c2416e01586d227",
+        "android_client_info": {
+          "package_name": "lk.bingchun.bing_chun_customer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCvOyrY6X4K5fI0Chhg_YVW0o_cEGX5U_c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

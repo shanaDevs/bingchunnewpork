@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# macOS/Linux wrapper — run this instead of deploy-backend.ps1
+exec "$(dirname "$0")/deploy.sh" "$@"

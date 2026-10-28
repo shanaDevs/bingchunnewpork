@@ -1,0 +1,58 @@
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+function surface(): 'shop' | 'pos' | 'admin' {
+  const value = (process.env.WEB_SURFACE || 'shop').trim().toLowerCase();
+  if (value === 'pos' || value === 'admin') return value;
+  return 'shop';
+}
+
+function isAsset(pathname: string): boolean {
+  return (
+    pathname.startsWith('/_next')
+    || pathname.startsWith('/api')
+    || pathname.startsWith('/socket.io')
+    || pathname.startsWith('/delivery-api')
+    || pathname.includes('.')
+  );
+}
+
+export function middleware(request: NextRequest) {
+  const current = surface();
+  const { pathname } = request.nextUrl;
+  if (isAsset(pathname)) return NextResponse.next();
+
+  if (current === 'shop') {
+    if (pathname.startsWith('/admin')) {
+      const adminWeb = (process.env.ADMIN_WEB_URL || '').trim().replace(/\/$/, '');
+      if (adminWeb) {
+        return NextResponse.redirect(`${adminWeb}${pathname}${request.nextUrl.search}`);
+      }
+    }
+    return NextResponse.next();
+  }
+
+  if (current === 'pos') {
+    const allowed = pathname === '/admin'
+      || pathname.startsWith('/admin/login')
+      || pathname.startsWith('/admin/orders')
+      || pathname.startsWith('/admin/pos');
+    if (!allowed) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/admin/login';
+      return NextResponse.redirect(url);
+    }
+  }
+
+  if (current === 'admin' && !pathname.startsWith('/admin')) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/admin';
+    return NextResponse.redirect(url);
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+};

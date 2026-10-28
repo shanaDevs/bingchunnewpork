@@ -1,0 +1,162 @@
+/*
+ * Design tokens and utilities for the redesigned home page (src/components/home-redesign).
+ * Imported from app/globals.css. Names here (brand-50…950, sun-*, font-display, sticker, wide:) are
+ * new to this project, so they don't override any existing token.
+ */
+/*
+ * Where the hero uses its landscape desktop composition: desktop (1280px+) and any landscape screen from
+ * 1024px (landscape tablets, small laptops), where it is scaled down. Upright screens below 1280px use
+ * the portrait tablet composition. Keep in step with `breakpoints.stageWide` in config/motion.ts.
+ */
+@custom-variant wide {
+  @media (min-width: 1280px), (min-width: 1024px) and (orientation: landscape) {
+    @slot;
+  }
+}
+
+/*
+ * Design tokens. Tailwind v4 generates utilities from these
+ * (e.g. bg-brand-600, text-brand-900, max-w-site).
+ * brand-500 is sampled from the Bing Chun mascot artwork (#3079EA); the rest of the
+ * scale is derived from it. Swap for official brand values when available.
+ */
+@theme {
+  --color-brand-50: #eef5ff;
+  --color-brand-100: #d9e8ff;
+  --color-brand-200: #bcd7ff;
+  --color-brand-300: #8ebcff;
+  --color-brand-400: #5b9bf6;
+  --color-brand-500: #3079ea;
+  --color-brand-600: #1f62d6;
+  --color-brand-700: #1a4fb2;
+  --color-brand-800: #1b438f;
+  --color-brand-900: #1a3a72;
+  --color-brand-950: #0f2147;
+
+  /*
+   * Plain white for text on blue. The app's light theme remaps `.text-white` to dark text site-wide,
+   * so the home page uses this token instead.
+   */
+  --color-snow: #ffffff;
+
+  /* Single warm accent, taken from the flower on the mascot's cup. Use sparingly. */
+  --color-sun-300: #ffe27a;
+  --color-sun-400: #ffd23f;
+
+  --container-site: 100rem;
+
+  /*
+   * Lazy bob for decorative illustrations. Starts and ends at rest, so reduced motion leaves them in place.
+   * Stagger copies with an inline animation-delay.
+   */
+  --animate-float: float 5s ease-in-out infinite;
+  @keyframes float {
+    0%,
+    100% {
+      translate: 0 0;
+      rotate: 0deg;
+    }
+    50% {
+      translate: 0 -10px;
+      rotate: 6deg;
+    }
+  }
+
+  /*
+   * Footer peekaboo, 7s loop: rest, duck below the divider, wait, pop back up past the line, wiggle, rest.
+   * translate % is of the image's own height (56% clears the artwork). Starts and ends at rest, so
+   * reduced motion (which cuts animations to one instant pass) leaves it still and in place.
+   */
+  --animate-mascot-peek: mascot-peek 7s ease-in-out infinite;
+  @keyframes mascot-peek {
+    0%,
+    58%,
+    100% {
+      translate: 0 0;
+      rotate: 0deg;
+    }
+    64%,
+    74% {
+      translate: 0 56%;
+      rotate: 0deg;
+    }
+    80% {
+      translate: 0 -5%;
+    }
+    83% {
+      translate: 0 0;
+      rotate: -7deg;
+    }
+    87% {
+      rotate: 6deg;
+    }
+    91% {
+      rotate: -3deg;
+    }
+    95% {
+      rotate: 0deg;
+    }
+  }
+
+  /* Gentle side-to-side rock, pivoting at the feet. Starts and ends upright so pausing it never jumps. */
+  --animate-mascot-sway: mascot-sway 2.4s ease-in-out infinite;
+  @keyframes mascot-sway {
+    0%,
+    100% {
+      rotate: 0deg;
+    }
+    25% {
+      rotate: 3deg;
+    }
+    75% {
+      rotate: -3deg;
+    }
+  }
+}
+
+@theme inline {
+  --font-display: var(--font-bricolage);
+  --font-numeric: var(--font-plus-jakarta);
+}
+
+
+/* Heavy, condensed display type used for the wordmark and hero headline. */
+@utility font-display-condensed {
+  font-family: var(--font-bricolage), system-ui, sans-serif;
+  font-weight: 800;
+  font-variation-settings:
+    "wdth" 75,
+    "opsz" 96;
+}
+
+/*
+ * White die-cut outline plus a soft shadow, so cut-out artwork reads on any background,
+ * including blue that matches the artwork itself. Sets `filter` outright, so don't combine with filter utilities.
+ */
+@utility sticker {
+  filter: drop-shadow(2px 0 0 white) drop-shadow(-2px 0 0 white) drop-shadow(0 2px 0 white)
+    drop-shadow(0 -2px 0 white) drop-shadow(0 8px 10px rgb(15 33 71 / 0.3));
+}
+
+/* Reduced motion for the home page's CSS transitions and loops (GSAP checks it separately). */
+@media (prefers-reduced-motion: reduce) {
+  .home-redesign *,
+  .home-redesign *::before,
+  .home-redesign *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * The home page's own surface: always light, in its own body face, whatever the app theme. It is
+ * rendered outside the app shell, so the page background and type come from here.
+ */
+.home-redesign {
+  background: #ffffff;
+  color: #0f172a;
+  font-family: var(--font-home-sans), system-ui, sans-serif;
+  color-scheme: light;
+}

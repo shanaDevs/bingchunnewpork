@@ -1,0 +1,2200 @@
+generator client {
+  previewFeatures = ["multiSchema"]
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas    = ["public", "delivery"]
+}
+
+enum OrderMode {
+  DELIVERY
+  TAKEAWAY
+  @@schema("public")
+}
+
+enum BatchStatus {
+  ACTIVE
+  DEPLETED
+  WRITTEN_OFF
+  FROZEN
+  @@schema("public")
+}
+
+enum BatchType {
+  NORMAL
+  EMERGENCY
+  RESET
+  @@schema("public")
+}
+
+enum OrderStatus {
+  RECEIVED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  @@schema("public")
+}
+
+enum CancelReason {
+  OUT_OF_STOCK
+  CUSTOMER_REQUEST
+  PAYMENT_OR_SYSTEM_ISSUE
+  @@schema("public")
+}
+
+enum PaymentMethod {
+  CARD
+  PAYHERE
+  CASH_ON_DELIVERY
+  CASH_AT_COUNTER
+  LOYALTY_POINTS
+  @@schema("public")
+}
+
+/// Online checkout gateway actually used (additive — does not replace PaymentMethod).
+enum PaymentGateway {
+  PAYHERE
+  WEBXPAY
+  @@schema("public")
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  @@schema("public")
+}
+
+/// Sales channel for an order. Distinct from `Order.platform` (0=web, 1=app analytics).
+enum OrderChannel {
+  WEB
+  APP
+  POS
+  WHATSAPP
+  TELEGRAM
+  @@schema("public")
+}
+
+enum MessagingChannel {
+  WHATSAPP
+  TELEGRAM
+  @@schema("public")
+}
+
+enum ConversationState {
+  NEW
+  SELECTING_STORE
+  BROWSING_PRODUCTS
+  SELECTING_PRODUCT
+  ADDING_PRODUCT
+  VIEWING_CART
+  CHECKOUT
+  COLLECTING_CUSTOMER_DETAILS
+  SELECTING_PAYMENT
+  CONFIRMING_ORDER
+  ORDER_CREATED
+  TRACKING_ORDER
+  @@schema("public")
+}
+
+enum ChannelMessageDirection {
+  INBOUND
+  OUTBOUND
+  @@schema("public")
+}
+
+enum MessageSenderType {
+  CUSTOMER
+  BOT
+  ADMIN
+  SYSTEM
+  @@schema("public")
+}
+
+model Role {
+  id    String @id @default(uuid())
+  name  String @unique
+
+  users AdminUser[]
+  
+  @@schema("public")
+
+  @@map("roles")
+}
+
+enum DeliveryJobStatus {
+  SCHEDULED
+  ASSIGNED
+  QUEUED
+  IN_PROGRESS
+  RETURNING
+  COMPLETED
+  CANCELLED
+  VEHICLE_FAILURE
+  @@schema("delivery")
+}
+
+enum DriverDutyStatus {
+  ONLINE
+  ON_DELIVERY
+  OFF_DUTY
+  @@schema("public")
+}
+
+enum NotificationType {
+  SMS
+  EMAIL
+  PUSH
+  @@schema("public")
+}
+
+enum ProductSize {
+  REGULAR
+  LARGE
+  @@schema("public")
+}
+
+model User {
+  id                String               @id @default(uuid())
+  name              String
+  email             String?              @unique
+  phone             String               @unique
+  passwordHash      String?
+  googleId          String?              @unique
+  facebookId        String?              @unique
+  isEmailVerified   Boolean              @default(false)
+  isPhoneVerified   Boolean              @default(true)
+  loyaltyPoints     Int                  @default(0)
+  notifyEmail       Boolean              @default(true)
+  notifySms         Boolean              @default(true)
+  notifyPush        Boolean              @default(true)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  deletedAt         DateTime?
+  bannedAt          DateTime?
+  bannedReason      String?              @db.Text
+  /// Bumped to revoke every customer access and refresh token.
+  tokenVersion      Int                  @default(0)
+  referredByUserId  String?
+  wishlistShareToken String?  @unique
+
+  addresses         Address[]
+  cart              Cart?
+  orders            Order[]
+  stockReservations StoreProductReservation[]
+  platformRatings   PlatformRating[]
+  riderRatings      RiderRating[]
+  productRatings    ProductRating[]
+  wishlistItems     WishlistItem[]
+  loyaltyTxns       LoyaltyTransaction[]
+  notifications         Notification[]
+  customerNotifications CustomerNotification[]
+  otpRecords            OtpRecord[]
+  promotionUsages       PromotionUsage[]
+  spinResults           SpinResult[]
+  customerChannels      CustomerChannel[]
+  conversationSessions  ConversationSession[]
+  customerAuditLogs     CustomerAuditLog[]
+  referredBy            User?                @relation("UserReferrals", fields: [referredByUserId], references: [id], onDelete: SetNull)
+  referrals             User[]               @relation("UserReferrals")
+
+  @@index([referredByUserId])
+  @@index([bannedAt])
+  @@schema("public")
+
+  @@map("users")
+}
+
+/// Maps WhatsApp / Telegram identities to an existing User (avoids duplicate accounts).
+model CustomerChannel {
+  id             String           @id @default(uuid())
+  customerId     String
+  channel        MessagingChannel
+  externalUserId String
+  phoneNumber    String?
+  username       String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  customer User @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([channel, externalUserId])
+  @@index([customerId])
+  @@index([phoneNumber])
+  @@schema("public")
+
+  @@map("customer_channels")
+}
+
+/// Server-side conversation state for messaging order bots (channel-agnostic).
+model ConversationSession {
+  id             String            @id @default(uuid())
+  channel        MessagingChannel
+  externalUserId String
+  customerId     String?
+  storeId        String?
+  state          ConversationState @default(NEW)
+  /// Cart lines: [{ productId, productName, quantity, unitPrice, size? }]
+  cartJson       Json              @default("[]")
+  /// Scratch pad: selectedProductId, pendingQty, checkout fields, lastOrderId, etc.
+  contextJson    Json              @default("{}")
+  expiresAt      DateTime
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  customer User?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  store    Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@unique([channel, externalUserId])
+  @@index([state, expiresAt])
+  @@index([customerId])
+  @@schema("public")
+
+  @@map("conversation_sessions")
+}
+
+/// Idempotency + optional admin conversation history for messaging channels.
+model ChannelMessage {
+  id                  String                  @id @default(uuid())
+  channel             MessagingChannel
+  externalMessageId   String
+  externalUserId      String
+  direction           ChannelMessageDirection
+  senderType          MessageSenderType       @default(CUSTOMER)
+  messageType         String                  @default("text")
+  payload             Json?
+  bodyText            String?                 @db.Text
+  orderId             String?
+  processed           Boolean                 @default(false)
+  processingStartedAt DateTime?
+  createdAt           DateTime                @default(now())
+
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@unique([channel, externalMessageId])
+  @@index([channel, externalUserId, createdAt])
+  @@index([channel, externalUserId, senderType, createdAt])
+  @@index([channel, direction, processed, createdAt])
+  @@index([orderId])
+  @@schema("public")
+
+  @@map("channel_messages")
+}
+
+model CustomerNotification {
+  id          String   @id @default(uuid())
+  userId      String
+  type        String   @default("ORDER_STATUS")
+  title       String
+  message     String   @db.Text
+  orderId     String?
+  orderNumber String?
+  status      String?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+  @@schema("public")
+
+  @@map("customer_notifications")
+}
+
+model OtpRecord {
+  id        String   @id @default(uuid())
+  userId    String
+  phone     String
+  code      String
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@schema("public")
+
+  @@map("otp_records")
+}
+
+model Address {
+  id          String   @id @default(uuid())
+  userId      String
+  label       String   @default("Home")
+  addressLine String
+  city        String
+  district    String
+  lat         Float?
+  lng         Float?
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders      Order[]
+
+  @@schema("public")
+
+  @@map("addresses")
+}
+
+model Store {
+  id            String         @id @default(uuid())
+  name          String
+  code          String?        @unique
+  addressLine   String
+  city          String
+  district      String
+  lat           Float
+  lng           Float
+  phone         String?
+  openTime      String         @default("09:00")
+  closeTime     String         @default("23:00")
+  onlineOrderStartTime String?
+  onlineOrderStopTime  String?
+  pickupCutoffMinutes  Int            @default(50)
+  isActive         Boolean        @default(true)
+  isBusy           Boolean        @default(false)
+  deliveryEnabled  Boolean        @default(false)
+  deliveryOtpRequired Boolean     @default(false)
+  /// Override for branch ride-completion geofence (meters). Null = use AppSetting default.
+  completionRadiusM Int?
+  platformDiscountPaybackEnabled Boolean @default(false)
+  /// Set when branch admin closes the branch; cleared on Open Branch. Blocks customer online orders.
+  branchClosedAt   DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  deliveryZones           DeliveryZone[]
+  deliveryAccessLogs      DeliveryAccessLog[]
+  orders               Order[]
+  adminUsers           AdminUser[]
+  accessibleByAdmins   AdminUser[] @relation("adminuseraccessiblestores")
+  storeProducts        StoreProduct[]
+  adminNotifications   AdminNotification[]
+  deliveryJobs         DeliveryJob[]
+  wallet                 StoreWallet?
+  walletTransactions     WalletTransaction[]
+  storeWithdrawals       StoreWithdrawal[]
+  commissionSettlements  CommissionSettlement[]
+  platformEarnings       PlatformEarning[]
+  promotionUsages        PromotionUsage[]
+  platformPaybackSettingLogs PlatformPaybackSettingLog[]
+  stockAuditLogs         StockAuditLog[]
+  stockReservations      StoreProductReservation[]
+  stockBatches           StockBatch[]
+  stockBatchCounters     StockBatchCounter[]
+  stockBatchGroups       StockBatchGroup[]
+  conversationSessions   ConversationSession[]
+  loyaltyCampaign      LoyaltyCampaign?
+  spinWheelOffers      SpinWheelOffer[]
+
+  @@schema("public")
+
+  @@map("stores")
+}
+
+model DeliveryZone {
+  id          String   @id @default(uuid())
+  storeId     String?
+  name        String
+  radiusKm    Float
+  fee         Int
+  minOrder    Int      @default(500)
+  isActive    Boolean  @default(true)
+  isGlobal    Boolean  @default(false)
+
+  store       Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orders      Order[]
+
+  @@schema("delivery")
+
+  @@map("delivery_zones")
+}
+
+model Category {
+  id       String    @id @default(uuid())
+  name     String    @unique
+  slug     String    @unique
+  icon     String?
+  sortOrder Int      @default(0)
+  isActive Boolean   @default(true)
+
+  products Product[]
+
+  @@schema("public")
+
+  @@map("categories")
+}
+
+model Product {
+  id          String        @id @default(uuid())
+  categoryId  String
+  name        String
+  slug        String        @unique
+  description String?       @db.Text
+  ingredients String?       @db.Text
+  basePrice   Int
+  cost        Int           @default(0)
+  imageUrl    String?
+  imageUrls   Json?
+  tag         String?
+  isAvailable Boolean       @default(true)
+  isDeliveryAvailable Boolean @default(true)
+  isCombo     Boolean       @default(false)
+  sortOrder   Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  category    Category      @relation(fields: [categoryId], references: [id])
+  toppings    ProductTopping[]
+  cartItems   CartItem[]
+  orderItems  OrderItem[]
+  storeProducts StoreProduct[]
+  ratings       ProductRating[]
+  wishlistItems WishlistItem[]
+  dailySpecials DailySpecial[]
+  stockAuditLogs StockAuditLog[]
+  stockReservations StoreProductReservation[]
+  stockBatches StockBatch[]
+  spinGifts   SpinWheelOffer[]
+  loyaltyCampaignGifts LoyaltyCampaign[] @relation("LoyaltyCampaignGiftProduct")
+
+  @@schema("public")
+
+  @@map("products")
+}
+
+model ProductRating {
+  id        String   @id @default(uuid())
+  productId String
+  userId    String?
+  guestName String?  @db.VarChar(100)
+  stars     Int
+  comment   String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt])
+  @@index([productId, stars])
+  @@schema("public")
+
+  @@map("product_ratings")
+}
+
+model WishlistItem {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@schema("public")
+
+  @@map("wishlist_items")
+}
+
+model DailySpecial {
+  id           String   @id @default(uuid())
+  productId    String
+  specialPrice Int
+  startsAt     DateTime
+  endsAt       DateTime
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([isActive, startsAt, endsAt])
+  @@schema("public")
+
+  @@map("daily_specials")
+}
+
+model StoreProduct {
+  storeId             String
+  productId           String
+  stock               Int      @default(0)
+  weeklyBaseQty       Int      @default(0)
+  weeklyRemainingQty  Int      @default(0)
+  weeklyTargetQty     Int      @default(0)
+  lowStockThreshold   Int?
+  onlineOutOfStockThreshold Int?
+  isAvailable         Boolean  @default(true)
+  branchDeactivatedAt DateTime?
+  updatedAt           DateTime @updatedAt
+
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, productId])
+  @@schema("public")
+
+  @@map("store_products")
+}
+
+enum StockChangeType {
+  ORDER_DEDUCTION
+  ORDER_RESTORATION
+  MANUAL_ADJUSTMENT
+  WEEKLY_RESET
+  BATCH_RECEIVED
+  BATCH_ADJUSTMENT
+  WASTAGE
+  EXPIRY_WRITE_OFF
+  @@schema("public")
+}
+
+enum StoreProductReservationStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  EXPIRED
+  @@schema("public")
+}
+
+model StoreProductReservation {
+  id              String                        @id @default(uuid())
+  reservationUuid String
+  userId          String?
+  cartId          String?
+  storeId         String
+  productId       String
+  quantity        Int
+  orderId         String?
+  status          StoreProductReservationStatus @default(ACTIVE)
+  expiresAt       DateTime
+  createdAt       DateTime                      @default(now())
+  updatedAt       DateTime                      @updatedAt
+
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  cart    Cart?    @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  store   Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  order   Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([reservationUuid])
+  @@index([storeId, productId, status])
+  @@index([status, expiresAt])
+  @@index([userId, status])
+  @@index([orderId])
+  @@schema("public")
+
+  @@map("store_product_reservations")
+}
+
+model StockAuditLog {
+  id          String          @id @default(uuid())
+  storeId     String
+  productId   String
+  batchId     String?
+  changeType  StockChangeType
+  qtyBefore   Int
+  qtyChange   Int
+  qtyAfter    Int
+  orderId     String?
+  adminUserId String?
+  note        String?         @db.Text
+  createdAt   DateTime        @default(now())
+
+  store       Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product     Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batch       StockBatch?     @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  order       Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  adminUser   AdminUser?      @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+
+  @@index([storeId, productId])
+  @@index([createdAt])
+  @@index([changeType])
+  @@index([batchId])
+  @@schema("public")
+
+  @@map("stock_audit_logs")
+}
+
+model StockBatch {
+  id               String      @id @default(uuid())
+  batchNumber      String
+  batchType        BatchType   @default(NORMAL)
+  batchGroupId     String?
+  storeId          String
+  productId        String
+  receivedQty      Int
+  remainingQty     Int
+  receivedAt       DateTime
+  unitCost         Int?
+  expiryDate       DateTime?
+  status           BatchStatus @default(ACTIVE)
+  note             String?     @db.Text
+  createdByAdminId String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  store       Store                  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product     Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batchGroup  StockBatchGroup?       @relation(fields: [batchGroupId], references: [id], onDelete: SetNull)
+  createdBy   AdminUser?             @relation(fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  allocations StockBatchAllocation[]
+  auditLogs   StockAuditLog[]
+
+  @@unique([storeId, batchNumber])
+  @@index([storeId, productId, status, receivedAt])
+  @@index([batchGroupId])
+  @@schema("public")
+
+  @@map("stock_batches")
+}
+
+model StockBatchGroup {
+  id               String   @id @default(uuid())
+  storeId          String
+  batchNumber      String
+  resetDate        DateTime
+  note             String?  @db.Text
+  createdByAdminId String?
+  createdAt        DateTime @default(now())
+
+  store     Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdBy AdminUser?  @relation(fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  batches   StockBatch[]
+
+  @@unique([storeId, batchNumber])
+  @@index([storeId, resetDate])
+  @@schema("public")
+
+  @@map("stock_batch_groups")
+}
+
+model StockBatchAllocation {
+  id          String   @id @default(uuid())
+  batchId     String
+  orderId     String
+  orderItemId String?
+  storeId     String
+  productId   String
+  quantity    Int
+  reversedQty Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  batch     StockBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  order     Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItem OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([batchId])
+  @@index([storeId, productId])
+  @@schema("public")
+
+  @@map("stock_batch_allocations")
+}
+
+model StockBatchCounter {
+  storeId  String
+  dateKey  String
+  lastSeq  Int      @default(0)
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, dateKey])
+  @@schema("public")
+
+  @@map("stock_batch_counters")
+}
+
+model Topping {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  extraPrice  Int              @default(0)
+  isAvailable Boolean          @default(true)
+
+  products    ProductTopping[]
+  cartItems   CartItemTopping[]
+  orderItems  OrderItemTopping[]
+
+  @@schema("public")
+
+  @@map("toppings")
+}
+
+model ProductTopping {
+  productId String
+  toppingId String
+
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  topping   Topping @relation(fields: [toppingId], references: [id], onDelete: Cascade)
+
+  @@id([productId, toppingId])
+  @@schema("public")
+
+  @@map("product_toppings")
+}
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String     @unique
+  orderMode OrderMode  @default(DELIVERY)
+  storeId   String?
+  updatedAt DateTime   @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+  reservations StoreProductReservation[]
+
+  @@schema("public")
+
+  @@map("carts")
+}
+
+model CartItem {
+  id         String            @id @default(uuid())
+  cartId     String
+  productId  String
+  size       ProductSize       @default(REGULAR)
+  quantity   Int               @default(1)
+  unitPrice  Int
+
+  cart       Cart              @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product    Product           @relation(fields: [productId], references: [id])
+  toppings   CartItemTopping[]
+
+  @@schema("public")
+
+  @@map("cart_items")
+}
+
+model CartItemTopping {
+  cartItemId String
+  toppingId  String
+
+  cartItem   CartItem @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  topping    Topping  @relation(fields: [toppingId], references: [id])
+
+  @@id([cartItemId, toppingId])
+  @@schema("public")
+
+  @@map("cart_item_toppings")
+}
+
+model Order {
+  id              String          @id @default(uuid())
+  orderNumber     String          @unique
+  /// Unguessable token for public order tracking links (never expose order number alone).
+  trackToken      String?         @unique
+  /// Client idempotency key for safe checkout retries (one order per key per user).
+  idempotencyKey  String?         @unique
+  userId          String?
+  guestName       String?
+  guestPhone      String?
+  guestEmail      String?
+  storeId         String
+  deliveryZoneId  String?
+  addressId       String?
+  orderMode       OrderMode
+  status          OrderStatus     @default(RECEIVED)
+  paymentMethod   PaymentMethod
+  /// Which online gateway processed CARD/PAYHERE checkout (null for cash/loyalty).
+  paymentGateway  PaymentGateway?
+  paymentStatus   PaymentStatus   @default(PENDING)
+  paymentRef      String?         @unique
+  paymentFailureReason String?    @db.Text
+  subtotal        Int
+  deliveryFee     Int             @default(0)
+  convenientFee   Int             @default(0)
+  discount        Int             @default(0)
+  loyaltyDiscount Int             @default(0)
+  total           Int
+  prepaidAmount   Int             @default(0)
+  /// Amount sent to the online gateway. Item edits are blocked while this is set and unpaid.
+  onlineChargeAmount Int?
+  cashReceivedAmount Int?
+  changeGivenAmount  Int?
+  promoCode       String?
+  qrCode          String?         @db.Text
+  pickupTime      String?
+  queuePosition   Int?
+  scheduledPickupAt DateTime?
+  pickupReminderSent Boolean     @default(false)
+  estimatedMinutes Int            @default(30)
+  notes           String?         @db.Text
+  deliveryAddressLine String?
+  deliveryCity        String?
+  deliveryDistrict    String?
+  deliveryLat         Float?
+  deliveryLng         Float?
+  platform            Int             @default(0)
+  /// Sales channel (WEB / APP / POS / WHATSAPP / TELEGRAM). Prefer this over `platform` for filtering.
+  channel             OrderChannel    @default(WEB)
+  cancelReason        CancelReason?
+  cancelledBy         String?
+  /// Order status at the moment it was cancelled (used to credit rider fees after a mid-ride cancel).
+  cancelledAtStatus   OrderStatus?
+  /// When the customer cancel countdown starts (order placement for cash; payment confirmation for online).
+  cancelWindowStartsAt DateTime?
+  /// First branch-staff account that acted on this order (accept, collect, complete, or cancel).
+  processedByAdminId String?
+  processedByName    String?
+  processedAt        DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  user            User?           @relation(fields: [userId], references: [id])
+  store           Store           @relation(fields: [storeId], references: [id])
+  processedBy     AdminUser?      @relation("OrderProcessedBy", fields: [processedByAdminId], references: [id], onDelete: SetNull)
+  deliveryZone    DeliveryZone?   @relation(fields: [deliveryZoneId], references: [id])
+  address         Address?        @relation(fields: [addressId], references: [id])
+  items           OrderItem[]
+  statusEvents    OrderStatusEvent[]
+  deliveryJobOrders DeliveryJobOrder[]
+  platformRating  PlatformRating?
+  riderRating     RiderRating?
+  deliveryAttempts DeliveryAttempt[]
+  deliveryOtps     DeliveryOtp[]
+  deliveryEvents   DeliveryEvent[]
+  driverComplaints DriverComplaint[]
+  meritPointHistory MeritPointHistory[]
+  promotionUsages  PromotionUsage[]
+  stockAuditLogs   StockAuditLog[]
+  stockReservations StoreProductReservation[]
+  stockBatchAllocations StockBatchAllocation[]
+  channelMessages   ChannelMessage[]
+  refund            Refund?
+
+  @@index([storeId, status, orderMode])
+  @@index([storeId, status, createdAt])
+  @@index([storeId, createdAt])
+  @@index([storeId, paymentStatus, createdAt])
+  @@index([userId, createdAt])
+  @@index([paymentStatus, createdAt])
+  @@index([channel, createdAt])
+  @@index([storeId, processedByAdminId, createdAt])
+  @@schema("public")
+
+  @@map("orders")
+}
+
+model PlatformRating {
+  id        String   @id @default(uuid())
+  orderId   String   @unique
+  userId    String?
+  stars     Int
+  comment   String?  @db.VarChar(500)
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([stars])
+  @@schema("public")
+
+  @@map("platform_ratings")
+}
+
+model RiderRating {
+  id        String   @id @default(uuid())
+  orderId   String   @unique
+  driverId  String
+  userId    String?
+  stars     Int
+  comment   String?  @db.VarChar(500)
+  createdAt DateTime @default(now())
+
+  order  Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  driver AdminUser @relation(fields: [driverId], references: [id])
+  user   User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([driverId])
+  @@schema("delivery")
+
+  @@map("rider_ratings")
+}
+
+model OrderItem {
+  id         String             @id @default(uuid())
+  orderId    String
+  productId  String
+  productName String
+  size       ProductSize        @default(REGULAR)
+  quantity   Int
+  unitPrice  Int
+  totalPrice Int
+
+  order      Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product    Product            @relation(fields: [productId], references: [id])
+  toppings   OrderItemTopping[]
+  stockBatchAllocations StockBatchAllocation[]
+
+  @@index([orderId])
+  @@schema("public")
+
+  @@map("order_items")
+}
+
+model OrderItemTopping {
+  orderItemId String
+  toppingId   String
+  toppingName String
+  extraPrice  Int    @default(0)
+
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  topping     Topping   @relation(fields: [toppingId], references: [id])
+
+  @@id([orderItemId, toppingId])
+  @@schema("public")
+
+  @@map("order_item_toppings")
+}
+
+model OrderStatusEvent {
+  id           String      @id @default(uuid())
+  orderId      String
+  status       OrderStatus
+  note         String?
+  actorAdminId String?
+  actorName    String?
+  actorRole    String?
+  createdAt    DateTime    @default(now())
+
+  order Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actor AdminUser? @relation("OrderStatusEventActor", fields: [actorAdminId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+  @@index([actorAdminId])
+  @@schema("public")
+
+  @@map("order_status_events")
+}
+
+model PromoCode {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  title           String?
+  description     String?
+  promotionKind   String?
+  promotionRules  Json?
+  usageLimits     Json?
+  discountType    String    @default("PERCENTAGE")
+  discountValue   Int
+  minOrderValue   Int       @default(0)
+  maxUses         Int?
+  usedCount       Int       @default(0)
+  isActive        Boolean   @default(true)
+  startsAt        DateTime?
+  expiresAt       DateTime?
+  criteria        Json?
+  ownership       String?
+  contributionSource String?  @default("JASON")
+  branchSharePct  Int?
+  platformSharePct Int?
+  branchShareSplits Json?
+  cardDesign      Json?
+  storeIds        Json?
+  sortOrder       Int       @default(0)
+  showOnHome      Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  deletedAt       DateTime?
+
+  usages          PromotionUsage[]
+
+  @@schema("public")
+
+  @@map("promo_codes")
+}
+
+// Per-order record of promotion cost sharing and offer details
+model PromotionUsage {
+  id                  String    @id @default(uuid())
+  orderId             String
+  promoCodeId         String?
+  promoCode           String
+  storeId             String
+  userId              String?
+  ownership           String
+  contributionSource  String?   @default("JASON")
+  branchSharePct      Int       @default(0)
+  platformSharePct    Int       @default(100)
+  promotionKind       String?
+  promotionRules      Json?
+  orderSubtotal       Int
+  totalDiscountAmount Int
+  branchShareAmount   Int       @default(0)
+  platformShareAmount Int       @default(0)
+  offerDetails        Json?
+  platformPaybackEligible     Boolean   @default(false)
+  /// Whole LKR (commerce); convert to settlement cents at finance boundary only.
+  platformPaybackAmount       Int       @default(0)
+  platformPaybackSettledAt    DateTime?
+  platformPaybackWithdrawalId String?
+  platformPaybackReversedAt   DateTime?
+  createdAt           DateTime  @default(now())
+
+  order     Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  promo     PromoCode? @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
+  store     Store      @relation(fields: [storeId], references: [id])
+  user      User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([promoCodeId])
+  @@index([storeId, createdAt])
+  @@index([storeId, platformPaybackSettledAt])
+  @@index([promoCode, createdAt])
+  @@schema("public")
+
+  @@map("promotion_usages")
+}
+
+model LoyaltyTransaction {
+  id        String   @id @default(uuid())
+  userId    String
+  orderId   String?
+  points    Int
+  type      String
+  note      String?
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([orderId, type])
+  @@schema("public")
+
+  @@map("loyalty_transactions")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String?
+  phone     String?
+  email     String?
+  type      NotificationType
+  subject   String?
+  message   String           @db.Text
+  sent      Boolean          @default(false)
+  sentAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user      User?            @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([sent, createdAt])
+  @@schema("public")
+
+  @@map("notifications")
+}
+
+model AdminUser {
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  pinLookup    String?
+  phone        String?
+  nicNumber       String?
+  address         String?   @db.Text
+  vehicleType     String?
+  vehicleNumber   String?
+  vehicleColor    String?
+  licenseNumber   String?
+  disabilities    String?   @db.Text
+  profilePhotoUrl String?
+  licenseImageUrl String?
+  dutyStatus      DriverDutyStatus @default(OFF_DUTY)
+  /// Driver merit points (0–100). New drivers start at 100.
+  meritPoints     Int              @default(100)
+  consecutiveSuccessfulDeliveries Int @default(0)
+  roleId       String
+  storeId      String?
+  isActive     Boolean    @default(true)
+  /// Bumped on password change or deactivation to invalidate outstanding refresh tokens.
+  tokenVersion Int        @default(0)
+  lastLoginAt  DateTime?
+  /// Bumped on each PIN login so only the newest rider JWT stays valid.
+  sessionVersion Int       @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  role             Role                 @relation(fields: [roleId], references: [id])
+  store            Store?               @relation(fields: [storeId], references: [id])
+  accessibleStores Store[]              @relation("adminuseraccessiblestores")
+  adminNotifications AdminNotification[]
+  deliveryJobs     DeliveryJob[]
+  riderRatings     RiderRating[]
+  permissions      Permission[]
+  driverLocations  DriverLocation[]
+  driverShifts     DriverShift[]
+  driverDevices    DriverDevice[]
+  deliveryAttempts DeliveryAttempt[]
+  deliveryJobRejections DeliveryJobRejection[]
+  driverComplaints DriverComplaint[]
+  driverBranchRequests DriverBranchRequest[]
+  meritPointHistory MeritPointHistory[]
+  stockAuditLogs   StockAuditLog[]
+  createdStockBatches StockBatch[]
+  createdStockBatchGroups StockBatchGroup[]
+  customerAuditLogs CustomerAuditLog[]
+  processedOrders   Order[]            @relation("OrderProcessedBy")
+  orderStatusEvents OrderStatusEvent[] @relation("OrderStatusEventActor")
+
+  @@unique([storeId, pinLookup])
+  @@index([pinLookup])
+  @@schema("public")
+
+  @@map("admin_users")
+}
+
+model Permission {
+  id           String    @id @default(uuid())
+  adminUserId  String
+  menu         String
+  canCreate    Boolean   @default(false)
+  canRead      Boolean   @default(false)
+  canUpdate    Boolean   @default(false)
+  canDelete    Boolean   @default(false)
+
+  adminUser    AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  
+  @@unique([adminUserId, menu])
+  @@schema("public")
+
+  @@map("permissions")
+}
+
+
+model DeliveryJob {
+  id          String            @id @default(uuid())
+  storeId     String
+  driverId    String?
+  title       String
+  /// Human-readable ride id, e.g. RIDE-1024
+  rideCode    String?           @unique
+  status      DeliveryJobStatus @default(SCHEDULED)
+  scheduledAt DateTime
+  assignedAt  DateTime?
+  startedAt   DateTime?
+  /// When the rider finished all customer deliveries and began returning to branch.
+  returnStartedAt DateTime?
+  completedAt DateTime?
+  totalCups             Int?
+  estimatedDistanceKm   Float?
+  estimatedMinutes      Int?
+  /// Mirrored from estimatedDistanceKm at creation; kept for older admin/analytics columns.
+  totalDistanceKm   Float?
+  /// Integer cents (finance); API exposes whole-LKR strings via money boundary.
+  totalDeliveryFees Decimal? @db.Decimal(20, 4)
+  /// GPS-accumulated distance for the full ride (branch to stops to branch).
+  actualDistanceKm  Float?
+  /// Simplified actual GPS polyline as JSON [[lat,lng],...].
+  actualRoute       String?           @db.Text
+  completedLat      Float?
+  completedLng      Float?
+  /// Set when this job's pickup point is NOT the outlet — e.g. a vehicle-failure
+  /// redelivery, where the new rider must collect parcels from the stranded rider's
+  /// breakdown spot instead of the branch. Null means "pick up at the store" as usual.
+  pickupLat         Float?
+  pickupLng         Float?
+  pickupLabel       String?
+  riderRatingSum    Int               @default(0)
+  riderRatingCount  Int               @default(0)
+  broadcastedAt     DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  store       Store             @relation(fields: [storeId], references: [id])
+  driver      AdminUser?        @relation(fields: [driverId], references: [id])
+  jobOrders   DeliveryJobOrder[]
+  rejections  DeliveryJobRejection[]
+
+  @@index([storeId, status])
+  @@index([driverId, status])
+  @@index([status, completedAt])
+  @@index([storeId, status, scheduledAt])
+  @@schema("delivery")
+
+  @@map("delivery_jobs")
+}
+
+model DeliveryJobOrder {
+  jobId     String
+  orderId   String
+  sequence  Int           @default(0)
+
+  job       DeliveryJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  order     Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, orderId])
+  @@schema("delivery")
+
+  @@map("delivery_job_orders")
+}
+
+model AdminNotification {
+  id          String   @id @default(uuid())
+  adminUserId String
+  storeId     String
+  type        String   @default("NEW_ORDER")
+  title       String
+  message     String   @db.Text
+  orderId     String?
+  productId   String?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  store       Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId, read])
+  @@index([storeId, createdAt])
+  @@index([productId])
+  @@schema("public")
+
+  @@map("admin_notifications")
+}
+
+model SystemSetting {
+  id                    String   @id @default("default")
+  paymentMethods        Json
+  activeOnlineGateway   String   @default("PAYHERE")
+  payhereMerchantId     String?
+  payhereMerchantSecret String?  @db.Text
+  payhereMode           String   @default("sandbox")
+  webxpayPublicKey      String?  @db.Text
+  webxpaySecretKey      String?
+  webxpayApiUsername    String?
+  webxpayApiPassword    String?  @db.Text
+  webxpayMode           String   @default("sandbox")
+  webxpayReturnUrl      String?
+  /// WhatsApp Business Cloud API (admin Settings). Secrets never returned to clients.
+  whatsappEnabled           Boolean  @default(false)
+  whatsappAccessToken       String?  @db.Text
+  whatsappPhoneNumberId     String?
+  whatsappBusinessAccountId String?
+  whatsappVerifyToken       String?
+  /// Meta webhook callback URL (HTTPS), e.g. https://api.example.com/api/whatsapp/webhook
+  whatsappCallbackUrl       String?  @db.Text
+  /// SMSlenz gateway (admin Settings). API key never returned to clients.
+  smsEnabled                Boolean  @default(false)
+  smsProvider               String   @default("smslenz")
+  smsUserId                 String?
+  smsApiKey                 String?  @db.Text
+  smsSenderId               String?
+  smsBaseUrl                String?
+  smsConnectionTimeoutMs    Int      @default(30000)
+  smsReadTimeoutMs          Int      @default(30000)
+  updatedAt             DateTime @updatedAt
+
+  @@schema("public")
+
+  @@map("system_settings")
+}
+
+model LoyaltySetting {
+  id                     String  @id @default("default")
+  pointsPerLkr           Float   @default(0.01)
+  redeemValue            Float   @default(1.0)
+  maxRedeemPct           Int     @default(100)
+  minOrderToEarn         Int     @default(200)
+  referralBonusPoints    Int     @default(100)
+  customerRedeemEnabled  Boolean @default(true)
+  checkoutRedeemEnabled  Boolean @default(true)
+  /// Lifetime points a customer must earn before checkout redemption unlocks.
+  minPointsToRedeem      Int     @default(100)
+  tiersJson              Json?
+  redeemRewardsJson      Json?
+  upcomingOffersJson     Json?
+
+  @@schema("public")
+
+  @@map("loyalty_settings")
+}
+
+model AppSetting {
+  id                           String  @id @default("default")
+  convenientFeeRate            Float   @default(0.075)
+  pickupConvenientFeeRate      Float   @default(0.06)
+  gatewayFeeRate               Float   @default(0.019)
+  deliveryPlatformFeeRate      Float   @default(0)
+  pickupAllowAddItemsPaidOnline Boolean @default(true)
+  pickupAllowEditCashUnpaid    Boolean @default(true)
+  maxCupsPerRider              Int     @default(20)
+  deliveryMilestone1Orders     Int     @default(50)
+  deliveryMilestone2Orders     Int     @default(150)
+  deliveryMilestone3Orders     Int     @default(300)
+  requireAppDownload           Boolean @default(true)
+  androidStoreUrl              String? @db.VarChar(512)
+  iosStoreUrl                  String? @db.VarChar(512)
+  androidAppIconUrl            String? @db.VarChar(512)
+  iosAppIconUrl                String? @db.VarChar(512)
+  spinDurationSeconds          Int       @default(8)
+  spinsPerWindow               Int       @default(1)
+  spinWindowHours              Int       @default(24)
+  spinTrackByIp                Boolean   @default(true)
+  spinEnabled                  Boolean   @default(true)
+  spinFirstOrderOnly           Boolean   @default(false)
+  spinRequireLogin             Boolean   @default(false)
+  spinDaysOfWeekJson           Json?
+  spinTimeStart                String?   @db.VarChar(5)
+  spinTimeEnd                  String?   @db.VarChar(5)
+  spinStartsAt                 DateTime?
+  spinExpiresAt                DateTime?
+  spinMaxPerDay                Int?
+  spinMaxPerCustomer           Int?
+  spinDisplayJson              Json?
+  spinCriteriaJson             Json?
+  cancelWindowMinutes          Int       @default(10)
+  /// Default geofence (meters) for completing a ride at the assigned branch.
+  branchCompletionRadiusM      Int       @default(100)
+
+  @@schema("public")
+
+  @@map("app_settings")
+}
+
+enum WalletTransactionType {
+  ORDER_PAYMENT
+  ORDER_ADDON_PAYMENT
+  REFUND
+  PAYOUT
+  ADJUSTMENT
+  @@schema("public")
+}
+
+enum SettlementStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+  @@schema("public")
+}
+
+enum SettlementPaymentMethod {
+  BANK_TRANSFER
+  CASH
+  CHECK
+  ONLINE
+  @@schema("public")
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  @@schema("public")
+}
+
+enum PlatformSettlementStatus {
+  OPEN
+  SETTLED
+  @@schema("public")
+}
+
+model StoreWallet {
+  id             String    @id @default(uuid())
+  storeId        String    @unique
+  balance        Decimal   @default(0) @db.Decimal(20, 4)
+  totalEarnings  Decimal   @default(0) @db.Decimal(20, 4)
+  totalWithdrawn Decimal   @default(0) @db.Decimal(20, 4)
+  currency       String    @default("LKR")
+  lastSettledAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@schema("public")
+
+  @@map("store_wallets")
+}
+
+model StoreWithdrawal {
+  id                  String                    @id @default(uuid())
+  storeId             String
+  amount              Decimal                   @db.Decimal(20, 4)
+  status              WithdrawalStatus          @default(PENDING)
+  remarks             String?                   @db.Text
+  periodFrom          DateTime?
+  periodTo            DateTime?
+  rejectionReason     String?                   @db.Text
+  paymentMethod       SettlementPaymentMethod?
+  proofUrl            String?                   @db.Text
+  checkNumber         String?
+  checkDate           DateTime?
+  invoiceRef          String?
+  invoiceUrl          String?
+  invoiceData         Json?
+  breakdown           Json?
+  isAdvance           Boolean                   @default(false)
+  requestedById       String
+  reviewedById        String?
+  reviewedAt          DateTime?
+  walletTransactionId String?                   @unique
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+
+  store             Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  walletTransaction WalletTransaction? @relation(fields: [walletTransactionId], references: [id])
+  commissionSettlement CommissionSettlement?
+  platformEarning   PlatformEarning?
+
+  @@index([storeId, createdAt])
+  @@index([storeId, status])
+  @@schema("public")
+
+  @@map("store_withdrawals")
+}
+
+model DeliveryPayout {
+  id              String                    @id @default(uuid())
+  /// Integer cents (finance); API exposes whole LKR via money boundary.
+  amount          Decimal                   @db.Decimal(20, 4)
+  status          WithdrawalStatus          @default(PENDING)
+  remarks         String?                   @db.Text
+  periodFrom      DateTime
+  periodTo        DateTime
+  requestedById   String
+  breakdown       Json?
+  rejectionReason String?                   @db.Text
+  paymentMethod   SettlementPaymentMethod?
+  proofUrl        String?
+  checkNumber     String?
+  checkDate       DateTime?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([periodTo])
+  @@schema("delivery")
+
+  @@map("delivery_payouts")
+}
+
+model WalletTransaction {
+  id            String                  @id @default(uuid())
+  storeId       String
+  orderId       String?
+  type          WalletTransactionType
+  amount        Decimal                 @db.Decimal(20, 4)
+  balanceAfter  Decimal                 @db.Decimal(20, 4)
+  paymentMethod PaymentMethod?
+  paymentRef    String?
+  description   String?                 @db.Text
+  reference     String?
+  createdById   String?
+  settledAt     DateTime?
+  periodFrom    DateTime?
+  periodTo      DateTime?
+  createdAt     DateTime                @default(now())
+
+  store      Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  withdrawal StoreWithdrawal?
+
+  @@unique([orderId, type], map: "wallet_tx_order_type")
+  @@index([storeId, createdAt], map: "wallet_tx_store_created")
+  @@index([type], map: "wallet_tx_type")
+  @@schema("public")
+
+  @@map("wallet_transactions")
+}
+
+model CommissionSettlement {
+  id               String                  @id @default(uuid())
+  statementRef     String                  @unique
+  storeId          String
+  periodFrom       DateTime
+  periodTo         DateTime
+  status           SettlementStatus        @default(PENDING_VERIFICATION)
+  paymentMethod    SettlementPaymentMethod
+  receiptUrl       String?                 @db.Text
+  breakdown        Json
+  totalCommission  Decimal                 @db.Decimal(20, 4)
+  totalProviderFee Decimal                 @db.Decimal(20, 4)
+  platformPaybackAmount Decimal            @default(0) @db.Decimal(20, 4)
+  submittedById    String?
+  verifiedById     String?
+  verifiedAt       DateTime?
+  storeWithdrawalId String?                 @unique
+  invoiceRef        String?
+  invoiceUrl        String?
+  invoiceData       Json?
+  createdAt        DateTime                @default(now())
+
+  store           Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeWithdrawal StoreWithdrawal? @relation(fields: [storeWithdrawalId], references: [id])
+
+  @@index([storeId, periodFrom, periodTo], map: "commission_settlement_store_period")
+  @@schema("public")
+
+  @@map("commission_settlements")
+}
+
+model PlatformEarning {
+  id                  String   @id @default(uuid())
+  storeId             String
+  storeWithdrawalId   String   @unique
+  periodFrom          DateTime?
+  periodTo            DateTime?
+  calendarMonth       String
+  commissionAmount    Decimal @db.Decimal(20, 4)
+  convenienceFeeAmount Decimal @db.Decimal(20, 4)
+  platformPaybackAmount Decimal @default(0) @db.Decimal(20, 4)
+  sharedPromoContributionAmount Decimal @default(0) @db.Decimal(20, 4)
+  loyaltyDiscountAmount Decimal @default(0) @db.Decimal(20, 4)
+  netPlatformCommissionAmount Decimal @default(0) @db.Decimal(20, 4)
+  completedRefundConvenienceAmount Decimal @default(0) @db.Decimal(20, 4)
+  rejectedRefundConvenienceAmount Decimal @default(0) @db.Decimal(20, 4)
+  netPlatformEarningsAmount Decimal @default(0) @db.Decimal(20, 4)
+  eligibleProviderAmount Decimal @default(0) @db.Decimal(20, 4)
+  gatewayDeductionAmount Decimal @default(0) @db.Decimal(20, 4)
+  totalEarned         Decimal @db.Decimal(20, 4)
+  breakdown           Json
+  approvedAt          DateTime
+  settlementId        String?
+  createdAt           DateTime @default(now())
+
+  store           Store                      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeWithdrawal StoreWithdrawal            @relation(fields: [storeWithdrawalId], references: [id], onDelete: Cascade)
+  settlement      PlatformMonthlySettlement? @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+
+  @@index([calendarMonth])
+  @@index([storeId, calendarMonth])
+  @@index([settlementId])
+  @@schema("public")
+
+  @@map("platform_earnings")
+}
+
+model PlatformMonthlySettlement {
+  id                   String                   @id @default(uuid())
+  calendarMonth        String                   @unique
+  totalCommission      Decimal                  @db.Decimal(20, 4)
+  totalConvenienceFee  Decimal                  @db.Decimal(20, 4)
+  totalEarned          Decimal                  @db.Decimal(20, 4)
+  status               PlatformSettlementStatus @default(OPEN)
+  settledAt            DateTime?
+  settledByAdminId     String?
+  notes                String?                  @db.Text
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  earnings PlatformEarning[]
+
+  @@schema("public")
+
+  @@map("platform_monthly_settlements")
+}
+
+model DeliveryAccessLog {
+  id              String   @id @default(uuid())
+  storeId         String
+  action          String
+  changedById     String?
+  changedByName   String?
+  reason          String?
+  ordersAtChange  Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
+  @@schema("delivery")
+
+  @@map("delivery_access_logs")
+}
+
+model PlatformPaybackSettingLog {
+  id            String   @id @default(uuid())
+  storeId       String
+  previousValue Boolean
+  newValue      Boolean
+  changedById   String
+  changedByName String?
+  createdAt     DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
+  @@schema("public")
+
+  @@map("platform_payback_setting_logs")
+}
+
+enum DeliveryAttemptOutcome {
+  DELIVERED
+  CUSTOMER_UNREACHABLE
+  WRONG_ADDRESS
+  REFUSED
+  PAYMENT_FAILED
+  OTHER
+  VEHICLE_FAILURE
+  @@schema("public")
+}
+
+enum DeliveryDomainState {
+  PENDING_ASSIGNMENT
+  ASSIGNED
+  PICKED_UP
+  EN_ROUTE
+  ARRIVED
+  AWAITING_OTP
+  DELIVERED
+  FAILED
+  RETURNED_TO_STORE
+  @@schema("public")
+}
+
+model DriverLocation {
+  id          String   @id @default(uuid())
+  driverId    String
+  jobId       String?
+  lat         Float
+  lng         Float
+  accuracyM   Float?
+  speedKph    Float?
+  heading     Float?
+  batteryPct  Int?
+  recordedAt  DateTime @default(now())
+
+  driver AdminUser @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([driverId, recordedAt])
+  @@index([jobId, recordedAt])
+  @@schema("delivery")
+
+  @@map("driver_locations")
+}
+
+model DriverShift {
+  id         String    @id @default(uuid())
+  driverId   String
+  storeId    String
+  startedAt  DateTime  @default(now())
+  endedAt    DateTime?
+  createdAt  DateTime  @default(now())
+
+  driver AdminUser @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([driverId, startedAt])
+  @@index([storeId, startedAt])
+  @@schema("delivery")
+
+  @@map("driver_shifts")
+}
+
+model DriverDevice {
+  id               String    @id @default(uuid())
+  driverId         String
+  deviceId         String
+  platform         String?
+  fcmToken         String?   @db.Text
+  refreshTokenHash String?   @db.Text
+  approvedAt       DateTime?
+  lastSeenAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  driver AdminUser @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@unique([driverId, deviceId])
+  @@index([deviceId])
+  @@schema("delivery")
+
+  @@map("driver_devices")
+}
+
+model DeliveryAttempt {
+  id         String                  @id @default(uuid())
+  orderId    String
+  jobId      String
+  driverId   String
+  attemptNo  Int                     @default(1)
+  outcome    DeliveryAttemptOutcome
+  note       String?                 @db.Text
+  photoUrl   String?
+  lat        Float?
+  lng        Float?
+  createdAt  DateTime                @default(now())
+
+  order  Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  driver AdminUser @relation(fields: [driverId], references: [id])
+
+  @@index([orderId, createdAt])
+  @@index([jobId])
+  @@schema("delivery")
+
+  @@map("delivery_attempts")
+}
+
+model DeliveryOtp {
+  id          String    @id @default(uuid())
+  orderId     String
+  codeHash    String
+  attempts    Int       @default(0)
+  expiresAt   DateTime
+  verifiedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@schema("delivery")
+
+  @@map("delivery_otps")
+}
+
+model DeliveryEvent {
+  id        String              @id @default(uuid())
+  orderId   String
+  jobId     String?
+  driverId  String?
+  state     DeliveryDomainState
+  note      String?
+  createdAt DateTime            @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@index([jobId, createdAt])
+  @@schema("delivery")
+
+  @@map("delivery_events")
+}
+
+model DeliveryOutbox {
+  id              String    @id @default(uuid())
+  type            String
+  payload         Json
+  idempotencyKey  String    @unique
+  attempts        Int       @default(0)
+  nextRetryAt     DateTime  @default(now())
+  deliveredAt     DateTime?
+  lastError       String?   @db.Text
+  createdAt       DateTime  @default(now())
+
+  @@index([deliveredAt, nextRetryAt])
+  @@schema("delivery")
+
+  @@map("delivery_outbox")
+}
+
+enum RefundStatus {
+  RECEIVED
+  COMPLETE
+  REJECTED
+  @@schema("public")
+}
+
+enum RefundSubmittedBy {
+  CUSTOMER
+  BRANCH_ADMIN
+  @@schema("public")
+}
+
+enum SpinOfferType {
+  PERCENTAGE
+  FIXED
+  FREE_DELIVERY
+  GIFT
+  NO_PRIZE
+  @@schema("public")
+}
+
+model LoyaltyCampaign {
+  id                       String    @id @default(uuid())
+  /// null = platform-wide default (exactly one row)
+  storeId                  String?   @unique
+  offer1Enabled            Boolean   @default(true)
+  offer1DiscountType       String    @default("PERCENTAGE")
+  offer1DiscountValue      Int       @default(20)
+  offer1WebDiscountValue   Int       @default(20)
+  offer1AppDiscountValue   Int       @default(30)
+  offer1MinSubtotal        Int       @default(0)
+  offer2Enabled            Boolean   @default(true)
+  offer2DiscountType       String    @default("PERCENTAGE")
+  offer2DiscountValue      Int       @default(5)
+  offer2RewardType         String    @default("GIFT")
+  offer2GiftProductId      String?
+  offer2WindowDays         Int       @default(7)
+  offer2MinSubtotal        Int       @default(0)
+  offer3Enabled            Boolean   @default(true)
+  offer3RequiredOrders     Int       @default(3)
+  offer3MinOrderAmount     Int       @default(1000)
+  offer3WinChanceNumerator Int       @default(1)
+  offer3WinChanceDenominator Int     @default(10)
+  offer3OptionAMinEach     Int       @default(1500)
+  offer3OptionBCombinedMin Int       @default(4500)
+  offer3MatchMode          String    @default("A_OR_B")
+  isActive                 Boolean   @default(true)
+  startsAt                 DateTime?
+  expiresAt                DateTime?
+  ownership                String?   @default("PLATFORM")
+  contributionSource       String?   @default("JASON")
+  branchSharePct           Int?      @default(0)
+  platformSharePct         Int?      @default(100)
+  branchShareSplits        Json?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  store       Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  giftProduct Product? @relation("LoyaltyCampaignGiftProduct", fields: [offer2GiftProductId], references: [id], onDelete: SetNull)
+
+  @@schema("public")
+
+  @@map("loyalty_campaigns")
+}
+
+model SpinWheelOffer {
+  id             String        @id @default(uuid())
+  storeId        String?
+  label          String
+  description    String?
+  offerType      SpinOfferType @default(PERCENTAGE)
+  discountValue  Int           @default(0)
+  /// Relative win weight (e.g. 40 = 40% when all weights sum to 100)
+  winRate        Float         @default(10)
+  color          String        @default("#307ef2")
+  sortOrder      Int           @default(0)
+  isActive       Boolean       @default(true)
+  minOrderValue  Int           @default(0)
+  giftProductId  String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  results        SpinResult[]
+  giftProduct    Product?      @relation(fields: [giftProductId], references: [id], onDelete: SetNull)
+  store          Store?        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  deletedAt      DateTime?
+
+  @@index([storeId, isActive])
+  @@schema("public")
+
+  @@map("spin_wheel_offers")
+}
+
+model SpinResult {
+  id         String         @id @default(uuid())
+  userId     String?
+  guestKey   String?
+  clientIp   String?
+  offerId    String
+  claimCode  String         @unique
+  status     String         @default("CLAIMED") // CLAIMED | REDEEMED | EXPIRED | NO_PRIZE
+  expiresAt  DateTime
+  orderId    String?
+  createdAt  DateTime       @default(now())
+  redeemedAt DateTime?
+
+  offer SpinWheelOffer @relation(fields: [offerId], references: [id])
+  user  User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status])
+  @@index([guestKey, status])
+  @@index([clientIp, createdAt])
+  @@index([claimCode])
+  @@schema("public")
+
+  @@map("spin_results")
+}
+
+model CancelReasonConfig {
+  id                  String   @id @default(uuid())
+  label               String
+  value               String   @unique
+  minRefundPercentage Float
+  maxRefundPercentage Float
+  isActive            Boolean  @default(true)
+  sortOrder           Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  refunds             Refund[]
+
+  @@schema("public")
+
+  @@map("cancel_reason_configs")
+}
+
+model OrderStatusRefundConfig {
+  id               String      @id @default(uuid())
+  orderStatus      OrderStatus @unique
+  refundPercentage Float
+  isActive         Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@schema("public")
+
+  @@map("order_status_refund_configs")
+}
+
+model Refund {
+  id                   String             @id @default(uuid())
+  orderId              String             @unique
+  customerId           String?
+  customerName         String?
+  submittedBy          RefundSubmittedBy  @default(CUSTOMER)
+  cancellationReason   String
+  customReasonText     String?            @db.Text
+  cancelledWithinWindow Boolean           @default(false)
+  salesTotal           Int
+  deliveryFee          Int                @default(0)
+  convenienceFee       Int                @default(0)
+  orderTotal           Int
+  refundPercentage     Float?
+  refundAmount         Int?
+  penaltyAmount        Int?
+  returningSubtotal           Int?
+  notReturningSubtotal        Int?
+  returningDeliveryFee        Int?
+  returningConvenienceFee     Int?
+  nonRefundableDeliveryFee    Int?
+  nonRefundableConvenienceFee Int?
+  additionalGatewayFee        Int?
+  cancelReasonConfigId        String?
+  configuredMinPercentage     Float?
+  configuredMaxPercentage     Float?
+  exceededRange               Boolean            @default(false)
+  exceededRangeReason           String?            @db.Text
+  cancelledAtStatus               OrderStatus?
+  configuredStatusRefundPercentage Float?
+  status               RefundStatus       @default(RECEIVED)
+  adminNotes           String?            @db.Text
+  processedByAdminId   String?
+  processedAt          DateTime?
+  paidAt               DateTime?
+  paidByAdminId        String?
+  paymentNote          String?            @db.Text
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  order                Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  cancelReasonConfig   CancelReasonConfig? @relation(fields: [cancelReasonConfigId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([customerId, status])
+  @@index([status, createdAt])
+  @@schema("public")
+
+  @@map("refunds")
+}
+
+enum MeritEventType {
+  INITIAL
+  LATE_DELIVERY
+  CANCEL_BEFORE_PICKUP
+  CONFIRMED_COMPLAINT
+  SERIOUS_VIOLATION
+  RECOVERY_BONUS
+  MANUAL_ADJUSTMENT
+  @@schema("public")
+}
+
+enum MeritStatusBand {
+  EXCELLENT
+  GOOD
+  AVERAGE
+  WARNING
+  CRITICAL
+  @@schema("public")
+}
+
+enum DriverComplaintStatus {
+  OPEN
+  CONFIRMED
+  DISMISSED
+  RESOLVED
+  @@schema("public")
+}
+
+enum DriverBranchRequestType {
+  ADD_BRANCH
+  CHANGE_BRANCH
+  REMOVE_BRANCH
+  @@schema("public")
+}
+
+enum DriverBranchRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  @@schema("public")
+}
+
+/// Immutable audit of driver job rejections / pre-pickup cancellations.
+model DeliveryJobRejection {
+  id        String   @id @default(uuid())
+  jobId     String
+  driverId  String
+  reason    String   @db.Text
+  rejectedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  job    DeliveryJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  driver AdminUser   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, rejectedAt])
+  @@index([driverId, rejectedAt])
+  @@schema("delivery")
+
+  @@map("delivery_job_rejections")
+}
+
+/// Driver-raised complaint against an order.
+model DriverComplaint {
+  id          String                @id @default(uuid())
+  orderId     String
+  driverId    String
+  storeId     String
+  category    String
+  description String                @db.Text
+  status      DriverComplaintStatus @default(OPEN)
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  order  Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  driver AdminUser @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([driverId, createdAt])
+  @@index([storeId, status, createdAt])
+  @@schema("delivery")
+
+  @@map("driver_complaints")
+}
+
+/// Driver request to add or change branch assignment (super-admin approval required).
+model DriverBranchRequest {
+  id           String                     @id @default(uuid())
+  driverId     String
+  type         DriverBranchRequestType
+  fromStoreId  String?
+  toStoreId    String
+  reason       String?                    @db.Text
+  status       DriverBranchRequestStatus  @default(PENDING)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?                    @db.Text
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+
+  driver AdminUser @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([driverId, status])
+  @@index([status, createdAt])
+  @@schema("delivery")
+
+  @@map("driver_branch_requests")
+}
+
+/// Immutable merit point ledger — never overwrite historical rows.
+model MeritPointHistory {
+  id             String         @id @default(uuid())
+  driverId       String
+  orderId        String?
+  previousPoints Int
+  changedPoints  Int
+  newPoints      Int
+  reason         String
+  eventType      MeritEventType
+  createdBy      String         @default("SYSTEM")
+  createdAt      DateTime       @default(now())
+
+  driver AdminUser @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  order  Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([driverId, createdAt])
+  @@index([orderId])
+  @@index([eventType, createdAt])
+  @@schema("delivery")
+
+  @@map("merit_point_history")
+}
+
+/// Delivery-owned rider ops profile (identity/login stays on public.admin_users).
+model RiderProfile {
+  id                              String           @id @default(uuid())
+  adminUserId                     String           @unique
+  pinLookup                       String?
+  phone                           String?
+  vehicleType                     String?
+  vehicleNumber                   String?
+  vehicleColor                    String?
+  licenseNumber                   String?
+  disabilities                    String?          @db.Text
+  profilePhotoUrl                 String?
+  licenseImageUrl                 String?
+  dutyStatus                      DriverDutyStatus @default(OFF_DUTY)
+  meritPoints                     Int              @default(100)
+  consecutiveSuccessfulDeliveries Int              @default(0)
+  sessionVersion                  Int              @default(0)
+  createdAt                       DateTime         @default(now())
+  updatedAt                       DateTime         @updatedAt
+
+  @@index([pinLookup])
+  @@schema("delivery")
+  @@map("rider_profiles")
+}
+
+enum JasonLedgerType {
+  INVESTMENT
+  EXPENSE
+  @@schema("public")
+}
+
+/// Owner-level investments/expenses ledger (JASON admin page). Separate from store wallets.
+model JasonLedgerEntry {
+  id                String          @id @default(uuid())
+  type              JasonLedgerType
+  amount            Decimal         @db.Decimal(20, 4)
+  description       String          @db.Text
+  occurredAt        DateTime        @default(now())
+  isActive          Boolean         @default(true)
+  createdById       String?
+  storeId           String?
+  storeWithdrawalId String?
+  balanceBefore     Decimal?        @db.Decimal(20, 4)
+  balanceAfter      Decimal?        @db.Decimal(20, 4)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([type, occurredAt])
+  @@index([occurredAt])
+  @@index([storeWithdrawalId])
+  @@schema("public")
+
+  @@map("jason_ledger_entries")
+}
+
+model CustomerAuditLog {
+  id         String    @id @default(uuid())
+  adminId    String
+  customerId String
+  action     String
+  reason     String    @db.Text
+  createdAt  DateTime  @default(now())
+
+  admin      AdminUser @relation(fields: [adminId], references: [id])
+  customer   User      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, createdAt])
+  @@schema("public")
+
+  @@map("customer_audit_logs")
+}

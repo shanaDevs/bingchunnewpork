@@ -1,0 +1,37 @@
+{
+  "name": "@bingchun/order-service",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only --exit-child src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "predev": "npm run prisma:generate -w @bingchun/db && npm run build -w @bingchun/db && npm run build -w @bingchun/cors"
+  },
+  "dependencies": {
+    "@bingchun/cors": "*",
+    "@bingchun/db": "*",
+    "bullmq": "^5.34.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.2.0",
+    "ioredis": "^5.4.1",
+    "jsonwebtoken": "^9.0.3",
+    "node-cron": "^4.6.0",
+    "socket.io": "^4.8.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node-cron": "^3.0.11",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.0.0"
+  }
+}

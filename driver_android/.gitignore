@@ -1,0 +1,17 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+/app/build/
+/app/release/
+
+# JVM crash dumps from daemon OOMs
+hs_err_pid*.log
+replay_pid*.log

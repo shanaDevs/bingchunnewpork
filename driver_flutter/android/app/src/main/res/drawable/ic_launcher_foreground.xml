@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive layers are 108dp with a 72dp masked viewport. A 12% inset
+     keeps the square artwork a little larger than that viewport so the rounded artwork fills every mask shape
+     without excessively cropping the mascot. Blue covers the motion overscan. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:inset="12%">
+    <bitmap
+        android:src="@drawable/launcher_artwork"
+        android:gravity="fill"
+        android:filter="true" />
+</inset>

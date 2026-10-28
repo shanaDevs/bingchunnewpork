@@ -1,0 +1,3 @@
+// Schema moved to packages/db/prisma/schema.prisma — do not edit here.
+// Use: npm run prisma:generate -w @bingchun/db
+// Accidental `prisma generate` from backend/ without --schema will fail until you point at packages/db.

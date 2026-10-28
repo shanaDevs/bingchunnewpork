@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+.env.*
+!.env.deploy.example
+npm-debug.log*
+.git
+.gitignore
+*.md
+.DS_Store
+.deploy-stage
+*.tar
+**/node_modules
+**/dist

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ splash icon. The system masks the icon to a circle about 2/3 of its box,
+     so the logo (already padded inside splash_icon.png) is inset a little more to stay
+     fully visible instead of being cropped and zoomed. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/splash_icon"
+    android:inset="9%" />

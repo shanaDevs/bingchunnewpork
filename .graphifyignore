@@ -1,0 +1,13 @@
+# Extra excludes beyond .gitignore (graphify already respects .gitignore)
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+*.env
+.env
+.env.*
+**/generated/prisma/
+firebase-service-account.json
+**/firebase-service-account.json

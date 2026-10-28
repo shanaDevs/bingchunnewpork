@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compact Google Maps–style pin for the directions action (not an official asset). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#EA4335"
+        android:pathData="M12,2C7.58,2 4,5.58 4,10c0,6.5 8,12 8,12s8,-5.5 8,-12c0,-4.42 -3.58,-8 -8,-8z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,5.4A4.6,4.6 0,1,0 12,14.6A4.6,4.6 0,1,0 12,5.4Z" />
+    <path
+        android:fillColor="#FBBC04"
+        android:pathData="M12,5.4 L12,10 L7.4,10 A4.6,4.6 0,0,1 12,5.4Z" />
+    <path
+        android:fillColor="#34A853"
+        android:pathData="M12,5.4 A4.6,4.6 0,0,1 16.6,10 L12,10 Z" />
+    <path
+        android:fillColor="#4285F4"
+        android:pathData="M7.4,10 A4.6,4.6 0,0,0 12,14.6 L12,10 Z" />
+    <path
+        android:fillColor="#EA4335"
+        android:pathData="M16.6,10 A4.6,4.6 0,0,1 12,14.6 L12,10 Z" />
+</vector>

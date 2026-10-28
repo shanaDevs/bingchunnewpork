@@ -1,0 +1,2 @@
+cd customer_mobile
+flutter devices

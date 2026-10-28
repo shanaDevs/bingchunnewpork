@@ -1,0 +1,143 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: bingchun-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootsecret}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-bingchun}
+      MYSQL_USER: ${MYSQL_USER:-bingchun}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-bingchunsecret}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootsecret}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: bingchun-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      TZ: Asia/Colombo
+      PORT: 4000
+      DATABASE_URL: mysql://${MYSQL_USER:-bingchun}:${MYSQL_PASSWORD:-bingchunsecret}@mysql:3306/${MYSQL_DATABASE:-bingchun}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh-in-production}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ADMIN_URL: ${ADMIN_URL:-http://localhost:3000/admin}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:4000}
+      DO_SPACES_KEY: ${DO_SPACES_KEY:-}
+      DO_SPACES_SECRET: ${DO_SPACES_SECRET:-}
+      DO_SPACES_BUCKET: ${DO_SPACES_BUCKET:-}
+      DO_SPACES_REGION: ${DO_SPACES_REGION:-sgp1}
+      DO_SPACES_ENDPOINT: ${DO_SPACES_ENDPOINT:-}
+      DO_SPACES_PREFIX: ${DO_SPACES_PREFIX:-bingchun}
+    ports:
+      - "${BACKEND_PORT:-4000}:4000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/api}
+    container_name: bingchun-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+
+  # Postgres matches packages/db (Prisma). Legacy mysql service above is unchanged for existing compose users.
+  postgres:
+    image: postgres:16-alpine
+    container_name: bingchun-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bingchun}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bingchunsecret}
+      POSTGRES_DB: ${POSTGRES_DB:-bingchun}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bingchun} -d ${POSTGRES_DB:-bingchun}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: bingchun-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  delivery-frontend:
+    build:
+      context: .
+      dockerfile: delivery-frontend/Dockerfile
+    container_name: bingchun-delivery-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - delivery-service
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      BACKEND_URL: http://backend:4000
+      DELIVERY_SERVICE_URL: http://delivery-service:4100
+    ports:
+      - "${DELIVERY_FRONTEND_PORT:-3100}:3100"
+
+  delivery-service:
+    build:
+      context: .
+      dockerfile: delivery-service/Dockerfile
+    container_name: bingchun-delivery
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DELIVERY_PORT: 4100
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bingchun}:${POSTGRES_PASSWORD:-bingchunsecret}@postgres:5432/${POSTGRES_DB:-bingchun}?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh-in-production}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-change-me-internal}
+      CORE_API_URL: http://backend:4000
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ADMIN_URL: ${ADMIN_URL:-http://localhost:3000/admin}
+    ports:
+      - "${DELIVERY_PORT:-4100}:4100"
+
+volumes:
+  mysql_data:
+  postgres_data:

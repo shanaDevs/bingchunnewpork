@@ -1,0 +1,27 @@
+{
+  "description": "Legacy core-backend delivery endpoints (driver + admin) to be proxied when DELIVERY_SERVICE_ENABLED=true",
+  "count": 21,
+  "endpoints": [
+    { "method": "POST", "path": "/api/auth/delivery/login" },
+    { "method": "GET", "path": "/api/delivery/route" },
+    { "method": "GET", "path": "/api/delivery/jobs" },
+    { "method": "GET", "path": "/api/delivery/jobs/active" },
+    { "method": "GET", "path": "/api/delivery/jobs/:id" },
+    { "method": "GET", "path": "/api/delivery/jobs/:id/route" },
+    { "method": "POST", "path": "/api/delivery/jobs/:id/assign" },
+    { "method": "POST", "path": "/api/delivery/jobs/:id/start" },
+    { "method": "POST", "path": "/api/delivery/jobs/:id/complete" },
+    { "method": "PUT", "path": "/api/delivery/orders/:orderId/status" },
+    { "method": "GET", "path": "/api/admin/delivery/pending-orders" },
+    { "method": "POST", "path": "/api/admin/delivery/classify" },
+    { "method": "POST", "path": "/api/admin/delivery/preview-route" },
+    { "method": "GET", "path": "/api/admin/delivery-jobs" },
+    { "method": "GET", "path": "/api/admin/delivery-jobs/:id" },
+    { "method": "GET", "path": "/api/admin/delivery-jobs/:id/route" },
+    { "method": "POST", "path": "/api/admin/delivery-jobs" },
+    { "method": "GET", "path": "/api/admin/drivers" },
+    { "method": "POST", "path": "/api/admin/drivers" },
+    { "method": "GET", "path": "/api/admin/stores/delivery-access" },
+    { "method": "PATCH", "path": "/api/admin/stores/:id/delivery-access" }
+  ]
+}

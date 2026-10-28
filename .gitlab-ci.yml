@@ -1,0 +1,204 @@
+# ============================================================
+# Bing Chun - GitLab CI/CD Pipeline
+# ============================================================
+# Stage 1 (build):  Build Docker images -> push to GitLab Container Registry
+#                   Runs on EVERY branch push.
+# Stage 2 (deploy): Tell CapRover to pull the image from the registry.
+#                   Runs on main branch only.
+#
+# Required GitLab CI/CD Variables (Settings > CI/CD > Variables):
+#   CAPROVER_BACKEND_TOKEN    - App token for bing-chun-backend in CapRover
+#   CAPROVER_FRONTEND_TOKEN   - App token for bing-chung in CapRover
+#   CAPROVER_DELIVERY_TOKEN   - App token for bing-chun-delivery in CapRover
+#
+# Required CapRover setup (one-time):
+#   CapRover > Settings > Docker Registries > Add:
+#     Registry Domain : registry.gitlab.com
+#     Username        : <GitLab deploy token username>
+#     Password        : <GitLab deploy token with read_registry scope>
+# ============================================================
+
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  CAPROVER_URL: "https://captain.mp.dartcodes.com"
+  CAPROVER_BACKEND_APP: "bing-chun-backend"
+  CAPROVER_FRONTEND_APP: "bing-chung"
+  CAPROVER_DELIVERY_APP: "bing-chun-delivery"
+
+  # API URL baked into the Next.js frontend at build time
+  FRONTEND_API_URL: "https://bing-chung-b.mp.dartcodes.com/api"
+  BACKEND_URL: "https://bing-chung-b.mp.dartcodes.com"
+  API_PROXY_URL: "https://bing-chung-b.mp.dartcodes.com"
+
+  DOCKER_TLS_CERTDIR: "/certs"
+
+# ----------------------------------------------------------
+# TEST - Unit tests (every branch push)
+# ----------------------------------------------------------
+test-unit:
+  stage: test
+  image: node:22-alpine
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+  before_script:
+    - npm ci --ignore-scripts
+    - npm run prisma:generate -w @bingchun/db
+    - npm run build -w @bingchun/db
+    - npm run build -w @bingchun/delivery-domain --if-present
+  script:
+    - echo "=== Running backend unit tests ==="
+    - npm run test:unit
+    - echo "=== Building delivery-service (typecheck) ==="
+    - npm run build -w @bingchun/delivery-service
+  artifacts:
+    when: always
+    paths:
+      - backend/coverage/
+    expire_in: 7 days
+  allow_failure: false
+
+# ----------------------------------------------------------
+# BUILD - Backend Docker image (every branch push)
+# ----------------------------------------------------------
+build-backend:
+  stage: build
+  image: docker:cli
+  services:
+    - docker:dind
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - echo "=== Building backend Docker image ==="
+    - docker build -f backend/Dockerfile -t "$CI_REGISTRY_IMAGE/backend:$CI_COMMIT_SHA" -t "$CI_REGISTRY_IMAGE/backend:$CI_COMMIT_REF_SLUG" .
+    - echo "=== Pushing backend image to GitLab Registry ==="
+    - docker push "$CI_REGISTRY_IMAGE/backend:$CI_COMMIT_SHA"
+    - docker push "$CI_REGISTRY_IMAGE/backend:$CI_COMMIT_REF_SLUG"
+    - >-
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+      docker tag "$CI_REGISTRY_IMAGE/backend:$CI_COMMIT_SHA" "$CI_REGISTRY_IMAGE/backend:latest" &&
+      docker push "$CI_REGISTRY_IMAGE/backend:latest";
+      fi
+    - echo "=== Backend image ready ==="
+
+# ----------------------------------------------------------
+# BUILD - Delivery service Docker image (every branch push)
+# ----------------------------------------------------------
+build-delivery:
+  stage: build
+  image: docker:cli
+  services:
+    - docker:dind
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - echo "=== Building delivery Docker image ==="
+    - docker build -f delivery-service/Dockerfile -t "$CI_REGISTRY_IMAGE/delivery:$CI_COMMIT_SHA" -t "$CI_REGISTRY_IMAGE/delivery:$CI_COMMIT_REF_SLUG" .
+    - echo "=== Pushing delivery image to GitLab Registry ==="
+    - docker push "$CI_REGISTRY_IMAGE/delivery:$CI_COMMIT_SHA"
+    - docker push "$CI_REGISTRY_IMAGE/delivery:$CI_COMMIT_REF_SLUG"
+    - >-
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+      docker tag "$CI_REGISTRY_IMAGE/delivery:$CI_COMMIT_SHA" "$CI_REGISTRY_IMAGE/delivery:latest" &&
+      docker push "$CI_REGISTRY_IMAGE/delivery:latest";
+      fi
+    - echo "=== Delivery image ready ==="
+
+# ----------------------------------------------------------
+# BUILD - Frontend Docker image (every branch push)
+# ----------------------------------------------------------
+build-frontend:
+  stage: build
+  image: docker:cli
+  services:
+    - docker:dind
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - echo "=== Building frontend Docker image ==="
+    - |
+      docker build \
+        --build-arg NEXT_PUBLIC_API_URL="/api" \
+        --build-arg BACKEND_URL="$BACKEND_URL" \
+        --build-arg API_PROXY_URL="$API_PROXY_URL" \
+        -t "$CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_SHA" \
+        -t "$CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_REF_SLUG" \
+        ./Frontend
+    - echo "=== Pushing frontend image to GitLab Registry ==="
+    - docker push "$CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_SHA"
+    - docker push "$CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_REF_SLUG"
+    - >-
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+      docker tag "$CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_SHA" "$CI_REGISTRY_IMAGE/frontend:latest" &&
+      docker push "$CI_REGISTRY_IMAGE/frontend:latest";
+      fi
+    - echo "=== Frontend image ready ==="
+
+# ----------------------------------------------------------
+# DEPLOY - Backend to CapRover (main only)
+# ----------------------------------------------------------
+deploy-backend:
+  stage: deploy
+  image: node:22-alpine
+  needs:
+    - build-backend
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  before_script:
+    - apk add --no-cache tar curl
+  script:
+    - echo "=== Deploying backend to CapRover ==="
+    - mkdir -p /tmp/backend-stage
+    - 'echo "{\"schemaVersion\": 2, \"imageName\": \"$CI_REGISTRY_IMAGE/backend:$CI_COMMIT_SHA\"}" > /tmp/backend-stage/captain-definition'
+    - tar -czf /tmp/backend-deploy.tar -C /tmp/backend-stage .
+    - npx -y caprover deploy --caproverUrl "$CAPROVER_URL" --caproverApp "$CAPROVER_BACKEND_APP" --appToken "$CAPROVER_BACKEND_TOKEN" --tarFile /tmp/backend-deploy.tar
+    - echo "=== Backend deploy complete ==="
+
+# ----------------------------------------------------------
+# DEPLOY - Delivery service to CapRover (main only)
+# ----------------------------------------------------------
+deploy-delivery:
+  stage: deploy
+  image: node:22-alpine
+  needs:
+    - build-delivery
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  before_script:
+    - apk add --no-cache tar curl
+  script:
+    - echo "=== Deploying delivery service to CapRover ==="
+    - mkdir -p /tmp/delivery-stage
+    - 'echo "{\"schemaVersion\": 2, \"imageName\": \"$CI_REGISTRY_IMAGE/delivery:$CI_COMMIT_SHA\"}" > /tmp/delivery-stage/captain-definition'
+    - tar -czf /tmp/delivery-deploy.tar -C /tmp/delivery-stage .
+    - npx -y caprover deploy --caproverUrl "$CAPROVER_URL" --caproverApp "$CAPROVER_DELIVERY_APP" --appToken "$CAPROVER_DELIVERY_TOKEN" --tarFile /tmp/delivery-deploy.tar
+    - echo "=== Delivery deploy complete ==="
+
+# ----------------------------------------------------------
+# DEPLOY - Frontend to CapRover (main only)
+# ----------------------------------------------------------
+deploy-frontend:
+  stage: deploy
+  image: node:22-alpine
+  needs:
+    - build-frontend
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  before_script:
+    - apk add --no-cache tar curl
+  script:
+    - echo "=== Deploying frontend to CapRover ==="
+    - mkdir -p /tmp/frontend-stage
+    - 'echo "{\"schemaVersion\": 2, \"imageName\": \"$CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_SHA\"}" > /tmp/frontend-stage/captain-definition'
+    - tar -czf /tmp/frontend-deploy.tar -C /tmp/frontend-stage .
+    - npx -y caprover deploy --caproverUrl "$CAPROVER_URL" --caproverApp "$CAPROVER_FRONTEND_APP" --appToken "$CAPROVER_FRONTEND_TOKEN" --tarFile /tmp/frontend-deploy.tar
+    - echo "=== Frontend deploy complete ==="

@@ -1,0 +1,16 @@
+/*
+ * Initial (hidden) state for the hero entrance.
+ * Active only while <html> has .hero-intro-pending (added pre-paint by heroIntroBoot.ts, never
+ * under reduced motion) and only on pages that contain the hero. HeroMotion removes the class in
+ * the same frame it applies GSAP's starting states, so nothing flashes and nothing stays hidden.
+ */
+.hero-intro-pending:has([data-hero="root"])
+  :is(
+    [data-header-row] > *,
+    [data-hero="headline-line"],
+    [data-hero="drink-motion"],
+    [data-hero="cta"],
+    [data-hero="decor"] [data-decor]
+  ) {
+  opacity: 0;
+}

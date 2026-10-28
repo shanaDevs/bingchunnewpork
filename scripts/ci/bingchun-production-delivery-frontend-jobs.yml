@@ -1,0 +1,102 @@
+# =============================================================================
+# Merge into DC-PVT-LTD/bingchun-production → .github/workflows/ci-cd-new-server.yml
+# (GitHub UI or direct commit on `main` — do not rely on sync from bingchung for workflows.)
+#
+# 1) In job `changes` → outputs, add:
+#      delivery_frontend: ${{ steps.filter.outputs.delivery_frontend }}
+# 2) In dorny/paths-filter `filters:`, add the `delivery_frontend:` block below.
+# 3) Paste the two jobs at the end of the workflow (before deploy-summary), and add
+#    deploy-delivery-frontend to deploy-summary `needs:` + echo line.
+# 4) Align each job's `if:` with your existing Build/Deploy bing-chun jobs
+#    (same pattern for force_deploy_all / needs.changes).
+# =============================================================================
+
+# --- paths-filter (under filters:) ---
+#            delivery_frontend:
+#              - 'delivery-frontend/**'
+#              - 'packages/settlement/**'
+#              - 'package.json'
+#              - 'package-lock.json'
+
+# --- optional GHCR image build (if your pipeline builds images like Build bing-chun image) ---
+# build-delivery-frontend-image:
+#   name: Build bing-chun-delivery-frontend image
+#   needs: changes
+#   if: needs.changes.outputs.delivery_frontend == 'true' || needs.changes.outputs.force_deploy_all == 'true'
+#   runs-on: ubuntu-latest
+#   permissions:
+#     contents: read
+#     packages: write
+#   steps:
+#     - uses: actions/checkout@v4
+#     - uses: docker/login-action@v3
+#       with:
+#         registry: ghcr.io
+#         username: ${{ github.actor }}
+#         password: ${{ secrets.GITHUB_TOKEN }}
+#     - uses: docker/setup-buildx-action@v3
+#     - uses: docker/build-push-action@v6
+#       with:
+#         context: .
+#         file: delivery-frontend/Dockerfile
+#         push: true
+#         tags: ghcr.io/${{ github.repository_owner }}/bing-chun-delivery-frontend:${{ github.sha }}
+#         build-args: |
+#           BACKEND_URL=${{ env.API_URL }}
+#         cache-from: type=gha
+#         cache-to: type=gha,mode=max
+
+# --- prebuilt tar deploy (matches bingchung ci-cd-new-server.yml; no GHCR) ---
+deploy-delivery-frontend:
+  name: Deploy bing-chun-delivery-frontend
+  needs: [changes, migrate]
+  if: needs.changes.outputs.delivery_frontend == 'true' || needs.changes.outputs.force_deploy_all == 'true'
+  runs-on: ubuntu-latest
+  environment:
+    name: bing-chun-delivery-frontend
+    url: ${{ env.DELIVERY_FRONTEND_URL }}
+  concurrency:
+    group: caprover-bing-chun-delivery-frontend
+    cancel-in-progress: false
+  steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+    - name: Build delivery-frontend (prebuilt standalone)
+      env:
+        BACKEND_URL: ${{ env.API_URL }}
+        DELIVERY_SERVICE_URL: http://srv-captain--bing-chun-delivery:4100
+        NODE_OPTIONS: --max-old-space-size=4096
+        NEXT_TELEMETRY_DISABLED: '1'
+      run: |
+        set -euo pipefail
+        npm ci --ignore-scripts
+        npm run build -w @bingchun/settlement
+        npm run build -w @bingchun/delivery-frontend
+        test -d delivery-frontend/.next/standalone
+        test -d delivery-frontend/.next/static
+        test -d delivery-frontend/public
+    - name: Package and deploy bing-chun-delivery-frontend
+      env:
+        TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+      run: |
+        set -euo pipefail
+        TOKEN="$(printf '%s' "$TOKEN_RAW" | tr -d '[:space:]' | tr -d '"' | tr -d "'")"
+        if [ -z "$TOKEN" ]; then echo "Missing CAPROVER_TOKEN secret in the bing-chun-delivery-frontend environment"; exit 1; fi
+        STAGE=/tmp/delivery-frontend-stage
+        rm -rf "$STAGE"
+        mkdir -p "$STAGE/.next"
+        cp delivery-frontend/deploy/Dockerfile.prebuilt "$STAGE/Dockerfile"
+        cp delivery-frontend/deploy/captain-definition "$STAGE/captain-definition"
+        cp -R delivery-frontend/.next/standalone "$STAGE/.next/standalone"
+        cp -R delivery-frontend/.next/static "$STAGE/.next/static"
+        cp -R delivery-frontend/public "$STAGE/public"
+        if [ ! -f "$STAGE/.next/standalone/delivery-frontend/server.js" ]; then
+          echo "standalone server.js missing"
+          find "$STAGE/.next/standalone" -name server.js | head -20
+          exit 1
+        fi
+        tar -czf /tmp/delivery-frontend-deploy.tar -C "$STAGE" .
+        npx -y caprover@2.2.3 deploy --caproverUrl "$CAPROVER_URL" --caproverApp bing-chun-delivery-frontend --appToken "$TOKEN" --tarFile /tmp/delivery-frontend-deploy.tar

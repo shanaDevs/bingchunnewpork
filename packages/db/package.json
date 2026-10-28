@@ -1,0 +1,23 @@
+{
+  "name": "@bingchun/db",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "prebuild": "node ../../node_modules/prisma/build/index.js generate",
+    "build": "tsc",
+    "prisma:generate": "node ../../node_modules/prisma/build/index.js generate",
+    "prisma:migrate": "node -r ./load-env.js ../../node_modules/prisma/build/index.js migrate dev",
+    "prisma:deploy": "node -r ./load-env.js ../../node_modules/prisma/build/index.js migrate deploy",
+    "prisma:push": "node -r ./load-env.js ../../node_modules/prisma/build/index.js db push"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0",
+    "typescript": "^5.0.0"
+  }
+}
