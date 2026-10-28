@@ -36,6 +36,26 @@ echo "[migrate] Database is ready. Running Prisma migrations..."
 
 SCHEMA_PATH="/app/packages/db/prisma/schema.prisma"
 PRISMA_CLI="/app/node_modules/prisma/build/index.js"
+MIGRATIONS_DIR="/app/packages/db/prisma/migrations"
+PG_MIGRATIONS_DIR="/app/packages/db/prisma/migrations-pg"
+
+# The historical migrations folder is MySQL SQL. It cannot build an empty
+# Postgres database. App Platform uses the generated baseline instead.
+case "$DATABASE_URL" in
+  postgres://*|postgresql://*)
+    if [ ! -d "$PG_MIGRATIONS_DIR" ]; then
+      echo "[migrate] ERROR: Postgres migrations not found at $PG_MIGRATIONS_DIR"
+      exit 1
+    fi
+    HAS_USERS=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAqc "SELECT CASE WHEN to_regclass('public.users') IS NULL THEN 'f' ELSE 't' END")
+    if [ "$HAS_USERS" != "t" ]; then
+      echo "[migrate] Postgres has no application tables. Clearing the failed migration record."
+      psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP TABLE IF EXISTS public."_prisma_migrations";'
+    fi
+    rm -rf "$MIGRATIONS_DIR"
+    cp -a "$PG_MIGRATIONS_DIR" "$MIGRATIONS_DIR"
+    ;;
+esac
 
 if [ ! -f "$SCHEMA_PATH" ]; then
   echo "[migrate] ERROR: Prisma schema not found at $SCHEMA_PATH"
