@@ -1,0 +1,42 @@
+# DigitalOcean deploy ($209 plan)
+
+A push to `main` deploys the four App Platform apps. Each app builds its
+Dockerfile from this GitHub repo. Shop runs `prisma migrate deploy` before the
+new shop containers start.
+
+Day-to-day deploys do not change instance counts. Leave autoscaling off.
+A second shop-web running all month puts the bill over $210.
+
+Postgres is `bingchun-pg` (direct port 25060, no pooler, no standby).
+Valkey is `bingchun-valkey`. The specs bind both, so the apps do not store
+those passwords. `DATABASE_URL` must stay on port 25060.
+
+The JWT-style secrets are generated and stored only in `secrets.env`, which
+git ignores. The YAML files keep `REPLACE_ME`. Uploading a YAML file from git
+onto a live app would wipe the real secrets. Change secrets in the DigitalOcean
+UI, or update the live app from `secrets.env`.
+
+A new `JWT_SECRET` logs every customer and cashier out. `DRIVER_PIN_PEPPER`
+must not equal `JWT_SECRET`. `COOKIE_DOMAIN` stays unset.
+
+The CapRover workflow (`.github/workflows/ci-cd-new-server.yml`) still runs
+when `production` is pushed. Do not push `production` until that workflow is
+turned off. The GHCR workflow in this repo only retags apps that already use
+container images. It refuses to update these GitHub-built apps.
+
+## Still required before the site can serve customers
+
+The API process exits in production until SMSlenz is configured. There is no
+database dump on this cluster, so the first boot is an empty schema. PayHere,
+WebXPay, Spaces, FCM, Google, and Facebook keys are not set. Copy those from
+the current production apps when you have them.
+
+After `/health` shows `socketAdapter` redis, point DNS here. Then set
+`FRONTEND_URL` to `https://bingchunsrilanka.com`, and update the PayHere notify
+URL and the Flutter API base URL. `backgroundJobs` is true only on shop-worker.
+shop-api stays at 2 instances. Do not add a second shop-web, delivery, cashier,
+or admin instance.
+
+`BACKEND_URL` on shop-web, pos-web, and admin-web is the private API URL inside
+that app. Do not replace those with a public URL. Cross-app links use the
+public `*.ondigitalocean.app` origin.
