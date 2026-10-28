@@ -1,8 +1,8 @@
 'use client';
 
 import { getApiBaseUrl } from '@/lib/apiBase';
-import { Suspense, useEffect, useState, useCallback, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Suspense, useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Wallet, RefreshCw, AlertCircle, ArrowDownToLine, Shield } from 'lucide-react';
@@ -37,10 +37,6 @@ import {
   normalizeWalletSummaryFromApi,
   normalizeWithdrawalFromApi,
 } from '@/lib/moneyString';
-import {
-  branchPayoutsDueQueryKey,
-  fetchBranchPayoutsDue,
-} from '@/lib/branchPayoutsDue';
 
 type PeriodBranchReport = {
   storeId: string;
@@ -337,26 +333,9 @@ function WalletOverviewPageContent() {
     void fetchWithdrawals(1);
   }, [fetchWallets, fetchWithdrawals, router, searchParams]);
 
-  const superAdminSession = admin != null && isSuperAdmin(admin);
-  const payoutsDuePeriod =
-    periodFrom && periodTo ? { from: periodFrom, to: periodTo } : currentMonthPeriod();
-
-  const branchPayoutsDueQuery = useQuery({
-    queryKey: branchPayoutsDueQueryKey(payoutsDuePeriod.from, payoutsDuePeriod.to),
-    queryFn: ({ signal }) =>
-      fetchBranchPayoutsDue(apiBase, payoutsDuePeriod.from, payoutsDuePeriod.to, signal),
-    enabled: superAdminSession && dueTabActive && Boolean(periodFrom && periodTo),
-    staleTime: 45_000,
-  });
-
-  const duePayouts = branchPayoutsDueQuery.data ?? [];
-  const duePayoutsLoading =
-    branchPayoutsDueQuery.isLoading ||
-    (branchPayoutsDueQuery.isFetching && !branchPayoutsDueQuery.isFetched);
-
   const invalidateBranchPayoutsDue = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['branch-payouts-due'] });
-  }, [queryClient]);
+    void fetchDuePayouts({ preserve: true });
+  }, [fetchDuePayouts]);
 
   useEffect(() => {
     if (!admin || isSuperAdmin(admin)) return;
@@ -396,7 +375,7 @@ function WalletOverviewPageContent() {
       await Promise.all([
         fetchWallets(),
         fetchWithdrawals(withdrawalPage),
-        ...(isSuperAdmin(admin) && dueTabActive ? [queryClient.invalidateQueries({ queryKey: ['branch-payouts-due'] })] : []),
+        ...(isSuperAdmin(admin) && dueTabActive ? [fetchDuePayouts({ preserve: true })] : []),
       ]).finally(() => {
         setLoading(false);
         if (!isSuperAdmin(admin)) {
@@ -599,6 +578,7 @@ function WalletOverviewPageContent() {
             duePayoutsLoadingMore={duePayoutsLoadingMore}
             onViewDuePayout={handleViewDuePayout}
             onReviewDuePayout={handleReviewDuePayout}
+            onDueTabOpen={loadDuePayoutsIfNeeded}
             tabActions={walletTabActions}
           />
         </Suspense>
@@ -671,7 +651,6 @@ function WalletOverviewPageContent() {
               fetchWallets(),
               fetchWithdrawals(1),
               fetchDuePayouts({ preserve: true }),
-              queryClient.invalidateQueries({ queryKey: ['branch-payouts-due'] }),
             ]);
           }}
         />

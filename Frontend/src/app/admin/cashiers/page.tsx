@@ -22,8 +22,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-function adminFetch(endpoint: string, options?: RequestInit) {
-  return adminApiFetch(endpoint, options);
+function adminFetch<T = unknown>(endpoint: string, options?: RequestInit): Promise<T> {
+  return adminApiFetch<T>(endpoint, options);
 }
 
 const EMPTY = { name: '', email: '', password: '' };
