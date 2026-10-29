@@ -1,10 +1,11 @@
 'use client';
 
 import { adminAuthHeaders } from '@/lib/adminSession';
+import { createAdminSocket } from '@/lib/adminSocket';
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { io, type Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import { Loader2, LocateFixed, MapPin, RefreshCw, Route } from 'lucide-react';
 import {
   Sheet,
@@ -12,7 +13,7 @@ import {
   SheetDescription,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { getApiBaseUrl, getSocketUrl } from '@/lib/apiBase';
+import { getApiBaseUrl } from '@/lib/apiBase';
 import { adminBadgeClass, DELIVERY_JOB_STATUS_LABEL } from '@/lib/adminBadges';
 import { BRANCH_RETURN_RADIUS_M } from '@/lib/deliveryConstants';
 import type { DeliveryRoutePayload } from '@/lib/deliveryRoute';
@@ -326,24 +327,25 @@ export default function AdminDeliveryJobDrawer({
       if (!resolvedStoreId || boundStoreId === resolvedStoreId) return;
       boundStoreId = resolvedStoreId;
 
-      try {
-        if (!socket) {
-          socket = io(getSocketUrl(), {
-            path: '/socket.io',
-            transports: ['websocket', 'polling'],
-            withCredentials: true,
-          });
+      const join = () => {
+        socket?.emit('joinAdmin', { adminId, storeId: resolvedStoreId });
+      };
 
-          socket.on('deliveryJobUpdated', (payload: { jobId?: string }) => {
-            if (cancelled || payload?.jobId !== jobId) return;
-            pollOnce();
-          });
-        }
-
-        socket.emit('joinAdmin', { adminId, storeId: resolvedStoreId });
-      } catch {
-        /* socket optional — polling still refreshes the drawer */
+      if (socket) {
+        join();
+        return;
       }
+
+      void createAdminSocket({ autoConnect: false }).then((created) => {
+        if (cancelled || !created) return;
+        socket = created;
+        created.on('deliveryJobUpdated', (payload: { jobId?: string }) => {
+          if (cancelled || payload?.jobId !== jobId) return;
+          pollOnce();
+        });
+        created.on('connect', join);
+        created.connect();
+      });
     };
 
     const stopPolling = () => {

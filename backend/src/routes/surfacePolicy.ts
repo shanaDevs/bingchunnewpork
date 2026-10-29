@@ -35,6 +35,7 @@ export const SHOP_AUTH: RouteRule[] = [
 
 export const STAFF_AUTH: RouteRule[] = [
   { methods: ['POST'], pattern: /^\/admin\/(login|refresh|logout|password\/forgot|password\/reset)$/ },
+  { methods: ['GET'], pattern: /^\/admin\/socket-token$/ },
 ];
 
 export const SHOP_MENU: RouteRule[] = [

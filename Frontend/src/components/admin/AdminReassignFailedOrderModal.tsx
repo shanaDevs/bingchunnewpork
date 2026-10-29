@@ -5,11 +5,12 @@ import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
-import { io, type Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import { Loader2, MapPin, Truck, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getApiBaseUrl, getSocketUrl } from '@/lib/apiBase';
+import { getApiBaseUrl } from '@/lib/apiBase';
 import { getAdminSession } from '@/lib/adminAuth';
+import { connectAdminSocketWithRooms } from '@/lib/adminSocket';
 import { adminBadgeClass } from '@/lib/adminBadges';
 import type { LiveDriverMarker, LiveStoreMarker } from '@/components/admin/AdminLiveDriversMap';
 
@@ -300,11 +301,15 @@ export default function AdminReassignFailedOrderModal({
     if (!failure) return;
     const admin = getAdminSession();
     if (!admin) return;
+    let cancelled = false;
     let socket: Socket | null = null;
-    try {
-      socket = io(getSocketUrl(), { transports: ['websocket', 'polling'] });
-      socket.emit('joinAdmin', { adminId: admin.id, storeId: branchId });
-      socket.on('driverLocation', (payload: DriverLocationEvent) => {
+    void connectAdminSocketWithRooms([{ adminId: admin.id, storeId: branchId }], (created) => {
+      if (cancelled) {
+        created.disconnect();
+        return;
+      }
+      socket = created;
+      created.on('driverLocation', (payload: DriverLocationEvent) => {
         const key = payload.driverId ?? payload.jobId;
         if (!key || typeof payload.lat !== 'number' || typeof payload.lng !== 'number') return;
         setDriverPositions((prev) => ({
@@ -312,10 +317,9 @@ export default function AdminReassignFailedOrderModal({
           [key]: { lat: payload.lat, lng: payload.lng, updatedAt: payload.updatedAt },
         }));
       });
-    } catch {
-      /* polling fallback */
-    }
+    });
     return () => {
+      cancelled = true;
       socket?.disconnect();
     };
   }, [failure, branchId]);

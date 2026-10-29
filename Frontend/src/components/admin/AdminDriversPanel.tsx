@@ -1,12 +1,12 @@
 'use client';
 
-import { getSocketUrl } from '@/lib/apiBase';
 import { adminFetch, adminFetchForm } from '@/lib/adminApi';
+import { createAdminSocket } from '@/lib/adminSocket';
 
 import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Copy, Loader2, Plus, Power, RefreshCw, Star, UserCircle2, X } from 'lucide-react';
-import { io, type Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import SearchableBranchSelect from '@/components/admin/SearchableBranchSelect';
 import SearchableRiderNameField from '@/components/admin/SearchableRiderNameField';
@@ -186,7 +186,7 @@ export default function AdminDriversPanel({
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-        const adminRaw = localStorage.getItem('bc_admin');
+    const adminRaw = localStorage.getItem('bc_admin');
     let adminId: string | undefined;
     let adminStoreId: string | undefined;
     try {
@@ -198,29 +198,29 @@ export default function AdminDriversPanel({
     } catch {
       /* ignore */
     }
+    if (!adminId) return;
 
     let socket: Socket | null = null;
-    try {
-      socket = io(getSocketUrl(), {
-        path: '/socket.io',
-        transports: ['websocket', 'polling'],
-        withCredentials: true,
-      });
-      if (adminId) {
-        socket.emit('joinAdmin', {
-          adminId,
-          storeId: poolStoreId || adminStoreId || storeId || undefined,
-        });
-      }
-      // Also join explicit store rooms for each visible branch when super-admin views all.
-      const joinIds = new Set<string>();
-      if (poolStoreId) joinIds.add(poolStoreId);
-      if (storeId) joinIds.add(storeId);
-      if (showAllBranches) stores.forEach((s) => joinIds.add(s.id));
-      for (const id of joinIds) {
-        socket.emit('joinAdmin', { adminId: adminId || 'admin', storeId: id });
-      }
+    let cancelled = false;
 
+    const joinIds = new Set<string>();
+    if (poolStoreId) joinIds.add(poolStoreId);
+    if (storeId) joinIds.add(storeId);
+    if (adminStoreId) joinIds.add(adminStoreId);
+    if (showAllBranches) stores.forEach((s) => joinIds.add(s.id));
+    if (joinIds.size === 0) joinIds.add('');
+
+    void createAdminSocket({ autoConnect: false }).then((created) => {
+      if (cancelled || !created) return;
+      socket = created;
+      socket.on('connect', () => {
+        for (const id of joinIds) {
+          socket?.emit('joinAdmin', {
+            adminId,
+            storeId: id || undefined,
+          });
+        }
+      });
       socket.on(
         'driverDutyChanged',
         (payload: { driverId: string; name?: string; dutyStatus: DriverDutyStatus }) => {
@@ -241,11 +241,11 @@ export default function AdminDriversPanel({
           );
         },
       );
-    } catch {
-      /* socket optional */
-    }
+      socket.connect();
+    });
 
     return () => {
+      cancelled = true;
       socket?.off('driverDutyChanged');
       socket?.disconnect();
     };

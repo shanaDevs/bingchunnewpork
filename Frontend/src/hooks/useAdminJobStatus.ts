@@ -1,10 +1,11 @@
 'use client';
 
 import { adminAuthHeaders } from '@/lib/adminSession';
+import { connectAdminSocketWithRooms } from '@/lib/adminSocket';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { io, type Socket } from 'socket.io-client';
-import { getApiBaseUrl, getSocketUrl } from '@/lib/apiBase';
+import type { Socket } from 'socket.io-client';
+import { getApiBaseUrl } from '@/lib/apiBase';
 import { getAdminSession } from '@/lib/adminAuth';
 
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'CANCELLED']);
@@ -141,27 +142,25 @@ export function useAdminJobStatus({
     let socket: Socket | null = null;
 
     if (admin) {
-      try {
-        socket = io(getSocketUrl(), {
-          path: '/socket.io',
-          transports: ['websocket', 'polling'],
-          withCredentials: true,
-        });
-
-        socket.emit('joinAdmin', { adminId: admin.id, storeId: storeId || admin.storeId });
-
-        socket.on('deliveryJobUpdated', (payload: { jobId?: string; status?: string }) => {
-          if (cancelled || payload?.jobId !== jobId) return;
-          if (payload.status) {
-            applyStatus(payload.status);
-            setError(null);
-          } else {
-            void pollOnce();
+      void connectAdminSocketWithRooms(
+        [{ adminId: admin.id, storeId: storeId || admin.storeId }],
+        (created) => {
+          if (cancelled) {
+            created.disconnect();
+            return;
           }
-        });
-      } catch {
-        /* socket optional */
-      }
+          socket = created;
+          created.on('deliveryJobUpdated', (payload: { jobId?: string; status?: string }) => {
+            if (cancelled || payload?.jobId !== jobId) return;
+            if (payload.status) {
+              applyStatus(payload.status);
+              setError(null);
+            } else {
+              void pollOnce();
+            }
+          });
+        },
+      );
     }
 
     return () => {
