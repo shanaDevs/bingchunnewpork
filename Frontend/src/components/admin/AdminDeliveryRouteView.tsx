@@ -26,6 +26,7 @@ import { resolveProductImageUrl } from '@/lib/productImageUrl';
 import { useAdminJobLiveRoute } from '@/hooks/useAdminJobLiveRoute';
 import { useAdminJobStatus } from '@/hooks/useAdminJobStatus';
 import { adminBadgeClass, DELIVERY_JOB_STATUS_BADGE, DELIVERY_JOB_STATUS_LABEL } from '@/lib/adminBadges';
+import { jobSupportsActualRouteReplay } from '@/lib/deliveryStopProgress';
 
 const AdminDeliveryRouteMap = dynamic(() => import('@/components/admin/AdminDeliveryRouteMap'), {
   ssr: false,
@@ -300,7 +301,7 @@ export default function AdminDeliveryRouteView({
 
   const jobStatus = jobStatusSync.status || route?.status || '';
   const isLiveJob = LIVE_JOB_STATUSES.has(jobStatus);
-  const isCompletedJob = jobStatus === 'COMPLETED';
+  const supportsActualRouteReplay = jobSupportsActualRouteReplay(jobStatus);
   const preStartBanner = preStartMessage(jobStatus);
 
   const liveRoute = useAdminJobLiveRoute({
@@ -357,7 +358,7 @@ export default function AdminDeliveryRouteView({
   }, [route?.jobId, route?.store?.id, storeId, jobStatusSync.refresh]);
 
   useEffect(() => {
-    if (!route || !isCompletedJob) return;
+    if (!route || !supportsActualRouteReplay) return;
 
     let cancelled = false;
     setActualLoading(true);
@@ -382,7 +383,7 @@ export default function AdminDeliveryRouteView({
     return () => {
       cancelled = true;
     };
-  }, [route, isCompletedJob, jobId, effectiveStoreId, storeId]);
+  }, [route, supportsActualRouteReplay, jobId, effectiveStoreId, storeId]);
 
   const headerTitle = useMemo(
     () => (route?.title ? formatDeliveryJobTitle(route.title) : 'Delivery route'),
@@ -412,7 +413,7 @@ export default function AdminDeliveryRouteView({
       : undefined);
   const overlayNotice = isLiveJob ? liveRoute.notice : actualNotice;
   const overlayLoading = isLiveJob ? liveRoute.loading : actualLoading;
-  const showPathOverlay = isLiveJob || isCompletedJob;
+  const showPathOverlay = isLiveJob || supportsActualRouteReplay;
 
   const comparisonSummary = useMemo(() => {
     if (!showPathOverlay) return null;

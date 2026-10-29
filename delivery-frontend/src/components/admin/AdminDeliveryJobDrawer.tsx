@@ -1,6 +1,6 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
+import { adminApiFetch } from '@/lib/adminApi';
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -25,6 +25,7 @@ import { useAdminJobLiveRoute } from '@/hooks/useAdminJobLiveRoute';
 import DeliveryRouteTimeline, {
   deliveryRouteTimelineHeadingExtra,
 } from '@/components/admin/DeliveryRouteTimeline';
+import { jobSupportsActualRouteReplay } from '@/lib/deliveryStopProgress';
 import {
   Table,
   TableBody,
@@ -208,35 +209,24 @@ function SectionHeading({
 }
 
 async function fetchJobDetail(jobId: string, storeId: string): Promise<AdminDeliveryJobDetail> {
-    const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  const res = await fetch(`${getApiBaseUrl()}/admin/delivery-jobs/${encodeURIComponent(jobId)}${qs}`, {
-    headers: adminAuthHeaders(), credentials: 'include',
-  });
-  const json = await res.json();
-  if (!json.success) throw new Error(json.message || 'Job not found');
-  return json.data as AdminDeliveryJobDetail;
+  const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
+  return adminApiFetch<AdminDeliveryJobDetail>(
+    `/admin/delivery-jobs/${encodeURIComponent(jobId)}${qs}`,
+  );
 }
 
 async function fetchJobRoute(jobId: string, storeId: string): Promise<JobRouteResponse> {
-    const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  const res = await fetch(
-    `${getApiBaseUrl()}/admin/delivery-jobs/${encodeURIComponent(jobId)}/route${qs}`,
-    { headers: adminAuthHeaders(), credentials: 'include' },
+  const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
+  return adminApiFetch<JobRouteResponse>(
+    `/admin/delivery-jobs/${encodeURIComponent(jobId)}/route${qs}`,
   );
-  const json = await res.json();
-  if (!json.success) throw new Error(json.message || 'Route not found');
-  return json.data as JobRouteResponse;
 }
 
 async function fetchActualRoute(jobId: string, storeId: string): Promise<ActualRouteOverlay> {
-    const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  const res = await fetch(
-    `${getApiBaseUrl()}/admin/delivery-jobs/${encodeURIComponent(jobId)}/actual-route${qs}`,
-    { headers: adminAuthHeaders(), credentials: 'include' },
+  const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
+  return adminApiFetch<ActualRouteOverlay>(
+    `/admin/delivery-jobs/${encodeURIComponent(jobId)}/actual-route${qs}`,
   );
-  const json = await res.json();
-  if (!json.success) throw new Error(json.message || 'Actual route not found');
-  return json.data as ActualRouteOverlay;
 }
 
 export default function AdminDeliveryJobDrawer({
@@ -260,7 +250,7 @@ export default function AdminDeliveryJobDrawer({
 
   const resolvedStoreId = job?.store?.id ?? storeId;
   const isLiveMapJob = Boolean(job && LIVE_MAP_STATUSES.has(job.status));
-  const isCompletedJob = job?.status === 'COMPLETED';
+  const supportsActualRouteReplay = Boolean(job && jobSupportsActualRouteReplay(job.status));
   const liveRoute = useAdminJobLiveRoute({
     jobId,
     storeId: resolvedStoreId,
@@ -269,7 +259,7 @@ export default function AdminDeliveryJobDrawer({
   });
 
   useEffect(() => {
-    if (!open || !isCompletedJob || !jobId) {
+    if (!open || !supportsActualRouteReplay || !jobId) {
       setActualOverlay(null);
       setActualNotice(null);
       return;
@@ -292,7 +282,7 @@ export default function AdminDeliveryJobDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, isCompletedJob, jobId, resolvedStoreId]);
+  }, [open, supportsActualRouteReplay, jobId, resolvedStoreId]);
 
   useEffect(() => {
     if (!open) return;
@@ -444,10 +434,14 @@ export default function AdminDeliveryJobDrawer({
     ? deliveryRouteTimelineHeadingExtra(job.orders, job.status)
     : null;
 
-  const overlayPath = isLiveMapJob ? liveRoute.path : isCompletedJob ? (actualOverlay?.path ?? []) : [];
+  const overlayPath = isLiveMapJob
+    ? liveRoute.path
+    : supportsActualRouteReplay
+      ? (actualOverlay?.path ?? [])
+      : [];
   const overlayLabel = isLiveMapJob ? 'Live' : 'Actual';
   const overlayNotice = isLiveMapJob ? liveRoute.notice : actualNotice;
-  const showPathOverlay = isLiveMapJob || isCompletedJob;
+  const showPathOverlay = isLiveMapJob || supportsActualRouteReplay;
   const vehicleFailurePosition =
     liveRoute.vehicleFailure ??
     (job?.vehicleFailure
@@ -571,7 +565,7 @@ export default function AdminDeliveryJobDrawer({
                       <p className="mt-0.5 text-xs text-muted">
                         {isLiveMapJob
                           ? 'Planned route with live driver path'
-                          : isCompletedJob
+                          : supportsActualRouteReplay
                             ? 'Planned route with recorded GPS path'
                             : 'Branch, delivery stops and return route'}
                       </p>

@@ -1,10 +1,10 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
+import { adminApiFetch } from '@/lib/adminApi';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { getApiBaseUrl, getSocketUrl } from '@/lib/apiBase';
+import { getSocketUrl } from '@/lib/apiBase';
 import { getAdminSession } from '@/lib/adminAuth';
 
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'CANCELLED']);
@@ -16,18 +16,12 @@ type JobStatusResponse = {
 };
 
 async function fetchJobStatus(jobId: string, storeId: string): Promise<JobStatusResponse> {
-    const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  const res = await fetch(
-    `${getApiBaseUrl()}/admin/delivery-jobs/${encodeURIComponent(jobId)}${qs}`,
-    { headers: adminAuthHeaders(), credentials: 'include' },
-  );
-  const json = await res.json();
-  if (!json.success) throw new Error(json.message || 'Failed to load job status');
-  const data = json.data as {
+  const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
+  const data = await adminApiFetch<{
     status?: string;
     pickedUp?: boolean;
     driver?: { id?: string } | null;
-  };
+  }>(`/admin/delivery-jobs/${encodeURIComponent(jobId)}${qs}`);
   return {
     status: data.status ?? '',
     pickedUp: data.pickedUp,
@@ -79,7 +73,7 @@ export function useAdminJobStatus({
       setError(null);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Unable to sync job status';
-      setError(`${message} (API: ${getApiBaseUrl()})`);
+      setError(message);
     }
   }, [applyStatus, enabled, jobId, storeId]);
 
@@ -121,7 +115,7 @@ export function useAdminJobStatus({
       } catch (e: unknown) {
         if (!cancelled) {
           const message = e instanceof Error ? e.message : 'Unable to sync job status';
-          setError(`${message} (API: ${getApiBaseUrl()})`);
+          setError(message);
         }
       } finally {
         pollInFlight = false;
