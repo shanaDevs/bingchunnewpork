@@ -1018,6 +1018,7 @@ export function resolveTotalPlatformCommissionDisplayLkr(params: {
   paybackEnabled: boolean;
   sharedPromoPlatformLkr?: number;
   loyaltyDiscountLkr?: number;
+  platformOwnedPromoDiscountLkr?: number;
   netPlatformEarningLkr?: number | null;
 }): number {
   return resolveNetPlatformCommissionLkr(params);

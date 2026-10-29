@@ -815,7 +815,7 @@ function CheckoutPage() {
         isLoyaltyCampaignOffer({ code }),
       );
       const loyaltyAutoAppliedOnCup =
-        Boolean(reward) &&
+        reward != null &&
         isLoyaltyCampaignOffer(reward) &&
         reward.source === 'auto' &&
         reward.locked;

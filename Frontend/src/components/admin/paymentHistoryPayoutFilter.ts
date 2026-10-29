@@ -12,8 +12,8 @@ export function payoutSettlementPeriodOverlaps(
   return row.periodFrom <= to && row.periodTo >= from;
 }
 
-export function filterPayoutRowsForDisplay(
-  payouts: PayoutPeriodRow[],
+export function filterPayoutRowsForDisplay<T extends PayoutPeriodRow>(
+  payouts: T[],
   options: {
     periodControlled: boolean;
     embedded: boolean;
@@ -22,7 +22,7 @@ export function filterPayoutRowsForDisplay(
     payoutDateTo: string;
     monthRange: (ym: string) => { from: string; to: string };
   },
-): PayoutPeriodRow[] {
+): T[] {
   if (options.periodControlled || options.embedded) {
     return payouts;
   }
