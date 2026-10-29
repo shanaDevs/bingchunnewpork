@@ -425,7 +425,7 @@ class _OrderDetailBodyState extends State<_OrderDetailBody> {
                     RunOutlineButton(
                       label: tr('Raise complaint'),
                       icon: Icons.feedback_outlined,
-                      color: c.warning,
+                      color: c.brand,
                       enabled: canAct,
                       onPressed: () => _raiseComplaint(vm, order),
                     ),

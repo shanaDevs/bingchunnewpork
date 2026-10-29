@@ -359,7 +359,7 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
               await showBcConfirm(
                 context,
                 icon: Icons.delivery_dining_rounded,
-                tone: BcDialogTone.warning,
+                tone: BcDialogTone.brand,
                 title: tr('Finish your ride first'),
                 message: tr(
                   'You have a claimed ride that is not finished. Complete or reject it before signing out.',
