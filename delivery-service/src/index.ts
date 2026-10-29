@@ -20,7 +20,6 @@ import {
 } from './jobs/coreIntegrationConsumer';
 import { assertProductionSecrets } from './lib/productionSecrets';
 import { isReady, runReadinessChecks } from './lib/readiness';
-import { buildMicroserviceCorsAllowlist } from '@bingchun/cors';
 
 const app = express();
 const server = http.createServer(app);
@@ -40,19 +39,26 @@ const deliveryFrontendOrigin =
   process.env.DELIVERY_FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3100';
 
 const corsAllowlist = Array.from(
-  new Set([
-    ...buildMicroserviceCorsAllowlist({
-      frontendUrl: config.frontendUrl,
-      adminUrl: config.adminUrl,
-    }),
-    deliveryFrontendOrigin,
-    'https://bingchunsrilanka.com',
-    'https://www.bingchunsrilanka.com',
-    'https://bing-chun.bc.dartcodes.com',
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:3100',
-  ]),
+  new Set(
+    [
+      config.frontendUrl,
+      config.adminUrl,
+      deliveryFrontendOrigin,
+      process.env.LIVE_SHOP_URL,
+      ...(process.env.CORS_EXTRA_ORIGINS || '').split(','),
+      'https://bingchunsrilanka.com',
+      'https://www.bingchunsrilanka.com',
+      'https://bing-chun.bc.dartcodes.com',
+      'https://bing-chun-admin-web.bc.dartcodes.com',
+      'https://bing-chun-pos-web.bc.dartcodes.com',
+      'https://bing-chun-delivery-frontend.bc.dartcodes.com',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:3100',
+    ]
+      .map((value) => (value || '').trim().replace(/\/$/, ''))
+      .filter(Boolean),
+  ),
 );
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
