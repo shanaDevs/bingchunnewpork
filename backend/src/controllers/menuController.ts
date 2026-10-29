@@ -323,7 +323,12 @@ async function loadMenuProducts(
     ]);
     if (!selectedStore) throw new AppError('Selected store not found', 404);
 
-    const rowByProductStore = new Map(storeProductRows.map((r) => [`${r.productId}:${r.storeId}`, r]));
+    // Build the map with .set() — `new Map(rows.map(...))` fails tsc when
+    // Promise.all+.catch widens storeProductRows to any[] (tuple vs any[]).
+    const rowByProductStore = new Map<string, StoreProductRow>();
+    for (const r of storeProductRows as StoreProductRow[]) {
+      rowByProductStore.set(`${r.productId}:${r.storeId}`, r);
+    }
     const branchDeactivatedIds = new Set(frozenRows.map((row) => row.productId));
     for (const productId of flagDeactivatedIds) {
       branchDeactivatedIds.add(productId);
