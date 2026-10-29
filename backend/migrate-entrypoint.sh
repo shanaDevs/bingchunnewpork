@@ -10,10 +10,24 @@ set -e
 
 export TZ="${TZ:-Asia/Colombo}"
 
+# Prefer DIRECT_URL (plain Postgres). Never run migrate deploy through PgBouncer
+# transaction pooling — advisory locks / DDL break there.
+if [ -n "${DIRECT_URL:-}" ]; then
+  export DATABASE_URL="$DIRECT_URL"
+  echo "[migrate] Using DIRECT_URL (direct Postgres, not PgBouncer)"
+fi
+
 if [ -z "$DATABASE_URL" ]; then
-  echo "[migrate] ERROR: DATABASE_URL is not set. Cannot run migrations."
+  echo "[migrate] ERROR: DATABASE_URL (or DIRECT_URL) is not set. Cannot run migrations."
   exit 1
 fi
+
+case "$DATABASE_URL" in
+  *pgbouncer=true*|*@*pgbouncer*)
+    echo "[migrate] ERROR: DATABASE_URL points at PgBouncer. Set DIRECT_URL to srv-captain--<postgres>:5432"
+    exit 1
+    ;;
+esac
 
 # Wait for the database to be reachable before running migrations
 DB_HOST=$(node -e "process.stdout.write(new URL(process.env.DATABASE_URL).hostname)")
