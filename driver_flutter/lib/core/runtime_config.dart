@@ -36,6 +36,7 @@ class RuntimeConfig extends ChangeNotifier {
   static const _keySound = 'sound_enabled';
   static const _keyHaptics = 'haptics_enabled';
   static const _keyFullScreenAlerts = 'full_screen_alerts_enabled';
+  static const _keyFullScreenAlertsReset = 'full_screen_alerts_reset_v1';
   static const _keyLanguage = 'app_language';
   static const _defaultTheme = 'LIGHT';
 
@@ -51,6 +52,12 @@ class RuntimeConfig extends ChangeNotifier {
     _themeMode = _prefs?.getString(_keyTheme) ?? _defaultTheme;
     _soundEnabled = _prefs?.getBool(_keySound) ?? true;
     _hapticsEnabled = _prefs?.getBool(_keyHaptics) ?? true;
+    // Riders who switched full-screen alerts off never saw new rides over the lock screen.
+    // Turn it back on once after this update; a later choice to switch it off is kept.
+    if (!(_prefs?.getBool(_keyFullScreenAlertsReset) ?? false)) {
+      await _prefs?.setBool(_keyFullScreenAlerts, true);
+      await _prefs?.setBool(_keyFullScreenAlertsReset, true);
+    }
     _fullScreenAlertsEnabled = _prefs?.getBool(_keyFullScreenAlerts) ?? true;
     L10n.current = AppLanguage.fromCode(_prefs?.getString(_keyLanguage));
   }

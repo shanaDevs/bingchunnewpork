@@ -268,13 +268,12 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
             iconTint: dark ? const Color(0xFF60A5FA) : const Color(0xFF1D4ED8),
             title: tr('Full-Screen Ride Alerts'),
             subtitle: !_fsiOn
-                ? tr('Off. New jobs show as a normal notification instead of ringing over the lock screen.')
+                ? tr('Off. New rides will NOT show over the lock screen, only as a small notification. Turn on so you never miss a ride.')
                 : _canFsi
                 ? tr('Allowed. Incoming jobs can ring over the lock screen immediately.')
                 : tr('Permission required to pop up incoming jobs over locked screens.'),
-            done: _canFsi,
-            // When off, the switch already shows the state.
-            showStatus: _fsiOn,
+            // Off counts as a problem: locked phones then get no ride screen.
+            done: _fsiOn && _canFsi,
             trailing: BcSwitch(
               value: _fsiOn,
               onChanged: (v) {

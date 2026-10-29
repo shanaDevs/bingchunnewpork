@@ -580,7 +580,7 @@ const Map<String, String> zhStrings = {
   'Allow background running': '允许后台运行',
   'Full-Screen Ride Alerts': '全屏行程提醒',
   'Allowed. Incoming jobs can ring over the lock screen immediately.': '已允许。新任务可立即在锁屏上响铃。',
-  'Off. New jobs show as a normal notification instead of ringing over the lock screen.': '已关闭。新任务将以普通通知显示，不会在锁屏上全屏响铃。',
+  'Off. New rides will NOT show over the lock screen, only as a small notification. Turn on so you never miss a ride.': '已关闭。新订单不会在锁屏上全屏显示，只会显示为小通知。请开启，以免错过订单。',
   'Permission required to pop up incoming jobs over locked screens.': '需要权限才能在锁屏上弹出新任务。',
   'Enabled': '已开启',
   'Allow full-screen alerts': '允许全屏提醒',
