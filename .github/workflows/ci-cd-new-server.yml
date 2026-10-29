@@ -1,7 +1,7 @@
 # ============================================================
 # Bing Chun — CI/CD for CapRover (Core Microservices via GHCR)
 # ============================================================
-# Runs on pushes to `production`. Builds and pushes all microservice
+# Runs on pushes to `staging`. Builds and pushes all microservice
 # Docker images to GitHub Container Registry (ghcr.io).
 # CapRover then pulls and deploys the pre-built container images.
 #
@@ -58,7 +58,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: ${{ github.workflow }}-production
+  group: ${{ github.workflow }}-staging
   cancel-in-progress: false
 
 env:
@@ -77,7 +77,7 @@ jobs:
   changes:
     name: Detect changed services
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/production' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     outputs:
       core: ${{ steps.summary.outputs.core }}
       shop: ${{ steps.summary.outputs.shop }}
@@ -821,7 +821,7 @@ jobs:
       - deploy-pos-web
       - deploy-delivery
       - deploy-delivery-frontend
-    if: always() && (github.ref == 'refs/heads/production' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    if: always() && (github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     steps:
       - name: Summarize build and deploy results
