@@ -1,6 +1,6 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
@@ -12,19 +12,6 @@ import ProductImage from '@/components/ui/ProductImage';
 import AdminTodaySpecialCard from '@/components/admin/AdminTodaySpecialCard';
 import { resolveProductImageUrl } from '@/lib/productImageUrl';
 import { confirmDialog } from '@/store/confirmStore';
-
-function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: adminAuthHeaders({ 'Content-Type': 'application/json', ...(options?.headers as Record<string, string> | undefined),
-    credentials: 'include',
-  }),
-  }).then(async (r) => {
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.message || 'Request failed');
-    return d.data ?? d;
-  });
-}
 
 interface ProductForm {
   name: string;

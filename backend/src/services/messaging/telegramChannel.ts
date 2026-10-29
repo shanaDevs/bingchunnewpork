@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'crypto';
 import { config } from '../../config';
 import { logger } from '../../utils/logger';
 import type { MessagingChannelAdapter, OutboundMessage, IncomingMessagingEvent } from './types';
@@ -119,7 +120,10 @@ export function validateTelegramWebhookSecret(headerValue: string | undefined): 
     // If secret not configured, accept in development only
     return config.nodeEnv !== 'production';
   }
-  return Boolean(headerValue && headerValue === expected);
+  if (!headerValue) return false;
+  const a = Buffer.from(headerValue);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export async function answerTelegramCallback(callbackQueryId: string): Promise<void> {

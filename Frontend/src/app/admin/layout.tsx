@@ -1,4 +1,5 @@
 'use client';
+import { adminApiFetch } from '@/lib/adminApi';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -40,31 +41,13 @@ const SIDEBAR_COLLAPSED_KEY = 'bc_admin_sidebar_collapsed';
 installAdminFetch();
 
 function adminFetchAppSettings() {
-  return fetch(`${getApiBaseUrl()}/settings/app`, {
-    headers: adminAuthHeaders({ 'Content-Type': 'application/json' }),
-    credentials: 'include',
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return data.data ?? data;
-  });
+  return adminApiFetch('/settings/app');
 }
 
 type BranchOperatingStatus = { branchClosedAt: string | null };
 
 function adminBranchFetch(endpoint: string, options?: RequestInit) {
-  return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: adminAuthHeaders({
-      'Content-Type': 'application/json',
-      ...(options?.headers as Record<string, string> | undefined),
-    }),
-    credentials: 'include',
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return (data.data ?? data) as BranchOperatingStatus;
-  });
+  return adminApiFetch<BranchOperatingStatus>(endpoint, options);
 }
 
 const CASHIER_NAV_HREFS = new Set(['/admin', '/admin/orders']);

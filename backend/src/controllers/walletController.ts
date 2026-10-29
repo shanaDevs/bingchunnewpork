@@ -24,7 +24,7 @@ import { ensureWithdrawalSchema } from '../lib/withdrawalSchema';
 import {
   listWithdrawalsUnsettledForDartCodes,
 } from '../lib/settlementWithdrawalQuery';
-import { summarizeOrderRevenue } from '../lib/walletRevenue';
+import { fetchSummarizedPaidOrderRevenue } from '../lib/walletRevenue';
 import { getWalletAnalysis } from '../lib/walletAnalysis';
 import { recalculateWalletBalance, syncMissingWalletPayments } from '../lib/walletSync';
 import {
@@ -762,16 +762,15 @@ export async function getWallet(req: Request, res: Response) {
 
   const dashboardPeriod = parseOptionalWalletPeriod(req);
   const wallet = await getOrCreateWallet(storeId as string);
-  const [pendingTotal, netTransferableEarnings] = await Promise.all([
+  const [pendingTotal, netTransferableEarnings, dashboard, store] = await Promise.all([
     getPendingWithdrawalTotal(storeId as string),
     computeNetTransferableEarnings(storeId as string),
+    getBranchWalletDashboard(storeId as string, dashboardPeriod),
+    prisma.store.findUnique({
+      where: { id: storeId as string },
+      select: { id: true, name: true, city: true, addressLine: true, phone: true },
+    }),
   ]);
-  const dashboard = await getBranchWalletDashboard(storeId as string, dashboardPeriod);
-
-  const store = await prisma.store.findUnique({
-    where: { id: storeId as string },
-    select: { id: true, name: true, city: true, addressLine: true, phone: true },
-  });
 
   res.json({
     success: true,
@@ -827,25 +826,20 @@ export async function getWalletTransactions(req: Request, res: Response) {
     };
   });
 
-  // Revenue summary from paid orders (matches order totals on admin orders page)
-  const paidOrders = await prisma.order.findMany({
-    where: {
-      storeId: storeId as string,
-      paymentStatus: 'PAID',
-      ...(from || to
-        ? {
-            createdAt: {
-              ...(from ? { gte: new Date(`${from}T00:00:00.000Z`) } : {}),
-              ...(to ? { lte: new Date(`${to}T23:59:59.999Z`) } : {}),
-            },
-          }
-        : {}),
-    },
-    select: { total: true, orderMode: true, paymentMethod: true },
-  });
-  const revenue = summarizeOrderRevenue(paidOrders);
+  const paidOrderWhere = {
+    storeId: storeId as string,
+    ...(from || to
+      ? {
+          createdAt: {
+            ...(from ? { gte: new Date(`${from}T00:00:00.000Z`) } : {}),
+            ...(to ? { lte: new Date(`${to}T23:59:59.999Z`) } : {}),
+          },
+        }
+      : {}),
+  };
 
-  const [aggOut] = await Promise.all([
+  const [revenue, aggOut] = await Promise.all([
+    fetchSummarizedPaidOrderRevenue(paidOrderWhere),
     prisma.walletTransaction.aggregate({
       _sum: { amount: true },
       where: { ...where, type: { in: ['REFUND', 'PAYOUT'] } } as any,

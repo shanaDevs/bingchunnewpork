@@ -250,7 +250,7 @@ function AdminDeliveryContent() {
     queryKey: ['admin-delivery-jobs-active', activeJobsQuery],
     queryFn: async () => (await adminFetch(`/admin/delivery-jobs${activeJobsQuery}`)).data as DeliveryJobListItem[],
     enabled: jobsQueryEnabled,
-    refetchInterval: tab === 'jobs' ? 10000 : false,
+    refetchInterval: tab === 'jobs' ? 20_000 : false,
     refetchIntervalInBackground: false,
   });
 
@@ -264,7 +264,7 @@ function AdminDeliveryContent() {
     queryFn: async () =>
       (await adminFetch(`/admin/delivery-jobs${completedJobsQuery}`)).data as DeliveryJobListItem[],
     enabled: jobsQueryEnabled,
-    refetchInterval: tab === 'jobs' ? 10000 : false,
+    refetchInterval: false,
     refetchIntervalInBackground: false,
   });
 
@@ -278,7 +278,7 @@ function AdminDeliveryContent() {
     queryFn: async () =>
       (await adminFetch(`/admin/delivery-jobs${incompleteJobsQuery}`)).data as DeliveryJobListItem[],
     enabled: jobsQueryEnabled,
-    refetchInterval: tab === 'jobs' ? 10000 : false,
+    refetchInterval: tab === 'jobs' ? 20_000 : false,
     refetchIntervalInBackground: false,
   });
 

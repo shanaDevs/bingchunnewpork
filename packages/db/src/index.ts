@@ -29,6 +29,11 @@ bootstrapDatabaseEnv();
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 function defaultPrismaPoolLimit(): number {
   const surface = (process.env.API_SURFACE || '').trim().toLowerCase();
+  // Behind PgBouncer (transaction mode) client connections are cheap — real Postgres
+  // connections are capped by PgBouncer's default_pool_size, so allow more concurrency.
+  if (isPgbouncerDatabaseUrl()) {
+    return surface === 'admin' || surface === 'pos' ? 8 : 12;
+  }
   // Keep pools small: many CapRover apps + rolling deploys share one Postgres/PgBouncer.
   if (surface === 'shop' || surface === 'pos' || surface === 'admin') return 3;
   if (surface === 'core' || surface === '') {
@@ -150,10 +155,52 @@ function createPrismaClient() {
     }
   }
 
-  return new PrismaClient({
+  const client = new PrismaClient({
     log: devLogs,
     ...(url ? { datasources: { db: { url } } } : {}),
   });
+
+  // Idle sockets get dropped by PgBouncer / firewalls / DB restarts ("Socket not connected",
+  // errno 107). Reads are idempotent, so retry them once on a fresh connection instead of
+  // surfacing a 503. Writes and anything inside a transaction are never retried.
+  client.$use(async (params, next) => {
+    if (params.runInTransaction || !params.model || !RETRYABLE_READ_ACTIONS.has(params.action)) {
+      return next(params);
+    }
+    try {
+      return await next(params);
+    } catch (err) {
+      if (!isTransientSocketError(err)) throw err;
+      console.warn(`[db] ${params.model}.${params.action} hit a dropped connection — retrying once`);
+      await sleep(150 + Math.floor(Math.random() * 150));
+      return next(params);
+    }
+  });
+
+  return client;
+}
+
+const RETRYABLE_READ_ACTIONS = new Set([
+  'findUnique',
+  'findUniqueOrThrow',
+  'findFirst',
+  'findFirstOrThrow',
+  'findMany',
+  'count',
+  'aggregate',
+  'groupBy',
+]);
+
+/** Dropped-socket errors only. P2024 (pool timeout) is excluded: retrying would deepen overload. */
+const TRANSIENT_SOCKET_RE =
+  /P1017|server has closed the connection|socket not connected|notconnected|connection reset|forcibly closed|kind:\s*(Io|Closed|ConnectionReset|NotConnected)/i;
+
+function isTransientSocketError(err: unknown, depth = 0): boolean {
+  if (!err || typeof err !== 'object' || depth > 4) return false;
+  const e = err as { code?: unknown; message?: unknown; cause?: unknown };
+  if (e.code === 'P1017') return true;
+  if (typeof e.message === 'string' && TRANSIENT_SOCKET_RE.test(e.message)) return true;
+  return e.cause != null && isTransientSocketError(e.cause, depth + 1);
 }
 
 /** One client per process, including development hot reloads. */

@@ -32,7 +32,7 @@ export async function adminApiJson(
 }
 
 /** Unwrapped `data` payload (or the whole body when `data` is absent). */
-export async function adminApiFetch<T = unknown>(endpoint: string, init?: RequestInit): Promise<T> {
+export async function adminApiFetch<T = any>(endpoint: string, init?: RequestInit): Promise<T> {
   const json = await adminApiJson(endpoint, init);
   if (json.data !== undefined) return json.data as T;
   return json as T;

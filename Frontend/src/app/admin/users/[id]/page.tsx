@@ -18,7 +18,7 @@ import {
 import toast from 'react-hot-toast';
 import StaffPermissionsGrid from '@/components/admin/StaffPermissionsGrid';
 import BranchAccessManager from '@/components/admin/BranchAccessManager';
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import { confirmDialog } from '@/store/confirmStore';
 import {
   Dialog,
@@ -29,23 +29,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { formatStaffRole, getStaffRoleAvatarUrl } from '@/lib/staffRoleAvatar';
-
-/* ------------------------------------------------------------------ */
-/*  API helper                                                         */
-/* ------------------------------------------------------------------ */
-function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
-  }).then(async (r) => {
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.message || 'Request failed');
-    return d.data ?? d;
-  });
-}
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

@@ -102,9 +102,7 @@ function OrdersPageContent() {
       return Array.isArray(result) ? result : [];
     },
     enabled: isAuthenticated,
-    // Keep list fresh when returning from checkout / order tracking.
-    staleTime: 0,
-    refetchOnMount: 'always',
+    staleTime: 30_000,
   });
 
   const [search, setSearch] = useState('');

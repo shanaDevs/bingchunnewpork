@@ -1,23 +1,11 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import StaffPermissionsGrid from '@/components/admin/StaffPermissionsGrid';
-import { getApiBaseUrl } from '@/lib/apiBase';
 import { formatStaffRole, getStaffRoleAvatarUrl } from '@/lib/staffRoleAvatar';
-
-function adminFetch(endpoint: string) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    headers: adminAuthHeaders(),
-    credentials: 'include',
-  }).then(async (r) => {
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.message || 'Request failed');
-    return d.data ?? d;
-  });
-}
 
 interface AdminUser {
   id: string;

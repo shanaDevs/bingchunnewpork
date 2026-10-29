@@ -4,21 +4,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Download, FileText, History } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getApiBaseUrl } from '@/lib/apiBase';
-import { adminAuthHeaders } from '@/lib/adminSession';
-
-const API_BASE = getApiBaseUrl();
-
-function adminFetch<T>(endpoint: string): Promise<T> {
-  return fetch(`${API_BASE}${endpoint}`, {
-    headers: adminAuthHeaders({ 'Content-Type': 'application/json' }),
-    credentials: 'include',
-  }).then(async (r) => {
-    const json = await r.json();
-    if (!r.ok) throw new Error(json.message || 'Request failed');
-    return json.data as T;
-  });
-}
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 
 type ReportTab = 'summary' | 'audit' | 'adjustments';
 
