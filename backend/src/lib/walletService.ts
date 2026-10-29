@@ -30,6 +30,7 @@ import {
   mergeSharedPromoIntoBreakdown,
   resolveFinalPayoutAmountFromBreakdown,
 } from './sharedPromoContribution';
+import { attachPromoOwnershipTotals, loadPromoOwnershipTotalsForPeriod } from './promoOwnershipTotals';
 import { Prisma } from '@prisma/client';
 import { centsToDecimal, parseDecimalFromDb } from './moneyDecimal';
 import {
@@ -1452,11 +1453,20 @@ export async function computeNetTransferableEarnings(
   from?: string,
   to?: string,
 ): Promise<number> {
-  const [breakdown, sharedPromo] = await Promise.all([
+  const [breakdown, sharedPromo, promoOwnership] = await Promise.all([
     computeBreakdownForPeriod(storeId, from, to),
     computeSharedPromoContribution(storeId, from, to),
+    from && to
+      ? loadPromoOwnershipTotalsForPeriod(storeId, from, to)
+      : Promise.resolve({
+          branchOwnedPromoDiscountTotal: 0,
+          platformOwnedPromoDiscountTotal: 0,
+        }),
   ]);
-  return mergeSharedPromoIntoBreakdown(breakdown, sharedPromo).netAmount;
+  return attachPromoOwnershipTotals(
+    mergeSharedPromoIntoBreakdown(breakdown, sharedPromo),
+    promoOwnership,
+  ).netAmount;
 }
 
 export async function getPendingWithdrawalTotal(storeId: string): Promise<number> {

@@ -33,6 +33,9 @@ export type PendingAllBranchRow = {
   walletRemaining?: number;
   hasOverlap: boolean;
   requiresPayout: boolean;
+  platformProviderReceivable?: {
+    lkr: import('@bingchun/settlement').PlatformProviderReceivableLkr;
+  } | null;
   unsettledWithdrawals: PendingAllUnsettledWithdrawal[];
 };
 

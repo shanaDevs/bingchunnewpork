@@ -10,7 +10,12 @@ import {
 } from '../middleware/auth';
 import { issueCustomerTokens, rotateCustomerRefresh, revokeUserSessions } from '../lib/userSession';
 import { completePasswordReset, passwordResetGenericMessage, requestPasswordReset } from '../lib/passwordReset';
-import { assertAdminCsrf, clearAdminAuthCookies, readAdminRefreshCookie } from '../lib/adminCookies';
+import {
+  assertAdminCsrf,
+  clearAdminAuthCookies,
+  readAdminAccessCookie,
+  readAdminRefreshCookie,
+} from '../lib/adminCookies';
 import { respondWithAdminAuthCookies } from '../lib/adminAuthResponse';
 import {
   assertCustomerCsrf,
@@ -729,6 +734,36 @@ export async function adminLogout(req: Request, res: Response, next: NextFunctio
     }
     clearAdminAuthCookies(res);
     return success(res, { loggedOut: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Expose the httpOnly admin access JWT for Socket.IO handshake.auth.
+ * Same-origin Next `/api` proxy can read the cookie; the browser cannot send
+ * that cookie to the CapRover API host on a cross-origin websocket.
+ * JWT verify only — no DB — so this stays cheap under reconnect storms.
+ */
+export async function adminSocketToken(req: Request, res: Response, next: NextFunction) {
+  try {
+    const header = req.headers.authorization;
+    const bearer =
+      typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : null;
+    const token = bearer || readAdminAccessCookie(req);
+    if (!token) throw new AppError('Unauthorized', 401);
+
+    let payload: { type?: string; sub?: string; role?: string };
+    try {
+      payload = jwt.verify(token, config.jwtSecret) as typeof payload;
+    } catch {
+      throw new AppError('Unauthorized', 401);
+    }
+    if (payload.type !== 'admin' || !payload.sub) throw new AppError('Unauthorized', 401);
+    if (payload.role === 'DELIVERY_DRIVER') throw new AppError('Unauthorized', 401);
+
+    res.setHeader('Cache-Control', 'no-store');
+    return success(res, { token });
   } catch (err) {
     next(err);
   }

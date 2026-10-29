@@ -1,7 +1,7 @@
 'use client';
 
 import { adminFetch } from '@/lib/adminApi';
-import { getSocketUrl } from '@/lib/apiBase';
+import { connectAdminSocketWithRooms } from '@/lib/adminSocket';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -12,7 +12,7 @@ import {
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { io, type Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import {
   ArrowLeft,
   ChevronLeft,
@@ -242,46 +242,51 @@ export default function AdminLiveDeliveryPage() {
 
   useEffect(() => {
     if (!admin) return;
+    let cancelled = false;
     let socket: Socket | null = null;
 
-    try {
-      socket = io(getSocketUrl(), { transports: ['websocket', 'polling'] });
-      socket.emit('joinAdmin', { adminId: admin.id, storeId: branchStoreId });
-
-      socket.on('driverLocation', (payload: DriverLocationEvent) => {
-        if (typeof payload.lat !== 'number' || typeof payload.lng !== 'number') return;
-        const recordedAt = payload.recordedAt ?? payload.updatedAt;
-        const ping: DriverPing = {
-          lat: payload.lat,
-          lng: payload.lng,
-          heading: payload.heading ?? null,
-          updatedAt: recordedAt,
-        };
-        const keys = [payload.driverId, payload.jobId].filter(Boolean) as string[];
-        if (keys.length === 0) return;
-
-        setDriverPositions((prev) => {
-          const next = { ...prev };
-          for (const key of keys) next[key] = ping;
-          return next;
-        });
-
-        if (payload.driverId) {
-          setDriverTrails((prev) =>
-            appendTrailPoint(prev, payload.driverId!, {
-              lat: payload.lat,
-              lng: payload.lng,
-              heading: payload.heading ?? null,
-              recordedAt,
-            }),
-          );
+    void connectAdminSocketWithRooms(
+      [{ adminId: admin.id, storeId: branchStoreId }],
+      (created) => {
+        if (cancelled) {
+          created.disconnect();
+          return;
         }
-      });
-    } catch {
-      /* socket optional — list + map still work via polling */
-    }
+        socket = created;
+        created.on('driverLocation', (payload: DriverLocationEvent) => {
+          if (typeof payload.lat !== 'number' || typeof payload.lng !== 'number') return;
+          const recordedAt = payload.recordedAt ?? payload.updatedAt;
+          const ping: DriverPing = {
+            lat: payload.lat,
+            lng: payload.lng,
+            heading: payload.heading ?? null,
+            updatedAt: recordedAt,
+          };
+          const keys = [payload.driverId, payload.jobId].filter(Boolean) as string[];
+          if (keys.length === 0) return;
+
+          setDriverPositions((prev) => {
+            const next = { ...prev };
+            for (const key of keys) next[key] = ping;
+            return next;
+          });
+
+          if (payload.driverId) {
+            setDriverTrails((prev) =>
+              appendTrailPoint(prev, payload.driverId!, {
+                lat: payload.lat,
+                lng: payload.lng,
+                heading: payload.heading ?? null,
+                recordedAt,
+              }),
+            );
+          }
+        });
+      },
+    );
 
     return () => {
+      cancelled = true;
       socket?.disconnect();
     };
   }, [admin, branchStoreId]);

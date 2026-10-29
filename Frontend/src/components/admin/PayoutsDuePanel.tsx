@@ -12,6 +12,7 @@ import {
   resolvePayoutPeriodRowDisplayAmounts,
 } from '@/components/admin/payoutPeriodRowAmounts';
 import { Skeleton } from '@/components/ui/skeleton';
+import { isOldestUnpaidBranchPayoutRow } from '@/lib/branchPayoutsDue';
 
 export type PayoutDueRow = {
   storeId: string;
@@ -38,6 +39,96 @@ const ALLOCATION_COLUMNS = [
   'Platform commission',
   'Delivery fee received',
 ] as const;
+
+const PAYOUTS_DUE_TABLE_COL_COUNT = 4 + ALLOCATION_COLUMNS.length + 2;
+
+const PAYOUTS_DUE_SKELETON_WIDTHS = [
+  'w-28',
+  'w-36',
+  'w-20',
+  'w-10',
+  'w-16',
+  'w-16',
+  'w-16',
+  'w-16',
+  'w-14',
+  'w-20',
+] as const;
+
+function PayoutsDueTableSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-navy-border)] px-4 py-3 sm:px-5">
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-4 w-24 bg-[var(--color-navy-light)]/70" />
+          <Skeleton className="h-3 w-40 bg-[var(--color-navy-light)]/70" />
+        </div>
+        <Skeleton className="h-8 w-full max-w-[220px] rounded-[12px] bg-[var(--color-navy-light)]/70 sm:w-[220px]" />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1100px] text-left text-xs">
+          <thead>
+            <tr className="border-b border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/50 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+              <th scope="col" className="px-3 py-2.5 font-semibold whitespace-nowrap">
+                Branch
+              </th>
+              <th scope="col" className="px-3 py-2.5 font-semibold whitespace-nowrap">
+                Period
+              </th>
+              <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
+                Amount due
+              </th>
+              <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
+                Orders
+              </th>
+              {ALLOCATION_COLUMNS.map((label) => (
+                <th
+                  key={label}
+                  scope="col"
+                  className="px-3 py-2.5 text-right font-semibold whitespace-nowrap"
+                >
+                  {label}
+                </th>
+              ))}
+              <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
+                Wallet view
+              </th>
+              <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
+                Action
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: rows }).map((_, row) => (
+              <tr
+                key={row}
+                className="border-b border-[var(--color-navy-border)]/70 last:border-b-0"
+              >
+                {Array.from({ length: PAYOUTS_DUE_TABLE_COL_COUNT }).map((__, col) => (
+                  <td
+                    key={col}
+                    className={
+                      col >= 2 && col <= 7 ? 'px-3 py-3 text-right' : 'px-3 py-3'
+                    }
+                  >
+                    <Skeleton
+                      className={cn(
+                        'h-3.5 bg-[var(--color-navy-light)]/70',
+                        PAYOUTS_DUE_SKELETON_WIDTHS[col] ?? 'w-20',
+                        col >= 2 && col <= 7 && 'ml-auto',
+                        col >= 8 && 'ml-auto inline-block',
+                      )}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
 
 function branchLabel(name: string) {
   return name.replace(/^Bing Chun\s*[-–]\s*/i, '').trim() || name;
@@ -130,6 +221,11 @@ export default function PayoutsDuePanel({
     return filteredRows.slice(start, start + PAYOUTS_DUE_PAGE_SIZE);
   }, [filteredRows, page]);
 
+  const canReviewAndPay = useMemo(
+    () => (row: PayoutDueRow) => isOldestUnpaidBranchPayoutRow(row, rows),
+    [rows],
+  );
+
   const rowsNeedingPreview = useMemo(
     () => pageRows.filter((row) => row.breakdown == null),
     [pageRows],
@@ -163,19 +259,7 @@ export default function PayoutsDuePanel({
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
-      {loading && count === 0 && (
-        <div className="flex items-center justify-center gap-2 py-16 text-sm text-[var(--color-text-muted)]">
-          <Loader2 size={18} className="animate-spin text-[var(--color-brand)]" />
-          Loading payouts due…
-        </div>
-      )}
-
-      {!loading && loadingMore && count === 0 && (
-        <div className="flex items-center justify-center gap-2 py-16 text-sm text-[var(--color-text-muted)]">
-          <Loader2 size={18} className="animate-spin text-[var(--color-brand)]" />
-          Loading more branches…
-        </div>
-      )}
+      {(loading || loadingMore) && count === 0 && <PayoutsDueTableSkeleton />}
 
       {!loading && !loadingMore && count === 0 && (
         <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
@@ -195,7 +279,7 @@ export default function PayoutsDuePanel({
             <div className="flex flex-wrap items-baseline gap-2">
               <h3 className="text-sm font-semibold text-[var(--color-text)]">Payouts Due</h3>
               <span className="text-xs text-[var(--color-text-muted)]">
-                {count} branch{count === 1 ? '' : 'es'} · 15-day cycle
+                {count} period{count === 1 ? '' : 's'} · oldest first · 15-day cycle
               </span>
             </div>
             <div className="relative w-full max-w-[220px] sm:w-auto">
@@ -256,6 +340,7 @@ export default function PayoutsDuePanel({
               <tbody>
                 {pageRows.map((row) => {
                   const key = payoutDueRowKey(row);
+                  const payEnabled = canReviewAndPay(row);
                   return (
                   <tr
                     key={key}
@@ -295,16 +380,28 @@ export default function PayoutsDuePanel({
                       </button>
                     </td>
                     <td className="px-3 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => onReviewAndPay(row)}
-                        className={cn(
-                          'inline-flex items-center rounded-lg border border-[var(--color-brand)] px-3 py-1.5',
-                          'text-xs font-semibold text-[var(--color-brand)] transition-colors hover:bg-[var(--color-brand-subtle)]',
-                        )}
-                      >
-                        Review & Pay
-                      </button>
+                      {payEnabled ? (
+                        <button
+                          type="button"
+                          onClick={() => onReviewAndPay(row)}
+                          className={cn(
+                            'inline-flex items-center rounded-lg border border-[var(--color-brand)] px-3 py-1.5',
+                            'text-xs font-semibold text-[var(--color-brand)] transition-colors hover:bg-[var(--color-brand-subtle)]',
+                          )}
+                        >
+                          Review & Pay
+                        </button>
+                      ) : (
+                        <span
+                          className="inline-flex max-w-[9.5rem] flex-col items-end gap-0.5 text-[10px] font-medium text-[var(--color-text-muted)]"
+                          title="Pay the earlier period for this branch first"
+                        >
+                          <span className="rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5 text-xs font-semibold opacity-50">
+                            Review & Pay
+                          </span>
+                          Pay earlier period first
+                        </span>
+                      )}
                     </td>
                   </tr>
                   );

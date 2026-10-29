@@ -4,21 +4,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Gift, Plus, Save, Star, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getApiBaseUrl } from '@/lib/apiBase';
-
-function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return data.data ?? data;
-  });
-}
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 
 type TierRow = {
   id: string;

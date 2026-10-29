@@ -1,10 +1,11 @@
 'use client';
 
 import { adminAuthHeaders } from '@/lib/adminSession';
+import { connectAdminSocketWithRooms } from '@/lib/adminSocket';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { io, type Socket } from 'socket.io-client';
-import { getApiBaseUrl, getSocketUrl } from '@/lib/apiBase';
+import type { Socket } from 'socket.io-client';
+import { getApiBaseUrl } from '@/lib/apiBase';
 import { getAdminSession } from '@/lib/adminAuth';
 
 export type AdminJobDriverPosition = {
@@ -160,69 +161,67 @@ export function useAdminJobLiveRoute({
     let socket: Socket | null = null;
 
     if (admin) {
-      try {
-        socket = io(getSocketUrl(), {
-          path: '/socket.io',
-          transports: ['websocket', 'polling'],
-          withCredentials: true,
-        });
-
-        socket.on('connect', () => {
-          if (!cancelled) setSocketConnected(true);
-        });
-        socket.on('disconnect', () => {
-          if (!cancelled) setSocketConnected(false);
-        });
-
-        socket.emit('joinAdmin', { adminId: admin.id, storeId: storeId || admin.storeId });
-
-        socket.on('driverLocation', (payload: DriverLocationEvent) => {
-          if (typeof payload.lat !== 'number' || typeof payload.lng !== 'number') return;
-          const knownDriverId = driverId || dataRef.current?.driverId;
-          const jobMatch = payload.jobId === jobId;
-          const driverMatch =
-            Boolean(knownDriverId) &&
-            payload.driverId === knownDriverId &&
-            (payload.jobId == null || payload.jobId === '' || payload.jobId === jobId);
-          if (!jobMatch && !driverMatch) return;
-
-          const updatedAt = payload.updatedAt ?? payload.recordedAt;
-          setData((prev) => {
-            const base = prev ?? dataRef.current ?? { path: [] };
-            const nextPath = appendPathPoint(base.path, payload.lat!, payload.lng!);
-            const next: AdminJobLiveRouteData = {
-              ...base,
-              path: nextPath,
-              driverPosition: { lat: payload.lat!, lng: payload.lng!, updatedAt },
-              source: 'live',
-            };
-            dataRef.current = next;
-            return next;
+      void connectAdminSocketWithRooms(
+        [{ adminId: admin.id, storeId: storeId || admin.storeId }],
+        (created) => {
+          if (cancelled) {
+            created.disconnect();
+            return;
+          }
+          socket = created;
+          created.on('connect', () => {
+            if (!cancelled) setSocketConnected(true);
           });
-          setNotice(null);
-        });
-
-        socket.on('vehicleFailureReported', (payload: VehicleFailureEvent) => {
-          if (payload.jobId !== jobId) return;
-          if (typeof payload.lat !== 'number' || typeof payload.lng !== 'number') return;
-          setData((prev) => {
-            const base = prev ?? dataRef.current ?? { path: [] };
-            const next: AdminJobLiveRouteData = {
-              ...base,
-              vehicleFailure: {
-                lat: payload.lat!,
-                lng: payload.lng!,
-                orderId: payload.orderId,
-              },
-              source: 'live',
-            };
-            dataRef.current = next;
-            return next;
+          created.on('disconnect', () => {
+            if (!cancelled) setSocketConnected(false);
           });
-        });
-      } catch {
-        /* socket optional */
-      }
+
+          created.on('driverLocation', (payload: DriverLocationEvent) => {
+            if (typeof payload.lat !== 'number' || typeof payload.lng !== 'number') return;
+            const knownDriverId = driverId || dataRef.current?.driverId;
+            const jobMatch = payload.jobId === jobId;
+            const driverMatch =
+              Boolean(knownDriverId) &&
+              payload.driverId === knownDriverId &&
+              (payload.jobId == null || payload.jobId === '' || payload.jobId === jobId);
+            if (!jobMatch && !driverMatch) return;
+
+            const updatedAt = payload.updatedAt ?? payload.recordedAt;
+            setData((prev) => {
+              const base = prev ?? dataRef.current ?? { path: [] };
+              const nextPath = appendPathPoint(base.path, payload.lat!, payload.lng!);
+              const next: AdminJobLiveRouteData = {
+                ...base,
+                path: nextPath,
+                driverPosition: { lat: payload.lat!, lng: payload.lng!, updatedAt },
+                source: 'live',
+              };
+              dataRef.current = next;
+              return next;
+            });
+            setNotice(null);
+          });
+
+          created.on('vehicleFailureReported', (payload: VehicleFailureEvent) => {
+            if (payload.jobId !== jobId) return;
+            if (typeof payload.lat !== 'number' || typeof payload.lng !== 'number') return;
+            setData((prev) => {
+              const base = prev ?? dataRef.current ?? { path: [] };
+              const next: AdminJobLiveRouteData = {
+                ...base,
+                vehicleFailure: {
+                  lat: payload.lat!,
+                  lng: payload.lng!,
+                  orderId: payload.orderId,
+                },
+                source: 'live',
+              };
+              dataRef.current = next;
+              return next;
+            });
+          });
+        },
+      );
     }
 
     return () => {

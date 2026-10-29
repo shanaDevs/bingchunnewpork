@@ -51,9 +51,15 @@ export type ResolvedLoyaltyCampaign = LoyaltyCampaignRow & {
 };
 
 export type CustomerOrderStats = {
+  /** Paid orders — used for Spin & Win unlock only. */
   validOrderCount: number;
   validOrderSubtotals: number[];
+  /** First paid order date (spin window). */
   firstOrderAt: Date | null;
+  /** Non-cancelled placed orders — Offer 1 / Offer 2 eligibility. */
+  placedOrderCount: number;
+  /** First placed order date — Offer 2 come-back window. */
+  firstPlacedOrderAt: Date | null;
   /** Offer 1 already on a non-cancelled order (including unpaid checkout). */
   offer1Claimed: boolean;
   /** Offer 2 already on a non-cancelled order (including unpaid checkout). */
@@ -271,6 +277,8 @@ function buildCustomerOrderStatsFromRows(
     validOrderCount: paidOrders.length,
     validOrderSubtotals: paidOrders.map((o) => o.subtotal),
     firstOrderAt: paidOrders[0]?.createdAt ?? null,
+    placedOrderCount: orders.length,
+    firstPlacedOrderAt: orders[0]?.createdAt ?? null,
     offer1Claimed,
     offer2Claimed,
   };
@@ -497,19 +505,19 @@ export function evaluateLoyaltyOffers(params: {
 
   if (
     campaign.offer1Enabled &&
-    stats.validOrderCount === 0 &&
+    stats.placedOrderCount === 0 &&
     !stats.offer1Claimed &&
     params.subtotal >= campaign.offer1MinSubtotal
   ) {
     cartDiscount = buildOffer1Discount(campaign, params.subtotal, params.channel);
   } else if (
     campaign.offer2Enabled &&
-    stats.validOrderCount === 1 &&
+    stats.placedOrderCount === 1 &&
     !stats.offer2Claimed &&
-    stats.firstOrderAt &&
+    stats.firstPlacedOrderAt &&
     params.subtotal >= campaign.offer2MinSubtotal
   ) {
-    const windowEnd = addDays(stats.firstOrderAt, campaign.offer2WindowDays);
+    const windowEnd = addDays(stats.firstPlacedOrderAt, campaign.offer2WindowDays);
     if (now <= windowEnd) {
       cartDiscount = buildOffer2Discount(campaign, params.subtotal, params.giftProduct);
     }
@@ -607,8 +615,8 @@ export async function getCustomerLoyaltyJourney(params: {
 
   let offer2WindowExpired = false;
   let offer2DaysLeft: number | null = null;
-  if (stats.validOrderCount === 1 && stats.firstOrderAt) {
-    const windowEnd = addDays(stats.firstOrderAt, campaign.offer2WindowDays);
+  if (stats.placedOrderCount === 1 && stats.firstPlacedOrderAt) {
+    const windowEnd = addDays(stats.firstPlacedOrderAt, campaign.offer2WindowDays);
     offer2WindowExpired = now > windowEnd;
     if (!offer2WindowExpired) {
       offer2DaysLeft = Math.max(
@@ -632,7 +640,7 @@ export async function getCustomerLoyaltyJourney(params: {
       detail: null,
       progress: null,
     });
-  } else if (stats.validOrderCount >= 1 || stats.offer1Claimed) {
+  } else if (stats.placedOrderCount >= 1 || stats.offer1Claimed) {
     steps.push({
       key: 'OFFER_1',
       stepNumber: 1,
@@ -679,7 +687,7 @@ export async function getCustomerLoyaltyJourney(params: {
       : offer2DiscountLabel;
     const baseDesc = `${rewardCopy} within ${campaign.offer2WindowDays} days of order 1`;
 
-    if (stats.validOrderCount >= 2 || stats.offer2Claimed) {
+    if (stats.placedOrderCount >= 2 || stats.offer2Claimed) {
       steps.push({
         key: 'OFFER_2',
         stepNumber: 2,
@@ -690,7 +698,7 @@ export async function getCustomerLoyaltyJourney(params: {
         detail: null,
         progress: null,
       });
-    } else if (stats.validOrderCount === 1 && offer2WindowExpired) {
+    } else if (stats.placedOrderCount === 1 && offer2WindowExpired) {
       steps.push({
         key: 'OFFER_2',
         stepNumber: 2,
@@ -701,7 +709,7 @@ export async function getCustomerLoyaltyJourney(params: {
         detail: null,
         progress: null,
       });
-    } else if (stats.validOrderCount === 1) {
+    } else if (stats.placedOrderCount === 1) {
       steps.push({
         key: 'OFFER_2',
         stepNumber: 2,
@@ -839,6 +847,8 @@ export async function evaluateLoyaltySpinAudience(params: {
         validOrderCount: 0,
         validOrderSubtotals: [],
         firstOrderAt: null,
+        placedOrderCount: 0,
+        firstPlacedOrderAt: null,
         offer1Claimed: false,
         offer2Claimed: false,
       };
@@ -866,6 +876,8 @@ export async function evaluateLoyaltyForStore(params: {
         validOrderCount: 0,
         validOrderSubtotals: [],
         firstOrderAt: null,
+        placedOrderCount: 0,
+        firstPlacedOrderAt: null,
         offer1Claimed: false,
         offer2Claimed: false,
       };

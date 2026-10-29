@@ -1,5 +1,6 @@
 'use client';
-import { getApiBaseUrl, getWebxpayReturnUrlHint } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
+import { getWebxpayReturnUrlHint } from '@/lib/apiBase';
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,20 +11,6 @@ import LoyaltyCampaignDashboard from '@/components/admin/loyalty/LoyaltyCampaign
 import PlatformDiscountPaybackSettings from '@/components/admin/PlatformDiscountPaybackSettings';
 import { isSuperAdmin, type AdminSession } from '@/lib/adminAuth';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-
-function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return data.data ?? data;
-  });
-}
 
 type MethodKey = 'PAYHERE' | 'CASH_AT_COUNTER';
 
@@ -187,7 +174,8 @@ export default function AdminSettingsPage() {
   const { data: messagingSettings } = useQuery({
     queryKey: ['admin-messaging-settings'],
     queryFn: () => adminFetch('/settings/messaging'),
-    enabled: superAdmin,
+    enabled: superAdmin && resolvedTab === 'messaging',
+    staleTime: 5 * 60_000,
   });
 
   const { data: whatsappLiveStatus } = useQuery({
@@ -197,8 +185,8 @@ export default function AdminSettingsPage() {
         token: { ok: boolean; status: string; detail: string; displayPhoneNumber?: string };
         lastInbound: { at: string; from: string; preview: string; source: string } | null;
       }>,
-    enabled: superAdmin,
-    refetchInterval: 30000,
+    enabled: superAdmin && resolvedTab === 'messaging',
+    refetchInterval: resolvedTab === 'messaging' ? 60_000 : false,
   });
 
   useEffect(() => {

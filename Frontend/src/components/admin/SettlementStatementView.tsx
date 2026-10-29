@@ -223,6 +223,7 @@ export default function SettlementStatementView({ statement, onClose }: Props) {
               <SettlementBreakdownCards
                 breakdown={breakdown}
                 totalCommission={statement.totalCommission}
+                platformPaybackAmount={statement.platformPaybackAmount}
                 orderCount={orderCount}
               />
 

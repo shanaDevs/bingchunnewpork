@@ -626,6 +626,33 @@ describe('getDashboardStats', () => {
         where: expect.objectContaining({ storeId: 'store-nugegoda' }),
       }),
     );
+    const countWheres = vi.mocked(prisma.order.count).mock.calls.map((call) => call[0]?.where);
+    const periodOrdersWhere = countWheres.find(
+      (where) => where?.storeId === 'store-nugegoda' && where.createdAt && !where.status,
+    );
+    const inProgressWhere = countWheres.find(
+      (where) =>
+        Array.isArray(where?.status?.in) && where.status.in.includes('PREPARING'),
+    );
+    expect(inProgressWhere).toEqual(
+      expect.objectContaining({
+        storeId: 'store-nugegoda',
+        createdAt: periodOrdersWhere?.createdAt,
+        status: { in: ['RECEIVED', 'PREPARING', 'READY'] },
+        OR: [
+          {
+            orderMode: 'TAKEAWAY',
+            OR: [{ paymentStatus: 'PAID' }, { paymentMethod: 'CASH_AT_COUNTER' }],
+          },
+          { orderMode: 'DELIVERY', paymentStatus: 'PAID' },
+        ],
+      }),
+    );
+    expect(
+      countWheres.some((where) =>
+        Array.isArray(where?.status?.in) && where.status.in.includes('OUT_FOR_DELIVERY'),
+      ),
+    ).toBe(false);
     expect(prisma.user.count).not.toHaveBeenCalled();
     expect(prisma.deliveryPayout.findMany).not.toHaveBeenCalled();
     expect(prisma.refund.aggregate).toHaveBeenCalledWith({

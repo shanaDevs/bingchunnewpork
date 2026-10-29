@@ -1,5 +1,5 @@
 'use client';
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -9,22 +9,6 @@ import CounterPaymentForm, { counterPaymentValid } from '@/components/admin/Coun
 import { formatMoney } from '@/lib/receipt';
 import { getAdminSession, isSuperAdmin, type AdminSession } from '@/lib/adminAuth';
 import type { Category, Product } from '@/types';
-
-const API_BASE = getApiBaseUrl();
-
-function adminFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    return fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
-  }).then(async (r) => {
-    const json = await r.json();
-    if (!r.ok) throw new Error(json.message || 'Request failed');
-    return (json.data ?? json) as T;
-  });
-}
 
 interface PosCartItem {
   cartId: string;

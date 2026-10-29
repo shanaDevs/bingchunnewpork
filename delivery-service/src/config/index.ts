@@ -13,7 +13,7 @@ if (process.env.NODE_ENV !== 'production' && process.env.DELIVERY_LOAD_BACKEND_E
 
 export const config = {
   // Prefer DELIVERY_PORT so a shared backend .env (PORT=4000) cannot steal this bind.
-  port: parseInt(process.env.DELIVERY_PORT || process.env.PORT || '4100', 10),
+  port: parseInt(process.env.DELIVERY_PORT || '4100', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   databaseUrl: process.env.DATABASE_URL || '',
   jwtSecret: process.env.JWT_SECRET || 'bingchun-dev-secret-change-in-prod',

@@ -388,53 +388,56 @@ export async function initSocket(server: HttpServer): Promise<SocketServer> {
     socket.on('joinAdmin', (payload: { adminId: string; storeId?: string }) => {
       if (!payload?.adminId) return;
 
-      void (async () => {
-        const token = readHandshakeToken(socket);
-        const jwtPayload = token ? verifyToken(token) : null;
+      const token = readHandshakeToken(socket);
+      const jwtPayload = token ? verifyToken(token) : null;
 
-        if (config.socketAuthEnforced) {
-          if (
-            !jwtPayload ||
-            jwtPayload.type !== 'admin' ||
-            jwtPayload.sub !== payload.adminId
-          ) {
-            logger.warn(`joinAdmin rejected for socket ${socket.id} (auth enforced)`);
-            socket.emit('socketError', { code: 'UNAUTHORIZED', message: 'Invalid socket auth for joinAdmin' });
-            return;
+      if (config.socketAuthEnforced) {
+        if (
+          !jwtPayload ||
+          jwtPayload.type !== 'admin' ||
+          jwtPayload.sub !== payload.adminId
+        ) {
+          // Throttle: reconnect storms previously logged this hundreds of times/min.
+          const rejects = ((socket.data.joinAdminRejects as number) || 0) + 1;
+          socket.data.joinAdminRejects = rejects;
+          if (rejects <= 2 || rejects % 25 === 0) {
+            logger.warn(`joinAdmin rejected for socket ${socket.id} (auth enforced, n=${rejects})`);
           }
-        } else {
-          logger.debug(`joinAdmin without enforced auth (deprecated) socket=${socket.id}`);
-        }
-
-        socket.join(`admin:${payload.adminId}`);
-        // stock:* events are also broadcast to this room (literal, not a glob).
-        socket.join('admin:*');
-        logger.debug(`Socket ${socket.id} joined admin:${payload.adminId} and admin:*`);
-
-        const admin = await prisma.adminUser.findUnique({
-          where: { id: payload.adminId },
-          select: { storeId: true, role: { select: { name: true } } },
-        });
-        if (admin?.role?.name === 'DELIVERY_ADMIN') {
-          socket.join('delivery-ops');
-          logger.debug(`Socket ${socket.id} joined delivery-ops`);
-        }
-
-        if (!payload.storeId) return;
-
-        if (jwtPayload?.role === 'SYSTEM_ADMIN') {
-          socket.join(`store:${payload.storeId}`);
+          socket.emit('socketError', { code: 'UNAUTHORIZED', message: 'Invalid socket auth for joinAdmin' });
+          if (rejects >= 3) {
+            socket.disconnect(true);
+          }
           return;
         }
+      } else {
+        logger.debug(`joinAdmin without enforced auth (deprecated) socket=${socket.id}`);
+      }
 
-        if (isBranchScopedRole(jwtPayload?.role)) {
-          if (admin?.storeId && admin.storeId === payload.storeId) {
-            socket.join(`store:${payload.storeId}`);
-          } else {
-            socket.emit('socketError', { code: 'FORBIDDEN', message: 'Cannot join another branch store room' });
-          }
+      socket.join(`admin:${payload.adminId}`);
+      // stock:* events are also broadcast to this room (literal, not a glob).
+      socket.join('admin:*');
+      logger.debug(`Socket ${socket.id} joined admin:${payload.adminId} and admin:*`);
+
+      // Prefer JWT claims — avoid Prisma on every join (P2024 under reconnect storms).
+      if (jwtPayload?.role === 'DELIVERY_ADMIN') {
+        socket.join('delivery-ops');
+        logger.debug(`Socket ${socket.id} joined delivery-ops`);
+      }
+
+      if (!payload.storeId) return;
+
+      if (jwtPayload?.role === 'SYSTEM_ADMIN' || jwtPayload?.role === 'DELIVERY_ADMIN') {
+        socket.join(`store:${payload.storeId}`);
+        return;
+      }
+
+      if (isBranchScopedRole(jwtPayload?.role)) {
+        if (jwtPayload?.storeId && jwtPayload.storeId === payload.storeId) {
+          socket.join(`store:${payload.storeId}`);
+        } else {
+          socket.emit('socketError', { code: 'FORBIDDEN', message: 'Cannot join another branch store room' });
         }
-      })();
+      }
     });
 
     socket.on('joinBranchPool', (payload: { storeIds: string[] }) => {

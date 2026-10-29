@@ -397,6 +397,7 @@ model Store {
   loyaltyCampaign      LoyaltyCampaign?
   spinWheelOffers      SpinWheelOffer[]
 
+  @@index([isActive, district])
   @@schema("public")
 
   @@map("stores")
@@ -430,6 +431,7 @@ model Category {
 
   products Product[]
 
+  @@index([isActive, sortOrder])
   @@schema("public")
 
   @@map("categories")
@@ -468,6 +470,7 @@ model Product {
   spinGifts   SpinWheelOffer[]
   loyaltyCampaignGifts LoyaltyCampaign[] @relation("LoyaltyCampaignGiftProduct")
 
+  @@index([categoryId, isAvailable, sortOrder])
   @@schema("public")
 
   @@map("products")
@@ -882,6 +885,8 @@ model Order {
   @@index([paymentStatus, createdAt])
   @@index([channel, createdAt])
   @@index([storeId, processedByAdminId, createdAt])
+  @@index([createdAt])
+  @@index([guestPhone, createdAt])
   @@schema("public")
 
   @@map("orders")
@@ -974,7 +979,7 @@ model OrderStatusEvent {
   actor AdminUser? @relation("OrderStatusEventActor", fields: [actorAdminId], references: [id], onDelete: SetNull)
 
   @@index([orderId, createdAt])
-  @@index([actorAdminId])
+  @@index([actorAdminId, createdAt])
   @@schema("public")
 
   @@map("order_status_events")

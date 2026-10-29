@@ -67,12 +67,61 @@ describe('aggregateSharedPromoUsageRows', () => {
         totalDiscountAmount: 100,
         branchShareAmount: 60,
         platformShareAmount: 40,
+        branchSharePct: 60,
+        platformSharePct: 40,
         contributionSource: null,
       },
     ]);
 
     expect(totals.platform).toBe(0);
     expect(totals.jason).toBe(4_000);
+  });
+
+  it('splits branch and platform shares to the cent from total and percentages', () => {
+    const totals = aggregateSharedPromoUsageRows([
+      {
+        totalDiscountAmount: 604,
+        branchShareAmount: 362,
+        platformShareAmount: 242,
+        branchSharePct: 60,
+        platformSharePct: 40,
+        contributionSource: 'PLATFORM',
+      },
+    ]);
+
+    expect(totals.totalDiscount).toBe(60_400);
+    expect(totals.branch).toBe(36_240);
+    expect(totals.platform).toBe(24_160);
+  });
+
+  it('handles uneven percentage splits (LKR 101 at 60%)', () => {
+    const totals = aggregateSharedPromoUsageRows([
+      {
+        totalDiscountAmount: 101,
+        branchShareAmount: 60,
+        platformShareAmount: 41,
+        branchSharePct: 60,
+        platformSharePct: 40,
+        contributionSource: 'PLATFORM',
+      },
+    ]);
+
+    expect(totals.branch).toBe(6_060);
+    expect(totals.platform).toBe(4_040);
+  });
+
+  it('falls back to stored share columns when percentages are missing', () => {
+    const totals = aggregateSharedPromoUsageRows([
+      {
+        totalDiscountAmount: 604,
+        branchShareAmount: 362,
+        platformShareAmount: 242,
+        contributionSource: 'PLATFORM',
+      },
+    ]);
+
+    expect(totals.branch).toBe(36_200);
+    expect(totals.platform).toBe(24_200);
   });
 });
 
@@ -83,6 +132,8 @@ describe('computeSharedPromoContribution', () => {
         totalDiscountAmount: 604,
         branchShareAmount: 362,
         platformShareAmount: 242,
+        branchSharePct: 60,
+        platformSharePct: 40,
         contributionSource: 'PLATFORM',
       },
     ] as never);
@@ -90,8 +141,8 @@ describe('computeSharedPromoContribution', () => {
     const result = await computeSharedPromoContribution('store-1', '2026-01-01', '2026-01-31');
 
     expect(result.sharedPromoTotalDiscount).toBe(60_400);
-    expect(result.sharedPromoBranchContributionAmount).toBe(36_200);
-    expect(result.sharedPromoPlatformContributionAmount).toBe(24_200);
+    expect(result.sharedPromoBranchContributionAmount).toBe(36_240);
+    expect(result.sharedPromoPlatformContributionAmount).toBe(24_160);
     expect(result.sharedPromoBranchContributionPct).toBe(60);
     expect(result.sharedPromoPlatformContributionPct).toBe(40);
   });

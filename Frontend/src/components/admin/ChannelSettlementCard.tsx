@@ -1,5 +1,6 @@
 'use client';
 
+import { formatCommissionRate } from '@/components/admin/commissionUtils';
 import type { SettlementPreview } from '@/components/admin/settlementTypes';
 import { formatMoneyAmount } from '@/lib/receipt';
 
@@ -76,6 +77,14 @@ export default function ChannelSettlementCard({
             </dd>
           </div>
         )}
+
+        <div className="flex items-center justify-between gap-2">
+          <dt className="text-[var(--color-text-muted)]">Commission</dt>
+          <dd className="font-semibold text-[var(--color-brand)]">
+            {money(row.commission)}
+            {row.rate > 0 ? ` @ ${formatCommissionRate(row.rate)}` : ''}
+          </dd>
+        </div>
 
         {customerConvenienceFee > 0.001 && (
           <div className="flex items-center justify-between gap-2">

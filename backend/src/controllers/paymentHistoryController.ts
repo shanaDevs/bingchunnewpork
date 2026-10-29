@@ -61,6 +61,7 @@ import {
 import { getWalletSummary } from '../lib/walletService';
 import { getConvenienceFeeRates } from '../lib/appSchema';
 import { generateCommissionSettlementInvoice } from '../lib/withdrawalInvoice';
+import { dateStringInColombo, todayDateString } from '../lib/datetime';
 
 const PROMOTION_PAYBACK_SELECT = {
   platformPaybackEligible: true,
@@ -144,19 +145,44 @@ function toDateStr(d: Date): string {
 }
 
 function defaultCurrentMonthPeriod() {
-  const now = new Date();
-  const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  return { from, to: toDateStr(now) };
+  const to = todayDateString();
+  const from = `${to.slice(0, 7)}-01`;
+  return { from, to };
 }
 
 function parsePeriodQuery(from?: string, to?: string) {
   if (!from && !to) return defaultCurrentMonthPeriod();
   if (!from || !to) throw new AppError('Both from and to dates are required', 400);
   if (from > to) throw new AppError('Start date must be on or before end date', 400);
-  const today = toDateStr(new Date());
+  const today = todayDateString();
   if (to > today) throw new AppError('End date cannot be in the future', 400);
   return { from, to };
 }
+
+function periodQueryToUtcBounds(from: string, to: string) {
+  return {
+    fromDate: new Date(`${from}T00:00:00.000Z`),
+    toDate: new Date(`${to}T23:59:59.999Z`),
+  };
+}
+
+const SETTLEMENT_PAYOUT_SELECT = {
+  id: true,
+  storeId: true,
+  statementRef: true,
+  createdAt: true,
+  totalCommission: true,
+  platformPaybackAmount: true,
+  paymentMethod: true,
+  receiptUrl: true,
+  invoiceRef: true,
+  invoiceUrl: true,
+  status: true,
+  periodFrom: true,
+  periodTo: true,
+  storeWithdrawalId: true,
+  store: { select: { name: true } },
+} as const;
 
 function isCurrentMonthPeriod(from: string, to: string) {
   const current = defaultCurrentMonthPeriod();
@@ -691,8 +717,8 @@ function mapSettlementToPayout(
     invoiceRef: settlement.invoiceRef ?? undefined,
     invoiceUrl: settlement.invoiceUrl ?? undefined,
     status: settlement.status,
-    periodFrom: toDateStr(settlement.periodFrom),
-    periodTo: toDateStr(settlement.periodTo),
+    periodFrom: dateStringInColombo(settlement.periodFrom),
+    periodTo: dateStringInColombo(settlement.periodTo),
     storeWithdrawalId,
     isAdvance,
     storeName: settlement.store.name,
@@ -714,6 +740,7 @@ function mapSettlementStatement(
     breakdown: unknown;
     totalCommission: Prisma.Decimal;
     totalProviderFee: Prisma.Decimal;
+    platformPaybackAmount?: Prisma.Decimal | null;
     storeWithdrawalId?: string | null;
     createdAt: Date;
     store: { name: string };
@@ -740,6 +767,8 @@ function mapSettlementStatement(
     breakdown: normalizeStoredSettlementBreakdown(settlement.breakdown),
     totalCommission: decimalFieldToCentsNumber(settlement.totalCommission) / 100,
     totalProviderFee: decimalFieldToCentsNumber(settlement.totalProviderFee) / 100,
+    platformPaybackAmount:
+      decimalFieldToCentsNumber(settlement.platformPaybackAmount ?? 0) / 100,
     totalOwed: decimalFieldToCentsNumber(settlement.totalCommission) / 100,
     submittedAt: settlement.createdAt.toISOString(),
   };
@@ -776,34 +805,29 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
       });
     }
 
-    const [paidOrders, settlements] = await Promise.all([
+    const { fromDate, toDate } = periodQueryToUtcBounds(from, to);
+
+    const [paidOrders, periodSettlements, allTimeSettlementRows] = await Promise.all([
       prisma.order.findMany({
         where: { storeId: { in: storeIds }, paymentStatus: 'PAID' },
         select: COMMISSION_ORDER_SELECT,
       }),
       prisma.commissionSettlement.findMany({
-        where: { storeId: { in: storeIds } },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-        select: {
-          id: true,
-          storeId: true,
-          statementRef: true,
-          createdAt: true,
-          totalCommission: true,
-          platformPaybackAmount: true,
-          paymentMethod: true,
-          receiptUrl: true,
-          invoiceRef: true,
-          invoiceUrl: true,
-          status: true,
-          periodFrom: true,
-          periodTo: true,
-          storeWithdrawalId: true,
-          store: { select: { name: true } },
+        where: {
+          storeId: { in: storeIds },
+          periodFrom: { lte: toDate },
+          periodTo: { gte: fromDate },
         },
+        orderBy: { createdAt: 'desc' },
+        select: SETTLEMENT_PAYOUT_SELECT,
+      }),
+      prisma.commissionSettlement.findMany({
+        where: { storeId: { in: storeIds }, status: { not: 'REJECTED' } },
+        select: { totalCommission: true, platformPaybackAmount: true },
       }),
     ]);
+
+    const settlements = periodSettlements;
 
     const linkedWithdrawalIds = settlements
       .map((s) => s.storeWithdrawalId)
@@ -838,9 +862,8 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
     const periodSubtotal = sumBreakdownRevenue(periodBreakdown);
     const slabInfo = slabInfoForPeriod(storeIds, from, to, periodBaseLookup, periodSubtotal);
 
-    const settlementRows = settlements.filter((s) => s.status !== 'REJECTED');
     const totalSettled =
-      settlementRows.reduce(
+      allTimeSettlementRows.reduce(
         (sum, s) => sum + decimalFieldToCentsNumber(s.totalCommission),
         0,
       ) / 100;
@@ -854,7 +877,7 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
         : computePendingDuesLkr({
             allTimeCommission,
             allTimePayback,
-            settlements: settlementRows.map((s) => ({
+            settlements: allTimeSettlementRows.map((s) => ({
               totalCommission: decimalFieldToCentsNumber(s.totalCommission),
               platformPaybackAmount: decimalFieldToCentsNumber(s.platformPaybackAmount),
             })),
@@ -1070,6 +1093,9 @@ export async function listPendingAllHandler(req: Request, res: Response, next: N
           );
 
           let dartCodesReceives: number;
+          let periodPlatformProviderReceivable: Awaited<
+            ReturnType<typeof resolveStoredPlatformProviderReceivable>
+          > | null = null;
           if (enrichedWithdrawals.length > 0) {
             dartCodesReceives = enrichedWithdrawals.reduce(
               (sum, w) => sum + w.dartCodesReceives,
@@ -1077,9 +1103,9 @@ export async function listPendingAllHandler(req: Request, res: Response, next: N
             );
           } else {
             const periodBreakdown = await computeBreakdownForPeriod(store.id, from, to);
-            const platformProviderReceivable =
+            periodPlatformProviderReceivable =
               await resolveStoredPlatformProviderReceivable(periodBreakdown);
-            dartCodesReceives = dartCodesReceivesLkrFromBreakdown(platformProviderReceivable);
+            dartCodesReceives = dartCodesReceivesLkrFromBreakdown(periodPlatformProviderReceivable);
           }
 
           const platformOwesBranch = netPlatformEarning < 0;
@@ -1098,6 +1124,7 @@ export async function listPendingAllHandler(req: Request, res: Response, next: N
             orderCount: sumBreakdownOrderCount(breakdown),
             hasOverlap: overlappingStoreIds.has(store.id),
             requiresPayout: withdrawals.length === 0,
+            platformProviderReceivable: periodPlatformProviderReceivable,
             unsettledWithdrawals: enrichedWithdrawals,
           };
         }),

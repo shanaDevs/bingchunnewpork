@@ -85,3 +85,6 @@ load-tests/reports/*
 # Graphify (knowledge graph for AI assistants)
 graphify-out/cost.json
 graphify-out/cache
+# Database dumps (contain customer data)
+backupdb/*
+!backupdb/.gitkeep

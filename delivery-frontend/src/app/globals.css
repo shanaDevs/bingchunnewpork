@@ -6809,6 +6809,18 @@
     }
   }
 
+  .actual-route-view__stage {
+    position: relative;
+    width: 100%;
+    background: var(--color-navy-light);
+  }
+
+  .actual-route-view__stage .delivery-map-wrap,
+  .actual-route-view__stage .leaflet-container {
+    height: 100%;
+    min-height: 520px;
+  }
+
   /* Cart add — mascot dance celebration */
   .cart-celebration__bubble {
     background: linear-gradient(135deg, var(--color-brand) 0%, var(--color-brand-light) 100%);

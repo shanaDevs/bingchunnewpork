@@ -1,7 +1,6 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import { useMemo, useState, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, Power, Search } from 'lucide-react';
@@ -9,19 +8,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import StoreAddressSearchField, { type StoreAddressSelection } from '@/components/admin/StoreAddressSearchField';
 import { groupStoresByDistrict } from '@/lib/groupStoresByDistrict';
-
-function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: adminAuthHeaders({ 'Content-Type': 'application/json', ...(options?.headers as Record<string, string> | undefined),
-    credentials: 'include',
-  }),
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return data.data ?? data;
-  });
-}
 
 const EMPTY = {
   name: '',

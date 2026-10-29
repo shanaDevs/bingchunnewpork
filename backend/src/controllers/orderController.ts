@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { ORDER_LIST_SCALARS } from '../lib/orderListSelect';
 import { success, paginated } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
 import {
@@ -2765,7 +2766,8 @@ export async function getAllOrders(req: Request, res: Response, next: NextFuncti
         orderBy,
         skip,
         take: l,
-        include: {
+        select: {
+          ...ORDER_LIST_SCALARS,
           items: {
             select: {
               productName: true,
