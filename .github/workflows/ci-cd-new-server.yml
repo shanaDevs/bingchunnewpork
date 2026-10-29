@@ -45,7 +45,7 @@ name: CI/CD (new server)
 on:
   push:
     branches:
-      - production
+      - staging
   workflow_dispatch:
     inputs:
       deploy_all:
