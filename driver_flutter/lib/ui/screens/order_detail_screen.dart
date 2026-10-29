@@ -459,44 +459,6 @@ class _OrderTopBar extends StatelessWidget {
                   ? const Color(0xFFF87171)
                   : const Color(0xFFFBBF24),
             ),
-      bottom: o == null
-          ? null
-          : Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _TopBarTag(icon: Icons.account_balance_wallet_outlined, label: o.paymentMethod),
-                _TopBarTag(
-                  icon: o.paymentStatus == 'PAID' ? Icons.check_circle_outline_rounded : Icons.schedule_rounded,
-                  label: o.paymentStatus,
-                ),
-              ],
-            ),
-    );
-  }
-}
-
-class _TopBarTag extends StatelessWidget {
-  const _TopBarTag({required this.icon, required this.label});
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(10)),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: Colors.white, size: 14),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
-          ),
-        ],
-      ),
     );
   }
 }
