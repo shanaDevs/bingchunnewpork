@@ -64,10 +64,14 @@ vi.mock('../../src/lib/promoOwnershipTotals', () => ({
   attachPromoOwnershipTotals: (breakdown: Record<string, unknown>) => breakdown,
 }));
 
+vi.mock('../../src/lib/walletTransactionInsert', () => ({
+  insertWalletLedgerRow: vi.fn(),
+}));
+
 import { prisma } from '../../src/lib/prisma';
+import { insertWalletLedgerRow } from '../../src/lib/walletTransactionInsert';
 import { computeBreakdownForPeriod, getOrCreateWallet, getWalletSummary } from '../../src/lib/walletService';
 import { approveWithdrawal } from '../../src/lib/withdrawalService';
-import { centsToDecimal } from '../helpers/moneyExpect';
 
 const asMock = <T>(fn: T) => fn as unknown as ReturnType<typeof vi.fn>;
 
@@ -103,6 +107,7 @@ function mockApprovalTransaction(
         .fn()
         .mockResolvedValueOnce([{ id: WITHDRAWAL_ID, status: lockedWithdrawalStatus }])
         .mockResolvedValueOnce([{ balance: 100_000, totalWithdrawn: 20_000 }]),
+      $executeRaw: vi.fn().mockResolvedValue(1),
       storeWallet: { update: vi.fn() },
       walletTransaction: { create: walletTransactionCreate },
       storeWithdrawal: {
@@ -170,27 +175,23 @@ describe('approveWithdrawal — FIN-003 SPPC ledger consistency', () => {
   });
 
   it('creates ADJUSTMENT then PAYOUT with a self-consistent balanceAfter chain when SPPC > 0', async () => {
-    const walletTransactionCreate = mockApprovalTransaction();
+    mockApprovalTransaction();
 
     await approveWithdrawal(WITHDRAWAL_ID, REVIEWER_ID, 'BANK_TRANSFER', '/proof.pdf');
 
-    expect(walletTransactionCreate).toHaveBeenCalledTimes(2);
-    expect(walletTransactionCreate.mock.calls[0][0]).toEqual(
+    expect(insertWalletLedgerRow).toHaveBeenCalledTimes(2);
+    expect(asMock(insertWalletLedgerRow).mock.calls[0][1]).toEqual(
       expect.objectContaining({
-        data: expect.objectContaining({
-          type: 'ADJUSTMENT',
-          amount: centsToDecimal(5_000),
-          balanceAfter: centsToDecimal(55_000),
-        }),
+        type: 'ADJUSTMENT',
+        amountCents: 5_000,
+        balanceAfterCents: 55_000,
       }),
     );
-    expect(walletTransactionCreate.mock.calls[1][0]).toEqual(
+    expect(asMock(insertWalletLedgerRow).mock.calls[1][1]).toEqual(
       expect.objectContaining({
-        data: expect.objectContaining({
-          type: 'PAYOUT',
-          amount: centsToDecimal(-55_000),
-          balanceAfter: centsToDecimal(50_000),
-        }),
+        type: 'PAYOUT',
+        amountCents: -55_000,
+        balanceAfterCents: 50_000,
       }),
     );
   });

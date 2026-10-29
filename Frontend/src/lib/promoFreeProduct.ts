@@ -80,6 +80,7 @@ export function showsFreeProductSummaryLine(
   if (items.length > 0 && isFreeProductPromoKind(reward?.promotionKind)) {
     return bogoOfferActiveInCart(reward as AppliedPromoReward, items);
   }
+  if (reward?.giftProduct || reward?.giftLabel) return true;
   return Boolean((reward?.discount ?? 0) > 0);
 }
 

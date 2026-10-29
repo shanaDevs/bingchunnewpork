@@ -805,7 +805,7 @@ export default function BranchWalletDetail({
             Math.max(0, (wallet.netTransferableEarnings ?? 0) - (wallet.totalWithdrawn ?? 0))
           }
           apiBase={apiBase}
-          onCompleted={() => {
+          onCompleted={(_meta) => {
             void Promise.all([fetchWallet(), fetchWithdrawals(1)]);
           }}
         />

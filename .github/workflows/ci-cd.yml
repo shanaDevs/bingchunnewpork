@@ -184,6 +184,7 @@ jobs:
           cp -R backend/src backend/package.json backend/tsconfig.json backend/docker-entrypoint.sh "$STAGE/backend/"
           if [ -d backend/prisma ]; then cp -R backend/prisma "$STAGE/backend/prisma"; fi
           if [ -d backend/public ]; then cp -R backend/public "$STAGE/backend/public"; fi
+          if [ -d backend/assets ]; then cp -R backend/assets "$STAGE/backend/assets"; fi
           sed -i 's/\r$//' "$STAGE/backend/docker-entrypoint.sh"
           chmod +x "$STAGE/backend/docker-entrypoint.sh"
           tar -czf /tmp/backend-deploy.tar -C "$STAGE" .

@@ -3,6 +3,7 @@
 import { Fragment, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, FileText, History, Image as ImageIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { Skeleton } from '@/components/ui/skeleton';
 import { formatMoneyAmount } from '@/lib/receipt';
 import { cn } from '@/lib/utils';
 import { openPayoutProof, openPayoutProofById, openWithdrawalInvoice } from '@/lib/adminProtectedFile';
@@ -108,6 +109,29 @@ function NoteCell({
 
 export const WITHDRAWAL_PAGE_SIZE = 10;
 
+const WITHDRAWAL_SKELETON_WIDTHS = ['w-20', 'w-28', 'w-24', 'w-16', 'w-16', 'w-20', 'w-24', 'w-28', 'w-24', 'w-12'] as const;
+
+function WithdrawalTableBodySkeleton({ colCount, rows = 6 }: { colCount: number; rows?: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, row) => (
+        <tr key={row} className="border-b border-[var(--color-navy-border)]/60 last:border-b-0">
+          {Array.from({ length: colCount }).map((__, col) => (
+            <td
+              key={col}
+              className={col >= 3 && col <= 4 ? 'px-5 py-3 text-right' : 'px-5 py-3'}
+            >
+              <Skeleton
+                className={`h-3.5 bg-[var(--color-navy-light)]/70 ${WITHDRAWAL_SKELETON_WIDTHS[col] ?? 'w-20'} ${col >= 3 && col <= 4 ? 'ml-auto' : ''}`}
+              />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export type WithdrawalPagination = {
   page: number;
   pages: number;
@@ -204,13 +228,7 @@ export default function WalletWithdrawalTable({
             </tr>
           </thead>
           <tbody>
-            {loading && (
-              <tr>
-                <td colSpan={colCount} className="px-5 py-10 text-center text-muted">
-                  Loading withdrawal history…
-                </td>
-              </tr>
-            )}
+            {loading && <WithdrawalTableBodySkeleton colCount={colCount} />}
             {!loading && rows.length === 0 && (
               <tr>
                 <td
@@ -224,7 +242,7 @@ export default function WalletWithdrawalTable({
                 </td>
               </tr>
             )}
-            {rows.map((row) => {
+            {!loading && rows.map((row) => {
               const breakdown = parseWithdrawalBreakdown(row.breakdown);
               const amounts = withdrawalAmountParts(row);
               const isExpanded = expandedId === row.id;

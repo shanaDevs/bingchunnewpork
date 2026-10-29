@@ -205,6 +205,7 @@ export function platformProviderReceivableInputFromBreakdownCents(
   breakdown: {
     commissionFee?: number;
     platformPaybackTotal?: number;
+    platformOwnedPromoDiscountTotal?: number;
     periodLoyaltyDiscountTotal?: number;
     sharedPromoPlatformContributionAmount?: number;
     convenienceFee?: number;
@@ -213,9 +214,11 @@ export function platformProviderReceivableInputFromBreakdownCents(
     gatewayRatePct?: number;
   },
 ): PlatformProviderReceivableInput {
+  const payback = breakdown.platformPaybackTotal ?? 0;
+  const owned = breakdown.platformOwnedPromoDiscountTotal ?? 0;
   return {
     commissionFeeCents: breakdown.commissionFee ?? 0,
-    platformPaybackCents: breakdown.platformPaybackTotal ?? 0,
+    platformPaybackCents: Math.max(payback, owned),
     loyaltyDiscountCents: breakdown.periodLoyaltyDiscountTotal ?? 0,
     sharedPromoPlatformCents: breakdown.sharedPromoPlatformContributionAmount ?? 0,
     normalConvenienceFeeCents: breakdown.convenienceFee ?? 0,

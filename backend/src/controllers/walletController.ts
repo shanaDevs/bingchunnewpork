@@ -251,8 +251,9 @@ export async function getPayoutPeriodInfoHandler(req: Request, res: Response, ne
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /admin/wallet/payouts-due
-// Super Admin queue: outstanding branch payout periods overlapping the wallet date range.
-// Optional query `from`/`to` (YYYY-MM-DD); when omitted, defaults to calendar month-to-date.
+// Super Admin queue: all elapsed unpaid branch payout periods (oldest first).
+// Optional query `from`/`to` are ignored (wallet month filter does not scope this list).
+// Optional `cursor` paginates active branches.
 // ──────────────────────────────────────────────────────────────────────────────
 function invalidateWalletPayoutsDueCache(): void {
   invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-payouts-due']));
@@ -1485,7 +1486,7 @@ export async function listWalletSecurityAuditLogsHandler(req: Request, res: Resp
 
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /admin/wallet/sync
-// Run full orders to wallets sync (SYSTEM_ADMIN only)
+// Reconcile missing paid-order credits; branch users are scoped to their store, system admin to all stores.
 // ──────────────────────────────────────────────────────────────────────────────
 export async function syncWallets(req: Request, res: Response, next: NextFunction) {
   try {

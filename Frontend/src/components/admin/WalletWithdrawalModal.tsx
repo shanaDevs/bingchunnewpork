@@ -18,6 +18,7 @@ import {
   computePeriodPayoutSplitLkr,
   parseWithdrawalBreakdown,
   parseWithdrawalBreakdownFromNetPreview,
+  mergeSharedPromoContributionFieldsIntoBreakdown,
   extractSharedPromoLkrFromBreakdown,
   resolvePlatformCommissionForPeriodLkr,
   resolvePeriodNetLkrFromBreakdown,
@@ -116,6 +117,27 @@ function netPreviewToChannelPreview(
       slabIndex: 0,
     },
   };
+}
+
+async function fetchNetPreviewMergedSharedPromoBreakdown(
+  apiBase: string,
+  stored: WithdrawalBreakdown,
+  from: string,
+  to: string,
+  storeId?: string,
+): Promise<WithdrawalBreakdown> {
+  const qs = new URLSearchParams({ from, to });
+  if (storeId) qs.set('storeId', storeId);
+  try {
+    const res = await fetch(`${apiBase}/admin/wallet/net-preview?${qs}`, withAdminCredentials());
+    const json = await res.json();
+    if (!res.ok) return stored;
+    const preview = parseWithdrawalBreakdownFromNetPreview(json.data);
+    if (!preview) return stored;
+    return mergeSharedPromoContributionFieldsIntoBreakdown(stored, preview);
+  } catch {
+    return stored;
+  }
 }
 
 export default function WalletWithdrawalModal({
@@ -271,8 +293,30 @@ export default function WalletWithdrawalModal({
     const hasFullSnapshot = parsed != null && !!parsed.channelBreakdown;
 
     if (viewPeriodOnly && hasFullSnapshot) {
-      setViewSnapshotLoading(false);
-      return;
+      if (!from || !to || !parsed) {
+        setViewSnapshotLoading(false);
+        return;
+      }
+
+      let cancelled = false;
+      setViewSnapshotLoading(true);
+      void fetchNetPreviewMergedSharedPromoBreakdown(
+        apiBase,
+        parsed,
+        from,
+        to,
+        viewWithdrawal.storeId ?? storeId,
+      )
+        .then((merged) => {
+          if (!cancelled) setBreakdown(merged);
+        })
+        .finally(() => {
+          if (!cancelled) setViewSnapshotLoading(false);
+        });
+
+      return () => {
+        cancelled = true;
+      };
     }
 
     if (viewPeriodOnly) {
@@ -296,13 +340,21 @@ export default function WalletWithdrawalModal({
           if (typeof data.gatewayRatePct === 'number') setGatewayRatePct(data.gatewayRatePct);
           setPaybackEnabled(Boolean(data.platformDiscountPaybackEnabled));
           if (typeof data.grossAmount === 'number') {
-            const nextBreakdown = parseWithdrawalBreakdownFromNetPreview(data);
-            setBreakdown(nextBreakdown);
-            setPeriodNet(
-              typeof data.netAmountLkr === 'number'
-                ? data.netAmountLkr
-                : resolvePeriodNetLkrFromBreakdown(nextBreakdown),
-            );
+            const previewBreakdown = parseWithdrawalBreakdownFromNetPreview(data);
+            const storedParsed = parseWithdrawalBreakdown(viewWithdrawal.breakdown);
+            if (storedParsed?.grossAmount != null && previewBreakdown) {
+              setBreakdown(
+                mergeSharedPromoContributionFieldsIntoBreakdown(storedParsed, previewBreakdown),
+              );
+              setPeriodNet(resolvePeriodNetLkrFromBreakdown(storedParsed));
+            } else {
+              setBreakdown(previewBreakdown);
+              setPeriodNet(
+                typeof data.netAmountLkr === 'number'
+                  ? data.netAmountLkr
+                  : resolvePeriodNetLkrFromBreakdown(previewBreakdown),
+              );
+            }
           }
           if (typeof data.totalSalesLkr === 'number') {
             setTierPreview({
@@ -351,6 +403,19 @@ export default function WalletWithdrawalModal({
         if (!fresh || fresh.id !== viewWithdrawal.id) return;
         setResolvedViewWithdrawal(fresh);
         applyViewWithdrawalSnapshot(fresh);
+        const parsedFresh = parseWithdrawalBreakdown(fresh.breakdown);
+        const periodFrom = toDateInputValue(fresh.periodFrom);
+        const periodTo = toDateInputValue(fresh.periodTo);
+        if (parsedFresh && periodFrom && periodTo) {
+          const merged = await fetchNetPreviewMergedSharedPromoBreakdown(
+            apiBase,
+            parsedFresh,
+            periodFrom,
+            periodTo,
+            fresh.storeId ?? storeId,
+          );
+          if (!cancelled) setBreakdown(merged);
+        }
       })
       .catch(() => {
         // keep snapshot from table row

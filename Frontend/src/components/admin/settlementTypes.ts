@@ -307,6 +307,29 @@ export function hasSharedPromoAmounts(promo: SharedPromoBreakdownLkr): boolean {
   );
 }
 
+const SHARED_PROMO_BREAKDOWN_FIELD_KEYS = [
+  'sharedPromoTotalDiscount',
+  'sharedPromoBranchContributionPct',
+  'sharedPromoBranchContributionAmount',
+  'sharedPromoPlatformContributionPct',
+  'sharedPromoPlatformContributionAmount',
+  'sharedPromoJasonContributionPct',
+  'sharedPromoJasonContributionAmount',
+] as const satisfies ReadonlyArray<keyof WithdrawalBreakdown>;
+
+/** Refresh cent-accurate shared-promo splits from net preview without changing locked payout math fields. */
+export function mergeSharedPromoContributionFieldsIntoBreakdown(
+  stored: WithdrawalBreakdown,
+  preview: WithdrawalBreakdown,
+): WithdrawalBreakdown {
+  const merged: WithdrawalBreakdown = { ...stored };
+  for (const key of SHARED_PROMO_BREAKDOWN_FIELD_KEYS) {
+    const value = preview[key];
+    if (value != null) merged[key] = value;
+  }
+  return merged;
+}
+
 /** Compact payout reference for Jason ledger and admin tables. */
 export function formatWithdrawalPayoutRef(
   storeWithdrawalId: string,
@@ -422,6 +445,7 @@ export function resolvePlatformCommissionForPeriodLkr(params: {
   periodBreakdownLkr: {
     platformPaybackTotal?: number;
     periodLoyaltyDiscountTotal?: number;
+    platformOwnedPromoDiscountTotal?: number;
     netPlatformEarning?: number;
     refundConvenienceFee?: number;
     rejectedRefundConvenienceFee?: number;
@@ -435,6 +459,7 @@ export function resolvePlatformCommissionForPeriodLkr(params: {
     paybackEnabled: params.paybackEnabled,
     sharedPromoPlatformLkr: params.sharedPromoPlatformLkr ?? 0,
     loyaltyDiscountLkr: params.periodBreakdownLkr?.periodLoyaltyDiscountTotal ?? 0,
+    platformOwnedPromoDiscountLkr: params.periodBreakdownLkr?.platformOwnedPromoDiscountTotal,
     netPlatformEarningLkr: params.periodBreakdownLkr?.netPlatformEarning,
   });
   return resolveNetPlatformCommissionWithRefundFeesLkr({
@@ -685,6 +710,7 @@ export type SettlementStatement = {
   totalCommission: number;
   totalProviderFee: number;
   totalOwed: number;
+  platformPaybackAmount?: number;
   submittedAt: string;
   slabInfo?: SlabInfo;
   monthlySlabInfo?: MonthlySlabInfo[];
@@ -905,6 +931,36 @@ export function resolveCommissionPaybackLkr(params: {
   return params.platformPaybackTotal ?? 0;
 }
 
+/** Platform-owned promo not already counted in store payback (LKR). */
+export function resolveExtraPlatformOwnedDeductionLkr(params: {
+  platformOwnedPromoDiscountLkr?: number;
+  commissionPaybackLkr?: number;
+}): number {
+  const owned = params.platformOwnedPromoDiscountLkr ?? 0;
+  const payback = params.commissionPaybackLkr ?? 0;
+  return Math.max(0, roundLkr(owned - payback));
+}
+
+/** Platform + shared platform shares shown as "- Platform Discounts" on the financial report. */
+export function resolvePlatformDiscountsReportLkr(params: {
+  platformOwnedPromoDiscountLkr?: number;
+  commissionPaybackLkr: number;
+  sharedPromoPlatformLkr: number;
+}): number {
+  const owned = params.platformOwnedPromoDiscountLkr ?? 0;
+  const platformDeduct = Math.max(params.commissionPaybackLkr, owned);
+  return roundLkr(platformDeduct + params.sharedPromoPlatformLkr);
+}
+
+/** Max(platform-owned, payback) deducted from commission before shared promo & loyalty. */
+export function resolvePlatformPromoCommissionDeductionLkr(params: {
+  platformOwnedPromoDiscountLkr?: number;
+  commissionPaybackLkr: number;
+}): number {
+  const owned = params.platformOwnedPromoDiscountLkr ?? 0;
+  return Math.max(params.commissionPaybackLkr, owned);
+}
+
 /** Branch commission after platform payback — matches Net commission in payout calculation. */
 export function resolveNetCommissionLkr(params: {
   commissionLkr: number;
@@ -925,16 +981,33 @@ export function resolveNetPlatformCommissionLkr(params: {
   paybackEnabled: boolean;
   sharedPromoPlatformLkr?: number;
   loyaltyDiscountLkr?: number;
+  platformOwnedPromoDiscountLkr?: number;
   /** Prefer API snapshot when available (already includes SPPC platform deduction). */
   netPlatformEarningLkr?: number | null;
 }): number {
+  const commissionPaybackLkr = resolveCommissionPaybackLkr({
+    paybackEnabled: params.paybackEnabled,
+    platformPaybackTotal: params.platformPaybackTotal,
+  });
+  const extraOwned = resolveExtraPlatformOwnedDeductionLkr({
+    platformOwnedPromoDiscountLkr: params.platformOwnedPromoDiscountLkr,
+    commissionPaybackLkr,
+  });
+
   if (params.netPlatformEarningLkr != null) {
-    return params.netPlatformEarningLkr;
+    return roundLkr(params.netPlatformEarningLkr - extraOwned);
   }
-  return (
-    resolveNetCommissionLkr(params) -
-    (params.sharedPromoPlatformLkr ?? 0) -
-    (params.loyaltyDiscountLkr ?? 0)
+
+  const platformPromoDeduct = resolvePlatformPromoCommissionDeductionLkr({
+    platformOwnedPromoDiscountLkr: params.platformOwnedPromoDiscountLkr,
+    commissionPaybackLkr,
+  });
+
+  return roundLkr(
+    params.commissionLkr -
+      platformPromoDeduct -
+      (params.sharedPromoPlatformLkr ?? 0) -
+      (params.loyaltyDiscountLkr ?? 0),
   );
 }
 
@@ -1111,6 +1184,7 @@ export function computePeriodPayoutNetFromPreview(params: {
   periodBreakdownLkr: {
     commissionFee: number;
     platformPaybackTotal?: number;
+    platformOwnedPromoDiscountTotal?: number;
     periodDiscountsTotal?: number;
     periodLoyaltyDiscountTotal?: number;
     netPlatformEarning?: number;
@@ -1144,6 +1218,7 @@ export function computePeriodPayoutNetFromPreview(params: {
     paybackEnabled: params.paybackEnabled,
     sharedPromoPlatformLkr,
     loyaltyDiscountLkr: period.periodLoyaltyDiscountTotal,
+    platformOwnedPromoDiscountLkr: period.platformOwnedPromoDiscountTotal,
     netPlatformEarningLkr: period.netPlatformEarning,
   });
 

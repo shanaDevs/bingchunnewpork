@@ -48,6 +48,7 @@ import {
   type RollingPeriodOption,
 } from '@/lib/biweeklyPeriods';
 import { confirmDialog } from '@/store/confirmStore';
+import type { BranchPayoutCompletedMeta } from '@/lib/branchPayoutsDue';
 
 type PaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CHECK' | '';
 
@@ -59,7 +60,7 @@ type Props = {
   walletBalance: number;
   availableBalance: number;
   apiBase: string;
-  onCompleted: () => void;
+  onCompleted: (meta: BranchPayoutCompletedMeta) => void;
   /** When opening from Payouts Due, lock the modal to that period instead of the oldest pending one. */
   presetPeriodFrom?: string | null;
   presetPeriodTo?: string | null;
@@ -538,8 +539,12 @@ export default function AdminInitiatePayoutModal({
         });
       }
 
-      toast.success('Payout completed — invoice generated');
-      onCompleted();
+      toast.success(`Branch payout successful — ${branchName}`);
+      onCompleted({
+        storeId,
+        periodFrom: dateFrom,
+        periodTo: dateTo,
+      });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to initiate payout');

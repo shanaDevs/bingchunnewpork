@@ -56,6 +56,7 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/backend/dist ./backend/dist
 COPY --from=builder /app/backend/package.json ./backend/package.json
 COPY backend/public ./backend/public
+COPY backend/assets ./backend/assets
 COPY backend/docker-entrypoint.sh ./backend/docker-entrypoint.sh
 
 RUN chmod +x backend/docker-entrypoint.sh && chown -R bingchun:bingchun /app

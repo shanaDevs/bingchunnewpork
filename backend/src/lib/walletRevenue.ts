@@ -270,7 +270,11 @@ export function summarizeOrderRevenueFromGroups(
 export async function fetchSummarizedPaidOrderRevenue(where: Prisma.OrderWhereInput) {
   const groups = await prisma.order.groupBy({
     by: ['orderMode', 'paymentMethod'],
-    where: { ...where, paymentStatus: 'PAID' },
+    where: {
+      ...where,
+      paymentStatus: 'PAID',
+      status: { not: 'CANCELLED' },
+    },
     _sum: { total: true },
   });
   return summarizeOrderRevenueFromGroups(
