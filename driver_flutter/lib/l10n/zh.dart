@@ -390,6 +390,7 @@ const Map<String, String> zhStrings = {
   'What happened? (optional)': '发生了什么？（选填）',
   'Reporting…': '正在报告…',
   'Report failure': '报告故障',
+  'Failure': '故障',
   'Request branch change': '申请更换门店',
   'Super admin will review this request. Only one pending request at a time.': '超级管理员将审核此申请。同一时间只能有一个待处理申请。',
   'Request type': '申请类型',

@@ -404,6 +404,12 @@ class _OrderDetailBodyState extends State<_OrderDetailBody> {
                             Intents.navigateTo(order.lat!, order.lng!, label: order.customerName);
                           }
                         },
+                        extra: RoundActionIcon(
+                          caption: tr('Failure'),
+                          icon: Icons.error_outline_rounded,
+                          tint: red,
+                          onTap: () => _reportFailure(vm, order),
+                        ),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -416,28 +422,12 @@ class _OrderDetailBodyState extends State<_OrderDetailBody> {
                       onPressed: () => _markDelivered(vm, order),
                     ),
                     const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: RunOutlineButton(
-                            label: tr('Report failure'),
-                            icon: Icons.error_outline_rounded,
-                            color: red,
-                            enabled: canAct,
-                            onPressed: () => _reportFailure(vm, order),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: RunOutlineButton(
-                            label: tr('Raise complaint'),
-                            icon: Icons.feedback_outlined,
-                            color: c.warning,
-                            enabled: canAct,
-                            onPressed: () => _raiseComplaint(vm, order),
-                          ),
-                        ),
-                      ],
+                    RunOutlineButton(
+                      label: tr('Raise complaint'),
+                      icon: Icons.feedback_outlined,
+                      color: c.warning,
+                      enabled: canAct,
+                      onPressed: () => _raiseComplaint(vm, order),
                     ),
                   ],
                 ),
