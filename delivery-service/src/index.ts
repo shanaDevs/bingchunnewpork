@@ -20,6 +20,7 @@ import {
 } from './jobs/coreIntegrationConsumer';
 import { assertProductionSecrets } from './lib/productionSecrets';
 import { isReady, runReadinessChecks } from './lib/readiness';
+import { buildMicroserviceCorsAllowlist } from '@bingchun/cors';
 
 const app = express();
 const server = http.createServer(app);
@@ -38,17 +39,32 @@ if (process.env.TRUST_PROXY !== undefined) {
 const deliveryFrontendOrigin =
   process.env.DELIVERY_FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3100';
 
+const corsAllowlist = Array.from(
+  new Set([
+    ...buildMicroserviceCorsAllowlist({
+      frontendUrl: config.frontendUrl,
+      adminUrl: config.adminUrl,
+    }),
+    deliveryFrontendOrigin,
+    'https://bingchunsrilanka.com',
+    'https://www.bingchunsrilanka.com',
+    'https://bing-chun.bc.dartcodes.com',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:3100',
+  ]),
+);
+
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(
   cors({
-    origin: [
-      config.frontendUrl,
-      config.adminUrl,
-      deliveryFrontendOrigin,
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:3100',
-    ],
+    origin: (origin, callback) => {
+      if (!origin || corsAllowlist.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
     credentials: true,
   })
 );

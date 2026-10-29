@@ -141,21 +141,44 @@ function isBingChunSurfaceWebOrigin(origin: string): boolean {
   }
 }
 
+function isLiveShopHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    host === 'bingchunsrilanka.com'
+    || host === 'www.bingchunsrilanka.com'
+    || host === 'bing-chun.bc.dartcodes.com'
+  );
+}
+
 function isAllowedFrontendOrigin(origin: string): boolean {
-  const canonical = canonicalizeFrontendUrl(origin);
-  if (isBackendApiOrigin(canonical)) return false;
-  if (productionCorsOrigins().includes(canonical)) return true;
-  if (isBingChunSurfaceWebOrigin(canonical)) return true;
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) return false;
+  if (isBackendApiOrigin(normalized)) return false;
+
+  // Match raw + canonical forms — CapRover may still have FRONTEND_URL on the
+  // old shop host while the browser sends https://bingchunsrilanka.com.
+  const allowlist = new Set(productionCorsOrigins());
+  if (allowlist.has(normalized)) return true;
+
+  const canonical = canonicalizeFrontendUrl(normalized);
+  if (!isBackendApiOrigin(canonical) && allowlist.has(canonical)) return true;
+  if (isBingChunSurfaceWebOrigin(canonical) || isBingChunSurfaceWebOrigin(normalized)) return true;
+
+  try {
+    if (isLiveShopHostname(new URL(normalized).hostname)) return true;
+  } catch {
+    /* ignore */
+  }
 
   const configured = getEffectiveFrontendUrl();
-  if (canonical === configured) return true;
+  if (canonical === configured || normalized === configured) return true;
 
   if (isProductionDeployment()) {
     return false;
   }
 
-  if (isLocalhostOrigin(origin)) return true;
-  if (/^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/i.test(origin)) return true;
+  if (isLocalhostOrigin(normalized)) return true;
+  if (/^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/i.test(normalized)) return true;
   return false;
 }
 
