@@ -13,6 +13,7 @@ import { resolveBranchPayoutDisplay } from '@/components/admin/branchPayoutDispl
 import PayoutBreakdownPanel from '@/components/admin/PayoutBreakdownPanel';
 import {
   buildSettlementPreviewFromChannelBreakdown,
+  channelBreakdownHasSalesActivity,
   computePeriodPayoutNetFromPreview,
   computePeriodPayoutSplitLkr,
   parseWithdrawalBreakdown,
@@ -124,7 +125,7 @@ export default function WalletApproveWithdrawalModal({
       : (preview?.orderCount ?? 0);
   const showChannelTable =
     channelTableData != null &&
-    channelTableOrderCount > 0 &&
+    (channelTableOrderCount > 0 || channelBreakdownHasSalesActivity(channelTableData)) &&
     (channelBreakdown != null || !previewLoading);
   const storedBreakdownLkr = breakdown ? withdrawalBreakdownToLkr(breakdown) : null;
   const liveBreakdownLkr = periodNet ? withdrawalBreakdownToLkr(periodNet) : null;
