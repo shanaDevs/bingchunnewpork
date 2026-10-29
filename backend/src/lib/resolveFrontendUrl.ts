@@ -10,7 +10,7 @@ import { buildConfiguredCorsOrigins, isLocalhostOrigin, normalizeOrigin } from '
 export const CUSTOMER_SHOP_URL =
   process.env.LIVE_SHOP_URL?.replace(/\/$/, '')
   || process.env.FRONTEND_URL?.replace(/\/$/, '')
-  || 'https://bing-chung.mp.dartcodes.com';
+  || 'https://bingchunsrilanka.com';
 
 const LIVE_SHOP = CUSTOMER_SHOP_URL;
 
@@ -29,6 +29,13 @@ const LEGACY_DEAD_HOSTNAME_PATTERNS = [
   /^bing-chun\.bc\.dartcodes\.com$/i,
 ];
 
+/** Always-allowlisted live shop hosts (custom domain + CapRover default). */
+const LIVE_SHOP_ORIGINS = [
+  'https://bingchunsrilanka.com',
+  'https://www.bingchunsrilanka.com',
+  'https://bing-chun.bc.dartcodes.com',
+];
+
 function productionCorsOrigins(): string[] {
   const extras = [
     process.env.CORS_EXTRA_ORIGINS,
@@ -38,6 +45,7 @@ function productionCorsOrigins(): string[] {
     DELIVERY_ADMIN_ORIGIN,
     ADMIN_WEB_ORIGIN,
     POS_WEB_ORIGIN,
+    ...LIVE_SHOP_ORIGINS,
   ].filter((value): value is string => Boolean(value?.trim()));
 
   return buildConfiguredCorsOrigins({
