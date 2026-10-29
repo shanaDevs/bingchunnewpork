@@ -25,6 +25,7 @@ import { useAdminJobLiveRoute } from '@/hooks/useAdminJobLiveRoute';
 import DeliveryRouteTimeline, {
   deliveryRouteTimelineHeadingExtra,
 } from '@/components/admin/DeliveryRouteTimeline';
+import { jobSupportsActualRouteReplay } from '@/lib/deliveryStopProgress';
 import {
   Table,
   TableBody,
@@ -260,7 +261,7 @@ export default function AdminDeliveryJobDrawer({
 
   const resolvedStoreId = job?.store?.id ?? storeId;
   const isLiveMapJob = Boolean(job && LIVE_MAP_STATUSES.has(job.status));
-  const isCompletedJob = job?.status === 'COMPLETED';
+  const supportsActualRouteReplay = Boolean(job && jobSupportsActualRouteReplay(job.status));
   const liveRoute = useAdminJobLiveRoute({
     jobId,
     storeId: resolvedStoreId,
@@ -269,7 +270,7 @@ export default function AdminDeliveryJobDrawer({
   });
 
   useEffect(() => {
-    if (!open || !isCompletedJob || !jobId) {
+    if (!open || !supportsActualRouteReplay || !jobId) {
       setActualOverlay(null);
       setActualNotice(null);
       return;
@@ -292,7 +293,7 @@ export default function AdminDeliveryJobDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, isCompletedJob, jobId, resolvedStoreId]);
+  }, [open, supportsActualRouteReplay, jobId, resolvedStoreId]);
 
   useEffect(() => {
     if (!open) return;
@@ -444,10 +445,14 @@ export default function AdminDeliveryJobDrawer({
     ? deliveryRouteTimelineHeadingExtra(job.orders, job.status)
     : null;
 
-  const overlayPath = isLiveMapJob ? liveRoute.path : isCompletedJob ? (actualOverlay?.path ?? []) : [];
+  const overlayPath = isLiveMapJob
+    ? liveRoute.path
+    : supportsActualRouteReplay
+      ? (actualOverlay?.path ?? [])
+      : [];
   const overlayLabel = isLiveMapJob ? 'Live' : 'Actual';
   const overlayNotice = isLiveMapJob ? liveRoute.notice : actualNotice;
-  const showPathOverlay = isLiveMapJob || isCompletedJob;
+  const showPathOverlay = isLiveMapJob || supportsActualRouteReplay;
   const vehicleFailurePosition =
     liveRoute.vehicleFailure ??
     (job?.vehicleFailure
@@ -571,7 +576,7 @@ export default function AdminDeliveryJobDrawer({
                       <p className="mt-0.5 text-xs text-muted">
                         {isLiveMapJob
                           ? 'Planned route with live driver path'
-                          : isCompletedJob
+                          : supportsActualRouteReplay
                             ? 'Planned route with recorded GPS path'
                             : 'Branch, delivery stops and return route'}
                       </p>

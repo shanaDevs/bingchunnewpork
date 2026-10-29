@@ -1,21 +1,31 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
+import { adminApiFetch } from '@/lib/adminApi';
 
 import { useQuery } from '@tanstack/react-query';
+import dynamic from 'next/dynamic';
 import { ArrowLeft, Clock, Loader2, MapPin } from 'lucide-react';
-import { getApiBaseUrl } from '@/lib/apiBase';
-import AdminActualRouteMap, { type ActualRoutePayload } from '@/components/admin/AdminActualRouteMap';
+import type { ActualRoutePayload } from '@/components/admin/AdminActualRouteMap';
+
+const MAP_STAGE_CLASS = 'actual-route-view__stage min-h-[520px] h-[min(72vh,720px)]';
+
+const AdminActualRouteMap = dynamic(() => import('@/components/admin/AdminActualRouteMap'), {
+  ssr: false,
+  loading: () => (
+    <div
+      className={`${MAP_STAGE_CLASS} flex items-center justify-center bg-navy-light text-sm text-muted`}
+    >
+      <Loader2 size={20} className="mr-2 animate-spin" />
+      Loading map…
+    </div>
+  ),
+});
 
 async function fetchActualRoute(jobId: string, storeId: string): Promise<ActualRoutePayload> {
-    const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  const res = await fetch(`${getApiBaseUrl()}/admin/delivery-jobs/${jobId}/actual-route${qs}`, {
-    headers: adminAuthHeaders(),
-    credentials: 'include',
-  });
-  const json = await res.json();
-  if (!json.success) throw new Error(json.message || 'Failed to load actual route');
-  return json.data as ActualRoutePayload;
+  const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
+  return adminApiFetch<ActualRoutePayload>(
+    `/admin/delivery-jobs/${encodeURIComponent(jobId)}/actual-route${qs}`,
+  );
 }
 
 type Props = {
@@ -74,7 +84,7 @@ export default function AdminActualRouteView({ jobId, storeId, onBack }: Props) 
       </div>
 
       {isLoading ? (
-        <div className="flex min-h-[520px] items-center justify-center p-8 text-muted">
+        <div className={`${MAP_STAGE_CLASS} flex items-center justify-center p-8 text-muted`}>
           <Loader2 size={20} className="mr-2 animate-spin" />
           Loading actual route…
         </div>
@@ -92,8 +102,8 @@ export default function AdminActualRouteView({ jobId, storeId, onBack }: Props) 
               No GPS trace recorded — showing branch and stop pins only.
             </div>
           ) : null}
-          <div className="min-h-[520px]">
-            <AdminActualRouteMap route={data} className="min-h-[520px]" />
+          <div className={MAP_STAGE_CLASS}>
+            <AdminActualRouteMap route={data} className="h-full w-full" />
           </div>
         </>
       )}
