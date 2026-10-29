@@ -186,12 +186,14 @@ describe('buildPayoutStatementFromBreakdown', () => {
         grossAmount: 100_000,
         commissionFee: 10_000,
         platformPaybackTotal: 8_000,
+        platformOwnedPromoDiscountTotal: 8_000,
         sharedPromoPlatformContributionAmount: 0,
       },
       90_000,
       false,
     );
-    expect(statement.platformDiscountsReportCents).toBe(0);
+    expect(statement.platformDiscountsReportCents).toBe(8_000);
+    expect(statement.netPlatformAmountCents).toBe(2_000);
   });
 });
 

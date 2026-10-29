@@ -248,7 +248,8 @@ router.get('/wallet/net-preview', requirePermission('WALLET', 'read'), walletCon
 router.get('/wallet/cancelled-by-branch-orders', requirePermission('WALLET', 'read'), walletController.getCancelledByBranchOrdersHandler);
 router.get('/wallet/payout-details', requirePermission('WALLET', 'read'), walletController.getPayoutDetailsBatch);
 router.get('/wallet/payout-detail/:transactionId', requirePermission('WALLET', 'read'), walletController.getPayoutDetail);
-router.post('/wallet/sync', requirePermission('WALLET', 'update'), walletController.syncWallets);
+// Store-scoped reconcile (branch managers); manual balance edits use POST /wallet/:storeId/adjust (update).
+router.post('/wallet/sync', requirePermission('WALLET', 'read'), walletController.syncWallets);
 router.post(
   '/wallet/:storeId/initiate-payout',
   requireSystemAdmin,

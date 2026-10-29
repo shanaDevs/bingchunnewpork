@@ -1,6 +1,6 @@
 'use client';
 
-import MonthPickerSelect from '@/components/admin/MonthPickerSelect';
+import MonthPickerSelect, { currentMonthKey } from '@/components/admin/MonthPickerSelect';
 import {
   todayDateStr,
   type WalletPeriodFilterApi,
@@ -37,7 +37,7 @@ export default function WalletPeriodFilterBar({ filter, className = '' }: Props)
       )}
     >
       <MonthPickerSelect
-        value={draftMonth}
+        value={monthDisabled ? draftMonth : draftMonth || currentMonthKey()}
         onChange={selectMonth}
         disabled={monthDisabled}
         className="h-10 w-[172px] min-w-[172px] rounded-[10px] text-[13px]"

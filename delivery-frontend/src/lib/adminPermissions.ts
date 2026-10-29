@@ -149,7 +149,7 @@ function resolveSavedPermission(
     return saved;
   }
 
-  if (saved) {
+  if (saved && !isEmptyPermission(saved)) {
     return withMenu(menu, saved);
   }
 
@@ -161,15 +161,24 @@ function resolveSavedPermission(
   return undefined;
 }
 
+function liveDriversMenuAccess(
+  permissions: Record<string, { canCreate?: boolean; canRead?: boolean; canUpdate?: boolean; canDelete?: boolean }>,
+  action: 'canCreate' | 'canRead' | 'canUpdate' | 'canDelete',
+): boolean {
+  const live = permissions.LIVE_DRIVERS;
+  const hasLiveKey = Object.prototype.hasOwnProperty.call(permissions, 'LIVE_DRIVERS');
+  if (hasLiveKey && live && (live.canCreate || live.canRead || live.canUpdate || live.canDelete)) {
+    return !!live[action];
+  }
+  return !!permissions.DELIVERY?.[action];
+}
+
 export function hasMenuReadAccess(
   permissions: Record<string, { canRead?: boolean }>,
   menuKey: string,
 ): boolean {
   if (menuKey === 'LIVE_DRIVERS') {
-    if (Object.prototype.hasOwnProperty.call(permissions, 'LIVE_DRIVERS')) {
-      return !!permissions.LIVE_DRIVERS?.canRead;
-    }
-    return !!permissions.DELIVERY?.canRead;
+    return liveDriversMenuAccess(permissions, 'canRead');
   }
   return !!permissions[menuKey]?.canRead;
 }
@@ -179,10 +188,7 @@ export function hasMenuCreateAccess(
   menuKey: string,
 ): boolean {
   if (menuKey === 'LIVE_DRIVERS') {
-    if (Object.prototype.hasOwnProperty.call(permissions, 'LIVE_DRIVERS')) {
-      return !!permissions.LIVE_DRIVERS?.canCreate;
-    }
-    return !!permissions.DELIVERY?.canCreate;
+    return liveDriversMenuAccess(permissions, 'canCreate');
   }
   return !!permissions[menuKey]?.canCreate;
 }
@@ -192,10 +198,7 @@ export function hasMenuUpdateAccess(
   menuKey: string,
 ): boolean {
   if (menuKey === 'LIVE_DRIVERS') {
-    if (Object.prototype.hasOwnProperty.call(permissions, 'LIVE_DRIVERS')) {
-      return !!permissions.LIVE_DRIVERS?.canUpdate;
-    }
-    return !!permissions.DELIVERY?.canUpdate;
+    return liveDriversMenuAccess(permissions, 'canUpdate');
   }
   return !!permissions[menuKey]?.canUpdate;
 }
@@ -205,10 +208,7 @@ export function hasMenuDeleteAccess(
   menuKey: string,
 ): boolean {
   if (menuKey === 'LIVE_DRIVERS') {
-    if (Object.prototype.hasOwnProperty.call(permissions, 'LIVE_DRIVERS')) {
-      return !!permissions.LIVE_DRIVERS?.canDelete;
-    }
-    return !!permissions.DELIVERY?.canDelete;
+    return liveDriversMenuAccess(permissions, 'canDelete');
   }
   return !!permissions[menuKey]?.canDelete;
 }
@@ -261,12 +261,6 @@ export function serializePermissionsMap(
   ).filter((permission) => {
     const hasAny =
       permission.canCreate || permission.canRead || permission.canUpdate || permission.canDelete;
-    if (hasAny) return true;
-
-    const delivery = permissionsMap.DELIVERY;
-    const deliveryGranted =
-      delivery?.canCreate || delivery?.canRead || delivery?.canUpdate || delivery?.canDelete;
-
-    return permission.menu === 'LIVE_DRIVERS' && Boolean(deliveryGranted);
+    return hasAny;
   });
 }

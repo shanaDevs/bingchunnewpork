@@ -3,7 +3,6 @@
 import { adminAuthHeaders } from '@/lib/adminSession';
 import { getApiBaseUrl } from '@/lib/apiBase';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -94,9 +93,8 @@ function formatWithdrawalPeriod(from: string | null, to: string | null): string 
   return formatBiweeklyPeriodLabel(from, to);
 }
 
-function branchPaymentHistoryHref(storeId: string, from: string, to: string) {
-  const qs = new URLSearchParams({ storeId, from, to });
-  return `/admin/payment-history?${qs.toString()}`;
+function branchReceivableExpandKey(storeId: string) {
+  return `branch:${storeId}`;
 }
 
 function extractPlatformProviderReceivableLkr(
@@ -207,18 +205,33 @@ function WithdrawalBreakdownPanel({ withdrawal }: { withdrawal: UnsettledWithdra
   );
 }
 
+function PeriodReceivablePanel({
+  receivableLkr,
+}: {
+  receivableLkr: PlatformProviderReceivableLkr | null | undefined;
+}) {
+  if (!receivableLkr) {
+    return (
+      <p className="py-3 text-sm text-[var(--color-text-muted)]">
+        Platform provider receivable is not available for this period preview.
+      </p>
+    );
+  }
+
+  return (
+    <div>
+      <PlatformProviderReceivable breakdownLkr={receivableLkr} className="mb-0" />
+    </div>
+  );
+}
+
 type ProcessPaymentRequestTableRowProps = {
   dateRangeText: string;
   branchName: string;
   totalReceivableLkr: number;
   remarks?: string | null;
-  storeId: string;
-  rangeFrom: string;
-  rangeTo: string;
-  onClose: () => void;
   isExpanded?: boolean;
   onToggleReceivable?: () => void;
-  showReceivableToggle?: boolean;
   selection?: {
     checked: boolean;
     disabled?: boolean;
@@ -233,13 +246,8 @@ function ProcessPaymentRequestTableRow({
   branchName,
   totalReceivableLkr,
   remarks,
-  storeId,
-  rangeFrom,
-  rangeTo,
-  onClose,
   isExpanded = false,
   onToggleReceivable,
-  showReceivableToggle = false,
   selection,
   expandedContent,
 }: ProcessPaymentRequestTableRowProps) {
@@ -281,21 +289,15 @@ function ProcessPaymentRequestTableRow({
                 aria-label={selection.ariaLabel}
               />
             )}
-            <Link
-              href={branchPaymentHistoryHref(storeId, rangeFrom, rangeTo)}
-              onClick={onClose}
-              className="process-payment-modal__request-action-btn"
-            >
-              View branch
-            </Link>
-            {showReceivableToggle && onToggleReceivable && (
+            {onToggleReceivable && (
               <button
                 type="button"
                 onClick={onToggleReceivable}
                 className="process-payment-modal__request-action-btn"
+                aria-expanded={isExpanded}
               >
                 {isExpanded ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
-                Receivable
+                View receivable
               </button>
             )}
           </div>
@@ -955,18 +957,31 @@ export default function ProcessPaymentBulkModal({
 
                   {!loading && activeTab === 'payout-required' && branchesAwaitingPayout.length > 0 && (
                     <ProcessPaymentRequestTable>
-                      {branchesAwaitingPayout.map((row) => (
-                        <ProcessPaymentRequestTableRow
-                          key={row.storeId}
-                          dateRangeText={periodLabel}
-                          branchName={row.storeName}
-                          totalReceivableLkr={row.dartCodesReceives ?? row.periodCommission}
-                          storeId={row.storeId}
-                          rangeFrom={rangeFrom}
-                          rangeTo={rangeTo}
-                          onClose={onClose}
-                        />
-                      ))}
+                      {branchesAwaitingPayout.map((row) => {
+                        const expandKey = branchReceivableExpandKey(row.storeId);
+                        const isExpanded = !!expanded[expandKey];
+
+                        return (
+                          <ProcessPaymentRequestTableRow
+                            key={row.storeId}
+                            dateRangeText={periodLabel}
+                            branchName={row.storeName}
+                            totalReceivableLkr={row.dartCodesReceives ?? row.periodCommission}
+                            isExpanded={isExpanded}
+                            onToggleReceivable={() =>
+                              setExpanded((prev) => ({
+                                ...prev,
+                                [expandKey]: !prev[expandKey],
+                              }))
+                            }
+                            expandedContent={
+                              <PeriodReceivablePanel
+                                receivableLkr={row.platformProviderReceivable?.lkr}
+                              />
+                            }
+                          />
+                        );
+                      })}
                     </ProcessPaymentRequestTable>
                   )}
 
@@ -986,12 +1001,7 @@ export default function ProcessPaymentBulkModal({
                             branchName={row.storeName}
                             totalReceivableLkr={row.dartCodesReceives}
                             remarks={withdrawal.remarks}
-                            storeId={row.storeId}
-                            rangeFrom={rangeFrom}
-                            rangeTo={rangeTo}
-                            onClose={onClose}
                             isExpanded={isExpanded}
-                            showReceivableToggle
                             onToggleReceivable={() =>
                               setExpanded((prev) => ({
                                 ...prev,
@@ -1021,12 +1031,7 @@ export default function ProcessPaymentBulkModal({
                             branchName={row.storeName}
                             totalReceivableLkr={row.dartCodesReceives}
                             remarks={withdrawal.remarks}
-                            storeId={row.storeId}
-                            rangeFrom={rangeFrom}
-                            rangeTo={rangeTo}
-                            onClose={onClose}
                             isExpanded={isExpanded}
-                            showReceivableToggle
                             onToggleReceivable={() =>
                               setExpanded((prev) => ({
                                 ...prev,

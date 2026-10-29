@@ -216,7 +216,7 @@ export default function PromoOffersPanel({
     const stillOk = pool.some((o) => o.code.toUpperCase() === reward.code.toUpperCase());
     if (!stillOk) {
       // Quiet clear — B1G1 must be able to auto-apply again when the product returns.
-      if (isFreeProductPromoKind(reward.promotionKind)) {
+      if (isFreeProductPromoKind(reward.promotionKind) || isLoyaltyCampaignOffer(reward)) {
         clearReward();
       } else {
         dismissReward();

@@ -1,8 +1,8 @@
-'use client';
+﻿'use client';
 
 import { getApiBaseUrl } from '@/lib/apiBase';
-import { Suspense, useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { Suspense, useEffect, useState, useCallback, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Wallet, RefreshCw, AlertCircle, ArrowDownToLine, Shield } from 'lucide-react';
@@ -11,8 +11,6 @@ import BranchWalletDetailModal from '@/components/admin/BranchWalletDetailModal'
 import AdminInitiatePayoutModal from '@/components/admin/AdminInitiatePayoutModal';
 import WalletWithdrawalModal from '@/components/admin/WalletWithdrawalModal';
 import {
-  WITHDRAWAL_PAGE_SIZE,
-  type WithdrawalPagination,
   type WithdrawalRow,
 } from '@/components/admin/WalletWithdrawalTable';
 import BranchWalletTabs from '@/components/admin/BranchWalletTabs';
@@ -22,41 +20,32 @@ import {
   duePeriodFocusFromRow,
   type DuePeriodFocus,
 } from '@/components/admin/payoutPeriodView';
-import type { BranchWalletDashboard } from '@/components/admin/BranchWalletSummaryCards';
 import type { StoreWallet } from '@/components/admin/SuperAdminSystemWalletTab';
 import WalletPeriodFilterBar from '@/components/admin/WalletPeriodFilterBar';
-import { currentMonthPeriod, useWalletPeriodFilter } from '@/components/admin/useWalletPeriodFilter';
+import {
+  adminWalletOverviewQueryKey,
+  adminWalletWithdrawalsQueryKey,
+  useWalletPeriodFilter,
+} from '@/components/admin/useWalletPeriodFilter';
+import {
+  fetchAdminWalletOverview,
+  fetchAdminWalletWithdrawals,
+  type WalletSummary,
+} from '@/lib/adminWalletOverview';
 import {
   fetchPayoutPeriods,
   payoutPeriodsQueryKey,
 } from '@/components/admin/BranchPayoutPeriodsSection';
 import toast from 'react-hot-toast';
 import { adminAuthHeaders } from '@/lib/adminSession';
+import { normalizeWithdrawalFromApi } from '@/lib/moneyString';
 import {
-  normalizeStoreWalletFromApi,
-  normalizeWalletSummaryFromApi,
-  normalizeWithdrawalFromApi,
-} from '@/lib/moneyString';
-
-type PeriodBranchReport = {
-  storeId: string;
-  storeName: string;
-  totalIn: number;
-  pickupOnlineIn: number;
-  deliveryCardIn: number;
-  totalOut: number;
-  currentBalance: number;
-};
-
-interface WalletSummary {
-  storeId: string;
-  currentBalance: number;
-  totalEarnings: number;
-  netTransferableEarnings: number;
-  totalWithdrawn: number;
-  pendingWithdrawalTotal: number;
-  availableBalance: number;
-}
+  branchPayoutsDueQueryKey,
+  fetchBranchPayoutsDue,
+  refreshBranchPayoutsDueQueries,
+  removePaidBranchFromPayoutsDueCache,
+  type BranchPayoutCompletedMeta,
+} from '@/lib/branchPayoutsDue';
 
 function branchDisplayName(name: string) {
   return name.replace(/^Bing Chun\s*[-–]\s*/i, '').trim() || name;
@@ -93,249 +82,129 @@ function WalletOverviewPageContent() {
         ? periodFrom
         : `${periodFrom} → ${periodTo}`
       : null;
-  const [admin, setAdmin] = useState<AdminSession | null>(null);
-  const [wallets, setWallets] = useState<StoreWallet[]>([]);
-  const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null);
-  const [walletDashboard, setWalletDashboard] = useState<BranchWalletDashboard | null>(null);
-  const [periodBranchReports, setPeriodBranchReports] = useState<PeriodBranchReport[]>([]);
-  const [periodLoading, setPeriodLoading] = useState(false);
-  const [withdrawals, setWithdrawals] = useState<WithdrawalRow[]>([]);
-  const [pendingWithdrawals, setPendingWithdrawals] = useState<WithdrawalRow[]>([]);
-  const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
-  const [withdrawalPage, setWithdrawalPage] = useState(1);
-  const [withdrawalPagination, setWithdrawalPagination] = useState<WithdrawalPagination | null>(null);
+  const [admin] = useState<AdminSession | null>(() => getAdminSession());
+  const withdrawalPeriodKey = `${periodFrom ?? ''}|${periodTo ?? ''}`;
+  const [withdrawalPageByPeriod, setWithdrawalPageByPeriod] = useState<Record<string, number>>({});
+  const withdrawalPage = withdrawalPageByPeriod[withdrawalPeriodKey] ?? 1;
+  const setWithdrawalPage = useCallback(
+    (page: number) => {
+      setWithdrawalPageByPeriod((prev) => ({ ...prev, [withdrawalPeriodKey]: page }));
+    },
+    [withdrawalPeriodKey],
+  );
   const [withdrawalModalOpen, setWithdrawalModalOpen] = useState(false);
   const [viewWithdrawalTarget, setViewWithdrawalTarget] = useState<WithdrawalRow | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [branchWalletTarget, setBranchWalletTarget] = useState<StoreWallet | null>(null);
   const [duePeriodFocus, setDuePeriodFocus] = useState<DuePeriodFocus | null>(null);
   const [autoInitiatePayout, setAutoInitiatePayout] = useState(false);
   const [initiatePayoutTarget, setInitiatePayoutTarget] = useState<StoreWallet | null>(null);
-  const [duePayouts, setDuePayouts] = useState<PayoutDueRow[]>([]);
-  const [duePayoutsLoading, setDuePayoutsLoading] = useState(false);
-  const [duePayoutsLoadingMore, setDuePayoutsLoadingMore] = useState(false);
   const [initiatePayoutPreset, setInitiatePayoutPreset] = useState<{
     periodFrom: string;
     periodTo: string;
     days: number;
   } | null>(null);
   const [payoutPeriodsRefresh, setPayoutPeriodsRefresh] = useState(0);
-  const duePayoutsFetchStarted = useRef(false);
-  const duePayoutsRequest = useRef(0);
 
   const apiBase = getApiBaseUrl();
   const dueTabActive = searchParams.get('tab') === 'due';
-
-  async function readApiError(res: Response, fallback: string): Promise<string> {
-    try {
-      const json = (await res.json()) as { message?: string };
-      const detail = json.message ? `${res.status}: ${json.message}` : String(res.status);
-      return `${fallback} (${detail})`;
-    } catch {
-      return `${fallback} (${res.status})`;
-    }
-  }
-
-  const fetchWallets = useCallback(async () => {
-    setError(null);
-    setPeriodLoading(isFiltered);
-    try {
-      const qs =
-        isFiltered && periodFrom && periodTo
-          ? `?${new URLSearchParams({ from: periodFrom, to: periodTo })}`
-          : '';
-      const res = await fetch(`${apiBase}/admin/wallet${qs}`, {
-        headers: adminAuthHeaders(),
-        credentials: 'include',
-      });
-      if (!res.ok) throw new Error(await readApiError(res, 'Failed to load wallet data'));
-      const json = await res.json();
-      setWallets(json.data.wallets ?? []);
-      setWalletSummary(json.data.summary ?? null);
-      setWalletDashboard(json.data.dashboard ?? null);
-      if (isFiltered) {
-        setPeriodBranchReports((json.data.periodBranchReports ?? []) as PeriodBranchReport[]);
-      } else {
-        setPeriodBranchReports([]);
-      }
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load wallets');
-    } finally {
-      setPeriodLoading(false);
-    }
-  }, [apiBase, isFiltered, periodFrom, periodTo]);
-
-  const payoutsDuePeriod = useMemo(() => {
-    if (isFiltered && periodFrom && periodTo) {
-      return { from: periodFrom, to: periodTo };
-    }
-    return currentMonthPeriod();
-  }, [isFiltered, periodFrom, periodTo]);
-
-  const fetchDuePayouts = useCallback(async (opts?: { preserve?: boolean }) => {
-    const preserve = opts?.preserve === true;
-    const requestId = ++duePayoutsRequest.current;
-    if (preserve) {
-      setDuePayoutsLoading(false);
-      setDuePayoutsLoadingMore(true);
-    } else {
-      setDuePayoutsLoading(true);
-      setDuePayoutsLoadingMore(false);
-      setDuePayouts([]);
-    }
-    const accumulated: PayoutDueRow[] = [];
-    let cursor: string | null = null;
-    let first = true;
-    const sortDueRows = (rows: PayoutDueRow[]) =>
-      [...rows].sort(
-        (a, b) => a.periodTo.localeCompare(b.periodTo) || a.storeName.localeCompare(b.storeName),
-      );
-    try {
-      for (;;) {
-        if (duePayoutsRequest.current !== requestId) return;
-        const qs = new URLSearchParams({
-          from: payoutsDuePeriod.from,
-          to: payoutsDuePeriod.to,
-        });
-        if (cursor) qs.set('cursor', cursor);
-        const res = await fetch(`${apiBase}/admin/wallet/payouts-due?${qs}`, {
-          headers: adminAuthHeaders(), credentials: 'include',
-        });
-        if (duePayoutsRequest.current !== requestId) return;
-        if (!res.ok) return;
-        const json = await res.json();
-        const page = (json.data ?? {}) as {
-          items?: PayoutDueRow[];
-          nextCursor?: string | null;
-          done?: boolean;
-        };
-        accumulated.push(...(page.items ?? []));
-        if (duePayoutsRequest.current !== requestId) return;
-        const incoming = sortDueRows(accumulated);
-        const nextCursor = page.nextCursor ?? null;
-        const done = page.done || !nextCursor || nextCursor === cursor;
-        if (preserve && !done) {
-          const seen = new Set(incoming.map((row) => `${row.storeId}|${row.periodFrom}|${row.periodTo}`));
-          setDuePayouts((current) =>
-            sortDueRows([
-              ...current.filter((row) => !seen.has(`${row.storeId}|${row.periodFrom}|${row.periodTo}`)),
-              ...incoming,
-            ]),
-          );
-        } else {
-          setDuePayouts(incoming);
-        }
-        if (first) {
-          setDuePayoutsLoading(false);
-          first = false;
-        }
-        if (done) {
-          setDuePayoutsLoadingMore(false);
-          return;
-        }
-        setDuePayoutsLoadingMore(true);
-        cursor = nextCursor;
-      }
-    } catch {
-      // non-critical
-    } finally {
-      if (duePayoutsRequest.current === requestId) {
-        setDuePayoutsLoading(false);
-        setDuePayoutsLoadingMore(false);
-      }
-    }
-  }, [apiBase, payoutsDuePeriod.from, payoutsDuePeriod.to]);
-
-  const loadDuePayoutsIfNeeded = useCallback(() => {
-    duePayoutsFetchStarted.current = true;
-    void fetchDuePayouts();
-  }, [fetchDuePayouts]);
+  const urlFrom = searchParams.get('from');
+  const urlTo = searchParams.get('to');
 
   useEffect(() => {
-    if (!duePayoutsFetchStarted.current) return;
-    void fetchDuePayouts();
-    // Only refetch when the applied wallet period changes (not when fetchDuePayouts identity changes).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payoutsDuePeriod.from, payoutsDuePeriod.to]);
-
-  const fetchWithdrawals = useCallback(async (page = 1) => {
-    setWithdrawalsLoading(true);
-    try {
-      const historyQs = new URLSearchParams({
-        page: String(page),
-        limit: String(WITHDRAWAL_PAGE_SIZE),
-      });
-      const pendingQs = new URLSearchParams({
-        status: 'PENDING',
-        limit: '50',
-      });
-      if (isFiltered && periodFrom && periodTo) {
-        historyQs.set('from', periodFrom);
-        historyQs.set('to', periodTo);
-        pendingQs.set('from', periodFrom);
-        pendingQs.set('to', periodTo);
-      }
-      const [historyRes, pendingRes] = await Promise.all([
-        fetch(`${apiBase}/admin/wallet/withdrawals?${historyQs}`, {
-          headers: adminAuthHeaders(), credentials: 'include',
-        }),
-        fetch(`${apiBase}/admin/wallet/withdrawals?${pendingQs}`, {
-          headers: adminAuthHeaders(), credentials: 'include',
-        }),
-      ]);
-      if (historyRes.ok) {
-        const json = await historyRes.json();
-        const items = (json.data?.items ?? []).map((row: WithdrawalRow) =>
-          normalizeWithdrawalFromApi(row),
-        );
-        setWithdrawals(items);
-        setWithdrawalPagination(
-          json.data?.pagination ?? {
-            page,
-            limit: WITHDRAWAL_PAGE_SIZE,
-            total: items.length,
-            pages: Math.max(1, Math.ceil(items.length / WITHDRAWAL_PAGE_SIZE)),
-          },
-        );
-        setWithdrawalPage(page);
-      }
-      if (pendingRes.ok) {
-        const json = await pendingRes.json();
-        setPendingWithdrawals(json.data?.items ?? []);
-      }
-    } catch {
-      // non-critical
-    } finally {
-      setWithdrawalsLoading(false);
-    }
-  }, [apiBase, isFiltered, periodFrom, periodTo]);
-
-  useEffect(() => {
-    const session = getAdminSession();
-    if (!session) {
+    if (!admin) {
       router.replace('/admin/login');
-      return;
     }
-    if (isSuperAdmin(session) && !searchParams.get('from') && !searchParams.get('to')) {
-      const { from, to } = currentMonthPeriod();
-      const params = new URLSearchParams(searchParams.toString());
-      params.set('from', from);
-      params.set('to', to);
-      router.replace(`/admin/wallet?${params.toString()}`, { scroll: false });
-      return;
-    }
-    setAdmin(session);
-    setLoading(true);
-    void fetchWallets().finally(() => setLoading(false));
-    void fetchWithdrawals(1);
-  }, [fetchWallets, fetchWithdrawals, router, searchParams]);
+  }, [admin, router]);
+
+  const superAdminNeedsDefaultPeriod =
+    admin != null && isSuperAdmin(admin) && !(urlFrom && urlTo);
+
+  const walletOverviewQuery = useQuery({
+    queryKey: adminWalletOverviewQueryKey(periodFrom, periodTo),
+    queryFn: ({ signal }) => fetchAdminWalletOverview(apiBase, periodFrom, periodTo, signal),
+    enabled: !!admin && !superAdminNeedsDefaultPeriod,
+  });
+
+  const branchAdminSession = admin != null && !isSuperAdmin(admin);
+
+  const withdrawalsQuery = useQuery({
+    queryKey: adminWalletWithdrawalsQueryKey(periodFrom, periodTo, withdrawalPage),
+    queryFn: ({ signal }) =>
+      fetchAdminWalletWithdrawals(
+        apiBase,
+        periodFrom,
+        periodTo,
+        withdrawalPage,
+        normalizeWithdrawalFromApi,
+        signal,
+      ),
+    enabled: branchAdminSession,
+  });
+
+  const overviewData = walletOverviewQuery.data;
+  const wallets = useMemo(() => overviewData?.wallets ?? [], [overviewData?.wallets]);
+  const walletSummary = overviewData?.summary ?? null;
+  const walletDashboard = overviewData?.dashboard ?? null;
+  const periodBranchReports = useMemo(
+    () => overviewData?.periodBranchReports ?? [],
+    [overviewData?.periodBranchReports],
+  );
+  const withdrawals = withdrawalsQuery.data?.withdrawals ?? [];
+  const pendingWithdrawals = withdrawalsQuery.data?.pendingWithdrawals ?? [];
+  const withdrawalPagination = withdrawalsQuery.data?.pagination ?? null;
+  const withdrawalsLoading =
+    withdrawalsQuery.isLoading || withdrawalsQuery.isFetching;
+
+  const error =
+    walletOverviewQuery.error instanceof Error
+      ? walletOverviewQuery.error.message
+      : walletOverviewQuery.error
+        ? 'Failed to load wallets'
+        : null;
+
+  const loading = walletOverviewQuery.isLoading;
+  const periodLoading = walletOverviewQuery.isFetching;
+  const dashboardLoading = loading || periodLoading;
+
+  const invalidateWalletData = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['admin-wallet-overview'] });
+    void queryClient.invalidateQueries({ queryKey: ['admin-wallet-withdrawals'] });
+  }, [queryClient]);
+
+  const superAdminSession = admin != null && isSuperAdmin(admin);
+
+  const branchPayoutsDueQuery = useQuery({
+    queryKey: branchPayoutsDueQueryKey(),
+    queryFn: ({ signal }) => fetchBranchPayoutsDue(apiBase, signal),
+    enabled: superAdminSession && dueTabActive && Boolean(periodFrom && periodTo),
+    staleTime: 45_000,
+  });
+
+  const duePayouts = branchPayoutsDueQuery.data ?? [];
+  const duePayoutsLoading =
+    branchPayoutsDueQuery.isLoading ||
+    (branchPayoutsDueQuery.isFetching && !branchPayoutsDueQuery.isFetched);
+  const duePayoutsLoadingMore =
+    branchPayoutsDueQuery.isFetching &&
+    branchPayoutsDueQuery.isFetched &&
+    !branchPayoutsDueQuery.isLoading;
 
   const invalidateBranchPayoutsDue = useCallback(() => {
-    void fetchDuePayouts({ preserve: true });
-  }, [fetchDuePayouts]);
+    void refreshBranchPayoutsDueQueries(queryClient);
+  }, [queryClient]);
+
+  const handleBranchPayoutCompleted = useCallback(
+    async (meta: BranchPayoutCompletedMeta) => {
+      setInitiatePayoutTarget(null);
+      setInitiatePayoutPreset(null);
+      removePaidBranchFromPayoutsDueCache(queryClient, meta);
+      invalidateWalletData();
+      await refreshBranchPayoutsDueQueries(queryClient);
+    },
+    [queryClient, invalidateWalletData],
+  );
 
   useEffect(() => {
     if (!admin || isSuperAdmin(admin)) return;
@@ -357,11 +226,8 @@ function WalletOverviewPageContent() {
     });
   }, [isFiltered, periodBranchReports, wallets]);
 
-  const dashboardLoading = loading || periodLoading;
-
   const handleSync = async () => {
     setSyncing(true);
-    setError(null);
     try {
       const res = await fetch(`${apiBase}/admin/wallet/sync`, {
         method: 'POST',
@@ -371,23 +237,21 @@ function WalletOverviewPageContent() {
       if (!res.ok) throw new Error(json.message || 'Sync failed');
       const added = json.data?.ordersAdded ?? 0;
       toast.success(json.message || (added > 0 ? `Synced ${added} order(s)` : 'Wallet is up to date'));
-      setLoading(true);
       await Promise.all([
-        fetchWallets(),
-        fetchWithdrawals(withdrawalPage),
-        ...(isSuperAdmin(admin) && dueTabActive ? [fetchDuePayouts({ preserve: true })] : []),
-      ]).finally(() => {
-        setLoading(false);
-        if (!isSuperAdmin(admin)) {
-          setPayoutPeriodsRefresh((n) => n + 1);
-          const storeId = walletSummary?.storeId ?? wallets[0]?.storeId;
-          if (storeId) {
-            void queryClient.invalidateQueries({ queryKey: payoutPeriodsQueryKey(storeId) });
-          }
+        invalidateWalletData(),
+        ...(isSuperAdmin(admin) && dueTabActive
+          ? [queryClient.invalidateQueries({ queryKey: ['branch-payouts-due'] })]
+          : []),
+      ]);
+      if (!isSuperAdmin(admin)) {
+        setPayoutPeriodsRefresh((n) => n + 1);
+        const storeId = walletSummary?.storeId ?? wallets[0]?.storeId;
+        if (storeId) {
+          void queryClient.invalidateQueries({ queryKey: payoutPeriodsQueryKey(storeId) });
         }
-      });
+      }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Sync failed');
+      toast.error(e instanceof Error ? e.message : 'Sync failed');
     } finally {
       setSyncing(false);
     }
@@ -544,7 +408,7 @@ function WalletOverviewPageContent() {
             withdrawalsLoading={withdrawalsLoading}
             storeNames={storeNameMap}
             withdrawalPagination={withdrawalPagination}
-            onPageChange={(p) => fetchWithdrawals(p)}
+            onPageChange={(p) => setWithdrawalPage(p)}
             onViewWithdrawal={(row) => setViewWithdrawalTarget(row)}
             hideDelivery={pickupOnly}
             tabActions={walletTabActions}
@@ -578,7 +442,6 @@ function WalletOverviewPageContent() {
             duePayoutsLoadingMore={duePayoutsLoadingMore}
             onViewDuePayout={handleViewDuePayout}
             onReviewDuePayout={handleReviewDuePayout}
-            onDueTabOpen={loadDuePayoutsIfNeeded}
             tabActions={walletTabActions}
           />
         </Suspense>
@@ -596,7 +459,10 @@ function WalletOverviewPageContent() {
           availableBalance={Math.max(0, netRemainingBalance)}
           storeId={branchSummary?.storeId}
           apiBase={apiBase}
-          onSubmitted={() => Promise.all([fetchWallets(), fetchWithdrawals(1)])}
+          onSubmitted={() => {
+            invalidateWalletData();
+            return Promise.resolve();
+          }}
         />
       )}
 
@@ -644,14 +510,8 @@ function WalletOverviewPageContent() {
             )
           }
           apiBase={apiBase}
-          onCompleted={() => {
-            setInitiatePayoutTarget(null);
-            setInitiatePayoutPreset(null);
-            void Promise.all([
-              fetchWallets(),
-              fetchWithdrawals(1),
-              fetchDuePayouts({ preserve: true }),
-            ]);
+          onCompleted={(meta) => {
+            void handleBranchPayoutCompleted(meta);
           }}
         />
       )}

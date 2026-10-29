@@ -31,6 +31,8 @@ type Props = {
   slabInfo?: SlabInfo | null;
   periodLabel?: string;
   isCurrentMonth?: boolean;
+  /** Branch-facing label on the active tier row; off for Super Admin views. */
+  showActiveTierLabel?: boolean;
 };
 
 type ChannelConfig = {
@@ -108,6 +110,7 @@ export default function CommissionBreakdownBadges({
   slabInfo,
   periodLabel,
   isCurrentMonth = true,
+  showActiveTierLabel = true,
 }: Props) {
   const activeIndex = slabInfo?.slabIndex ?? 0;
   const effectiveRate = slabInfo?.effectiveRate;
@@ -261,7 +264,7 @@ export default function CommissionBreakdownBadges({
                         >
                           <span className="inline-flex items-center gap-1.5">
                             Tier {index + 1}
-                            {isActive && (
+                            {isActive && showActiveTierLabel && (
                               <span className="rounded-full bg-[var(--color-brand)]/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-[var(--color-brand)]">
                                 Yours
                               </span>

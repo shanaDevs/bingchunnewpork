@@ -19,15 +19,49 @@ export type PromoOwnershipTotals = {
   platformOwnedPromoDiscountTotal: number;
 };
 
-export function attachPromoOwnershipTotals<T extends object>(
+/** Platform-owned promo not already deducted via store payback (cents). */
+export function resolveExtraPlatformOwnedDeductionCents(breakdown: {
+  platformOwnedPromoDiscountTotal?: number;
+  platformPaybackTotal?: number;
+}): number {
+  const owned = breakdown.platformOwnedPromoDiscountTotal ?? 0;
+  const payback = breakdown.platformPaybackTotal ?? 0;
+  return Math.max(0, owned - payback);
+}
+
+/** Deduct platform-only promos from net platform earning; credit branch net (same as SPPC). */
+export function applyPlatformOwnedDiscountToBreakdown<
+  T extends {
+    netPlatformEarning: number;
+    netAmount: number;
+    platformOwnedPromoDiscountTotal?: number;
+    platformPaybackTotal?: number;
+  },
+>(breakdown: T): T {
+  const extra = resolveExtraPlatformOwnedDeductionCents(breakdown);
+  if (extra <= 0) return breakdown;
+  return {
+    ...breakdown,
+    netPlatformEarning: breakdown.netPlatformEarning - extra,
+    netAmount: breakdown.netAmount + extra,
+  };
+}
+
+export function attachPromoOwnershipTotals<
+  T extends {
+    netPlatformEarning: number;
+    netAmount: number;
+    platformPaybackTotal?: number;
+  },
+>(
   breakdown: T,
   totals: PromoOwnershipTotals,
 ): T & PromoOwnershipTotals {
-  return {
+  return applyPlatformOwnedDiscountToBreakdown({
     ...breakdown,
     branchOwnedPromoDiscountTotal: totals.branchOwnedPromoDiscountTotal,
     platformOwnedPromoDiscountTotal: totals.platformOwnedPromoDiscountTotal,
-  };
+  });
 }
 
 /** Display-only promo totals by ownership (cents), reusing invoice promo aggregation. */

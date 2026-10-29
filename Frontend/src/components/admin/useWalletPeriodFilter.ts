@@ -41,10 +41,8 @@ function isValidYmd(value: string | null | undefined): value is string {
   return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
-/** Applied period only when URL has valid `from`/`to`. Missing params = no filter (all-time). */
-function resolveApplied(searchParams: URLSearchParams): AppliedWalletPeriod | null {
-  const from = searchParams.get('from');
-  const to = searchParams.get('to');
+/** Applied period when URL has valid `from`/`to`; otherwise null until defaulted to current month. */
+export function resolveAppliedFromUrl(from: string | null, to: string | null): AppliedWalletPeriod | null {
   if (!isValidYmd(from) || !isValidYmd(to) || from > to) return null;
 
   const monthKey = from.slice(0, 7);
@@ -61,37 +59,38 @@ function resolveApplied(searchParams: URLSearchParams): AppliedWalletPeriod | nu
   };
 }
 
+/** React Query key segment for wallet overview keyed by applied URL period. */
+export function adminWalletOverviewQueryKey(from: string | null, to: string | null) {
+  return ['admin-wallet-overview', from ?? '', to ?? ''] as const;
+}
+
+export function adminWalletWithdrawalsQueryKey(
+  from: string | null,
+  to: string | null,
+  page: number,
+) {
+  return ['admin-wallet-withdrawals', from ?? '', to ?? '', page] as const;
+}
+
 /**
  * Shared wallet period filter (month or custom from/to) synced via URL `from`/`to`.
- * Draft fields update locally; Apply commits to the URL. No URL dates = all-time totals.
+ * Defaults to the current calendar month when URL dates are missing.
  */
 export function useWalletPeriodFilter() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const applied = useMemo(() => resolveApplied(searchParams), [searchParams]);
+  const urlFrom = searchParams.get('from');
+  const urlTo = searchParams.get('to');
+  const applied = useMemo(
+    () => resolveAppliedFromUrl(urlFrom, urlTo),
+    [urlFrom, urlTo],
+  );
   const isFiltered = applied != null;
 
-  const [draftMonth, setDraftMonth] = useState('');
+  const [draftMonth, setDraftMonth] = useState(() => currentMonthKey());
   const [draftFrom, setDraftFrom] = useState('');
   const [draftTo, setDraftTo] = useState('');
   const [draftMode, setDraftMode] = useState<WalletPeriodMode>('month');
-
-  useEffect(() => {
-    if (!applied) {
-      setDraftMode('month');
-      setDraftMonth('');
-      setDraftFrom('');
-      setDraftTo('');
-      return;
-    }
-    setDraftMode(applied.mode);
-    setDraftMonth(applied.mode === 'month' ? (applied.monthKey ?? '') : '');
-    setDraftFrom(applied.mode === 'custom' ? applied.from : '');
-    setDraftTo(applied.mode === 'custom' ? applied.to : '');
-  }, [applied]);
-
-  const customRangeActive = draftMode === 'custom' && (!!draftFrom || !!draftTo);
-  const monthDisabled = customRangeActive;
 
   const commitParams = useCallback(
     (from: string | null, to: string | null) => {
@@ -108,6 +107,25 @@ export function useWalletPeriodFilter() {
     },
     [router, searchParams],
   );
+
+  useEffect(() => {
+    if (!applied) {
+      setDraftMode('month');
+      setDraftMonth(currentMonthKey());
+      setDraftFrom('');
+      setDraftTo('');
+      const { from, to } = currentMonthPeriod();
+      commitParams(from, to);
+      return;
+    }
+    setDraftMode(applied.mode);
+    setDraftMonth(applied.mode === 'month' ? (applied.monthKey ?? currentMonthKey()) : '');
+    setDraftFrom(applied.mode === 'custom' ? applied.from : '');
+    setDraftTo(applied.mode === 'custom' ? applied.to : '');
+  }, [applied, commitParams]);
+
+  const customRangeActive = draftMode === 'custom' && (!!draftFrom || !!draftTo);
+  const monthDisabled = customRangeActive;
 
   const selectMonth = useCallback((monthKey: string) => {
     setDraftMode('month');
@@ -146,10 +164,11 @@ export function useWalletPeriodFilter() {
 
   const reset = useCallback(() => {
     setDraftMode('month');
-    setDraftMonth('');
+    setDraftMonth(currentMonthKey());
     setDraftFrom('');
     setDraftTo('');
-    commitParams(null, null);
+    const { from, to } = currentMonthPeriod();
+    commitParams(from, to);
   }, [commitParams]);
 
   const canApply =
