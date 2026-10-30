@@ -1,25 +1,13 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 
 import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
-import { getApiBaseUrl } from '@/lib/apiBase';
 import ProductImage from '@/components/ui/ProductImage';
 import type { Product } from '@/types';
 import type { SelectedPromoProduct } from '@/lib/promotionTypes';
-
-function adminFetch(endpoint: string) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    headers: adminAuthHeaders(),
-    credentials: 'include',
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return data.data ?? data;
-  });
-}
 
 export function productToSelected(p: Product): SelectedPromoProduct {
   return {

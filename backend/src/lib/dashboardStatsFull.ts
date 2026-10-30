@@ -23,6 +23,7 @@ import {
   loadSuperAdminMonthlyCashflow,
 } from './dashboardStatsHelpers';
 import { aggregateTopRefundBranches } from './refundAnalytics';
+import { inProgressOrdersWhere, waitingReceivedOrdersWhere } from './dashboardQueueCounts';
 
 export async function buildDashboardStatsFull(ctx: DashboardStatsContext) {
   const {
@@ -74,10 +75,7 @@ export async function buildDashboardStatsFull(ctx: DashboardStatsContext) {
         ? Promise.resolve(0)
         : prisma.user.count({ where: { deletedAt: null } }),
       () => prisma.order.count({
-        where: {
-          ...scope,
-          status: { in: ['RECEIVED', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY'] },
-        },
+        where: inProgressOrdersWhere(scope, selectedRange),
       }),
       () => prisma.order.count({ where: { ...scope, ...periodWhere } }),
       () => prisma.order.aggregate({
@@ -191,13 +189,10 @@ export async function buildDashboardStatsFull(ctx: DashboardStatsContext) {
         orderBy: { balance: 'desc' },
         take: isBranchAdmin ? 1 : 8,
       }),
-      () => prisma.order.count({
-        where: {
-          ...scope,
-          status: { in: ['RECEIVED', 'PREPARING'] },
-          createdAt: { lt: new Date(now.getTime() - 30 * 60 * 1000) },
-        },
-      }),
+      () => {
+        const where = waitingReceivedOrdersWhere(scope, selectedRange, now);
+        return where ? prisma.order.count({ where }) : Promise.resolve(0);
+      },
       () => prisma.orderItem.aggregate({
         where: { order: paidPeriodWhere },
         _sum: { quantity: true },

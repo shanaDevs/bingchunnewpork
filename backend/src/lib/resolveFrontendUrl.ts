@@ -10,7 +10,7 @@ import { buildConfiguredCorsOrigins, isLocalhostOrigin, normalizeOrigin } from '
 export const CUSTOMER_SHOP_URL =
   process.env.LIVE_SHOP_URL?.replace(/\/$/, '')
   || process.env.FRONTEND_URL?.replace(/\/$/, '')
-  || 'https://bing-chung.mp.dartcodes.com';
+  || 'https://bingchunsrilanka.com';
 
 const LIVE_SHOP = CUSTOMER_SHOP_URL;
 
@@ -29,6 +29,13 @@ const LEGACY_DEAD_HOSTNAME_PATTERNS = [
   /^bing-chun\.bc\.dartcodes\.com$/i,
 ];
 
+/** Always-allowlisted live shop hosts (custom domain + CapRover default). */
+const LIVE_SHOP_ORIGINS = [
+  'https://bingchunsrilanka.com',
+  'https://www.bingchunsrilanka.com',
+  'https://bing-chun.bc.dartcodes.com',
+];
+
 function productionCorsOrigins(): string[] {
   const extras = [
     process.env.CORS_EXTRA_ORIGINS,
@@ -38,6 +45,7 @@ function productionCorsOrigins(): string[] {
     DELIVERY_ADMIN_ORIGIN,
     ADMIN_WEB_ORIGIN,
     POS_WEB_ORIGIN,
+    ...LIVE_SHOP_ORIGINS,
   ].filter((value): value is string => Boolean(value?.trim()));
 
   return buildConfiguredCorsOrigins({
@@ -133,21 +141,44 @@ function isBingChunSurfaceWebOrigin(origin: string): boolean {
   }
 }
 
+function isLiveShopHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    host === 'bingchunsrilanka.com'
+    || host === 'www.bingchunsrilanka.com'
+    || host === 'bing-chun.bc.dartcodes.com'
+  );
+}
+
 function isAllowedFrontendOrigin(origin: string): boolean {
-  const canonical = canonicalizeFrontendUrl(origin);
-  if (isBackendApiOrigin(canonical)) return false;
-  if (productionCorsOrigins().includes(canonical)) return true;
-  if (isBingChunSurfaceWebOrigin(canonical)) return true;
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) return false;
+  if (isBackendApiOrigin(normalized)) return false;
+
+  // Match raw + canonical forms — CapRover may still have FRONTEND_URL on the
+  // old shop host while the browser sends https://bingchunsrilanka.com.
+  const allowlist = new Set(productionCorsOrigins());
+  if (allowlist.has(normalized)) return true;
+
+  const canonical = canonicalizeFrontendUrl(normalized);
+  if (!isBackendApiOrigin(canonical) && allowlist.has(canonical)) return true;
+  if (isBingChunSurfaceWebOrigin(canonical) || isBingChunSurfaceWebOrigin(normalized)) return true;
+
+  try {
+    if (isLiveShopHostname(new URL(normalized).hostname)) return true;
+  } catch {
+    /* ignore */
+  }
 
   const configured = getEffectiveFrontendUrl();
-  if (canonical === configured) return true;
+  if (canonical === configured || normalized === configured) return true;
 
   if (isProductionDeployment()) {
     return false;
   }
 
-  if (isLocalhostOrigin(origin)) return true;
-  if (/^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/i.test(origin)) return true;
+  if (isLocalhostOrigin(normalized)) return true;
+  if (/^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/i.test(normalized)) return true;
   return false;
 }
 

@@ -849,6 +849,7 @@ export {
   creditedDeliveredTotals,
   deliveredOrderDeliveryFees,
   finalizeDeliveryJob,
+  persistJobActualRouteFromGps,
 } from '@bingchun/delivery-domain';
 
 /**

@@ -38,17 +38,39 @@ if (process.env.TRUST_PROXY !== undefined) {
 const deliveryFrontendOrigin =
   process.env.DELIVERY_FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3100';
 
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(
-  cors({
-    origin: [
+const corsAllowlist = Array.from(
+  new Set(
+    [
       config.frontendUrl,
       config.adminUrl,
       deliveryFrontendOrigin,
+      process.env.LIVE_SHOP_URL,
+      ...(process.env.CORS_EXTRA_ORIGINS || '').split(','),
+      'https://bingchunsrilanka.com',
+      'https://www.bingchunsrilanka.com',
+      'https://bing-chun.bc.dartcodes.com',
+      'https://bing-chun-admin-web.bc.dartcodes.com',
+      'https://bing-chun-pos-web.bc.dartcodes.com',
+      'https://bing-chun-delivery-frontend.bc.dartcodes.com',
       'http://localhost:3000',
       'http://localhost:3001',
       'http://localhost:3100',
-    ],
+    ]
+      .map((value) => (value || '').trim().replace(/\/$/, ''))
+      .filter(Boolean),
+  ),
+);
+
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || corsAllowlist.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
     credentials: true,
   })
 );

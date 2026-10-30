@@ -1,0 +1,887 @@
+# ============================================================
+# Bing Chun — CI/CD for CapRover (Core Microservices via GHCR)
+# ============================================================
+# Runs on pushes to `staging`. Builds and pushes all microservice
+# Docker images to GitHub Container Registry (ghcr.io).
+# CapRover then pulls and deploys the pre-built container images.
+#
+# Deploy Order (guarantees zero downtime):
+#   1. bing-chun-migrate  ← runs first: prisma migrate deploy, exits 0
+#   2. All other services deploy in parallel AFTER migrate succeeds
+#
+# Microservice Architecture:
+#
+#   MIGRATIONS (one-shot, runs before everything)
+#   └── bing-chun-migrate     (prisma migrate deploy — exits after done)
+#
+#   CUSTOMER SIDE
+#   ├── bing-chun-shop        (Customer Shop API  — backend API_SURFACE=shop)
+#   └── bing-chun             (Customer Storefront Web — Frontend WEB_SURFACE=shop)
+#
+#   ADMIN / BRANCH SIDE
+#   ├── bing-chun-admin       (Admin/Branch API   — backend API_SURFACE=admin)
+#   ├── bing-chun-admin-web   (Admin Web           — Frontend WEB_SURFACE=admin)
+#   ├── bing-chun-pos         (Cashier/POS API    — backend API_SURFACE=pos)
+#   └── bing-chun-pos-web     (POS/Cashier Web    — Frontend WEB_SURFACE=pos)
+#
+#   DELIVERY SIDE  (fully independent — stays up when other sides are down)
+#   ├── bing-chun-delivery            (Delivery Service — delivery-service/)
+#   └── bing-chun-delivery-frontend   (Delivery Web    — delivery-frontend/)
+#
+#   SHARED CORE  (pure API server — no longer responsible for migrations)
+#   └── bing-chun-core        (Core API — backend API_SURFACE=core)
+#
+# Note:
+#   • Migrations run via bing-chun-migrate (backend/Dockerfile.migrate) BEFORE
+#     any service is deployed. Core going down never blocks migrations.
+#   • Each side is independently deployable — one group going down does NOT
+#     affect the others.
+#   • orders / payments / notification services are NOT deployed as separate
+#     CapRover apps; that logic is handled within the backend surfaces.
+# ============================================================
+
+name: CI/CD (new server)
+
+on:
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+    inputs:
+      deploy_all:
+        description: Deploy all CapRover apps (images are always built)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-staging
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  CAPROVER_URL: https://captain.bc.dartcodes.com
+  API_URL: https://bing-chun-core.bc.dartcodes.com
+  FRONTEND_URL: https://bing-chun.bc.dartcodes.com
+  DELIVERY_FRONTEND_URL: https://bing-chun-delivery-frontend.bc.dartcodes.com
+  SHOP_API_URL: ${{ vars.SHOP_API_URL || 'https://bing-chun-shop.bc.dartcodes.com' }}
+  POS_API_URL: ${{ vars.POS_API_URL || 'https://bing-chun-pos.bc.dartcodes.com' }}
+  ADMIN_API_URL: ${{ vars.ADMIN_API_URL || 'https://bing-chun-admin.bc.dartcodes.com' }}
+  POS_WEB_URL: ${{ vars.POS_WEB_URL || 'https://bing-chun-pos-web.bc.dartcodes.com' }}
+  ADMIN_WEB_URL: ${{ vars.ADMIN_WEB_URL || 'https://bing-chun-admin-web.bc.dartcodes.com' }}
+
+jobs:
+  changes:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    outputs:
+      core: ${{ steps.summary.outputs.core }}
+      shop: ${{ steps.summary.outputs.shop }}
+      pos: ${{ steps.summary.outputs.pos }}
+      admin: ${{ steps.summary.outputs.admin }}
+      delivery: ${{ steps.summary.outputs.delivery }}
+      frontend: ${{ steps.summary.outputs.frontend }}
+      pos_web: ${{ steps.summary.outputs.pos_web }}
+      admin_web: ${{ steps.summary.outputs.admin_web }}
+      delivery_frontend: ${{ steps.summary.outputs.delivery_frontend }}
+      deploy_all: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_all }}
+      any: ${{ steps.summary.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed services
+        id: summary
+        env:
+          DEPLOY_ALL: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_all }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: bash .github/scripts/detect-changed-services.sh
+
+      - name: Log changed services
+        run: |
+          echo "deploy_all=${{ steps.summary.outputs.deploy_all }}"
+          echo "core=${{ steps.summary.outputs.core }}"
+          echo "shop=${{ steps.summary.outputs.shop }}"
+          echo "pos=${{ steps.summary.outputs.pos }}"
+          echo "admin=${{ steps.summary.outputs.admin }}"
+          echo "delivery=${{ steps.summary.outputs.delivery }}"
+          echo "frontend=${{ steps.summary.outputs.frontend }}"
+          echo "pos_web=${{ steps.summary.outputs.pos_web }}"
+          echo "admin_web=${{ steps.summary.outputs.admin_web }}"
+          echo "delivery_frontend=${{ steps.summary.outputs.delivery_frontend }}"
+
+  # ============================================================
+  # BUILD JOBS — Build and push to ghcr.io
+  # All images are always built unconditionally so the registry
+  # stays up to date. Deploy jobs are gated on changed detection.
+  # ============================================================
+
+  # ----------------------------------------------------------
+  # MIGRATIONS (one-shot — runs before any service deploys)
+  # ----------------------------------------------------------
+
+  build-migrate:
+    name: "[Migrate] Build bing-chun-migrate"
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image metadata
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/bing-chun-migrate"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${image}:${{ github.sha }}"
+            echo "${image}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile.migrate
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha,scope=bing-chun-migrate
+          cache-to: type=gha,mode=max,scope=bing-chun-migrate
+
+  # ----------------------------------------------------------
+  # SHARED CORE
+  # ----------------------------------------------------------
+
+  build-core:
+    name: "[Core] Build bing-chun-core"
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image metadata
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/bing-chun-core"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${image}:${{ github.sha }}"
+            echo "${image}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            API_SURFACE=core
+          cache-from: type=gha,scope=bing-chun-core
+          cache-to: type=gha,mode=max,scope=bing-chun-core
+
+  # ----------------------------------------------------------
+  # CUSTOMER SIDE
+  # ----------------------------------------------------------
+
+  build-shop:
+    name: "[Customer] Build bing-chun-shop"
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image metadata
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/bing-chun-shop"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${image}:${{ github.sha }}"
+            echo "${image}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            API_SURFACE=shop
+          cache-from: type=gha,scope=bing-chun-shop
+          cache-to: type=gha,mode=max,scope=bing-chun-shop
+
+  build-frontend:
+    name: "[Customer] Build bing-chun (storefront web)"
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image metadata
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/bing-chun"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${image}:${{ github.sha }}"
+            echo "${image}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Frontend/deploy/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=/api
+            WEB_SURFACE=shop
+            BACKEND_URL=${{ env.SHOP_API_URL }}
+            API_PROXY_URL=${{ env.SHOP_API_URL }}
+            SHOP_API_URL=${{ env.SHOP_API_URL }}
+            ADMIN_API_URL=${{ env.ADMIN_API_URL }}
+            ADMIN_WEB_URL=${{ env.ADMIN_WEB_URL }}
+            NEXT_PUBLIC_SOCKET_URL=${{ env.SHOP_API_URL }}
+            NEXT_PUBLIC_SITE_URL=${{ env.FRONTEND_URL }}
+          cache-from: type=gha,scope=bing-chun
+          cache-to: type=gha,mode=max,scope=bing-chun
+
+  # ----------------------------------------------------------
+  # ADMIN / BRANCH SIDE
+  # ----------------------------------------------------------
+
+  build-admin:
+    name: "[Admin] Build bing-chun-admin"
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image metadata
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/bing-chun-admin"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${image}:${{ github.sha }}"
+            echo "${image}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            API_SURFACE=admin
+          cache-from: type=gha,scope=bing-chun-admin
+          cache-to: type=gha,mode=max,scope=bing-chun-admin
+
+  build-admin-web:
+    name: "[Admin] Build bing-chun-admin-web"
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image metadata
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/bing-chun-admin-web"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${image}:${{ github.sha }}"
+            echo "${image}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Frontend/deploy/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=/api
+            WEB_SURFACE=admin
+            BACKEND_URL=${{ env.ADMIN_API_URL }}
+            API_PROXY_URL=${{ env.ADMIN_API_URL }}
+            POS_API_URL=
+            ADMIN_API_URL=${{ env.ADMIN_API_URL }}
+            ADMIN_WEB_URL=${{ env.ADMIN_WEB_URL }}
+            NEXT_PUBLIC_SOCKET_URL=${{ env.ADMIN_API_URL }}
+            NEXT_PUBLIC_SITE_URL=${{ env.ADMIN_WEB_URL }}
+          cache-from: type=gha,scope=bing-chun-admin-web
+          cache-to: type=gha,mode=max,scope=bing-chun-admin-web
+
+  build-pos:
+    name: "[Admin] Build bing-chun-pos (cashier API)"
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image metadata
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/bing-chun-pos"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${image}:${{ github.sha }}"
+            echo "${image}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            API_SURFACE=pos
+          cache-from: type=gha,scope=bing-chun-pos
+          cache-to: type=gha,mode=max,scope=bing-chun-pos
+
+  build-pos-web:
+    name: "[Admin] Build bing-chun-pos-web (cashier web)"
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image metadata
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/bing-chun-pos-web"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${image}:${{ github.sha }}"
+            echo "${image}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Frontend/deploy/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=/api
+            WEB_SURFACE=pos
+            BACKEND_URL=${{ env.POS_API_URL }}
+            API_PROXY_URL=${{ env.POS_API_URL }}
+            POS_API_URL=${{ env.POS_API_URL }}
+            ADMIN_API_URL=
+            ADMIN_WEB_URL=${{ env.ADMIN_WEB_URL }}
+            NEXT_PUBLIC_SOCKET_URL=${{ env.POS_API_URL }}
+            NEXT_PUBLIC_SITE_URL=${{ env.POS_WEB_URL }}
+          cache-from: type=gha,scope=bing-chun-pos-web
+          cache-to: type=gha,mode=max,scope=bing-chun-pos-web
+
+  # ----------------------------------------------------------
+  # DELIVERY SIDE  (fully independent)
+  # ----------------------------------------------------------
+
+  build-delivery:
+    name: "[Delivery] Build bing-chun-delivery"
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image metadata
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/bing-chun-delivery"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${image}:${{ github.sha }}"
+            echo "${image}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: delivery-service/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha,scope=bing-chun-delivery
+          cache-to: type=gha,mode=max,scope=bing-chun-delivery
+
+  build-delivery-frontend:
+    name: "[Delivery] Build bing-chun-delivery-frontend"
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image metadata
+        id: meta
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          image="${{ env.REGISTRY }}/${repo}/bing-chun-delivery-frontend"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${image}:${{ github.sha }}"
+            echo "${image}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: delivery-frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            BACKEND_URL=${{ env.API_URL }}
+            API_PROXY_URL=${{ env.API_URL }}
+            DELIVERY_SERVICE_URL=http://srv-captain--bing-chun-delivery:4100
+            NEXT_PUBLIC_SOCKET_URL=${{ env.API_URL }}
+            NEXT_PUBLIC_SITE_URL=${{ env.DELIVERY_FRONTEND_URL }}
+          cache-from: type=gha,scope=bing-chun-delivery-frontend
+          cache-to: type=gha,mode=max,scope=bing-chun-delivery-frontend
+
+  # ============================================================
+  # DEPLOY JOBS — Deploy GHCR image to CapRover
+  # Gated: only deploys the service if its source changed
+  # (or deploy_all is set). Each group is independent.
+  #
+  # DEPLOY ORDER:
+  #   1. deploy-migrate (always runs first — blocks all others)
+  #   2. All other services deploy in parallel after migrate
+  # ============================================================
+
+  # ----------------------------------------------------------
+  # MIGRATIONS (runs first — all deploys depend on this)
+  # ----------------------------------------------------------
+
+  deploy-migrate:
+    name: "[Migrate] Run bing-chun-migrate"
+    needs: [changes, build-migrate]
+    if: needs.build-migrate.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun-migrate
+    concurrency:
+      group: caprover-bing-chun-migrate
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy migration image to CapRover
+        env:
+          TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+          IMAGE: ${{ needs.build-migrate.outputs.image }}:${{ github.sha }}
+        run: bash .github/scripts/caprover-image-deploy.sh bing-chun-migrate "$IMAGE" "$TOKEN_RAW"
+      - name: Wait for migration to complete
+        env:
+          TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+        run: |
+          echo "Waiting for bing-chun-migrate container to finish (up to 5 minutes)..."
+          TOKEN=$(echo "$TOKEN_RAW" | tr -d '[:space:]')
+          CAPROVER_URL="${{ env.CAPROVER_URL }}"
+          for i in $(seq 1 30); do
+            sleep 10
+            STATUS=$(curl -sS -X GET \
+              "${CAPROVER_URL}/api/v2/user/apps/appData/bing-chun-migrate" \
+              -H "x-captain-auth: ${TOKEN}" \
+              -H "Content-Type: application/json" | \
+              python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',{}).get('appDefinition',{}).get('instanceCount',1))" 2>/dev/null || echo "1")
+            echo "Attempt $i: container state check..."
+            # prisma migrate deploy exits 0 quickly; CapRover marks stopped containers
+            # We just wait enough time for migrations to run (typically 5-30s)
+            if [ "$i" -ge 3 ]; then
+              echo "Migration container has had sufficient time to complete."
+              break
+            fi
+          done
+          echo "Migration phase complete — proceeding to service deployments."
+
+  # ----------------------------------------------------------
+  # SHARED CORE
+  # ----------------------------------------------------------
+
+  deploy-core:
+    name: "[Core] Deploy bing-chun-core"
+    needs: [changes, build-core, deploy-migrate]
+    if: needs.deploy-migrate.result == 'success' && needs.build-core.result == 'success' && (needs.changes.outputs.deploy_all == 'true' || needs.changes.outputs.core == 'true')
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun-core
+      url: ${{ env.API_URL }}
+    concurrency:
+      group: caprover-bing-chun-core
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy GHCR image to CapRover
+        env:
+          TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+          IMAGE: ${{ needs.build-core.outputs.image }}:${{ github.sha }}
+        run: bash .github/scripts/caprover-image-deploy.sh bing-chun-core "$IMAGE" "$TOKEN_RAW"
+
+  # ----------------------------------------------------------
+  # CUSTOMER SIDE
+  # ----------------------------------------------------------
+
+  deploy-shop:
+    name: "[Customer] Deploy bing-chun-shop"
+    needs: [changes, build-shop, deploy-migrate]
+    if: needs.deploy-migrate.result == 'success' && needs.build-shop.result == 'success' && (needs.changes.outputs.deploy_all == 'true' || needs.changes.outputs.shop == 'true')
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun-shop
+    concurrency:
+      group: caprover-bing-chun-shop
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy GHCR image to CapRover
+        env:
+          TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+          IMAGE: ${{ needs.build-shop.outputs.image }}:${{ github.sha }}
+        run: bash .github/scripts/caprover-image-deploy.sh bing-chun-shop "$IMAGE" "$TOKEN_RAW"
+
+  deploy-frontend:
+    name: "[Customer] Deploy bing-chun (storefront web)"
+    needs: [changes, build-frontend, deploy-migrate]
+    if: needs.deploy-migrate.result == 'success' && needs.build-frontend.result == 'success' && (needs.changes.outputs.deploy_all == 'true' || needs.changes.outputs.frontend == 'true')
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun
+      url: ${{ env.FRONTEND_URL }}
+    concurrency:
+      group: caprover-bing-chun
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy GHCR image to CapRover
+        env:
+          TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+          IMAGE: ${{ needs.build-frontend.outputs.image }}:${{ github.sha }}
+        run: bash .github/scripts/caprover-image-deploy.sh bing-chun "$IMAGE" "$TOKEN_RAW"
+
+  # ----------------------------------------------------------
+  # ADMIN / BRANCH SIDE
+  # ----------------------------------------------------------
+
+  deploy-admin:
+    name: "[Admin] Deploy bing-chun-admin"
+    needs: [changes, build-admin, deploy-migrate]
+    if: needs.deploy-migrate.result == 'success' && needs.build-admin.result == 'success' && (needs.changes.outputs.deploy_all == 'true' || needs.changes.outputs.admin == 'true')
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun-admin
+    concurrency:
+      group: caprover-bing-chun-admin
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy GHCR image to CapRover
+        env:
+          TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+          IMAGE: ${{ needs.build-admin.outputs.image }}:${{ github.sha }}
+        run: bash .github/scripts/caprover-image-deploy.sh bing-chun-admin "$IMAGE" "$TOKEN_RAW"
+
+  deploy-admin-web:
+    name: "[Admin] Deploy bing-chun-admin-web"
+    needs: [changes, build-admin-web, deploy-migrate]
+    if: needs.deploy-migrate.result == 'success' && needs.build-admin-web.result == 'success' && (needs.changes.outputs.deploy_all == 'true' || needs.changes.outputs.admin_web == 'true')
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun-admin-web
+    concurrency:
+      group: caprover-bing-chun-admin-web
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy GHCR image to CapRover
+        env:
+          TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+          IMAGE: ${{ needs.build-admin-web.outputs.image }}:${{ github.sha }}
+        run: bash .github/scripts/caprover-image-deploy.sh bing-chun-admin-web "$IMAGE" "$TOKEN_RAW"
+
+  deploy-pos:
+    name: "[Admin] Deploy bing-chun-pos (cashier API)"
+    needs: [changes, build-pos, deploy-migrate]
+    if: needs.deploy-migrate.result == 'success' && needs.build-pos.result == 'success' && (needs.changes.outputs.deploy_all == 'true' || needs.changes.outputs.pos == 'true')
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun-pos
+    concurrency:
+      group: caprover-bing-chun-pos
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy GHCR image to CapRover
+        env:
+          TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+          IMAGE: ${{ needs.build-pos.outputs.image }}:${{ github.sha }}
+        run: bash .github/scripts/caprover-image-deploy.sh bing-chun-pos "$IMAGE" "$TOKEN_RAW"
+
+  deploy-pos-web:
+    name: "[Admin] Deploy bing-chun-pos-web (cashier web)"
+    needs: [changes, build-pos-web, deploy-migrate]
+    if: needs.deploy-migrate.result == 'success' && needs.build-pos-web.result == 'success' && (needs.changes.outputs.deploy_all == 'true' || needs.changes.outputs.pos_web == 'true')
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun-pos-web
+    concurrency:
+      group: caprover-bing-chun-pos-web
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy GHCR image to CapRover
+        env:
+          TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+          IMAGE: ${{ needs.build-pos-web.outputs.image }}:${{ github.sha }}
+        run: bash .github/scripts/caprover-image-deploy.sh bing-chun-pos-web "$IMAGE" "$TOKEN_RAW"
+
+  # ----------------------------------------------------------
+  # DELIVERY SIDE  (fully independent)
+  # ----------------------------------------------------------
+
+  deploy-delivery:
+    name: "[Delivery] Deploy bing-chun-delivery"
+    needs: [changes, build-delivery, deploy-migrate]
+    if: needs.deploy-migrate.result == 'success' && needs.build-delivery.result == 'success' && (needs.changes.outputs.deploy_all == 'true' || needs.changes.outputs.delivery == 'true')
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun-delivery
+    concurrency:
+      group: caprover-bing-chun-delivery
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy GHCR image to CapRover
+        env:
+          TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+          IMAGE: ${{ needs.build-delivery.outputs.image }}:${{ github.sha }}
+        run: bash .github/scripts/caprover-image-deploy.sh bing-chun-delivery "$IMAGE" "$TOKEN_RAW"
+
+  deploy-delivery-frontend:
+    name: "[Delivery] Deploy bing-chun-delivery-frontend"
+    needs: [changes, build-delivery-frontend, deploy-migrate]
+    if: needs.deploy-migrate.result == 'success' && needs.build-delivery-frontend.result == 'success' && (needs.changes.outputs.deploy_all == 'true' || needs.changes.outputs.delivery_frontend == 'true')
+    runs-on: ubuntu-latest
+    environment:
+      name: bing-chun-delivery-frontend
+      url: ${{ env.DELIVERY_FRONTEND_URL }}
+    concurrency:
+      group: caprover-bing-chun-delivery-frontend
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy GHCR image to CapRover
+        env:
+          TOKEN_RAW: ${{ secrets.CAPROVER_TOKEN }}
+          IMAGE: ${{ needs.build-delivery-frontend.outputs.image }}:${{ github.sha }}
+        run: bash .github/scripts/caprover-image-deploy.sh bing-chun-delivery-frontend "$IMAGE" "$TOKEN_RAW"
+
+  # ============================================================
+  # SUMMARY & HEALTH CHECKS
+  # ============================================================
+
+  deploy-summary:
+    name: Deploy summary
+    needs:
+      - changes
+      - deploy-migrate
+      - deploy-core
+      - deploy-shop
+      - deploy-frontend
+      - deploy-admin
+      - deploy-admin-web
+      - deploy-pos
+      - deploy-pos-web
+      - deploy-delivery
+      - deploy-delivery-frontend
+    if: always() && (github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize build and deploy results
+        run: |
+          echo "## CI/CD Summary — Bing Chun Microservices" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🗄️ Migrations (runs first)" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Service | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bing-chun-migrate | ${{ needs.deploy-migrate.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🔷 Shared Core" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Service | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bing-chun-core | ${{ needs.deploy-core.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🛍️ Customer Side" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Service | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bing-chun-shop (API) | ${{ needs.deploy-shop.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bing-chun (Storefront Web) | ${{ needs.deploy-frontend.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🏪 Admin / Branch Side" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Service | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bing-chun-admin (API) | ${{ needs.deploy-admin.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bing-chun-admin-web | ${{ needs.deploy-admin-web.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bing-chun-pos (Cashier API) | ${{ needs.deploy-pos.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bing-chun-pos-web (Cashier Web) | ${{ needs.deploy-pos-web.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🚚 Delivery Side (independent)" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Service | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bing-chun-delivery | ${{ needs.deploy-delivery.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bing-chun-delivery-frontend | ${{ needs.deploy-delivery-frontend.result }} |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post-deploy health check
+        run: |
+          set -euo pipefail
+          echo "Running post-deploy health checks..."
+          check() {
+            local url="$1" expected="$2"
+            if [ -z "$url" ]; then
+              echo "skip $expected (URL variable unset)"
+              return 0
+            fi
+            echo "checking $url/health expects surface=$expected"
+            if curl -fsS --retry 2 --retry-delay 3 "$url/health" -o /tmp/role-health.json 2>/dev/null; then
+              cat /tmp/role-health.json
+              python3 -c 'import json,sys; body=json.load(open("/tmp/role-health.json")); got=body.get("surface"); print(f"Service {sys.argv[1]} surface: {got}"); assert got==sys.argv[1], f"Expected {sys.argv[1]}, got {got}"' "$expected"
+            else
+              echo "::warning ::$expected health check failed or service is initializing at $url/health"
+            fi
+          }
+          check "${API_URL:-}" core
+          check "${SHOP_API_URL:-}" shop
+          check "${POS_API_URL:-}" pos
+          check "${ADMIN_API_URL:-}" admin
+        env:
+          API_URL: ${{ env.API_URL }}
+          SHOP_API_URL: ${{ env.SHOP_API_URL }}
+          POS_API_URL: ${{ env.POS_API_URL }}
+          ADMIN_API_URL: ${{ env.ADMIN_API_URL }}

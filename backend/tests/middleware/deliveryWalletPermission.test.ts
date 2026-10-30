@@ -67,4 +67,54 @@ describe('WALLET menu permission', () => {
     expect(thrownError(next).statusCode).toBe(403);
     expect(thrownError(next).message).toContain('WALLET');
   });
+
+  it('allows WALLET read for branch managers with read-only wallet access', async () => {
+    vi.mocked(prisma.adminUser.findUnique).mockResolvedValue({
+      id: 'mgr-1',
+      isActive: true,
+      role: { name: 'STORE_MANAGER' },
+    } as never);
+    vi.mocked(prisma.permission.findUnique).mockResolvedValue({
+      adminUserId: 'mgr-1',
+      menu: 'WALLET',
+      canCreate: false,
+      canRead: true,
+      canUpdate: false,
+      canDelete: false,
+    } as never);
+
+    await requirePermission('WALLET', 'read')(
+      createMockReq({ user: { sub: 'mgr-1', type: 'admin', role: 'STORE_MANAGER' } }),
+      createMockRes(),
+      next,
+    );
+
+    expect(next).toHaveBeenCalledWith();
+    expect(asMockFn(next).mock.calls[0]).toEqual([]);
+  });
+
+  it('denies WALLET update for branch managers with read-only wallet access', async () => {
+    vi.mocked(prisma.adminUser.findUnique).mockResolvedValue({
+      id: 'mgr-1',
+      isActive: true,
+      role: { name: 'STORE_MANAGER' },
+    } as never);
+    vi.mocked(prisma.permission.findUnique).mockResolvedValue({
+      adminUserId: 'mgr-1',
+      menu: 'WALLET',
+      canCreate: false,
+      canRead: true,
+      canUpdate: false,
+      canDelete: false,
+    } as never);
+
+    await requirePermission('WALLET', 'update')(
+      createMockReq({ user: { sub: 'mgr-1', type: 'admin', role: 'STORE_MANAGER' } }),
+      createMockRes(),
+      next,
+    );
+
+    expect(thrownError(next).statusCode).toBe(403);
+    expect(thrownError(next).message).toBe('Permission denied: Cannot update WALLET');
+  });
 });

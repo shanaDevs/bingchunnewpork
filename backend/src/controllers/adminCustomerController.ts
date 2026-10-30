@@ -121,27 +121,64 @@ export async function listCustomers(req: Request, res: Response, next: NextFunct
           deletedAt: true,
           bannedAt: true,
           bannedReason: true,
-          orders: {
-            select: {
-              id: true,
-              total: true,
-              status: true,
-              paymentStatus: true,
-              createdAt: true,
-              storeId: true,
-              store: {
-                select: {
-                  id: true,
-                  name: true,
-                  city: true,
-                },
-              },
-            },
-            orderBy: { createdAt: 'desc' },
-          },
         },
       }),
     ]);
+
+    const userIds = users.map((user) => user.id);
+    const [orderStats, paidByStore] = userIds.length
+      ? await Promise.all([
+          prisma.order.groupBy({
+            by: ['userId'],
+            where: { userId: { in: userIds } },
+            _count: { _all: true },
+            _max: { createdAt: true },
+          }),
+          prisma.order.groupBy({
+            by: ['userId', 'storeId'],
+            where: {
+              userId: { in: userIds },
+              paymentStatus: 'PAID',
+              status: { not: 'CANCELLED' },
+            },
+            _sum: { total: true },
+            _count: { _all: true },
+            _max: { createdAt: true },
+          }),
+        ])
+      : [
+          [] as Array<{
+            userId: string | null;
+            _count: { _all: number };
+            _max: { createdAt: Date | null };
+          }>,
+          [] as Array<{
+            userId: string | null;
+            storeId: string;
+            _sum: { total: number | null };
+            _count: { _all: number };
+            _max: { createdAt: Date | null };
+          }>,
+        ];
+
+    const storeIds = [...new Set(paidByStore.map((row) => row.storeId))];
+    const stores = storeIds.length
+      ? await prisma.store.findMany({
+          where: { id: { in: storeIds } },
+          select: { id: true, name: true, city: true },
+        })
+      : [];
+    const storeById = new Map(stores.map((store) => [store.id, store]));
+    const statsByUser = new Map(
+      orderStats.filter((row) => row.userId).map((row) => [row.userId as string, row]),
+    );
+    const paidRowsByUser = new Map<string, typeof paidByStore>();
+    for (const row of paidByStore) {
+      if (!row.userId) continue;
+      const list = paidRowsByUser.get(row.userId) ?? [];
+      list.push(row);
+      paidRowsByUser.set(row.userId, list);
+    }
 
     const data = users.map((user) => {
       let userStatus: 'ACTIVE' | 'BANNED' | 'DELETED' = 'ACTIVE';
@@ -151,40 +188,31 @@ export async function listCustomers(req: Request, res: Response, next: NextFunct
         userStatus = 'BANNED';
       }
 
-      // Compute lifetime paid spend & favourite branch
-      const paidOrders = user.orders.filter(
-        (o) => o.paymentStatus === 'PAID' && o.status !== 'CANCELLED',
-      );
-      const lifetimeSpend = paidOrders.reduce((sum, o) => sum + o.total, 0);
-
-      // Group store spend
-      const storeSpendMap = new Map<string, { store: { name: string; city: string }; spend: number; orders: number; lastOrder: Date }>();
-      for (const ord of paidOrders) {
-        const existing = storeSpendMap.get(ord.storeId) || {
-          store: ord.store,
-          spend: 0,
-          orders: 0,
-          lastOrder: ord.createdAt,
-        };
-        existing.spend += ord.total;
-        existing.orders += 1;
-        if (ord.createdAt > existing.lastOrder) {
-          existing.lastOrder = ord.createdAt;
-        }
-        storeSpendMap.set(ord.storeId, existing);
-      }
-
-      const sortedStores = [...storeSpendMap.values()].sort((a, b) => {
-        if (b.spend !== a.spend) return b.spend - a.spend;
-        if (b.orders !== a.orders) return b.orders - a.orders;
-        return b.lastOrder.getTime() - a.lastOrder.getTime();
-      });
+      const paidRows = paidRowsByUser.get(user.id) ?? [];
+      const lifetimeSpend = paidRows.reduce((sum, row) => sum + (row._sum.total ?? 0), 0);
+      const sortedStores = paidRows
+        .flatMap((row) => {
+          const store = storeById.get(row.storeId);
+          if (!store || !row._max.createdAt) return [];
+          return [{
+            store,
+            spend: row._sum.total ?? 0,
+            orders: row._count._all,
+            lastOrder: row._max.createdAt,
+          }];
+        })
+        .sort((a, b) => {
+          if (b.spend !== a.spend) return b.spend - a.spend;
+          if (b.orders !== a.orders) return b.orders - a.orders;
+          return b.lastOrder.getTime() - a.lastOrder.getTime();
+        });
 
       const favouriteBranch = sortedStores[0]
         ? { name: sortedStores[0].store.name, city: sortedStores[0].store.city }
         : null;
 
-      const lastOrder = user.orders[0]?.createdAt ?? null;
+      const orderStat = statsByUser.get(user.id);
+      const lastOrder = orderStat?._max.createdAt ?? null;
 
       return {
         id: user.id,
@@ -197,7 +225,7 @@ export async function listCustomers(req: Request, res: Response, next: NextFunct
         bannedAt: user.bannedAt,
         bannedReason: user.bannedReason,
         lifetimeSpend,
-        ordersCount: user.orders.length,
+        ordersCount: orderStat?._count._all ?? 0,
         favouriteBranch,
         lastOrderAt: lastOrder,
       };

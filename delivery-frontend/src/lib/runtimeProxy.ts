@@ -6,26 +6,31 @@ import type { NextRequest } from 'next/server';
  * Next.js `rewrites()` are frozen into routes-manifest.json at BUILD time, so a build made without the
  * right BACKEND_URL / DELIVERY_SERVICE_URL permanently proxies to localhost (every call -> 500
  * "Internal Server Error"). Route handlers read process.env on every request instead, so CapRover
- * runtime env vars always win.
+ * runtime env vars always win. A missing production URL returns 502 instead of
+ * calling a hardcoded host.
  */
-
-const PRODUCTION_CORE_ORIGIN = 'https://bing-chun-core.bc.dartcodes.com';
-const PRODUCTION_DELIVERY_ORIGIN = 'http://srv-captain--bing-chun-delivery:4100';
 
 const isLocalhost = (url: string) => /localhost|127\.0\.0\.1/i.test(url);
 const clean = (url: string | undefined) => (url ?? '').trim().replace(/\/+$/, '');
 
+function usable(url: string): string {
+  if (!url) return '';
+  if (process.env.NODE_ENV === 'production' && isLocalhost(url)) return '';
+  return url;
+}
+
 export function resolveCoreOrigin(): string {
   const fromEnv = clean(process.env.BACKEND_URL) || clean(process.env.API_PROXY_URL);
-  if (fromEnv && !(process.env.NODE_ENV === 'production' && isLocalhost(fromEnv))) return fromEnv;
-  return process.env.NODE_ENV === 'production' ? PRODUCTION_CORE_ORIGIN : 'http://localhost:4000';
+  const origin = usable(fromEnv);
+  if (origin) return origin;
+  return process.env.NODE_ENV === 'production' ? '' : 'http://localhost:4000';
 }
 
 export function resolveDeliveryOrigin(): string {
   const fromEnv = clean(process.env.DELIVERY_SERVICE_URL) || clean(process.env.NEXT_PUBLIC_DELIVERY_API_URL);
-  const origin = fromEnv.replace(/\/delivery-api$/, '');
-  if (origin && !(process.env.NODE_ENV === 'production' && isLocalhost(origin))) return origin;
-  return process.env.NODE_ENV === 'production' ? PRODUCTION_DELIVERY_ORIGIN : 'http://localhost:4100';
+  const origin = usable(fromEnv.replace(/\/delivery-api$/, ''));
+  if (origin) return origin;
+  return process.env.NODE_ENV === 'production' ? '' : 'http://localhost:4100';
 }
 
 const HOP_BY_HOP = new Set([
@@ -42,6 +47,13 @@ const HOP_BY_HOP = new Set([
 ]);
 
 export async function proxyTo(req: NextRequest, origin: string): Promise<Response> {
+  if (!origin) {
+    return Response.json(
+      { success: false, message: 'Upstream URL is not configured' },
+      { status: 502 },
+    );
+  }
+
   const target = `${origin}${req.nextUrl.pathname}${req.nextUrl.search}`;
 
   const headers = new Headers();

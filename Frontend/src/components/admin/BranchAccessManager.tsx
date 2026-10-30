@@ -1,23 +1,11 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Store } from 'lucide-react';
-import { getApiBaseUrl } from '@/lib/apiBase';
 
 type StoreRef = { id: string; name: string; city?: string };
-
-function adminFetch(endpoint: string) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    headers: adminAuthHeaders(),
-    credentials: 'include',
-  }).then(async (r) => {
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.message || 'Request failed');
-    return d.data ?? d;
-  });
-}
 
 /**
  * Staff accounts are tied to a single home branch (storeId).

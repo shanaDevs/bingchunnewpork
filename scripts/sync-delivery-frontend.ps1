@@ -106,11 +106,25 @@ $adminGlob = @(
   'DashboardKpiCard.tsx', 'BrandKpiIconBox.tsx', 'DateRangePicker.tsx', 'AdminTablePagination.tsx'
 )
 $adminDst = Join-Path $dst 'components\admin'
+$portalDriversAdminFiles = @('AdminDriversPanel.tsx', 'SearchableRiderNameField.tsx')
+$portalDriversAdminBackup = @{}
+foreach ($f in $portalDriversAdminFiles) {
+  $portalPath = Join-Path $adminDst $f
+  if (Test-Path $portalPath) {
+    $portalDriversAdminBackup[$f] = Get-Content $portalPath -Raw
+  }
+}
 if (Test-Path $adminDst) { Remove-Item $adminDst -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $adminDst | Out-Null
 Get-ChildItem (Join-Path $src 'components\admin') -File | Where-Object {
   $n = $_.Name
+  if ($portalDriversAdminFiles -contains $n) { return $false }
   $adminGlob | Where-Object { $n -like $_ }
 } | ForEach-Object { Copy-Item $_.FullName (Join-Path $adminDst $_.Name) -Force }
+foreach ($f in $portalDriversAdminFiles) {
+  if ($portalDriversAdminBackup.ContainsKey($f)) {
+    Set-Content -Path (Join-Path $adminDst $f) -Value $portalDriversAdminBackup[$f] -NoNewline
+  }
+}
 
 Write-Host "Delivery-frontend sync complete."

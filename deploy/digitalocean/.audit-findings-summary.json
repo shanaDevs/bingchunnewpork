@@ -1,0 +1,31 @@
+{
+  "auditedAt": "2026-10-30",
+  "cluster": "bingchun-pg",
+  "connectionUser": "bingchun_app",
+  "publicHost": "bingchun-pg-do-user-35274177-0.d.db.ondigitalocean.com",
+  "clusterOnline": true,
+  "hasRealData": true,
+  "evidence": {
+    "physicalTables": { "public": 62, "delivery": 19 },
+    "pgStatEstimatedRows": { "public": 44817, "delivery": 5213 },
+    "notableEstimates": {
+      "delivery_jobs": 675,
+      "delivery_job_orders": 3927,
+      "admin_users": 217,
+      "order_status_events": 26115
+    }
+  },
+  "bingchun_appSelect": "permission denied on tables; use doadmin or pg_stat for audits",
+  "appPlatformBinding": "deploy/digitalocean/app.*.yaml uses cluster_name bingchun-pg and ${pg.DATABASE_URL} (doadmin)",
+  "legacyComparison": {
+    "host": "208.87.132.47",
+    "delivery_orders": 4390,
+    "delivery_jobs_total": 678,
+    "note": "DO stats align with legacy scale; both appear populated"
+  },
+  "recommendedNextSteps": [
+    "Grant bingchun_app USAGE/SELECT (and app DML) on public and delivery if apps should use secrets.env user",
+    "Optional: audit-doadmin.url for exact COUNT(*) via audit-delivery-portal-readonly.cjs",
+    "Rotate secrets if exposed in chat"
+  ]
+}

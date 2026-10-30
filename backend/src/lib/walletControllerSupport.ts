@@ -48,6 +48,7 @@ import {
   resolvePayoutPeriodOptions,
   getNextPayoutStartDate,
 } from './withdrawalService';
+import { dayAfterUtcDateStr, toUtcDateStr } from './utcDateString';
 import {
   analyticsCacheKey,
   withAnalyticsCache,
@@ -87,16 +88,8 @@ export async function resolveScopedStoreId(req: Request, paramStoreId?: string):
   return user.storeId;
 }
 
-export function toDateStr(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-}
-
-export function dayAfterDateStr(dateStr: string): string {
-  const d = new Date(`${dateStr}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return toDateStr(d);
-}
+export const toDateStr = toUtcDateStr;
+export const dayAfterDateStr = dayAfterUtcDateStr;
 
 export function minFromDate(lastSettledAt: Date | null): string | null {
   if (!lastSettledAt) return null;
@@ -704,15 +697,6 @@ export function defaultSuperAdminPayoutsDuePeriod(): { from: string; to: string 
   return { from: `${y}-${m}-01`, to: `${y}-${m}-${pad(now.getDate())}` };
 }
 
-function payoutPeriodOverlapsRange(
-  periodFrom: string,
-  periodTo: string,
-  from: string,
-  to: string,
-): boolean {
-  return periodFrom <= to && periodTo >= from;
-}
-
 function inclusivePeriodDays(periodFrom: string, periodTo: string): number {
   const start = new Date(`${periodFrom}T00:00:00.000Z`).getTime();
   const end = new Date(`${periodTo}T00:00:00.000Z`).getTime();
@@ -731,15 +715,8 @@ export type SuperAdminPayoutDueItem = {
   breakdown: unknown | null;
 };
 
-type PayoutsDueDateFilter = { from: string; to: string };
-
-function periodMatchesDateFilter(
-  periodFrom: string,
-  periodTo: string,
-  filter: PayoutsDueDateFilter,
-): boolean {
-  return payoutPeriodOverlapsRange(periodFrom, periodTo, filter.from, filter.to);
-}
+/** Max elapsed 15-day windows per branch in the Super Admin due queue (matches payout validation). */
+export const PAYOUTS_DUE_UNPAID_WINDOW_MAX = 24;
 
 type PayoutPeriodWithdrawalRow = {
   id: string;
@@ -767,7 +744,6 @@ function nextPayoutStartFromWithdrawals(
 async function buildStorePayoutsDueRows(
   storeId: string,
   storeName: string,
-  dateFilter: PayoutsDueDateFilter,
   withdrawals: PayoutPeriodWithdrawalRow[],
   earliestPaidOrderDay: string | null,
 ): Promise<SuperAdminPayoutDueItem[]> {
@@ -780,7 +756,6 @@ async function buildStorePayoutsDueRows(
     if (!periodFrom || !periodTo) continue;
     covered.add(periodKey(periodFrom, periodTo));
     if (withdrawal.status !== 'PENDING') continue;
-    if (!periodMatchesDateFilter(periodFrom, periodTo, dateFilter)) continue;
     const netAmountCents = withdrawalAmountCents(withdrawal as never);
     if (netAmountCents <= 0) continue;
     rows.push({
@@ -799,8 +774,7 @@ async function buildStorePayoutsDueRows(
   const unpaidWindows = buildElapsedPayoutWindowsFromStart(
     startFrom,
     FIXED_PAYOUT_PERIOD_DAYS,
-    8,
-    dateFilter,
+    PAYOUTS_DUE_UNPAID_WINDOW_MAX,
   ).filter((window) => !covered.has(periodKey(window.from, window.to)));
 
   // Period breakdown is expensive — run a few at a time, not serially forever.
@@ -847,25 +821,7 @@ export async function listSuperAdminPayoutsDueItems(query?: {
   to?: string;
   cursor?: string;
 }): Promise<SuperAdminPayoutsDuePage> {
-  let dateFilter: PayoutsDueDateFilter;
-  if (
-    query?.from &&
-    query?.to &&
-    isValidYmdDate(query.from) &&
-    isValidYmdDate(query.to) &&
-    query.from <= query.to
-  ) {
-    dateFilter = { from: query.from, to: query.to };
-  } else {
-    dateFilter = defaultSuperAdminPayoutsDuePeriod();
-  }
-
-  const cacheKey = analyticsCacheKey([
-    'wallet-payouts-due',
-    dateFilter.from,
-    dateFilter.to,
-    query?.cursor ?? '',
-  ]);
+  const cacheKey = analyticsCacheKey(['wallet-payouts-due', query?.cursor ?? '']);
 
   return withAnalyticsCache(cacheKey, async () => {
     const stores = await prisma.store.findMany({
@@ -942,7 +898,6 @@ export async function listSuperAdminPayoutsDueItems(query?: {
           buildStorePayoutsDueRows(
             store.id,
             store.name,
-            dateFilter,
             withdrawalsByStore.get(store.id) ?? [],
             earliestByStore.get(store.id) ?? null,
           ),
@@ -951,7 +906,10 @@ export async function listSuperAdminPayoutsDueItems(query?: {
     const items: SuperAdminPayoutDueItem[] = perStoreRows.flat();
 
     items.sort(
-      (a, b) => a.periodTo.localeCompare(b.periodTo) || a.storeName.localeCompare(b.storeName),
+      (a, b) =>
+        a.periodFrom.localeCompare(b.periodFrom) ||
+        a.periodTo.localeCompare(b.periodTo) ||
+        a.storeName.localeCompare(b.storeName),
     );
     const done = start + slice.length >= stores.length;
     return {

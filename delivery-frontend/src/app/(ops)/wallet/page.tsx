@@ -316,7 +316,6 @@ function DeliveryWalletPageContent() {
   const [pinError, setPinError] = useState('');
   const [pinSubmitting, setPinSubmitting] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
-  const [uploadingProofId, setUploadingProofId] = useState<string | null>(null);
 
   useEffect(() => {
     setPageReady(true);
@@ -584,25 +583,6 @@ function DeliveryWalletPageContent() {
       toast.error(err instanceof Error ? err.message : 'Failed to cancel payout');
     } finally {
       setCancellingId(null);
-    }
-  }
-
-  async function uploadPayoutProof(row: DeliveryPayoutRow, file: File) {
-    if (uploadingProofId) return;
-    setUploadingProofId(row.id);
-    try {
-      const form = new FormData();
-      form.append('proof', file);
-      await deliveryWalletFetch(`/admin/delivery-wallet/payouts/${row.id}/proof`, unlockToken, {
-        method: 'POST',
-        body: form,
-      });
-      toast.success('Payment proof uploaded');
-      void queryClient.invalidateQueries({ queryKey: ['delivery-wallet-payouts'] });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to upload payment proof');
-    } finally {
-      setUploadingProofId(null);
     }
   }
 
@@ -968,31 +948,6 @@ function DeliveryWalletPageContent() {
                                 'Cancel'
                               )}
                             </button>
-                          )}
-                          {superAdmin && row.status === 'APPROVED' && !row.proofUrl && (
-                            <label
-                              className={cn(
-                                'inline-flex cursor-pointer items-center rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs font-semibold text-amber-400 transition-colors hover:bg-amber-500/10',
-                                uploadingProofId === row.id && 'pointer-events-none opacity-50',
-                              )}
-                            >
-                              {uploadingProofId === row.id ? (
-                                <Loader2 size={12} className="animate-spin" />
-                              ) : (
-                                'Upload proof'
-                              )}
-                              <input
-                                type="file"
-                                accept="image/jpeg,image/png,image/webp,application/pdf"
-                                className="hidden"
-                                disabled={uploadingProofId === row.id}
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  e.target.value = '';
-                                  if (file) void uploadPayoutProof(row, file);
-                                }}
-                              />
-                            </label>
                           )}
                           <button
                             type="button"

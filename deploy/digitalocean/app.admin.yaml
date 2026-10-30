@@ -1,0 +1,139 @@
+# Generated app spec. Secrets in git stay REPLACE_ME.
+# Live apps get the generated values from the gitignored secrets file.
+# Postgres and Valkey are the existing Singapore clusters, direct port via the binding.
+# A push to main deploys this app. Do not enable autoscaling.
+name: bingchun-admin
+region: sgp
+vpc:
+  id: e9844e32-e978-4544-a8c7-0bed9c9ab21c
+disable_edge_cache: true
+alerts:
+  - rule: DEPLOYMENT_FAILED
+databases:
+  - name: pg
+    engine: PG
+    version: "16"
+    production: true
+    cluster_name: bingchun-pg
+    db_name: defaultdb
+    db_user: doadmin
+  - name: cache
+    engine: VALKEY
+    version: "8"
+    production: true
+    cluster_name: bingchun-valkey
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /socket.io
+      component:
+        name: admin-api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /
+      component:
+        name: admin-web
+        preserve_path_prefix: true
+services:
+  - name: admin-api
+    github:
+      repo: Bing-Chung-Dart/bingchun
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: backend/Dockerfile
+    instance_size_slug: apps-s-1vcpu-1gb-fixed
+    instance_count: 1
+    http_port: 4000
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 40
+      period_seconds: 10
+      timeout_seconds: 5
+      failure_threshold: 6
+    envs:
+      - key: NODE_ENV
+        scope: RUN_TIME
+        value: production
+      - key: TZ
+        scope: RUN_TIME
+        value: Asia/Colombo
+      - key: API_SURFACE
+        scope: RUN_AND_BUILD_TIME
+        value: admin
+      - key: RUN_BACKGROUND_JOBS
+        scope: RUN_TIME
+        value: "false"
+      - key: PRISMA_CONNECTION_LIMIT
+        scope: RUN_TIME
+        value: "4"
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: "${pg.DATABASE_URL}"
+      - key: REDIS_URL
+        scope: RUN_TIME
+        value: "${cache.DATABASE_URL}"
+      - key: JWT_SECRET
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: JWT_REFRESH_SECRET
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: INTERNAL_SERVICE_SECRET
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DELIVERY_OTP_PEPPER
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DRIVER_PIN_PEPPER
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: FRONTEND_URL
+        scope: RUN_TIME
+        value: "https://bingchunsrilanka.com"
+      - key: ADMIN_WEB_URL
+        scope: RUN_TIME
+        value: "https://replace-admin-host.example"
+      - key: POS_WEB_URL
+        scope: RUN_TIME
+        value: "https://replace-cashier-host.example"
+  - name: admin-web
+    github:
+      repo: Bing-Chung-Dart/bingchun
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Frontend/deploy/Dockerfile
+    instance_size_slug: apps-s-1vcpu-2gb
+    instance_count: 1
+    http_port: 80
+    health_check:
+      http_path: /
+      initial_delay_seconds: 20
+      period_seconds: 10
+      timeout_seconds: 5
+      failure_threshold: 6
+    envs:
+      - key: NODE_ENV
+        scope: RUN_TIME
+        value: production
+      - key: WEB_SURFACE
+        scope: RUN_AND_BUILD_TIME
+        value: admin
+      - key: NEXT_PUBLIC_API_URL
+        scope: RUN_AND_BUILD_TIME
+        value: /api
+      - key: BACKEND_URL
+        scope: RUN_TIME
+        value: "${admin-api.PRIVATE_URL}"
+      - key: ADMIN_API_URL
+        scope: RUN_TIME
+        value: "${admin-api.PRIVATE_URL}"
+      - key: API_PROXY_URL
+        scope: RUN_TIME
+        value: "${admin-api.PRIVATE_URL}"

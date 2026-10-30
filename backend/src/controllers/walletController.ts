@@ -24,7 +24,7 @@ import { ensureWithdrawalSchema } from '../lib/withdrawalSchema';
 import {
   listWithdrawalsUnsettledForDartCodes,
 } from '../lib/settlementWithdrawalQuery';
-import { summarizeOrderRevenue } from '../lib/walletRevenue';
+import { fetchSummarizedPaidOrderRevenue } from '../lib/walletRevenue';
 import { getWalletAnalysis } from '../lib/walletAnalysis';
 import { recalculateWalletBalance, syncMissingWalletPayments } from '../lib/walletSync';
 import {
@@ -251,8 +251,9 @@ export async function getPayoutPeriodInfoHandler(req: Request, res: Response, ne
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /admin/wallet/payouts-due
-// Super Admin queue: outstanding branch payout periods overlapping the wallet date range.
-// Optional query `from`/`to` (YYYY-MM-DD); when omitted, defaults to calendar month-to-date.
+// Super Admin queue: all elapsed unpaid branch payout periods (oldest first).
+// Optional query `from`/`to` are ignored (wallet month filter does not scope this list).
+// Optional `cursor` paginates active branches.
 // ──────────────────────────────────────────────────────────────────────────────
 function invalidateWalletPayoutsDueCache(): void {
   invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-payouts-due']));
@@ -762,16 +763,15 @@ export async function getWallet(req: Request, res: Response) {
 
   const dashboardPeriod = parseOptionalWalletPeriod(req);
   const wallet = await getOrCreateWallet(storeId as string);
-  const [pendingTotal, netTransferableEarnings] = await Promise.all([
+  const [pendingTotal, netTransferableEarnings, dashboard, store] = await Promise.all([
     getPendingWithdrawalTotal(storeId as string),
     computeNetTransferableEarnings(storeId as string),
+    getBranchWalletDashboard(storeId as string, dashboardPeriod),
+    prisma.store.findUnique({
+      where: { id: storeId as string },
+      select: { id: true, name: true, city: true, addressLine: true, phone: true },
+    }),
   ]);
-  const dashboard = await getBranchWalletDashboard(storeId as string, dashboardPeriod);
-
-  const store = await prisma.store.findUnique({
-    where: { id: storeId as string },
-    select: { id: true, name: true, city: true, addressLine: true, phone: true },
-  });
 
   res.json({
     success: true,
@@ -827,25 +827,20 @@ export async function getWalletTransactions(req: Request, res: Response) {
     };
   });
 
-  // Revenue summary from paid orders (matches order totals on admin orders page)
-  const paidOrders = await prisma.order.findMany({
-    where: {
-      storeId: storeId as string,
-      paymentStatus: 'PAID',
-      ...(from || to
-        ? {
-            createdAt: {
-              ...(from ? { gte: new Date(`${from}T00:00:00.000Z`) } : {}),
-              ...(to ? { lte: new Date(`${to}T23:59:59.999Z`) } : {}),
-            },
-          }
-        : {}),
-    },
-    select: { total: true, orderMode: true, paymentMethod: true },
-  });
-  const revenue = summarizeOrderRevenue(paidOrders);
+  const paidOrderWhere = {
+    storeId: storeId as string,
+    ...(from || to
+      ? {
+          createdAt: {
+            ...(from ? { gte: new Date(`${from}T00:00:00.000Z`) } : {}),
+            ...(to ? { lte: new Date(`${to}T23:59:59.999Z`) } : {}),
+          },
+        }
+      : {}),
+  };
 
-  const [aggOut] = await Promise.all([
+  const [revenue, aggOut] = await Promise.all([
+    fetchSummarizedPaidOrderRevenue(paidOrderWhere),
     prisma.walletTransaction.aggregate({
       _sum: { amount: true },
       where: { ...where, type: { in: ['REFUND', 'PAYOUT'] } } as any,
@@ -1491,7 +1486,7 @@ export async function listWalletSecurityAuditLogsHandler(req: Request, res: Resp
 
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /admin/wallet/sync
-// Run full orders to wallets sync (SYSTEM_ADMIN only)
+// Reconcile missing paid-order credits; branch users are scoped to their store, system admin to all stores.
 // ──────────────────────────────────────────────────────────────────────────────
 export async function syncWallets(req: Request, res: Response, next: NextFunction) {
   try {

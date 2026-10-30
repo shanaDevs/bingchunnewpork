@@ -21,6 +21,8 @@ type Props = {
   /** Collapse full schedule behind a disclosure — default on dashboard. */
   collapsible?: boolean;
   defaultExpanded?: boolean;
+  /** Branch-facing label on the active tier row; off for Super Admin views. */
+  showActiveTierLabel?: boolean;
 };
 
 function formatMonthLabel(month: string): string {
@@ -30,7 +32,13 @@ function formatMonthLabel(month: string): string {
 }
 
 
-function TierScheduleTable({ activeIndex }: { activeIndex: number }) {
+function TierScheduleTable({
+  activeIndex,
+  showActiveTierLabel = true,
+}: {
+  activeIndex: number;
+  showActiveTierLabel?: boolean;
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border border-[var(--color-navy-border)]">
       <table className="w-full min-w-[360px] text-left text-xs">
@@ -55,7 +63,7 @@ function TierScheduleTable({ activeIndex }: { activeIndex: number }) {
                 <td className="px-3 py-2 font-medium text-[var(--color-text)]">
                   <span className="inline-flex items-center gap-1.5">
                     Tier {index + 1}
-                    {isActive && (
+                    {isActive && showActiveTierLabel && (
                       <span className="rounded-full bg-[var(--color-brand)]/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-[var(--color-brand)]">
                         Yours
                       </span>
@@ -80,11 +88,13 @@ function TierDisclosure({
   monthlySlabInfo,
   hideBaseSummary,
   defaultExpanded,
+  showActiveTierLabel = true,
 }: {
   slabInfo: SlabInfo;
   monthlySlabInfo?: MonthlySlabInfo[];
   hideBaseSummary?: boolean;
   defaultExpanded?: boolean;
+  showActiveTierLabel?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const activeIndex = slabInfo.slabIndex;
@@ -174,7 +184,7 @@ function TierDisclosure({
             </div>
           )}
 
-          <TierScheduleTable activeIndex={activeIndex} />
+          <TierScheduleTable activeIndex={activeIndex} showActiveTierLabel={showActiveTierLabel} />
         </div>
       )}
     </div>
@@ -188,6 +198,7 @@ export default function CommissionSlabTable({
   hideBaseSummary,
   collapsible = false,
   defaultExpanded,
+  showActiveTierLabel = true,
 }: Props) {
   const activeIndex = slabInfo?.slabIndex ?? 0;
 
@@ -198,6 +209,7 @@ export default function CommissionSlabTable({
         monthlySlabInfo={monthlySlabInfo}
         hideBaseSummary={hideBaseSummary}
         defaultExpanded={defaultExpanded}
+        showActiveTierLabel={showActiveTierLabel}
       />
     );
   }
@@ -252,7 +264,7 @@ export default function CommissionSlabTable({
         </div>
       )}
 
-      <TierScheduleTable activeIndex={activeIndex} />
+      <TierScheduleTable activeIndex={activeIndex} showActiveTierLabel={showActiveTierLabel} />
     </div>
   );
 }

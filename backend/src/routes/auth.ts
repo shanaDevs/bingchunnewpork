@@ -37,6 +37,7 @@ router.delete('/me', authenticate, authController.deleteAccount);
 // Admin auth
 router.post('/admin/login', authRateLimiter, authController.adminLogin);
 router.post('/admin/refresh', refreshRateLimiter, authController.adminRefreshToken);
+router.get('/admin/socket-token', authController.adminSocketToken);
 router.post('/admin/logout', authController.adminLogout);
 router.post('/admin/password/forgot', authRateLimiter, authController.adminForgotPassword);
 router.post('/admin/password/reset', authRateLimiter, authController.adminResetPassword);

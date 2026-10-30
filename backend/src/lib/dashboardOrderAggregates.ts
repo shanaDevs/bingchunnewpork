@@ -1,7 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { orderCommissionChannel } from './commission';
 import { prisma } from './prisma';
-import { isCardPaymentMethod, isCounterCashPaymentMethod } from './walletRevenue';
 
 export type PaidSalesScope = {
   storeId?: string;
@@ -197,6 +196,8 @@ export async function aggregateHourlySales(scope: PaidSalesScope): Promise<Hourl
 type ChannelGroupRow = {
   orderMode: string;
   paymentMethod: string;
+  /** CARD pickup paid through an online gateway, not collected as a counter card. */
+  onlineCard: boolean;
   totalSum: number;
   addonSum: number;
   subtotalSum: number;
@@ -213,6 +214,7 @@ async function loadChannelGroupRows(scope: PaidSalesScope): Promise<ChannelGroup
     Array<{
       orderMode: string;
       paymentMethod: string;
+      onlineCard: boolean | null;
       total_sum: bigint | number | null;
       addon_sum: bigint | number | null;
       subtotal_sum: bigint | number | null;
@@ -227,6 +229,13 @@ async function loadChannelGroupRows(scope: PaidSalesScope): Promise<ChannelGroup
     SELECT
       o."orderMode" AS "orderMode",
       o."paymentMethod" AS "paymentMethod",
+      (
+        o."paymentMethod" = 'CARD'
+        AND (
+          o."paymentGateway" IS NOT NULL
+          OR NULLIF(BTRIM(COALESCE(o."paymentRef", '')), '') IS NOT NULL
+        )
+      ) AS "onlineCard",
       COALESCE(SUM(o."total"), 0) AS total_sum,
       COALESCE(SUM(COALESCE(addon.addon_cents, 0)), 0) AS addon_sum,
       COALESCE(SUM(o."subtotal"), 0) AS subtotal_sum,
@@ -254,12 +263,13 @@ async function loadChannelGroupRows(scope: PaidSalesScope): Promise<ChannelGroup
       GROUP BY "orderId"
     ) addon ON addon."orderId" = o.id
     WHERE ${paidSalesSqlWhere(scope)}
-    GROUP BY o."orderMode", o."paymentMethod"
+    GROUP BY o."orderMode", o."paymentMethod", "onlineCard"
   `;
 
   return rows.map((row) => ({
     orderMode: row.orderMode,
     paymentMethod: row.paymentMethod,
+    onlineCard: row.onlineCard === true,
     totalSum: Number(row.total_sum ?? 0),
     addonSum: Number(row.addon_sum ?? 0) / 100,
     subtotalSum: Number(row.subtotal_sum ?? 0),
@@ -281,21 +291,16 @@ export async function summarizeRevenueChannelsForScope(scope: PaidSalesScope) {
 
   for (const group of groups) {
     const primaryAmount = group.totalSum - group.addonSum;
-    if (group.orderMode === 'TAKEAWAY') {
-      if (isCounterCashPaymentMethod(group.paymentMethod) && primaryAmount > 0) {
-        pickupCash += primaryAmount;
-      } else if (group.paymentMethod === 'PAYHERE' && primaryAmount > 0) {
-        pickupOnline += primaryAmount;
-      } else if (
-        (group.paymentMethod === 'CARD' || group.paymentMethod === 'LOYALTY_POINTS') &&
-        primaryAmount > 0
-      ) {
-        pickupCard += primaryAmount;
-      }
-    } else if (
-      group.orderMode === 'DELIVERY' &&
-      isCardPaymentMethod(group.paymentMethod)
-    ) {
+    const channel = orderCommissionChannel(group.orderMode, group.paymentMethod, {
+      onlineCard: group.onlineCard,
+    });
+    if (channel === 'pickupCash' && primaryAmount > 0) {
+      pickupCash += primaryAmount;
+    } else if (channel === 'pickupOnline' && primaryAmount > 0) {
+      pickupOnline += primaryAmount;
+    } else if (channel === 'pickupCard' && primaryAmount > 0) {
+      pickupCard += primaryAmount;
+    } else if (channel === 'deliveryOnline') {
       deliveryCard += group.totalSum;
     }
   }
@@ -339,7 +344,9 @@ export async function summarizePaymentChannelBreakdownForScope(
 
   for (const group of groups) {
     const primaryAmount = group.totalSum - group.addonSum;
-    const primaryChannel = orderCommissionChannel(group.orderMode, group.paymentMethod);
+    const primaryChannel = orderCommissionChannel(group.orderMode, group.paymentMethod, {
+      onlineCard: group.onlineCard,
+    });
     if (primaryChannel === 'pickupCash' && primaryAmount > 0) {
       totals.pickupCashTotal += primaryAmount;
       totals.pickupCashCount += group.orderCount;

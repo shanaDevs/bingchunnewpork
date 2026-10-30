@@ -1,4 +1,5 @@
 'use client';
+import { adminApiFetch } from '@/lib/adminApi';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -8,7 +9,7 @@ import {
   LayoutDashboard, Package, ShoppingBag, Store, Tag, Users, BarChart2,
   LogOut, Menu, X, Boxes, Settings, Truck, UserCircle2, Wallet, UserCog, Monitor,
   ChevronsLeft, ChevronsRight, History, TrendingUp, CreditCard,
-  ShieldAlert, Landmark, Dices, MessageCircle, DoorClosed, DoorOpen, Undo2, Gift, CircleDollarSign,
+  ShieldAlert, Dices, MessageCircle, DoorClosed, DoorOpen, Undo2, Gift, CircleDollarSign,
   UserCheck, Radio,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -40,31 +41,13 @@ const SIDEBAR_COLLAPSED_KEY = 'bc_admin_sidebar_collapsed';
 installAdminFetch();
 
 function adminFetchAppSettings() {
-  return fetch(`${getApiBaseUrl()}/settings/app`, {
-    headers: adminAuthHeaders({ 'Content-Type': 'application/json' }),
-    credentials: 'include',
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return data.data ?? data;
-  });
+  return adminApiFetch('/settings/app');
 }
 
 type BranchOperatingStatus = { branchClosedAt: string | null };
 
 function adminBranchFetch(endpoint: string, options?: RequestInit) {
-  return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: adminAuthHeaders({
-      'Content-Type': 'application/json',
-      ...(options?.headers as Record<string, string> | undefined),
-    }),
-    credentials: 'include',
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return (data.data ?? data) as BranchOperatingStatus;
-  });
+  return adminApiFetch<BranchOperatingStatus>(endpoint, options);
 }
 
 const CASHIER_NAV_HREFS = new Set(['/admin', '/admin/orders']);
@@ -130,7 +113,6 @@ const ALL_NAV: Array<{
     { href: '/admin/wallet', label: 'Wallet', icon: Wallet, superOnly: false, menuKey: 'WALLET' },
     // Settlement lives under Wallet → Platform Payments; keep for route/permission matching only.
     { href: '/admin/payment-history', label: 'Settlement Payouts', icon: History, superOnly: false, hidden: true, menuKey: 'PAYMENT_HISTORY' },
-    { href: '/admin/platform-earnings', label: 'Platform Earnings', icon: Landmark, superOnly: true },
     { href: '/admin/jason', label: 'JASON', icon: CircleDollarSign, superOnly: true },
     { href: '/admin/menu', label: 'Menu', icon: Package, superOnly: true, menuKey: 'MENU' },
     { href: '/admin/stores', label: 'Stores', icon: Store, superOnly: true, menuKey: 'STORES' },
@@ -252,12 +234,12 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
     if (stored === '1') setSidebarCollapsed(true);
   }, []);
 
-  // Backfill deliveryEnabled for sessions created before the field was added.
+  // Backfill deliveryEnabled when missing from local session (legacy login or null from API).
   useEffect(() => {
     if (isLoginPage) return;
     const admin = getAdminSession();
     if (!admin || !isBranchScoped(admin)) return;
-    if (admin.deliveryEnabled !== undefined) return;
+    if (admin.deliveryEnabled != null) return;
     void refreshAdminAuth()
       .then((next) => setAdminUser(next))
       .catch(() => {
@@ -302,6 +284,11 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
 
       if (isDeliveryAdmin(admin) && pathname === '/admin') {
         router.replace('/admin/delivery');
+        return;
+      }
+
+      if (isPathUnder(pathname, '/admin/platform-earnings')) {
+        router.replace('/admin/wallet?tab=platform');
         return;
       }
 
