@@ -39,7 +39,10 @@ export async function buildDashboardStatsFull(ctx: DashboardStatsContext) {
     monthlyChart,
     paidPeriodWhere,
     paidSalesScope,
+    pickupOnlyQueue,
   } = ctx;
+
+  const queueCountOptions = pickupOnlyQueue ? { pickupOnly: true as const } : undefined;
 
   const [
       todayOrders,
@@ -75,7 +78,7 @@ export async function buildDashboardStatsFull(ctx: DashboardStatsContext) {
         ? Promise.resolve(0)
         : prisma.user.count({ where: { deletedAt: null } }),
       () => prisma.order.count({
-        where: inProgressOrdersWhere(scope, selectedRange),
+        where: inProgressOrdersWhere(scope, selectedRange, queueCountOptions),
       }),
       () => prisma.order.count({ where: { ...scope, ...periodWhere } }),
       () => prisma.order.aggregate({
@@ -190,7 +193,7 @@ export async function buildDashboardStatsFull(ctx: DashboardStatsContext) {
         take: isBranchAdmin ? 1 : 8,
       }),
       () => {
-        const where = waitingReceivedOrdersWhere(scope, selectedRange, now);
+        const where = waitingReceivedOrdersWhere(scope, selectedRange, now, queueCountOptions);
         return where ? prisma.order.count({ where }) : Promise.resolve(0);
       },
       () => prisma.orderItem.aggregate({

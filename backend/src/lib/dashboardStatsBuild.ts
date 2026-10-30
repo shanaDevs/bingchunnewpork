@@ -57,6 +57,14 @@ export async function createDashboardStatsContext(
 ): Promise<DashboardStatsContext> {
   const storeId = await resolveBranchStoreId(req);
   const scope = storeId ? { storeId } : {};
+  let pickupOnlyQueue = false;
+  if (storeId) {
+    const store = await prisma.store.findUnique({
+      where: { id: storeId },
+      select: { deliveryEnabled: true },
+    });
+    pickupOnlyQueue = store?.deliveryEnabled === false;
+  }
   const isBranchAdmin = isBranchScopedRole(req.user?.role);
   const now = new Date();
   const todayRange = periodRange('today', now);
@@ -75,6 +83,7 @@ export async function createDashboardStatsContext(
 
   return {
     scope,
+    pickupOnlyQueue,
     isBranchAdmin,
     period,
     from,
