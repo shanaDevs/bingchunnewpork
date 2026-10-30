@@ -2,6 +2,7 @@
 
 import { ChevronDown, MapPin, ShoppingBag, UserRound } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type Ref } from "react";
 import { Container } from "@/components/home-redesign/ui/Container";
 import { Wordmark } from "@/components/home-redesign/ui/Wordmark";
@@ -100,6 +101,7 @@ const solidBlue = "bg-brand-600 text-snow shadow-lg shadow-brand-600/25 hover:bg
  * Below lg the nav links move into MobileMenu, opened from a menu button beside the cart.
  */
 export function SiteHeader() {
+  const pathname = usePathname();
   const headerRef = useRef<HTMLElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -162,8 +164,8 @@ export function SiteHeader() {
                 : "bg-white/10 ring-white/20",
             )}
           >
-            {mainNav.map((item, index) => {
-              const isCurrent = index === 0;
+            {mainNav.map((item) => {
+              const isCurrent = item.href === pathname;
               return (
                 <li key={item.label}>
                   <Link

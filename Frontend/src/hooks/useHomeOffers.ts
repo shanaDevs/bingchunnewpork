@@ -7,7 +7,8 @@ import type { PromoCode } from '@/types';
 import { mapPromosToHomeOffers } from '@/components/home/homeOffers';
 import { useCartStore, type OrderMode } from '@/store/cartStore';
 
-function selectFulfillmentOrActiveStoreId(s: {
+/** The branch whose offers to show: the cart's single fulfillment branch, else the chosen order branch. */
+export function selectFulfillmentOrActiveStoreId(s: {
   orderMode: OrderMode | null;
   deliveryInfo: { storeId?: string } | null;
   takeawayInfo: { storeId?: string } | null;
