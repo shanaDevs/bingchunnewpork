@@ -18,6 +18,9 @@ router.use('/me', meRoutes);
 router.use('/locations', locationsRoutes);
 router.use('/route', routeRoutes);
 router.use('/internal', internalRoutes);
+router.get('/admin/health', (_req, res) => {
+  res.json({ success: true, service: 'delivery-admin', status: 'ok' });
+});
 router.use('/admin', authenticateAdmin, requireAdmin, adminRoutes);
 
 export default router;

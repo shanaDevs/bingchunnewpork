@@ -97,6 +97,9 @@ services:
       - key: FRONTEND_URL
         scope: RUN_TIME
         value: "https://bingchunsrilanka.com"
+      - key: DELIVERY_FRONTEND_URL
+        scope: RUN_TIME
+        value: "https://bingchun-delivery-6mgs2.ondigitalocean.app"
       - key: ADMIN_WEB_URL
         scope: RUN_TIME
         value: "https://replace-admin-host.example"
