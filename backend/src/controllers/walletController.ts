@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { Prisma, prisma } from '../lib/prisma';
 import { config } from '../config';
 import { AppError } from '../middleware/errorHandler';
@@ -33,6 +34,7 @@ import {
   lkrToCents,
   parseDecimalFromDb,
 } from '../lib/moneyDecimal';
+import { insertWalletLedgerRow } from '../lib/walletTransactionInsert';
 import { parseLockedStoreWallet, walletDataAfterBalanceDelta, walletDataAfterDebit } from '../lib/walletStoreUpdates';
 import {
   serializeStoreWallet,
@@ -1242,19 +1244,18 @@ export async function creditWalletForOrder(
           totalEarnings: earnings.plus(centsToDecimal(centsAmount)),
         },
       });
-      await tx.walletTransaction.create({
-        data: {
-          id: require('crypto').randomUUID(),
-          storeId,
-          orderId,
-          type: 'ORDER_PAYMENT',
-          amount: centsToDecimal(centsAmount),
-          balanceAfter: centsToDecimal(newBalance),
-          paymentMethod: paymentMethod as any,
-          paymentRef: order?.paymentRef ?? null,
-          description: descParts,
-          reference: order?.orderNumber ?? null,
-        },
+      const ledgerId = crypto.randomUUID();
+      await insertWalletLedgerRow(tx, {
+        id: ledgerId,
+        storeId,
+        orderId,
+        type: 'ORDER_PAYMENT',
+        amountCents: centsAmount,
+        balanceAfterCents: newBalance,
+        paymentMethod,
+        paymentRef: order?.paymentRef ?? null,
+        description: descParts,
+        reference: order?.orderNumber ?? null,
       });
     });
   } catch (err) {
