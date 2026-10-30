@@ -120,12 +120,13 @@ export function getSocketUrl(): string {
   if (getApiBaseOverride()) {
     return getBackendOrigin();
   }
-  const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
-  if (configured.startsWith('/') && typeof window !== 'undefined') {
-    return window.location.origin;
-  }
   if (process.env.NEXT_PUBLIC_SOCKET_URL) {
     return stripTrailingSlash(process.env.NEXT_PUBLIC_SOCKET_URL);
+  }
+  const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
+  // Same-origin `/api` (delivery console on App Platform): admin Socket.IO runs on shop API.
+  if (configured.startsWith('/') && typeof window !== 'undefined') {
+    return getBackendOrigin();
   }
   return getBackendOrigin();
 }

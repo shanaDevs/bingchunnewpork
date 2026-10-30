@@ -1,0 +1,10 @@
+{
+  "host": "https://bingchun-delivery-6mgs2.ondigitalocean.app",
+  "checkedAt": "2026-10-30",
+  "findings": {
+    "GET /delivery-api/admin/health": { "status": 400, "body": "Transport unknown (Engine.IO)" },
+    "GET /health": { "status": 404, "note": "hits delivery-web Next.js, no route" },
+    "GET /delivery-api/admin/drivers": { "status": 400, "body": "Transport unknown", "via": "delivery-web proxy" }
+  },
+  "likelyCause": "Ingress routed /socket.io to delivery-service; /delivery-api proxied via Next to private URL but upstream returned Engine.IO errors. Fix: route /delivery-api to delivery component; route /socket.io via delivery-web rewrite to shop; point client sockets at shop origin."
+}
