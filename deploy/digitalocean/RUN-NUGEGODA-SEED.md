@@ -59,19 +59,38 @@ From your laptop, the repo script needs **doadmin** (`deploy/digitalocean/audit-
 
 ## Console commands
 
+**Copy-paste:** see [`CONSOLE-SEED-NUGEGODA.sh`](CONSOLE-SEED-NUGEGODA.sh) or run step-by-step below.
+
+**App:** `bingchun-shop` → **shop-api** → one instance → **Console**.
+
+### 2a Pre-flight (read-only)
+
+```sh
+cd /app/backend
+export SEED_TARGET_STORE_NAME=Nugegoda
+npm run audit:nugegoda-seed:prod
+```
+
+### 2b Seed (30–60+ minutes)
+
 ```sh
 cd /app/backend
 export TZ=Asia/Colombo
 export ALLOW_NUGEGODA_APP_SEED=true
 export ALLOW_SEED_ON_LIVE=true
 export SEED_TARGET_STORE_NAME=Nugegoda
-# Optional: walk-in phone avoids SMS (default 0700000000)
-# export SEED_CUSTOMER_PHONE=0700000000
-
 npm run seed:nugegoda-app:prod
 ```
 
-`DATABASE_URL` is already set on shop-api (doadmin, VPC).
+`DATABASE_URL` is already doadmin on shop-api (VPC).
+
+### 2c Post-run audit
+
+```sh
+cd /app/backend
+export SEED_TARGET_STORE_NAME=Nugegoda
+npm run audit:nugegoda-seed:prod
+```
 
 ### If the console disconnects
 
