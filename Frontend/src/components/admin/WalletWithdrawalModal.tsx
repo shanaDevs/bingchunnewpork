@@ -16,6 +16,7 @@ import PayoutBreakdownPanel from '@/components/admin/PayoutBreakdownPanel';
 import {
   buildSettlementPreviewFromChannelBreakdown,
   computePeriodPayoutSplitLkr,
+  channelBreakdownHasSalesActivity,
   parseWithdrawalBreakdown,
   parseWithdrawalBreakdownFromNetPreview,
   mergeSharedPromoContributionFieldsIntoBreakdown,
@@ -26,6 +27,7 @@ import {
   resolvePreviewConvenienceFeeLkr,
   resolveTotalDeliveryFeeForAllocationLkr,
   sumAllRevenueSubtotal,
+  sumChannelBreakdownOrderCount,
   type SettlementPreview,
   type WithdrawalBreakdown,
   withdrawalBreakdownToLkr,
@@ -104,19 +106,44 @@ function netPreviewToChannelPreview(
   to: string,
 ): SettlementPreview | null {
   if (!preview?.breakdown) return null;
+  const summedOrderCount = sumChannelBreakdownOrderCount(preview.breakdown);
+  const orderCount =
+    preview.orderCount != null && preview.orderCount > 0
+      ? preview.orderCount
+      : summedOrderCount;
   return {
     period: preview.period ?? { from, to },
     breakdown: preview.breakdown,
     totalCommission: preview.totalCommission ?? 0,
     totalProviderFee: preview.totalProviderFee ?? 0,
     totalOwed: preview.totalCommission ?? 0,
-    orderCount: preview.orderCount ?? 0,
+    orderCount,
     slabInfo: preview.slabInfo ?? {
       monthlyBase: 0,
       effectiveRate: 0,
       slabIndex: 0,
     },
   };
+}
+
+async function fetchChannelPreviewFromNetPreview(
+  apiBase: string,
+  from: string,
+  to: string,
+  storeId?: string,
+): Promise<SettlementPreview | null> {
+  const qs = new URLSearchParams({ from, to });
+  if (storeId) qs.set('storeId', storeId);
+  const res = await fetch(`${apiBase}/admin/wallet/net-preview?${qs}`, withAdminCredentials());
+  const json = await res.json();
+  if (!res.ok) return null;
+  const data = json.data as Record<string, unknown> | undefined;
+  if (!data) return null;
+  return netPreviewToChannelPreview(
+    data.channelPreview as Parameters<typeof netPreviewToChannelPreview>[0],
+    from,
+    to,
+  );
 }
 
 async function fetchNetPreviewMergedSharedPromoBreakdown(
@@ -415,10 +442,29 @@ export default function WalletWithdrawalModal({
             fresh.storeId ?? storeId,
           );
           if (!cancelled) setBreakdown(merged);
+          if (!cancelled && !parsedFresh.channelBreakdown) {
+            const preview = await fetchChannelPreviewFromNetPreview(
+              apiBase,
+              periodFrom,
+              periodTo,
+              fresh.storeId ?? storeId,
+            );
+            if (!cancelled && preview) setChannelPreview(preview);
+          }
         }
       })
-      .catch(() => {
-        // keep snapshot from table row
+      .catch(async () => {
+        const periodFrom = toDateInputValue(viewWithdrawal.periodFrom);
+        const periodTo = toDateInputValue(viewWithdrawal.periodTo);
+        const parsed = parseWithdrawalBreakdown(viewWithdrawal.breakdown);
+        if (parsed?.channelBreakdown || !periodFrom || !periodTo || cancelled) return;
+        const preview = await fetchChannelPreviewFromNetPreview(
+          apiBase,
+          periodFrom,
+          periodTo,
+          viewWithdrawal.storeId ?? storeId,
+        );
+        if (!cancelled && preview) setChannelPreview(preview);
       })
       .finally(() => {
         if (!cancelled) setViewSnapshotLoading(false);
@@ -665,6 +711,14 @@ export default function WalletWithdrawalModal({
         }
       : null;
   const submitTotalLkr = branchPayout.totalBranchPayoutLkr;
+  const channelTableBreakdown =
+    channelPreview?.breakdown ?? breakdown?.channelBreakdown ?? null;
+  const showChannelSalesTable =
+    !netLoading &&
+    !viewSnapshotLoading &&
+    rangeReady &&
+    channelTableBreakdown != null &&
+    channelBreakdownHasSalesActivity(channelTableBreakdown);
   const payoutBreakdownPanelProps = breakdownLkr
     ? {
         preview: isViewMode ? null : channelPreview,
@@ -935,16 +989,14 @@ export default function WalletWithdrawalModal({
                 </div>
               )}
 
-              {!netLoading && !viewSnapshotLoading && channelPreview && rangeReady && channelPreview.orderCount > 0 && (
-                <ChannelSalesTable breakdown={channelPreview.breakdown} className="mb-4" />
+              {showChannelSalesTable && channelTableBreakdown && (
+                <ChannelSalesTable breakdown={channelTableBreakdown} className="mb-4" />
               )}
 
               {!netLoading &&
                 !viewSnapshotLoading &&
                 payoutBreakdownPanelProps &&
-                (isViewMode
-                  ? true
-                  : channelPreview && rangeReady && channelPreview.orderCount > 0) && (
+                (isViewMode || rangeReady) && (
                   <PayoutBreakdownPanel {...payoutBreakdownPanelProps} className="mb-4" />
                 )}
 

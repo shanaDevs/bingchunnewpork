@@ -252,14 +252,34 @@ export function isOnlineProviderChannel(channel: CommissionChannel): boolean {
   return channel === 'pickupOnline' || channel === 'deliveryOnline';
 }
 
+export type OrderChannelHints = {
+  /** Precomputed: CARD pickup was collected through an online gateway. */
+  onlineCard?: boolean;
+  paymentGateway?: string | null;
+  paymentRef?: string | null;
+};
+
+/** Card pickup paid via PayHere/WebXPay. Counter card collection has neither gateway nor payment ref. */
+export function takeawayCardPaidOnline(hints?: OrderChannelHints): boolean {
+  if (!hints) return false;
+  if (hints.onlineCard) return true;
+  if (typeof hints.paymentGateway === 'string' && hints.paymentGateway.trim()) return true;
+  if (typeof hints.paymentRef === 'string' && hints.paymentRef.trim()) return true;
+  return false;
+}
+
 export function orderCommissionChannel(
   orderMode: string,
   paymentMethod: string,
+  hints?: OrderChannelHints,
 ): CommissionChannel | null {
   if (orderMode === 'TAKEAWAY') {
     if (isCounterCashPaymentMethod(paymentMethod)) return 'pickupCash';
     if (paymentMethod === 'PAYHERE') return 'pickupOnline';
-    if (paymentMethod === 'CARD' || paymentMethod === 'LOYALTY_POINTS') return 'pickupCard';
+    if (paymentMethod === 'CARD') {
+      return takeawayCardPaidOnline(hints) ? 'pickupOnline' : 'pickupCard';
+    }
+    if (paymentMethod === 'LOYALTY_POINTS') return 'pickupCard';
     return null;
   }
   if (orderMode === 'DELIVERY' && isCardPaymentMethod(paymentMethod)) {

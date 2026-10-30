@@ -35,10 +35,10 @@ export default function PayoutBreakdownTabs({
           Financial Report
         </TabsTrigger>
       </TabsList>
-      <TabsContent value="classic" className="mt-0 outline-none">
+      <TabsContent value="classic" className="mt-0 flex-none outline-none">
         {classicContent}
       </TabsContent>
-      <TabsContent value="report" className="mt-0 outline-none">
+      <TabsContent value="report" className="mt-0 flex-none outline-none">
         {reportContent}
       </TabsContent>
     </Tabs>

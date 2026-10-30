@@ -7,6 +7,7 @@ import {
   buildSlabInfo,
   normalizeStoredSettlementBreakdown,
   orderCommissionChannel,
+  type OrderChannelHints,
   storePeriodKey,
   sumBreakdownCommission,
   sumCommissionableBase,
@@ -315,10 +316,11 @@ function addOrderToSummaryBucket(
   orderMode: string,
   paymentMethod: string,
   total: number,
+  hints?: OrderChannelHints,
 ) {
   bucket.orderCount += 1;
   bucket.grossSales += total;
-  const channel = orderCommissionChannel(orderMode, paymentMethod);
+  const channel = orderCommissionChannel(orderMode, paymentMethod, hints);
   if (channel === 'deliveryOnline') bucket.delivery += total;
   else if (channel === 'pickupCash') bucket.pickupCash += total;
   else if (channel === 'pickupOnline') bucket.pickupOnline += total;
@@ -344,7 +346,14 @@ function buildWeeklyBuckets(range: { gte: Date; lte: Date }) {
 }
 
 function buildOrderSummaryChart(
-  orders: Array<{ createdAt: Date; total: number; orderMode: string; paymentMethod: string }>,
+  orders: Array<{
+    createdAt: Date;
+    total: number;
+    orderMode: string;
+    paymentMethod: string;
+    paymentGateway?: string | null;
+    paymentRef?: string | null;
+  }>,
   period: 'today' | 'month' | 'year' | 'custom',
   range: { gte: Date; lte: Date },
 ): OrderSummaryBucket[] {
@@ -354,7 +363,7 @@ function buildOrderSummaryChart(
     );
     for (const order of orders) {
       const hour = new Date(order.createdAt).getHours();
-      addOrderToSummaryBucket(buckets[hour], order.orderMode, order.paymentMethod, order.total);
+      addOrderToSummaryBucket(buckets[hour], order.orderMode, order.paymentMethod, order.total, order);
     }
     return buckets;
   }
@@ -372,7 +381,7 @@ function buildOrderSummaryChart(
       const key = monthKey(new Date(order.createdAt));
       const bucket = bucketMap.get(key);
       if (!bucket) continue;
-      addOrderToSummaryBucket(bucket, order.orderMode, order.paymentMethod, order.total);
+      addOrderToSummaryBucket(bucket, order.orderMode, order.paymentMethod, order.total, order);
     }
     return keys.map((key) => bucketMap.get(key)!);
   }
@@ -386,7 +395,7 @@ function buildOrderSummaryChart(
     );
     for (const order of orders) {
       const hour = new Date(order.createdAt).getHours();
-      addOrderToSummaryBucket(buckets[hour], order.orderMode, order.paymentMethod, order.total);
+      addOrderToSummaryBucket(buckets[hour], order.orderMode, order.paymentMethod, order.total, order);
     }
     return buckets;
   }
@@ -404,7 +413,7 @@ function buildOrderSummaryChart(
       const key = dayKey(new Date(order.createdAt));
       const bucket = bucketMap.get(key);
       if (!bucket) continue;
-      addOrderToSummaryBucket(bucket, order.orderMode, order.paymentMethod, order.total);
+      addOrderToSummaryBucket(bucket, order.orderMode, order.paymentMethod, order.total, order);
     }
     return keys.map((key) => bucketMap.get(key)!);
   }
@@ -422,7 +431,7 @@ function buildOrderSummaryChart(
       const key = monthKey(new Date(order.createdAt));
       const bucket = bucketMap.get(key);
       if (!bucket) continue;
-      addOrderToSummaryBucket(bucket, order.orderMode, order.paymentMethod, order.total);
+      addOrderToSummaryBucket(bucket, order.orderMode, order.paymentMethod, order.total, order);
     }
     return keys.map((key) => bucketMap.get(key)!);
   }
@@ -439,7 +448,7 @@ function buildOrderSummaryChart(
     if (!match) continue;
     const chartBucket = bucketMap.get(match.label);
     if (!chartBucket) continue;
-    addOrderToSummaryBucket(chartBucket, order.orderMode, order.paymentMethod, order.total);
+    addOrderToSummaryBucket(chartBucket, order.orderMode, order.paymentMethod, order.total, order);
   }
   return weeklyBuckets.map((bucket) => bucketMap.get(bucket.label)!);
 }
@@ -589,6 +598,8 @@ function buildPaymentChannelBreakdown(
     convenientFee?: number;
     addonAmountLkr?: number;
     addonPaymentMethod?: string;
+    paymentGateway?: string | null;
+    paymentRef?: string | null;
   }>,
 ) {
   const totals = { ...EMPTY_CHANNEL_TOTALS };
@@ -596,7 +607,7 @@ function buildPaymentChannelBreakdown(
   for (const order of orders) {
     const addonAmount = order.addonAmountLkr ?? 0;
     const primaryAmount = order.total - addonAmount;
-    const primaryChannel = orderCommissionChannel(order.orderMode, order.paymentMethod);
+    const primaryChannel = orderCommissionChannel(order.orderMode, order.paymentMethod, order);
 
     if (primaryChannel === 'pickupCash' && primaryAmount > 0) {
       totals.pickupCashTotal += primaryAmount;
@@ -1250,7 +1261,14 @@ function enrichTopTierScorecards<
 
 function buildOrderSummaryByBranch(
   stores: Array<{ id: string; name: string }>,
-  orders: Array<{ storeId: string; total: number; orderMode: string; paymentMethod: string }>,
+  orders: Array<{
+    storeId: string;
+    total: number;
+    orderMode: string;
+    paymentMethod: string;
+    paymentGateway?: string | null;
+    paymentRef?: string | null;
+  }>,
   limit = 10,
   pickupOnly = false,
   sortBy: 'revenue' | 'orders' = 'revenue',
@@ -1265,7 +1283,7 @@ function buildOrderSummaryByBranch(
     for (const order of orders) {
       const bucket = bucketsByStore.get(order.storeId);
       if (!bucket) continue;
-      addOrderToSummaryBucket(bucket, order.orderMode, order.paymentMethod, order.total);
+      addOrderToSummaryBucket(bucket, order.orderMode, order.paymentMethod, order.total, order);
     }
     return [...bucketsByStore.values()]
       .filter((bucket) =>
@@ -1300,7 +1318,7 @@ function buildOrderSummaryByBranch(
   for (const order of orders) {
     const index = topStoreIds.indexOf(order.storeId);
     if (index < 0) continue;
-    addOrderToSummaryBucket(buckets[index], order.orderMode, order.paymentMethod, order.total);
+    addOrderToSummaryBucket(buckets[index], order.orderMode, order.paymentMethod, order.total, order);
   }
 
   return buckets;
@@ -1456,6 +1474,8 @@ export async function getBrandAnalytics(req: Request, res: Response, next: NextF
           convenientFee: true,
           orderMode: true,
           paymentMethod: true,
+          paymentGateway: true,
+          paymentRef: true,
           createdAt: true,
           storeId: true,
           platform: true,
@@ -2112,6 +2132,8 @@ export async function getBranchTierAnalytics(req: Request, res: Response, next: 
           deliveryFee: true,
           convenientFee: true,
           paymentMethod: true,
+          paymentGateway: true,
+          paymentRef: true,
           createdAt: true,
           storeId: true,
           platform: true,
@@ -2413,6 +2435,8 @@ export async function getBranchAnalytics(req: Request, res: Response, next: Next
           convenientFee: true,
           orderMode: true,
           paymentMethod: true,
+          paymentGateway: true,
+          paymentRef: true,
           createdAt: true,
           storeId: true,
           platform: true,
@@ -3776,6 +3800,8 @@ function addOrderToStoreChannelBreakdown(
     subtotal?: number;
     deliveryFee?: number;
     convenientFee?: number;
+    paymentGateway?: string | null;
+    paymentRef?: string | null;
   },
 ) {
   bucket.totalOrders += 1;
@@ -3784,7 +3810,7 @@ function addOrderToStoreChannelBreakdown(
 
   const addonAmount = order.addonAmountLkr ?? 0;
   const primaryAmount = order.total - addonAmount;
-  const primaryChannel = orderCommissionChannel(order.orderMode, order.paymentMethod);
+  const primaryChannel = orderCommissionChannel(order.orderMode, order.paymentMethod, order);
 
   if (primaryChannel === 'pickupCash' && primaryAmount > 0) {
     bucket.pickupCash.amount += primaryAmount;
@@ -3848,6 +3874,8 @@ export async function getTopBranchesChannelBreakdown(req: Request, res: Response
               loyaltyDiscount: true,
               orderMode: true,
               paymentMethod: true,
+              paymentGateway: true,
+              paymentRef: true,
               storeId: true,
               subtotal: true,
               deliveryFee: true,

@@ -19,6 +19,7 @@ import ChannelSalesTable from '@/components/admin/ChannelSalesTable';
 import { resolveBranchPayoutDisplay } from '@/components/admin/branchPayoutDisplay';
 import PayoutBreakdownPanel from '@/components/admin/PayoutBreakdownPanel';
 import {
+  channelBreakdownHasSalesActivity,
   computeFinalPayoutLkr,
   computePeriodPayoutSplitLkr,
   extractSharedPromoLkrFromBreakdown,
@@ -684,7 +685,10 @@ export default function AdminInitiatePayoutModal({
                 </div>
               )}
 
-              {!previewLoading && channelPreview && rangeReady && channelPreview.orderCount > 0 && (
+              {!previewLoading &&
+                channelPreview &&
+                rangeReady &&
+                channelBreakdownHasSalesActivity(channelPreview.breakdown) && (
                 <ChannelSalesTable breakdown={channelPreview.breakdown} className="mb-4" />
               )}
 
