@@ -8,6 +8,16 @@ Run **once** inside **bingchun-shop → shop-api → Console** (single instance)
 2. Confirm migrations are current (shop deploy runs `prisma migrate deploy`).
 3. Nugegoda has products, stock, and a **STORE_MANAGER** admin (`branch@bingchunsrilanka.lk` if base seed ran).
 
+### Pre-flight audit (shop-api Console)
+
+```sh
+cd /app/backend
+export SEED_TARGET_STORE_NAME=Nugegoda
+npm run audit:nugegoda-seed:prod
+```
+
+From your laptop, the repo script needs **doadmin** (`deploy/digitalocean/audit-doadmin.url` or `AUDIT_DATABASE_URL`); `secrets.env` app user gets `permission denied for table stores`.
+
 ## Console commands
 
 ```sh
@@ -46,7 +56,15 @@ Re-run with `--skip-clear` only if you want to keep partial seed rows and contin
 ## Verify
 
 - Admin: Nugegoda analytics Sep/Oct ~10L delivered GMV; refunds RECEIVED/COMPLETE/REJECTED.
-- Read-only audit from repo root (doadmin URL):
+- Post-run audit in **shop-api Console**:
+
+```sh
+cd /app/backend
+export SEED_TARGET_STORE_NAME=Nugegoda
+npm run audit:nugegoda-seed:prod
+```
+
+- Or from repo root with doadmin URL:
 
 ```powershell
 node deploy/digitalocean/audit-nugegoda-seed-readonly.cjs
