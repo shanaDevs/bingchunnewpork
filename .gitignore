@@ -42,6 +42,9 @@ coverage
 playwright-report/
 test-results/
 
+# Backend test files
+backend/tests/
+
 # Next.js build output
 .next/
 out/

@@ -171,7 +171,7 @@ function periodToViewRow(row: PayoutPeriodRow, storeId?: string): {
   return syntheticPeriodViewWithdrawal({
     key: row.key,
     periodFrom: row.periodFrom,
-    periodTo: row.periodTo,
+    periodTo: previewPeriodTo(row),
     amountCents: row.amountCents,
     storeId,
     breakdown: row.breakdown,

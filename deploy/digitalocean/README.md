@@ -11,6 +11,37 @@ Postgres is `bingchun-pg` (direct port 25060, no pooler, no standby).
 Valkey is `bingchun-valkey`. The specs bind both, so the apps do not store
 those passwords. `DATABASE_URL` must stay on port 25060.
 
+App components receive **`${pg.DATABASE_URL}` (doadmin)** from the database
+binding. The `DATABASE_URL` line in `secrets.env` uses **`bingchun_app`** for
+local checks; that user may not have `SELECT` on tables even when data exists.
+
+### Check whether `bingchun-pg` has data (read-only)
+
+From repo root (uses public host derived from `secrets.env`):
+
+```powershell
+node deploy/digitalocean/audit-delivery-portal-readonly.cjs
+```
+
+Optional exact row counts: copy **doadmin** public URL into
+`deploy/digitalocean/audit-doadmin.url` (see `audit-doadmin.url.example`) or
+set `AUDIT_DATABASE_URL`, then run the same command.
+
+Compare legacy CapRover Postgres (`backend/.env`):
+
+```powershell
+node deploy/digitalocean/audit-delivery-portal-legacy.cjs
+```
+
+### Delivery portal routing (App Platform)
+
+Ingress on `bingchun-delivery` should send **`/delivery-api`** to the **`delivery`**
+API component and **`/socket.io`** to **`delivery-web`** (Next rewrites sockets to
+`BACKEND_URL` / shop). Admin Socket.IO must not hit delivery-service Engine.IO.
+
+Set **`DELIVERY_FRONTEND_URL`** on shop-api and delivery-service to the live
+delivery portal URL for CORS. Redeploy after changing [`app.delivery.yaml`](app.delivery.yaml).
+
 The JWT-style secrets are generated and stored only in `secrets.env`, which
 git ignores. The YAML files keep `REPLACE_ME`. Uploading a YAML file from git
 onto a live app would wipe the real secrets. Change secrets in the DigitalOcean
