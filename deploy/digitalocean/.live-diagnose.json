@@ -1,10 +1,25 @@
 {
   "host": "https://bingchun-delivery-6mgs2.ondigitalocean.app",
-  "checkedAt": "2026-10-30",
+  "checkedAt": "2026-10-30T15:35+0530",
   "findings": {
-    "GET /delivery-api/admin/health": { "status": 400, "body": "Transport unknown (Engine.IO)" },
-    "GET /health": { "status": 404, "note": "hits delivery-web Next.js, no route" },
-    "GET /delivery-api/admin/drivers": { "status": 400, "body": "Transport unknown", "via": "delivery-web proxy" }
+    "GET /delivery-api/admin/health": {
+      "status": 400,
+      "body": "Transport unknown (Engine.IO)",
+      "note": "Ingress still not sending /delivery-api to Express; apply app.delivery.yaml ingress via DO UI or doctl"
+    },
+    "GET /api/admin/health": {
+      "status": 401,
+      "body": "Unauthorised (expected without session)",
+      "note": "Core proxy via delivery-web → shop works"
+    }
   },
-  "likelyCause": "Ingress routed /socket.io to delivery-service; /delivery-api proxied via Next to private URL but upstream returned Engine.IO errors. Fix: route /delivery-api to delivery component; route /socket.io via delivery-web rewrite to shop; point client sockets at shop origin."
+  "fixAppliedInRepo": [
+    "deliveryAdminViaCore: route admin APIs via /api on *.ondigitalocean.app",
+    "app.delivery.yaml: NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE + DELIVERY_ADMIN_VIA_CORE",
+    "deploy/digitalocean/apply-delivery-app-spec.cjs for doctl spec merge"
+  ],
+  "afterDeployExpect": {
+    "browserDriversUrl": "/api/admin/drivers (not /delivery-api)",
+    "GET /delivery-api/admin/health": "200 JSON after ingress fix on DO"
+  }
 }

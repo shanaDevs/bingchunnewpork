@@ -1,50 +1,9 @@
 /**
- * Read-only Nugegoda seed baseline / verification on DO Postgres.
- * Uses same URL loading as audit-delivery-portal-readonly.cjs
+ * Read-only Nugegoda seed baseline / verification on DO Postgres (doadmin).
  */
-const fs = require('fs');
-const path = require('path');
+const { requireDoadminDatabaseUrl } = require('./lib/load-doadmin-database-url.cjs');
 
-const secretsPath = path.join(__dirname, 'secrets.env');
-const doadminUrlPath = path.join(__dirname, 'audit-doadmin.url');
-
-function loadPublicDatabaseUrl() {
-  if (process.env.AUDIT_DATABASE_URL) return process.env.AUDIT_DATABASE_URL;
-  if (fs.existsSync(doadminUrlPath)) {
-    const line = fs
-      .readFileSync(doadminUrlPath, 'utf8')
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .find((l) => l && !l.startsWith('#'));
-    if (line) {
-      const parsed = new URL(line);
-      if (parsed.hostname.startsWith('private-')) {
-        parsed.hostname = parsed.hostname.slice('private-'.length);
-      }
-      return parsed.toString();
-    }
-  }
-  const text = fs.readFileSync(secretsPath, 'utf8');
-  for (const line of text.split(/\r?\n/)) {
-    const m = line.match(/^\s*DATABASE_URL\s*=\s*(.+)\s*$/);
-    if (!m) continue;
-    let url = m[1].trim();
-    if (
-      (url.startsWith('"') && url.endsWith('"')) ||
-      (url.startsWith("'") && url.endsWith("'"))
-    ) {
-      url = url.slice(1, -1);
-    }
-    const parsed = new URL(url);
-    if (parsed.hostname.startsWith('private-')) {
-      parsed.hostname = parsed.hostname.slice('private-'.length);
-    }
-    return parsed.toString();
-  }
-  throw new Error('DATABASE_URL not found in secrets.env or audit-doadmin.url');
-}
-
-process.env.DATABASE_URL = loadPublicDatabaseUrl();
+process.env.DATABASE_URL = requireDoadminDatabaseUrl();
 
 const { PrismaClient } = require('../../node_modules/@prisma/client');
 const prisma = new PrismaClient();

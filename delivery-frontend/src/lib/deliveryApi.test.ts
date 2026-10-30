@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest';
-import { resolveAdminRequestUrl } from './deliveryApi';
+import { describe, expect, it, vi, afterEach } from 'vitest';
+import { deliveryAdminViaCore, resolveAdminRequestUrl } from './deliveryApi';
+
+describe('deliveryAdminViaCore', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('uses core when NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE is true', () => {
+    vi.stubEnv('NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE', 'true');
+    expect(deliveryAdminViaCore()).toBe(true);
+  });
+});
 
 describe('resolveAdminRequestUrl', () => {
   it('routes delivery-jobs actual-route through delivery-api', () => {

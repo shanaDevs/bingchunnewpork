@@ -131,3 +131,10 @@ services:
       - key: NEXT_PUBLIC_SOCKET_URL
         scope: RUN_AND_BUILD_TIME
         value: "https://bingchunsrilanka.com"
+      # Until ingress sends /delivery-api to the delivery component, admin reads use shop /api (runtime proxy).
+      - key: NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE
+        scope: RUN_AND_BUILD_TIME
+        value: "true"
+      - key: DELIVERY_ADMIN_VIA_CORE
+        scope: RUN_TIME
+        value: "true"
