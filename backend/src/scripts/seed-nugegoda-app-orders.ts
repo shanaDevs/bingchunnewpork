@@ -34,11 +34,11 @@ import { normalizePhone } from '../utils/phone';
 import { runHandler, type HarnessUser } from './lib/seedControllerHarness';
 import { assertNugegodaAppSeedAllowed } from './seedGuard';
 
-dotenv.config({ path: path.join(__dirname, '../../.env') });
+dotenv.config({ path: path.join(__dirname, '../../.env'), override: false });
 
 const SEED_NOTE = 'seed-nuge-app-';
 const WEEKLY_TARGET_QTY = 80;
-const RESET_QTY = 50;
+const RESET_QTY = 2000;
 const DEFAULT_TARGET_LKR = 1_000_000;
 const PAYMENT_METHODS: PaymentMethod[] = ['PAYHERE', 'CARD'];
 const WALK_IN_PHONE = '0700000000';
@@ -248,7 +248,7 @@ async function restockStore(store: StoreRow): Promise<void> {
   if (products.length === 0) throw new Error(`No store_products for ${store.name}`);
 
   const existing = await prisma.stockBatch.findMany({
-    where: { storeId: store.id, status: 'ACTIVE', remainingQty: { gt: 20 } },
+    where: { storeId: store.id, status: 'ACTIVE', remainingQty: { gt: 500 } },
     select: { productId: true },
   });
   const stocked = new Set(existing.map((r) => r.productId));
@@ -515,43 +515,68 @@ async function placeOnlineOrder(input: {
     };
   }
 
-  const data = await runHandler<{ order: { id: string; orderNumber: string; total: number; orderMode: OrderMode; storeId: string; userId: string | null; paymentMethod: PaymentMethod } }>(
-    placeOrder,
-    {
-      body,
-      user: actors.customer,
-      headers: { 'idempotency-key': crypto.randomUUID() },
-    },
-  );
+  const maxAttempts = 6;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const data = await runHandler<{
+        order: {
+          id: string;
+          orderNumber: string;
+          total: number;
+          orderMode: OrderMode;
+          storeId: string;
+          userId: string | null;
+          paymentMethod: PaymentMethod;
+        };
+      }>(placeOrder, {
+        body,
+        user: actors.customer,
+        headers: { 'idempotency-key': crypto.randomUUID() },
+      });
 
-  const order = data.order;
-  const total = await zeroConvenienceFeeForOrder(order.id);
-  const paymentRef = `${SEED_NOTE}pay-${crypto.randomUUID()}`;
-  await markOnlineOrderPaid(
-    {
-      id: order.id,
-      orderNumber: order.orderNumber,
-      storeId: order.storeId,
-      total,
-      paymentMethod: order.paymentMethod,
-      userId: order.userId,
-      orderMode: order.orderMode,
-    },
-    { paymentRef },
-  );
+      const order = data.order;
+      const total = await zeroConvenienceFeeForOrder(order.id);
+      const paymentRef = `${SEED_NOTE}pay-${crypto.randomUUID()}`;
+      await markOnlineOrderPaid(
+        {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          storeId: order.storeId,
+          total,
+          paymentMethod: order.paymentMethod,
+          userId: order.userId,
+          orderMode: order.orderMode,
+        },
+        { paymentRef },
+      );
 
-  return prisma.order.findUniqueOrThrow({
-    where: { id: order.id },
-    select: {
-      id: true,
-      orderNumber: true,
-      total: true,
-      orderMode: true,
-      storeId: true,
-      userId: true,
-      paymentMethod: true,
-    },
-  });
+      return prisma.order.findUniqueOrThrow({
+        where: { id: order.id },
+        select: {
+          id: true,
+          orderNumber: true,
+          total: true,
+          orderMode: true,
+          storeId: true,
+          userId: true,
+          paymentMethod: true,
+        },
+      });
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const orderNumConflict =
+        msg.includes('orderNumber') ||
+        (typeof err === 'object' &&
+          err !== null &&
+          (err as { code?: string; meta?: { target?: string[] } }).code === 'P2002' &&
+          (err as { meta?: { target?: string[] } }).meta?.target?.includes('orderNumber'));
+      if (attempt < maxAttempts - 1 && orderNumConflict) continue;
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
 async function setStatus(
@@ -842,7 +867,21 @@ async function seedDeliveredGmv(ctx: {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (paymentMethod === 'CARD' && msg.includes('payment')) {
+      if (msg.includes('Insufficient stock')) {
+        await restockStore(store);
+        const alt = products[(seq + day + 1) % products.length];
+        const retryQty = Math.min(quantity, 4);
+        order = await placeOnlineOrder({
+          store,
+          actors,
+          orderMode,
+          paymentMethod,
+          product: alt,
+          quantity: retryQty,
+          note,
+          promoCode,
+        });
+      } else if (paymentMethod === 'CARD' && msg.includes('payment')) {
         paymentMethod = 'PAYHERE';
         order = await placeOnlineOrder({
           store,
