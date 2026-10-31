@@ -118,22 +118,22 @@ services:
       - key: NODE_ENV
         scope: RUN_TIME
         value: production
-      # Browser → shop/core absolute URL (not delivery-service). Requires ADMIN_COOKIE_SAMESITE=none on shop-api.
+      # Browser → admin API (delivery-jobs / drivers / ops live on admin surface).
       - key: NEXT_PUBLIC_API_URL
         scope: RUN_AND_BUILD_TIME
-        value: "https://bing-chun-ui2ow.ondigitalocean.app/api"
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app/api"
       - key: DELIVERY_SERVICE_URL
         scope: RUN_TIME
         value: "${delivery.PRIVATE_URL}"
       - key: BACKEND_URL
         scope: RUN_AND_BUILD_TIME
-        value: "https://bing-chun-ui2ow.ondigitalocean.app"
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
       - key: API_PROXY_URL
         scope: RUN_AND_BUILD_TIME
-        value: "https://bing-chun-ui2ow.ondigitalocean.app"
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
       - key: NEXT_PUBLIC_SOCKET_URL
         scope: RUN_AND_BUILD_TIME
-        value: "https://bing-chun-ui2ow.ondigitalocean.app"
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
       - key: NEXT_PUBLIC_SITE_URL
         scope: RUN_AND_BUILD_TIME
         value: "https://bingchun-delivery-6mgs2.ondigitalocean.app"

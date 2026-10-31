@@ -24,9 +24,22 @@ databases:
     cluster_name: bingchun-valkey
 ingress:
   rules:
+    # API + health hit admin-api directly (delivery ops + admin-web avoid Next double-proxy).
     - match:
         path:
           prefix: /socket.io
+      component:
+        name: admin-api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /api
+      component:
+        name: admin-api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /health
       component:
         name: admin-api
         preserve_path_prefix: true
@@ -65,6 +78,10 @@ services:
       - key: RUN_BACKGROUND_JOBS
         scope: RUN_TIME
         value: "false"
+      # Delivery console calls this API cross-origin.
+      - key: ADMIN_COOKIE_SAMESITE
+        scope: RUN_TIME
+        value: "none"
       - key: PRISMA_CONNECTION_LIMIT
         scope: RUN_TIME
         value: "4"

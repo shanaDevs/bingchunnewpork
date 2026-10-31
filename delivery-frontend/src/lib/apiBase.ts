@@ -96,8 +96,8 @@ export function getBackendOrigin(): string {
 
 /**
  * API base URL (includes /api suffix).
- * Production delivery console uses absolute shop/core URL
- * (`https://bing-chun-ui2ow.ondigitalocean.app/api`). Local/dev may use `/api` (proxied).
+ * Production delivery console uses absolute admin API URL
+ * (`https://bingchun-admin-a4ndy.ondigitalocean.app/api`). Local/dev may use `/api` (proxied).
  * Staff Login 5-tap override wins in the browser when set.
  */
 export function getApiBaseUrl(): string {

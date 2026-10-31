@@ -11,16 +11,16 @@ COPY delivery-frontend ./delivery-frontend
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Browser calls shop/core directly so DevTools shows shop host (not delivery /api proxy).
-ARG NEXT_PUBLIC_API_URL=https://bing-chun-ui2ow.ondigitalocean.app/api
+# Browser calls admin API (delivery-jobs live on admin surface, not shop).
+ARG NEXT_PUBLIC_API_URL=https://bingchun-admin-a4ndy.ondigitalocean.app/api
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ARG BACKEND_URL=https://bing-chun-ui2ow.ondigitalocean.app
+ARG BACKEND_URL=https://bingchun-admin-a4ndy.ondigitalocean.app
 ENV BACKEND_URL=$BACKEND_URL
-ARG API_PROXY_URL=https://bing-chun-ui2ow.ondigitalocean.app
+ARG API_PROXY_URL=https://bingchun-admin-a4ndy.ondigitalocean.app
 ENV API_PROXY_URL=$API_PROXY_URL
 ARG DELIVERY_SERVICE_URL=
 ENV DELIVERY_SERVICE_URL=$DELIVERY_SERVICE_URL
-ARG NEXT_PUBLIC_SOCKET_URL=https://bing-chun-ui2ow.ondigitalocean.app
+ARG NEXT_PUBLIC_SOCKET_URL=https://bingchun-admin-a4ndy.ondigitalocean.app
 ENV NEXT_PUBLIC_SOCKET_URL=$NEXT_PUBLIC_SOCKET_URL
 ARG NEXT_PUBLIC_SITE_URL=https://bingchun-delivery-6mgs2.ondigitalocean.app
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
