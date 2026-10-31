@@ -316,13 +316,17 @@ export async function listAdminDeliveryJobs(req: Request, res: Response, next: N
     return success(
       res,
       jobs.map((j) => {
-        const linkedOrders = j.jobOrders.flatMap((link) => {
+        let orderCount = 0;
+        let deliveredCount = 0;
+        let totalRevenue = 0;
+        for (const link of j.jobOrders) {
           const order = orderById.get(link.orderId);
-          return order ? [{ order }] : [];
-        });
-        const visibleOrders = visibleJobOrderLinksForDeliveryJob(j.status, linkedOrders);
-        const deliveredCount = visibleOrders.filter((jo) => jo.order.status === 'DELIVERED').length;
-        const totalRevenue = visibleOrders.reduce((sum, jo) => sum + jo.order.total, 0);
+          if (!order) continue;
+          if (isActiveDeliveryJobStatus(j.status) && order.status === 'CANCELLED') continue;
+          orderCount += 1;
+          if (order.status === 'DELIVERED') deliveredCount += 1;
+          totalRevenue += order.total;
+        }
         return {
           id: j.id,
           rideCode: j.rideCode ?? null,
@@ -342,7 +346,7 @@ export async function listAdminDeliveryJobs(req: Request, res: Response, next: N
           startedAt: j.startedAt,
           returnStartedAt: j.returnStartedAt ?? null,
           completedAt: j.completedAt,
-          orderCount: visibleOrders.length,
+          orderCount,
           deliveredCount,
           totalCups: j.totalCups ?? null,
           totalRevenue,
