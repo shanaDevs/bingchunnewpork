@@ -91,6 +91,19 @@ function isBackendApiOrigin(origin: string): boolean {
   return candidate === api;
 }
 
+/**
+ * App Platform publishes the storefront and `/api` on one `*.ondigitalocean.app` host.
+ * That host is also `API_BASE_URL`, so it must stay a valid browser origin.
+ */
+function isSharedAppPlatformOrigin(origin: string): boolean {
+  if (!isBackendApiOrigin(origin)) return false;
+  try {
+    return new URL(origin).hostname.endsWith('.ondigitalocean.app');
+  } catch {
+    return false;
+  }
+}
+
 /** True when deployed on CapRover/production hosts, even if NODE_ENV was not set. */
 export function isProductionDeployment(): boolean {
   if (config.nodeEnv === 'production') return true;
@@ -153,12 +166,14 @@ function isLiveShopHostname(hostname: string): boolean {
 function isAllowedFrontendOrigin(origin: string): boolean {
   const normalized = normalizeOrigin(origin);
   if (!normalized) return false;
-  if (isBackendApiOrigin(normalized)) return false;
 
   // Match raw + canonical forms — CapRover may still have FRONTEND_URL on the
   // old shop host while the browser sends https://bingchunsrilanka.com.
+  // An explicitly configured origin wins even when it is also API_BASE_URL,
+  // which is the case for the shared DigitalOcean app hostname.
   const allowlist = new Set(productionCorsOrigins());
-  if (allowlist.has(normalized)) return true;
+  if (allowlist.has(normalized) || isSharedAppPlatformOrigin(normalized)) return true;
+  if (isBackendApiOrigin(normalized)) return false;
 
   const canonical = canonicalizeFrontendUrl(normalized);
   if (!isBackendApiOrigin(canonical) && allowlist.has(canonical)) return true;
@@ -210,10 +225,8 @@ export function resolveFrontendUrl(req: Request, explicit?: string): string {
 
   for (const raw of candidates) {
     const origin = normalizeOrigin(raw);
-    if (!origin || isBackendApiOrigin(origin)) continue;
-    if (isAllowedFrontendOrigin(origin)) {
-      return canonicalizeFrontendUrl(origin);
-    }
+    if (!origin || !isAllowedFrontendOrigin(origin)) continue;
+    return canonicalizeFrontendUrl(origin);
   }
 
   return getEffectiveFrontendUrl();

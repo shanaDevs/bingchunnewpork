@@ -83,4 +83,19 @@ describe('isCorsAllowedOrigin production matrix', () => {
     expect(isCorsAllowedOrigin('https://bing-chun-admin-web.bc.dartcodes.com')).toBe(true);
     expect(isCorsAllowedOrigin('https://bing-chun-pos-web.bc.dartcodes.com')).toBe(true);
   });
+
+  it('allows the shared DigitalOcean app host used by the storefront and the API', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.LIVE_SHOP_URL = 'https://bingchunsrilanka.com';
+    process.env.FRONTEND_URL = 'https://bingchunsrilanka.com';
+    process.env.ADMIN_URL = 'https://bingchun-admin-a4ndy.ondigitalocean.app';
+    process.env.API_BASE_URL = 'https://bing-chun-ui2ow.ondigitalocean.app';
+    process.env.CORS_EXTRA_ORIGINS = 'https://bing-chun-ui2ow.ondigitalocean.app,https://bingchun-pos-i8pq3.ondigitalocean.app';
+
+    const { isCorsAllowedOrigin } = await import('../../src/lib/resolveFrontendUrl');
+    expect(isCorsAllowedOrigin('https://bing-chun-ui2ow.ondigitalocean.app')).toBe(true);
+    expect(isCorsAllowedOrigin('https://bingchunsrilanka.com')).toBe(true);
+    expect(isCorsAllowedOrigin('https://bingchun-pos-i8pq3.ondigitalocean.app')).toBe(true);
+    expect(isCorsAllowedOrigin('https://evil.example.com')).toBe(false);
+  });
 });

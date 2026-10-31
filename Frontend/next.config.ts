@@ -193,6 +193,12 @@ const nextConfig: NextConfig = {
     return [];
   },
   async rewrites() {
+    // Production App Platform injects the API hostname only after the
+    // container starts. A rewrite baked here would keep pointing at
+    // localhost:4000. Request handlers under src/app/api and
+    // src/app/delivery-api proxy with the live URL instead.
+    if (process.env.NODE_ENV === 'production') return [];
+
     const surface = getWebSurface();
     const apiOrigin = surface === 'admin'
       ? getAdminApiOrigin()
