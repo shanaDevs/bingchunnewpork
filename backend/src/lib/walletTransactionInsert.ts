@@ -8,6 +8,9 @@ export type WalletLedgerInsert = {
   /** Signed integer cents (matches amount column semantics). */
   amountCents: number;
   balanceAfterCents: number;
+  orderId?: string | null;
+  paymentMethod?: string | null;
+  paymentRef?: string | null;
   description?: string | null;
   reference?: string | null;
   createdById?: string | null;
@@ -34,12 +37,15 @@ export async function insertWalletLedgerRow(
     INSERT INTO "wallet_transactions" (
       "id",
       "storeId",
+      "orderId",
       "type",
       "direction",
       "counterparty",
       "idempotencyKey",
       "amount",
       "balanceAfter",
+      "paymentMethod",
+      "paymentRef",
       "description",
       "reference",
       "createdById",
@@ -48,12 +54,15 @@ export async function insertWalletLedgerRow(
     ) VALUES (
       ${row.id},
       ${row.storeId},
+      ${row.orderId ?? null},
       ${row.type}::"WalletTransactionType",
       ${direction}::"WalletTxDirection",
       'CUSTOMER'::"WalletTxCounterparty",
       ${idempotencyKey},
       ${centsToDecimal(row.amountCents)},
       ${centsToDecimal(row.balanceAfterCents)},
+      ${row.paymentMethod ? `${row.paymentMethod}` : null}::"PaymentMethod",
+      ${row.paymentRef ?? null},
       ${row.description ?? null},
       ${row.reference ?? null},
       ${row.createdById ?? null},

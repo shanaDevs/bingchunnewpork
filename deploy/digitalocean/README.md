@@ -42,6 +42,19 @@ API component and **`/socket.io`** to **`delivery-web`** (Next rewrites sockets 
 Set **`DELIVERY_FRONTEND_URL`** on shop-api and delivery-service to the live
 delivery portal URL for CORS. Redeploy after changing [`app.delivery.yaml`](app.delivery.yaml).
 
+To merge secrets into the app spec and apply ingress with **doctl** (does not wipe UI-only
+settings if you edit ingress in the console instead):
+
+```powershell
+node deploy/digitalocean/apply-delivery-app-spec.cjs
+doctl apps update <APP_ID> --spec deploy/digitalocean/.generated-app.delivery.yaml
+```
+
+Until `/delivery-api` ingress is correct, **delivery-web** sets
+`NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE=true` and the frontend also routes admin APIs via shop
+`/api` when the host is `*.ondigitalocean.app` (see `deliveryAdminViaCore` in
+`delivery-frontend/src/lib/deliveryApi.ts`).
+
 The JWT-style secrets are generated and stored only in `secrets.env`, which
 git ignores. The YAML files keep `REPLACE_ME`. Uploading a YAML file from git
 onto a live app would wipe the real secrets. Change secrets in the DigitalOcean
