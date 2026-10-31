@@ -193,17 +193,26 @@ export function visibleJobOrderLinksForDeliveryJob<T extends { order: { status: 
  * required relation makes Prisma throw "Field order is required to return data, got null"
  * and the whole list fails. Loading by id leaves the missing order out.
  */
+type OrderSelectWithId<S extends Prisma.OrderSelect> = S & { id: true };
+
 export async function findOrdersByIds<S extends Prisma.OrderSelect>(
   ids: string[],
   select: S,
-): Promise<Map<string, Prisma.OrderGetPayload<{ select: S }>>> {
+): Promise<Map<string, Prisma.OrderGetPayload<{ select: OrderSelectWithId<S> }>>> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return new Map();
+  const selectWithId: OrderSelectWithId<S> = { ...select, id: true };
+  type Row = Prisma.OrderGetPayload<{ select: OrderSelectWithId<S> }>;
   const rows = await prisma.order.findMany({
     where: { id: { in: unique } },
-    select,
+    select: selectWithId,
   });
-  return new Map(rows.map((row) => [row.id, row]));
+  const out = new Map<string, Row>();
+  for (const row of rows) {
+    const id = (row as { id: string }).id;
+    out.set(id, row as Row);
+  }
+  return out;
 }
 
 export async function findOrdersByIdsInclude<I extends Prisma.OrderInclude>(
@@ -212,11 +221,17 @@ export async function findOrdersByIdsInclude<I extends Prisma.OrderInclude>(
 ): Promise<Map<string, Prisma.OrderGetPayload<{ include: I }>>> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return new Map();
+  type Row = Prisma.OrderGetPayload<{ include: I }>;
   const rows = await prisma.order.findMany({
     where: { id: { in: unique } },
     include,
   });
-  return new Map(rows.map((row) => [row.id, row]));
+  const out = new Map<string, Row>();
+  for (const row of rows) {
+    const id = (row as { id: string }).id;
+    out.set(id, row as Row);
+  }
+  return out;
 }
 
 /**
