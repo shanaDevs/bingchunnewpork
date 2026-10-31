@@ -23,6 +23,8 @@ ARG NEXT_PUBLIC_SOCKET_URL=
 ENV NEXT_PUBLIC_SOCKET_URL=$NEXT_PUBLIC_SOCKET_URL
 ARG NEXT_PUBLIC_SITE_URL=
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+ARG NEXT_PUBLIC_MAIN_ADMIN_URL=
+ENV NEXT_PUBLIC_MAIN_ADMIN_URL=$NEXT_PUBLIC_MAIN_ADMIN_URL
 
 RUN npm run build -w @bingchun/settlement \
  && npm run build -w @bingchun/delivery-frontend
@@ -34,9 +36,13 @@ ENV PORT=3100
 ARG BACKEND_URL=
 ARG API_PROXY_URL=
 ARG DELIVERY_SERVICE_URL=
+ARG MAIN_ADMIN_URL=
+ARG ADMIN_WEB_URL=
 ENV BACKEND_URL=$BACKEND_URL
 ENV API_PROXY_URL=$API_PROXY_URL
 ENV DELIVERY_SERVICE_URL=$DELIVERY_SERVICE_URL
+ENV MAIN_ADMIN_URL=$MAIN_ADMIN_URL
+ENV ADMIN_WEB_URL=$ADMIN_WEB_URL
 COPY --from=builder /app/delivery-frontend/.next/standalone ./
 COPY --from=builder /app/delivery-frontend/.next/static ./delivery-frontend/.next/static
 COPY --from=builder /app/delivery-frontend/public ./delivery-frontend/public

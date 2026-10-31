@@ -24,12 +24,15 @@ function queueVisibilityOr(): Prisma.OrderWhereInput[] {
 export function inProgressOrdersWhere(
   scope: StoreScope,
   selectedRange: DateRange,
+  options?: { pickupOnly?: boolean },
 ): Prisma.OrderWhereInput {
   return {
     ...scope,
     createdAt: { gte: selectedRange.gte, lte: selectedRange.lte },
     status: { in: ORDER_QUEUE_STATUSES },
-    OR: queueVisibilityOr(),
+    OR: options?.pickupOnly
+      ? [{ orderMode: 'TAKEAWAY', ...fulfillmentQueuePaymentWhere('pickup') }]
+      : queueVisibilityOr(),
   };
 }
 
