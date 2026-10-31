@@ -74,7 +74,7 @@ No full unused-dependency audit was executed in this documentation pass.
 2. Formalize Prisma Migrate; reduce boot-time `ensure*`
 3. Shared admin API module + React Query keys
 4. Env-driven CORS only; remove LAN hardcodes
-5. Complete or remove MFA fields; complete or remove POS nav
+5. Complete or remove POS nav (admin MFA already removed)
 6. Align Flutter API config with documented production defaults
 7. Expand Vitest coverage to orders, wallet, admin permissions
 8. Add CI test stage before CapRover deploy

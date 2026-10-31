@@ -300,7 +300,6 @@ Outbound notification log: userId?, phone?, email?, type NotificationType, subje
 | pinLookup | String? | driver PIN lookup |
 | roleId | String | FK → roles |
 | storeId | String? | FK home store |
-| mfaEnabled / mfaSecret | Boolean / String? | **MFA flow Not Implemented** |
 | isActive | Boolean | |
 | lastLoginAt | DateTime? | |
 | createdAt / updatedAt | DateTime | |

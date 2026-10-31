@@ -230,11 +230,12 @@ export function monthsInRange(from: string, to: string): string[] {
 }
 
 export function computePlatformCommission(base: number, monthlyBase: number): number {
-  return base * getEffectiveRate(monthlyBase);
+  // Whole-LKR ledger unit — round half-up at the calculation site.
+  return Math.round(base * getEffectiveRate(monthlyBase));
 }
 
 export function computeProviderFee(orderSubtotal: number, rate = GATEWAY_FEE_RATE): number {
-  return orderSubtotal * rate;
+  return Math.round(orderSubtotal * rate);
 }
 
 /** PayHere gateway fee applies to full transaction total on PayHere pickup online & delivery online orders. */
