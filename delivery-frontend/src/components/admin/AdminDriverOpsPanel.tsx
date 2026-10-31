@@ -1,9 +1,9 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
+import { adminFetch } from '@/lib/adminApi';
 
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
   CheckCircle2,
@@ -16,8 +16,9 @@ import {
   Percent,
   XCircle,
 } from 'lucide-react';
-import { getApiBaseUrl } from '@/lib/apiBase';
 import { adminBadgeClass } from '@/lib/adminBadges';
+import AdminTablePagination from '@/components/admin/AdminTablePagination';
+import { ADMIN_TABLE_PAGE_SIZE, buildPageList } from '@/lib/pagination';
 import AdminComplaintDetailModal from '@/components/admin/AdminComplaintDetailModal';
 import AdminBranchRequestReviewModal, {
   type AdminDriverBranchRequest,
@@ -41,16 +42,49 @@ import AdminReassignFailedOrderModal, {
   forwardOrdersFromFailure,
 } from '@/components/admin/AdminReassignFailedOrderModal';
 
-async function adminFetch(endpoint: string, options?: RequestInit) {
-    const res = await fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: adminAuthHeaders({ 'Content-Type': 'application/json', ...(options?.headers as Record<string, string> | undefined),
-    credentials: 'include',
-  }),
-  });
-  const json = await res.json();
-  if (!json.success) throw new Error(json.message || 'Request failed');
-  return json;
+type OpsPage<T> = {
+  rows: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+function toOpsPage<T>(data: unknown, page: number, pageSize: number): OpsPage<T> {
+  if (data && typeof data === 'object' && Array.isArray((data as OpsPage<T>).rows)) {
+    const pageData = data as OpsPage<T>;
+    return {
+      rows: pageData.rows,
+      total: typeof pageData.total === 'number' ? pageData.total : pageData.rows.length,
+      page: pageData.page ?? page,
+      pageSize: pageData.pageSize ?? pageSize,
+    };
+  }
+  if (Array.isArray(data)) {
+    const rows = data as T[];
+    const start = (page - 1) * pageSize;
+    return {
+      rows: rows.slice(start, start + pageSize),
+      total: rows.length,
+      page,
+      pageSize,
+    };
+  }
+  return { rows: [], total: 0, page, pageSize };
+}
+
+function buildOpsListQuery(storeId: string | undefined, page: number, pageSize: number) {
+  const qs = new URLSearchParams();
+  if (storeId) qs.set('storeId', storeId);
+  qs.set('page', String(page));
+  qs.set('pageSize', String(pageSize));
+  return `?${qs.toString()}`;
+}
+
+function buildOpsListQueryNoStore(page: number, pageSize: number) {
+  const qs = new URLSearchParams();
+  qs.set('page', String(page));
+  qs.set('pageSize', String(pageSize));
+  return `?${qs.toString()}`;
 }
 
 export type AnalyticsFilters = {
@@ -146,9 +180,17 @@ export default function AdminDriverOpsPanel({
   const qc = useQueryClient();
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
   const [selectedFailure, setSelectedFailure] = useState<AdminDeliveryFailure | null>(null);
-  const storeQuery = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
   const [selectedComplaintId, setSelectedComplaintId] = useState<string | null>(null);
   const [selectedBranchRequest, setSelectedBranchRequest] = useState<AdminDriverBranchRequest | null>(null);
+  const [listPage, setListPage] = useState(1);
+  const [listPageSize, setListPageSize] = useState(ADMIN_TABLE_PAGE_SIZE);
+
+  useEffect(() => {
+    setListPage(1);
+  }, [storeId, mode]);
+
+  const listQuery = buildOpsListQuery(storeId, listPage, listPageSize);
+  const requestsListQuery = buildOpsListQueryNoStore(listPage, listPageSize);
 
   const appliedAnalyticsFilters: AnalyticsFilters = analyticsFilters ?? {
     storeId,
@@ -169,23 +211,39 @@ export default function AdminDriverOpsPanel({
   );
 
   const complaintsQuery = useQuery({
-    queryKey: ['admin-driver-complaints', storeId],
-    queryFn: async () => (await adminFetch(`/admin/driver-complaints${storeQuery}`)).data as AdminDriverComplaint[],
+    queryKey: ['admin-driver-complaints', storeId, listPage, listPageSize],
+    queryFn: async () =>
+      toOpsPage<AdminDriverComplaint>(
+        (await adminFetch(`/admin/driver-complaints${listQuery}`)).data,
+        listPage,
+        listPageSize,
+      ),
     enabled: mode === 'complaints',
+    placeholderData: keepPreviousData,
   });
 
   const failuresQuery = useQuery({
-    queryKey: ['admin-delivery-failures', storeId],
+    queryKey: ['admin-delivery-failures', storeId, listPage, listPageSize],
     queryFn: async () =>
-      (await adminFetch(`/admin/delivery-failures${storeQuery}`)).data as AdminDeliveryFailure[],
+      toOpsPage<AdminDeliveryFailure>(
+        (await adminFetch(`/admin/delivery-failures${listQuery}`)).data,
+        listPage,
+        listPageSize,
+      ),
     enabled: mode === 'failures',
+    placeholderData: keepPreviousData,
   });
 
   const requestsQuery = useQuery({
-    queryKey: ['admin-driver-branch-requests'],
+    queryKey: ['admin-driver-branch-requests', listPage, listPageSize],
     queryFn: async () =>
-      (await adminFetch('/admin/driver-branch-requests')).data as AdminDriverBranchRequest[],
+      toOpsPage<AdminDriverBranchRequest>(
+        (await adminFetch(`/admin/driver-branch-requests${requestsListQuery}`)).data,
+        listPage,
+        listPageSize,
+      ),
     enabled: mode === 'requests',
+    placeholderData: keepPreviousData,
   });
 
   const analyticsQuery = useQuery({
@@ -228,6 +286,38 @@ export default function AdminDriverOpsPanel({
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  function renderOpsTablePagination(
+    pageData: OpsPage<unknown> | undefined,
+    itemLabel: string,
+    ariaLabel: string,
+  ) {
+    if (!pageData || pageData.total === 0) return null;
+    const totalPages = Math.max(1, Math.ceil(pageData.total / listPageSize));
+    const safePage = Math.min(listPage, totalPages);
+    const rangeStart = (safePage - 1) * listPageSize + 1;
+    const rangeEnd = Math.min(safePage * listPageSize, pageData.total);
+    return (
+      <div className="border-t border-navy-border px-4 py-3 sm:px-5">
+        <AdminTablePagination
+          pageSize={listPageSize}
+          onPageSizeChange={(size) => {
+            setListPageSize(size);
+            setListPage(1);
+          }}
+          rangeStart={rangeStart}
+          rangeEnd={rangeEnd}
+          totalItems={pageData.total}
+          safePage={safePage}
+          totalPages={totalPages}
+          pageList={buildPageList(safePage, totalPages)}
+          onPageChange={setListPage}
+          itemLabel={itemLabel}
+          ariaLabel={ariaLabel}
+        />
+      </div>
+    );
+  }
 
   if (mode === 'analytics') {
     const summary = analyticsQuery.data?.summary;
@@ -434,11 +524,8 @@ export default function AdminDriverOpsPanel({
   }
 
   if (mode === 'requests') {
-    const rows = [...(requestsQuery.data ?? [])].sort((a, b) => {
-      if (a.status === 'PENDING' && b.status !== 'PENDING') return -1;
-      if (a.status !== 'PENDING' && b.status === 'PENDING') return 1;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
+    const requestPage = requestsQuery.data;
+    const rows = requestPage?.rows ?? [];
 
     return (
       <>
@@ -547,6 +634,7 @@ export default function AdminDriverOpsPanel({
               )}
             </tbody>
           </table>
+          {renderOpsTablePagination(requestPage, 'requests', 'Branch requests pagination')}
         </div>
         <AdminBranchRequestReviewModal
           request={selectedBranchRequest}
@@ -563,7 +651,8 @@ export default function AdminDriverOpsPanel({
   }
 
   if (mode === 'failures') {
-    const failures = failuresQuery.data ?? [];
+    const failurePage = failuresQuery.data;
+    const failures = failurePage?.rows ?? [];
     return (
       <>
         <div className="card overflow-x-auto">
@@ -679,6 +768,7 @@ export default function AdminDriverOpsPanel({
               )}
             </tbody>
           </table>
+          {renderOpsTablePagination(failurePage, 'failures', 'Delivery failures pagination')}
         </div>
         <AdminReassignFailedOrderModal
           failure={selectedFailure}
@@ -689,7 +779,7 @@ export default function AdminDriverOpsPanel({
           onClose={() => setSelectedFailure(null)}
           onAssigned={() => {
             setSelectedFailure(null);
-            qc.invalidateQueries({ queryKey: ['admin-delivery-failures', storeId] });
+            qc.invalidateQueries({ queryKey: ['admin-delivery-failures'] });
             qc.invalidateQueries({ queryKey: ['admin-delivery-jobs'] });
           }}
         />
@@ -697,7 +787,8 @@ export default function AdminDriverOpsPanel({
     );
   }
 
-  const complaints = complaintsQuery.data ?? [];
+  const complaintPage = complaintsQuery.data;
+  const complaints = complaintPage?.rows ?? [];
 
   return (
     <>
@@ -795,6 +886,7 @@ export default function AdminDriverOpsPanel({
             )}
           </tbody>
         </table>
+        {renderOpsTablePagination(complaintPage, 'complaints', 'Driver complaints pagination')}
       </div>
 
       <AdminComplaintDetailModal

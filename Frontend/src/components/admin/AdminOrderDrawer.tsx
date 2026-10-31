@@ -31,7 +31,7 @@ import CounterPaymentForm, {
 import type { Order } from '@/types';
 import { getOrderEditMode, orderBalanceDue, orderEditLockedMessage, orderTotalLabel, type OrderEditMode } from '@/lib/orderEdit';
 import { getStatusLabel } from '@/lib/orderStatus';
-import { formatOrderPromoDisplay } from '@/lib/journeyPromoLabel';
+import { formatOrderDiscountSuffix } from '@/lib/orderDiscountLabel';
 import {
   customerLabel,
   customerPhone,
@@ -446,6 +446,15 @@ export default function AdminOrderDrawer({ orderKey, onClose, onViewReceipt, onC
     ? 'flex w-full max-w-2xl max-h-[90dvh] flex-col overflow-hidden rounded-2xl border border-navy-border bg-navy-card shadow-2xl'
     : 'flex h-[100dvh] w-full max-w-lg flex-col overflow-hidden border-l border-navy-border bg-navy-card shadow-2xl';
 
+  const orderDiscountSuffix =
+    order && order.discount > 0
+      ? formatOrderDiscountSuffix({
+          promoCode: order.promoCode,
+          subtotal: order.subtotal,
+          discount: order.discount,
+        })
+      : null;
+
   const panelContent = (
     <>
       <div className="flex shrink-0 items-start justify-between border-b border-navy-border px-5 py-4">
@@ -639,8 +648,7 @@ export default function AdminOrderDrawer({ orderKey, onClose, onViewReceipt, onC
                 {order.discount > 0 && (
                   <div className="flex justify-between py-1 text-green-400">
                     <span>
-                      Discount
-                      {order.promoCode ? ` (${formatOrderPromoDisplay(order.promoCode)})` : ''}
+                      Discount{orderDiscountSuffix ? ` (${orderDiscountSuffix})` : ''}
                     </span>
                     <span className="tabular-nums">-{formatMoney(order.discount)}</span>
                   </div>

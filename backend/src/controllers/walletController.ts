@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { Prisma, prisma } from '../lib/prisma';
 import { config } from '../config';
 import { AppError } from '../middleware/errorHandler';
@@ -33,6 +34,7 @@ import {
   lkrToCents,
   parseDecimalFromDb,
 } from '../lib/moneyDecimal';
+import { insertWalletLedgerRow } from '../lib/walletTransactionInsert';
 import { parseLockedStoreWallet, walletDataAfterBalanceDelta, walletDataAfterDebit } from '../lib/walletStoreUpdates';
 import {
   serializeStoreWallet,
@@ -251,8 +253,9 @@ export async function getPayoutPeriodInfoHandler(req: Request, res: Response, ne
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /admin/wallet/payouts-due
-// Super Admin queue: outstanding branch payout periods overlapping the wallet date range.
-// Optional query `from`/`to` (YYYY-MM-DD); when omitted, defaults to calendar month-to-date.
+// Super Admin queue: all elapsed unpaid branch payout periods (oldest first).
+// Optional query `from`/`to` are ignored (wallet month filter does not scope this list).
+// Optional `cursor` paginates active branches.
 // ──────────────────────────────────────────────────────────────────────────────
 function invalidateWalletPayoutsDueCache(): void {
   invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-payouts-due']));
@@ -1241,19 +1244,18 @@ export async function creditWalletForOrder(
           totalEarnings: earnings.plus(centsToDecimal(centsAmount)),
         },
       });
-      await tx.walletTransaction.create({
-        data: {
-          id: require('crypto').randomUUID(),
-          storeId,
-          orderId,
-          type: 'ORDER_PAYMENT',
-          amount: centsToDecimal(centsAmount),
-          balanceAfter: centsToDecimal(newBalance),
-          paymentMethod: paymentMethod as any,
-          paymentRef: order?.paymentRef ?? null,
-          description: descParts,
-          reference: order?.orderNumber ?? null,
-        },
+      const ledgerId = crypto.randomUUID();
+      await insertWalletLedgerRow(tx, {
+        id: ledgerId,
+        storeId,
+        orderId,
+        type: 'ORDER_PAYMENT',
+        amountCents: centsAmount,
+        balanceAfterCents: newBalance,
+        paymentMethod,
+        paymentRef: order?.paymentRef ?? null,
+        description: descParts,
+        reference: order?.orderNumber ?? null,
       });
     });
   } catch (err) {
@@ -1485,7 +1487,7 @@ export async function listWalletSecurityAuditLogsHandler(req: Request, res: Resp
 
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /admin/wallet/sync
-// Run full orders to wallets sync (SYSTEM_ADMIN only)
+// Reconcile missing paid-order credits; branch users are scoped to their store, system admin to all stores.
 // ──────────────────────────────────────────────────────────────────────────────
 export async function syncWallets(req: Request, res: Response, next: NextFunction) {
   try {

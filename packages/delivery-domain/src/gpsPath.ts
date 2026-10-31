@@ -204,23 +204,43 @@ export async function deleteExpiredDriverLocations(retentionDays: number): Promi
   return result.count;
 }
 
-/**
- * Finalize actual route/distance from GPS trace and sum delivery fees.
- * Called when the rider completes the ride at the branch.
- */
-export async function finalizeDeliveryJob(jobId: string): Promise<void> {
-  const job = await prisma.deliveryJob.findUnique({
+type JobForActualRoute = {
+  id: string;
+  driverId: string | null;
+  startedAt: Date | null;
+  assignedAt: Date | null;
+  createdAt: Date;
+  completedAt: Date | null;
+  actualDistanceKm: number | null;
+  totalDistanceKm: number | null;
+  store: { lat: number; lng: number };
+  jobOrders: Array<{
+    order: {
+      deliveryLat: number | null;
+      deliveryLng: number | null;
+      address: { lat: number | null; lng: number | null } | null;
+    };
+  }>;
+};
+
+async function loadJobForActualRoute(jobId: string): Promise<JobForActualRoute | null> {
+  return prisma.deliveryJob.findUnique({
     where: { id: jobId },
-    include: {
+    select: {
+      id: true,
+      driverId: true,
+      startedAt: true,
+      assignedAt: true,
+      createdAt: true,
+      completedAt: true,
+      actualDistanceKm: true,
+      totalDistanceKm: true,
       store: { select: { lat: true, lng: true } },
       jobOrders: {
         orderBy: { sequence: 'asc' },
-        include: {
+        select: {
           order: {
             select: {
-              status: true,
-              deliveryFee: true,
-              cancelledAtStatus: true,
               deliveryLat: true,
               deliveryLng: true,
               address: { select: { lat: true, lng: true } },
@@ -230,10 +250,12 @@ export async function finalizeDeliveryJob(jobId: string): Promise<void> {
       },
     },
   });
-  if (!job) return;
+}
 
-  const totalDeliveryFees = deliveredOrderDeliveryFees(job.jobOrders);
-
+async function computeActualRouteForJob(
+  jobId: string,
+  job: JobForActualRoute,
+): Promise<{ actualDistanceKm: number; actualRoute: LatLngPoint[] }> {
   const startedAt = job.startedAt ?? job.assignedAt ?? job.createdAt;
   const completedAt = job.completedAt ?? new Date();
 
@@ -276,15 +298,66 @@ export async function finalizeDeliveryJob(jobId: string): Promise<void> {
     actualRoute = path;
   }
 
+  return {
+    actualDistanceKm: Math.round(actualDistanceKm * 10) / 10,
+    actualRoute,
+  };
+}
+
+/** Persist GPS-based actual route/distance without changing delivery fees. */
+export async function persistJobActualRouteFromGps(jobId: string): Promise<void> {
+  const job = await loadJobForActualRoute(jobId);
+  if (!job) return;
+
+  const { actualDistanceKm, actualRoute } = await computeActualRouteForJob(jobId, job);
+
   await prisma.deliveryJob.update({
     where: { id: jobId },
     data: {
-      actualDistanceKm: Math.round(actualDistanceKm * 10) / 10,
+      actualDistanceKm,
+      actualRoute: JSON.stringify(actualRoute.map((p) => [p.lat, p.lng])),
+    },
+  });
+}
+
+/**
+ * Finalize actual route/distance from GPS trace and sum delivery fees.
+ * Called when the rider completes the ride at the branch.
+ */
+export async function finalizeDeliveryJob(jobId: string): Promise<void> {
+  const job = await prisma.deliveryJob.findUnique({
+    where: { id: jobId },
+    include: {
+      store: { select: { lat: true, lng: true } },
+      jobOrders: {
+        orderBy: { sequence: 'asc' },
+        include: {
+          order: {
+            select: {
+              status: true,
+              deliveryFee: true,
+              cancelledAtStatus: true,
+              deliveryLat: true,
+              deliveryLng: true,
+              address: { select: { lat: true, lng: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!job) return;
+
+  const totalDeliveryFees = deliveredOrderDeliveryFees(job.jobOrders);
+  const { actualDistanceKm, actualRoute } = await computeActualRouteForJob(jobId, job);
+
+  await prisma.deliveryJob.update({
+    where: { id: jobId },
+    data: {
+      actualDistanceKm,
       actualRoute: JSON.stringify(actualRoute.map((p) => [p.lat, p.lng])),
       totalDeliveryFees,
-      ...(job.totalDistanceKm == null
-        ? { totalDistanceKm: Math.round(actualDistanceKm * 10) / 10 }
-        : {}),
+      ...(job.totalDistanceKm == null ? { totalDistanceKm: actualDistanceKm } : {}),
     },
   });
 }

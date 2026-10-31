@@ -60,3 +60,27 @@ export async function adminFetch(
   }
   return json;
 }
+
+/** Multipart driver create/update (do not set Content-Type). */
+export async function adminFetchForm(
+  endpoint: string,
+  formData: FormData,
+  method: 'POST' | 'PATCH' = 'POST',
+) {
+  const res = await fetch(
+    resolveUrl(endpoint),
+    withAdminCredentials({
+      method,
+      headers: adminAuthHeaders(),
+      body: formData,
+    }),
+  );
+  let json: { success?: boolean; message?: string; data?: unknown };
+  try {
+    json = await res.json();
+  } catch {
+    throw new Error(res.ok ? 'Invalid server response' : `Upload failed (${res.status})`);
+  }
+  if (!json.success) throw new Error(json.message || 'Request failed');
+  return json;
+}

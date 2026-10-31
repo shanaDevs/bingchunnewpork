@@ -16,6 +16,11 @@ export type ReturnNodeState = 'completed' | 'active' | 'pending';
 
 const POST_PICKUP_JOB_STATUSES = new Set(['IN_PROGRESS', 'RETURNING', 'COMPLETED']);
 
+/** Admin map replay: stored or GPS-fallback actual path (not live tracking). */
+export function jobSupportsActualRouteReplay(status: string): boolean {
+  return status === 'COMPLETED' || status === 'VEHICLE_FAILURE';
+}
+
 /** Branch is completed after Confirm Pickup or once delivery has started. */
 export function deriveBranchStartState(pickedUp: boolean, jobStatus: string): WizardStepState {
   if (pickedUp || POST_PICKUP_JOB_STATUSES.has(jobStatus)) return 'completed';

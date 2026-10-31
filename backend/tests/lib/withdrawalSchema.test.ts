@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../src/lib/schemaPatch', () => ({
-  addColumnIfMissing: vi.fn(async () => undefined),
-  columnUdtName: vi.fn(async () => 'text'),
-  execSql: vi.fn(async () => 0),
-  tableHasColumn: vi.fn(async () => true),
-}));
+vi.mock('../../src/lib/schemaPatch', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/lib/schemaPatch')>();
+  return {
+    ...actual,
+    runtimeSchemaPatchesAllowed: vi.fn(() => true),
+    addColumnIfMissing: vi.fn(async () => undefined),
+    columnUdtName: vi.fn(async () => 'text'),
+    execSql: vi.fn(async () => 0),
+    tableHasColumn: vi.fn(async () => true),
+  };
+});
 
 vi.mock('../../src/lib/moneyDecimalSchema', () => ({
   ensureAdminMoneyDecimalColumns: vi.fn(async () => undefined),

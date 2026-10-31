@@ -30,6 +30,7 @@ vi.mock('../../src/lib/deliveryJobHelpers', async (importOriginal) => {
   return {
     ...actual,
     recordVehicleFailureAndReleaseJob: vi.fn(async () => ({ orderIds: ['order-1'] })),
+    persistJobActualRouteFromGps: vi.fn(async () => undefined),
   };
 });
 
@@ -40,7 +41,7 @@ vi.mock('../../src/utils/logger', () => ({
 import { reportVehicleFailure } from '../../src/controllers/deliveryJobController';
 import { prisma } from '../../src/lib/prisma';
 import { jobHasPickedUp } from '../../src/lib/liveDriverTracking';
-import { recordVehicleFailureAndReleaseJob, REJECT_JOB_BEFORE_FAILURE_MESSAGE } from '../../src/lib/deliveryJobHelpers';
+import { recordVehicleFailureAndReleaseJob, REJECT_JOB_BEFORE_FAILURE_MESSAGE, persistJobActualRouteFromGps } from '../../src/lib/deliveryJobHelpers';
 import { broadcastVehicleFailureReported } from '../../src/lib/socket';
 import { AppError } from '../../src/middleware/errorHandler';
 
@@ -116,6 +117,7 @@ describe('reportVehicleFailure — pre-pickup vs idle vs in-progress', () => {
       lng: 79.89,
       note: 'Puncture',
     });
+    expect(persistJobActualRouteFromGps).toHaveBeenCalledWith('job-1');
     expect(broadcastVehicleFailureReported).toHaveBeenCalledWith(
       'store-1',
       expect.objectContaining({ jobId: 'job-1', driverId: DRIVER_ID, orderId: 'order-1' }),

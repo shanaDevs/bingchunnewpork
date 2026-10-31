@@ -21,17 +21,56 @@ export type ActualRoutePayload = {
   stops: Array<{ orderNumber: string; lat: number; lng: number }>;
 };
 
+function isValidLatLng(lat: number, lng: number): boolean {
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+}
+
+function runWhenMapReady(map: L.Map, action: () => void) {
+  const run = () => {
+    try {
+      if (!map.getContainer().isConnected) return;
+      map.invalidateSize({ animate: false });
+      action();
+    } catch {
+      /* map may be mid-unmount */
+    }
+  };
+
+  if ((map as L.Map & { _loaded?: boolean })._loaded) {
+    requestAnimationFrame(run);
+    return;
+  }
+  map.whenReady(() => requestAnimationFrame(run));
+}
+
+function MapResizeTrigger() {
+  const map = useMap();
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        map.invalidateSize({ animate: false });
+      } catch {
+        /* ignore */
+      }
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [map]);
+  return null;
+}
+
 function FitBounds({ points }: { points: [number, number][] }) {
   const map = useMap();
   const signature = useMemo(() => points.map((p) => p.join(',')).join('|'), [points]);
 
   useEffect(() => {
     if (points.length === 0) return;
-    if (points.length === 1) {
-      map.setView(points[0], 15);
-      return;
-    }
-    map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
+    runWhenMapReady(map, () => {
+      if (points.length === 1) {
+        map.setView(points[0], 15);
+        return;
+      }
+      map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
+    });
   }, [map, points, signature]);
 
   return null;
@@ -52,13 +91,24 @@ type Props = {
 };
 
 export default function AdminActualRouteMap({ route, className = '' }: Props) {
-  const pathPoints: [number, number][] = route.path.map((p) => [p.lat, p.lng]);
-  const boundsPoints: [number, number][] = [
-    [route.store.lat, route.store.lng],
-    ...route.stops.map((s) => [s.lat, s.lng] as [number, number]),
-    ...pathPoints,
-  ];
+  const path = route.path ?? [];
+  const stops = route.stops ?? [];
+
+  const pathPoints: [number, number][] = path
+    .filter((p) => isValidLatLng(p.lat, p.lng))
+    .map((p) => [p.lat, p.lng] as [number, number]);
+
+  const boundsPoints: [number, number][] = [];
+  if (isValidLatLng(route.store.lat, route.store.lng)) {
+    boundsPoints.push([route.store.lat, route.store.lng]);
+  }
+  for (const s of stops) {
+    if (isValidLatLng(s.lat, s.lng)) boundsPoints.push([s.lat, s.lng]);
+  }
+  boundsPoints.push(...pathPoints);
+
   const center = boundsPoints[0] ?? COLOMBO;
+  const showStoreMarker = isValidLatLng(route.store.lat, route.store.lng);
 
   return (
     <div className={`delivery-map-wrap h-full w-full ${className}`}>
@@ -67,6 +117,7 @@ export default function AdminActualRouteMap({ route, className = '' }: Props) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <MapResizeTrigger />
         <FitBounds points={boundsPoints} />
         {pathPoints.length >= 2 && (
           <Polyline
@@ -74,15 +125,19 @@ export default function AdminActualRouteMap({ route, className = '' }: Props) {
             pathOptions={{ color: '#16a34a', weight: 5, opacity: 0.9 }}
           />
         )}
-        <Marker position={[route.store.lat, route.store.lng]} icon={storeIcon()} />
-        {route.stops.map((stop, idx) => (
-          <CircleMarker
-            key={`${stop.orderNumber}-${idx}`}
-            center={[stop.lat, stop.lng]}
-            radius={8}
-            pathOptions={{ color: '#2563eb', fillColor: '#3b82f6', fillOpacity: 0.9 }}
-          />
-        ))}
+        {showStoreMarker ? (
+          <Marker position={[route.store.lat, route.store.lng]} icon={storeIcon()} />
+        ) : null}
+        {stops.map((stop, idx) =>
+          isValidLatLng(stop.lat, stop.lng) ? (
+            <CircleMarker
+              key={`${stop.orderNumber}-${idx}`}
+              center={[stop.lat, stop.lng]}
+              radius={8}
+              pathOptions={{ color: '#2563eb', fillColor: '#3b82f6', fillOpacity: 0.9 }}
+            />
+          ) : null,
+        )}
       </MapContainer>
     </div>
   );

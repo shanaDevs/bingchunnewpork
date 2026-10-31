@@ -26,9 +26,15 @@ ingress:
   rules:
     - match:
         path:
-          prefix: /socket.io
+          prefix: /delivery-api
       component:
         name: delivery
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /socket.io
+      component:
+        name: delivery-web
         preserve_path_prefix: true
     - match:
         path:
@@ -90,7 +96,7 @@ services:
         type: SECRET
       - key: DELIVERY_FRONTEND_URL
         scope: RUN_TIME
-        value: "https://replace-delivery-host.example"
+        value: "https://bingchun-delivery-6mgs2.ondigitalocean.app"
   - name: delivery-web
     github:
       repo: Bing-Chung-Dart/bingchun
@@ -122,3 +128,13 @@ services:
       - key: API_PROXY_URL
         scope: RUN_TIME
         value: "https://bingchunsrilanka.com"
+      - key: NEXT_PUBLIC_SOCKET_URL
+        scope: RUN_AND_BUILD_TIME
+        value: "https://bingchunsrilanka.com"
+      # Until ingress sends /delivery-api to the delivery component, admin reads use shop /api (runtime proxy).
+      - key: NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE
+        scope: RUN_AND_BUILD_TIME
+        value: "true"
+      - key: DELIVERY_ADMIN_VIA_CORE
+        scope: RUN_TIME
+        value: "true"

@@ -1,13 +1,13 @@
 'use client';
 
 import { adminFetch } from '@/lib/adminApi';
-import { getSocketUrl } from '@/lib/apiBase';
+import { connectAdminSocketWithRooms } from '@/lib/adminSocket';
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { io, type Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import {
   AlertTriangle,
   BarChart3,
@@ -298,29 +298,24 @@ function AdminDeliveryContent() {
     let cancelled = false;
     let socket: Socket | null = null;
 
-    try {
-      socket = io(getSocketUrl(), {
-        path: '/socket.io',
-        transports: ['websocket', 'polling'],
-        withCredentials: true,
-      });
+    const rooms =
+      jobStoreIds.length > 0
+        ? jobStoreIds.map((storeIdToJoin) => ({ adminId: admin.id, storeId: storeIdToJoin }))
+        : [{ adminId: admin.id, storeId: admin.storeId }];
 
-      socket.on('deliveryJobUpdated', () => {
+    void connectAdminSocketWithRooms(rooms, (created) => {
+      if (cancelled) {
+        created.disconnect();
+        return;
+      }
+      socket = created;
+      created.on('deliveryJobUpdated', () => {
         if (cancelled) return;
         queryClient.invalidateQueries({ queryKey: ['admin-delivery-jobs-active'] });
         queryClient.invalidateQueries({ queryKey: ['admin-delivery-jobs-completed'] });
         queryClient.invalidateQueries({ queryKey: ['admin-delivery-jobs-incomplete'] });
       });
-
-      for (const storeIdToJoin of jobStoreIds) {
-        socket.emit('joinAdmin', { adminId: admin.id, storeId: storeIdToJoin });
-      }
-      if (jobStoreIds.length === 0 && admin.storeId) {
-        socket.emit('joinAdmin', { adminId: admin.id, storeId: admin.storeId });
-      }
-    } catch {
-      /* socket optional — polling still refreshes the jobs table */
-    }
+    });
 
     return () => {
       cancelled = true;

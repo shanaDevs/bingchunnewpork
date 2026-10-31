@@ -31,8 +31,13 @@ function defaultPrismaPoolLimit(): number {
   const surface = (process.env.API_SURFACE || '').trim().toLowerCase();
   // Behind PgBouncer (transaction mode) client connections are cheap — real Postgres
   // connections are capped by PgBouncer's default_pool_size, so allow more concurrency.
+  // Keep modest even behind PgBouncer — CapRover rolling deploys double
+  // every pool briefly, and Prisma P2024 appears when the local pool waits
+  // on a saturated PgBouncer/Postgres.
   if (isPgbouncerDatabaseUrl()) {
-    return surface === 'admin' || surface === 'pos' ? 8 : 12;
+    if (surface === 'admin' || surface === 'pos') return 5;
+    if (surface === 'shop') return 6;
+    return 5;
   }
   // Keep pools small: many CapRover apps + rolling deploys share one Postgres/PgBouncer.
   if (surface === 'shop' || surface === 'pos' || surface === 'admin') return 3;

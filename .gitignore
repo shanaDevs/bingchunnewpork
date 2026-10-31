@@ -42,6 +42,9 @@ coverage
 playwright-report/
 test-results/
 
+# Backend test files
+backend/tests/
+
 # Next.js build output
 .next/
 out/
@@ -85,3 +88,9 @@ load-tests/reports/*
 # Graphify (knowledge graph for AI assistants)
 graphify-out/cost.json
 graphify-out/cache
+# Database dumps (contain customer data)
+backupdb/*
+!backupdb/.gitkeep
+
+# DigitalOcean merged app spec (contains secrets from secrets.env)
+deploy/digitalocean/.generated-app.delivery.yaml

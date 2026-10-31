@@ -114,6 +114,15 @@ describe('getBranchWalletDashboard', () => {
   it('scopes delivery payouts and refunds to the requested store', async () => {
     await getBranchWalletDashboard(storeId);
 
+    expect(prisma.order.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          storeId,
+          paymentStatus: 'PAID',
+          status: { not: 'CANCELLED' },
+        },
+      }),
+    );
     expect(prisma.storeWithdrawal.aggregate).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { storeId, status: 'APPROVED' },

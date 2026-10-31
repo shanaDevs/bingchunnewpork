@@ -1,0 +1,3 @@
+# One line: full postgresql:// URL for doadmin (public host, sslmode=require).
+# Copy from DigitalOcean → Databases → bingchun-pg → Connection details.
+# Rename this file to audit-doadmin.url (gitignored) or set AUDIT_DATABASE_URL instead.

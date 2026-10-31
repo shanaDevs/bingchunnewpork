@@ -74,10 +74,11 @@ export function buildPayoutStatementFromBreakdown(
   const totalRefundCents =
     nonReturningRefundsCents + platformRefundsCents + deliveryRefundsCents;
 
-  const platformDiscountsReportCents = paybackCents + sharedPlatform;
+  const platformPromoDeductCents = Math.max(paybackCents, platformOwned);
+  const platformDiscountsReportCents = platformPromoDeductCents + sharedPlatform;
   const netPlatformAmountCents = hasNumber(o, 'netPlatformEarning')
     ? num(o, 'netPlatformEarning')
-    : commissionCents - paybackCents - sharedPlatform - loyaltyDiscountCents;
+    : commissionCents - platformPromoDeductCents - sharedPlatform - loyaltyDiscountCents;
 
   const gatewayRateRaw = o.gatewayRatePct;
   const gatewayRatePct =

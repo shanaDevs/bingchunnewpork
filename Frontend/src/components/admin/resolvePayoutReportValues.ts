@@ -3,7 +3,9 @@ import {
   computePayoutNetLkr,
   hasSharedPromoAmounts,
   resolveCommissionPaybackLkr,
+  resolveExtraPlatformOwnedDeductionLkr,
   resolveNetPlatformCommissionWithRefundFeesLkr,
+  resolvePlatformDiscountsReportLkr,
   resolveTotalDiscountsLkr,
   resolveTotalPlatformCommissionDisplayLkr,
   roundLkr,
@@ -464,11 +466,28 @@ export function resolvePayoutReportValues(
     paybackEnabled: showPaybackDetails,
     sharedPromoPlatformLkr: discounts.sharedPromoPlatformLkr,
     loyaltyDiscountLkr,
-    netPlatformEarningLkr:
-      snapshotActive && periodBreakdownLkr.netPlatformEarning != null
-        ? periodBreakdownLkr.netPlatformEarning
-        : null,
+    platformOwnedPromoDiscountLkr: discounts.platformOwnedPromoDiscountsLkr,
+    netPlatformEarningLkr: null,
   });
+  const extraPlatformOwnedDeductionLkr = resolveExtraPlatformOwnedDeductionLkr({
+    platformOwnedPromoDiscountLkr: discounts.platformOwnedPromoDiscountsLkr,
+    commissionPaybackLkr,
+  });
+  const legacySnapshotNetPlatformLkr =
+    roundLkr(
+      sales.commissionLkr -
+        commissionPaybackLkr -
+        discounts.sharedPromoPlatformLkr -
+        loyaltyDiscountLkr,
+    );
+  const storedNetPlatformLkr =
+    snapshotActive && periodBreakdownLkr.netPlatformEarning != null
+      ? periodBreakdownLkr.netPlatformEarning
+      : null;
+  const snapshotMissingPlatformOwnedAdjustment =
+    storedNetPlatformLkr != null &&
+    extraPlatformOwnedDeductionLkr > 0.001 &&
+    Math.abs(storedNetPlatformLkr - legacySnapshotNetPlatformLkr) < 0.02;
   const netPlatformCommissionLkr = resolveNetPlatformCommissionWithRefundFeesLkr({
     baseNetPlatformCommissionLkr: netPlatformCommissionForPayoutLkr,
     refundConvenienceFeeLkr: refunds.refundConvenienceFeeLkr,
@@ -486,12 +505,16 @@ export function resolvePayoutReportValues(
     rejectedRefundNetAmountLkr: refunds.rejectedRefundNetAmountLkr,
   });
   const branchNetPayoutLkr =
-    snapshotNetAmountLkr ??
-    (snapshotActive
-      ? periodBreakdownLkr.netAmount
-      : gateway.gatewayBaseLkr > 0.001
-        ? recalculatedNetLkr
-        : (periodBreakdownLkr.netAmount ?? recalculatedNetLkr));
+    snapshotNetAmountLkr != null
+      ? roundLkr(
+          snapshotNetAmountLkr +
+            (snapshotMissingPlatformOwnedAdjustment ? extraPlatformOwnedDeductionLkr : 0),
+        )
+      : snapshotActive
+        ? periodBreakdownLkr.netAmount
+        : gateway.gatewayBaseLkr > 0.001
+          ? recalculatedNetLkr
+          : (periodBreakdownLkr.netAmount ?? recalculatedNetLkr);
 
   return {
     hasPeriodData: true,
@@ -501,7 +524,11 @@ export function resolvePayoutReportValues(
     ...gateway,
     platformPaybackLkr,
     commissionPaybackLkr,
-    platformDiscountsReportLkr: commissionPaybackLkr + discounts.sharedPromoPlatformLkr,
+    platformDiscountsReportLkr: resolvePlatformDiscountsReportLkr({
+      platformOwnedPromoDiscountLkr: discounts.platformOwnedPromoDiscountsLkr,
+      commissionPaybackLkr,
+      sharedPromoPlatformLkr: discounts.sharedPromoPlatformLkr,
+    }),
     loyaltyDiscountLkr,
     netPlatformCommissionLkr,
     netPlatformCommissionForPayoutLkr,

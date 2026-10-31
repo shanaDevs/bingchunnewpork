@@ -1,6 +1,6 @@
 'use client';
 
-import { getApiBaseUrl, getSocketUrl } from '@/lib/apiBase';
+import { getApiBaseUrl } from '@/lib/apiBase';
 import { isBranchAdmin, isBranchScoped, type AdminSession } from '@/lib/adminAuth';
 import {
   playBranchNewOrderSound,
@@ -15,10 +15,10 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { ChevronRight, AlertTriangle, Package, ShoppingBag, Sparkles, X, XCircle } from 'lucide-react';
 import ProductImage from '@/components/ui/ProductImage';
-import { io, type Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import toast from 'react-hot-toast';
-import { adminAuthHeaders, ensureAdminAccessToken, refreshAdminSessionIfNeeded } from '@/lib/adminSession';
-import { ensureAdminSocketAuth } from '@/lib/socketClient';
+import { adminAuthHeaders } from '@/lib/adminSession';
+import { createAdminSocket, fetchAdminSocketToken } from '@/lib/adminSocket';
 
 export interface AdminNotificationPayload {
   id?: string;
@@ -996,49 +996,47 @@ export function AdminNotificationProvider({
     window.addEventListener('pointerdown', prime);
     window.addEventListener('keydown', prime);
 
-    const socketUrl = getSocketUrl();
     let socket: Socket | null = null;
+    let cancelled = false;
+    let authRetryTimer: number | null = null;
+    let authFailCount = 0;
 
-    try {
-      socket = io(socketUrl, {
-        transports: ['websocket', 'polling'],
-        withCredentials: true,
-        path: '/socket.io',
-        autoConnect: false,
+    const joinRooms = () => {
+      socket?.emit('joinAdmin', {
+        adminId: adminUserId,
+        storeId: adminStoreId || undefined,
       });
+    };
 
-      const joinRooms = () => {
-        socket?.emit('joinAdmin', {
-          adminId: adminUserId,
-          storeId: adminStoreId || undefined,
-        });
-      };
-
-      socket.io.on('reconnect_attempt', () => {
-        void ensureAdminSocketAuth();
-      });
+    void createAdminSocket({ autoConnect: false }).then((created) => {
+      if (cancelled || !created) return;
+      socket = created;
 
       socket.on('connect_error', () => {
-        void refreshAdminSessionIfNeeded().then((outcome) => {
-          if (outcome === 'ok') socket?.connect();
-        });
+        // Let Socket.IO reconnect with refreshed handshake auth; avoid tight manual loops.
       });
 
       socket.on('socketError', (payload: { code?: string }) => {
         if (payload?.code !== 'UNAUTHORIZED') return;
-        void refreshAdminSessionIfNeeded().then((outcome) => {
-          if (outcome !== 'ok') return;
+        authFailCount += 1;
+        if (authFailCount > 5) {
           socket?.disconnect();
-          socket?.connect();
-          joinRooms();
-        });
-      });
-
-      void ensureAdminAccessToken().then(() => {
-        socket?.connect();
+          return;
+        }
+        const delayMs = Math.min(30_000, 1000 * 2 ** Math.min(authFailCount, 4));
+        if (authRetryTimer != null) window.clearTimeout(authRetryTimer);
+        authRetryTimer = window.setTimeout(() => {
+          void fetchAdminSocketToken().then((token) => {
+            if (!token || !socket) return;
+            socket.auth = { token };
+            socket.disconnect();
+            socket.connect();
+          });
+        }, delayMs);
       });
 
       socket.on('connect', () => {
+        authFailCount = 0;
         joinRooms();
         void syncUnreadOrderAlerts(30_000);
       });
@@ -1161,11 +1159,13 @@ export function AdminNotificationProvider({
           );
         });
       }
-    } catch {
-      /* socket optional */
-    }
+
+      socket.connect();
+    });
 
     return () => {
+      cancelled = true;
+      if (authRetryTimer != null) window.clearTimeout(authRetryTimer);
       window.removeEventListener('pointerdown', prime);
       window.removeEventListener('keydown', prime);
       socket?.disconnect();

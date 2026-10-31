@@ -5,6 +5,7 @@ import {
   computePlatformCommission,
   getEffectiveRate,
   getSlabIndex,
+  orderCommissionChannel,
   sumBreakdownOrderCount,
   sumOnlinePaymentsCollectedFromBreakdown,
 } from '../../src/lib/commission';
@@ -107,5 +108,20 @@ describe('sumOnlinePaymentsCollectedFromBreakdown', () => {
     expect(breakdown.pickupCard.revenueSubtotal).toBe(300);
     expect(sumOnlinePaymentsCollectedFromBreakdown(breakdown)).toBe(3700);
     expect(sumBreakdownOrderCount(breakdown)).toBe(5);
+  });
+});
+
+describe('orderCommissionChannel pickup card vs pickup online', () => {
+  it('keeps counter card pickup on pickup card', () => {
+    expect(orderCommissionChannel('TAKEAWAY', 'CARD')).toBe('pickupCard');
+    expect(orderCommissionChannel('TAKEAWAY', 'CARD', { paymentGateway: null, paymentRef: null })).toBe(
+      'pickupCard',
+    );
+  });
+
+  it('counts gateway card pickup as pickup online', () => {
+    expect(orderCommissionChannel('TAKEAWAY', 'CARD', { paymentGateway: 'WEBXPAY' })).toBe('pickupOnline');
+    expect(orderCommissionChannel('TAKEAWAY', 'CARD', { paymentRef: 'ph_123' })).toBe('pickupOnline');
+    expect(orderCommissionChannel('TAKEAWAY', 'PAYHERE')).toBe('pickupOnline');
   });
 });

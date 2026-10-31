@@ -30,20 +30,34 @@ it connects straight to Postgres. Override per app with `PRISMA_CONNECTION_LIMIT
 | bing-chun-admin (`admin`) | 1–2 | 8 | Heavy reports; keep `RUN_BACKGROUND_JOBS=false` |
 | bing-chun-core (`core`) | 1 | 8 | Only instance with `RUN_BACKGROUND_JOBS=true` and schema patches |
 | bing-chun-delivery | 2 | 10 | Separate DB schema, same server |
-| bing-chun-migrate | 1 (job) | 1 | One-shot |
+| bing-chun-migrate | 1 (job) | 1 | One-shot; **direct** Postgres only — see [37](./37_Migration_Microservice.md) |
 | Web apps (Next.js) | any | – | They never touch Postgres |
 
-Shared variables for every API app:
+Shared variables for every **API** app (not migrate):
 
 ```
 DATABASE_URL=postgresql://USER:PASS@srv-captain--pgbouncer:6432/bingchun?pgbouncer=true
 PRISMA_CONNECTION_LIMIT=12      # per table above
 PRISMA_POOL_TIMEOUT=15          # seconds to wait for a free connection (clamped 5–30)
 PRISMA_CONNECT_TIMEOUT=8        # seconds (clamped 3–15)
+RUNTIME_SCHEMA_PATCHES=false    # after bing-chun-migrate is live
 ```
 
-Migrations (`prisma migrate deploy`) must use a **direct** Postgres URL (not PgBouncer):
-set `DIRECT_URL`/a separate env on `bing-chun-migrate` pointing at `srv-captain--postgres:5432`.
+### Migration microservice (required with PgBouncer)
+
+`prisma migrate deploy` must **never** go through PgBouncer. Use the dedicated CapRover app
+`bing-chun-migrate` (image: `backend/Dockerfile.migrate`). CI deploys it **before** every other
+service on pushes to `production`.
+
+```
+# CapRover app: bing-chun-migrate only
+DIRECT_URL=postgresql://USER:PASS@srv-captain--bing-chun-production-db:5432/bingchun?schema=public
+DATABASE_URL=postgresql://USER:PASS@srv-captain--bing-chun-production-db:5432/bingchun?schema=public
+PRISMA_CONNECTION_LIMIT=1
+```
+
+Full CapRover create steps, GitHub environment, logs, and checklist:
+**[37 — Migration microservice guide](./37_Migration_Microservice.md)**.
 
 Budget check: `sum(instances × PRISMA_CONNECTION_LIMIT)` is client connections (fine for PgBouncer,
 set `max_client_conn = 1000`). `default_pool_size` × databases must stay below Postgres

@@ -35,7 +35,26 @@ describe('getCustomerOrderStats', () => {
     const stats = await getCustomerOrderStats('user-1');
 
     expect(stats.validOrderCount).toBe(1);
+    expect(stats.placedOrderCount).toBe(2);
     expect(stats.offer2Claimed).toBe(true);
     expect(stats.offer1Claimed).toBe(false);
+  });
+
+  it('counts a single pending order toward placed order stats', async () => {
+    const createdAt = new Date('2026-08-10T10:00:00Z');
+    vi.mocked(prisma.order.findMany).mockResolvedValue([
+      {
+        subtotal: 1200,
+        createdAt,
+        paymentStatus: 'PENDING',
+        promoCode: null,
+      },
+    ] as never);
+
+    const stats = await getCustomerOrderStats('user-1');
+
+    expect(stats.validOrderCount).toBe(0);
+    expect(stats.placedOrderCount).toBe(1);
+    expect(stats.firstPlacedOrderAt).toEqual(createdAt);
   });
 });

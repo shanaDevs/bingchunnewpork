@@ -25,9 +25,27 @@ const emptyStats: CustomerOrderStats = {
   validOrderCount: 0,
   validOrderSubtotals: [],
   firstOrderAt: null,
+  placedOrderCount: 0,
+  firstPlacedOrderAt: null,
   offer1Claimed: false,
   offer2Claimed: false,
 };
+
+function statsAfterFirstPlacedOrder(
+  firstPlacedOrderAt: Date,
+  overrides: Partial<CustomerOrderStats> = {},
+): CustomerOrderStats {
+  return {
+    validOrderCount: 0,
+    validOrderSubtotals: [],
+    firstOrderAt: null,
+    placedOrderCount: 1,
+    firstPlacedOrderAt,
+    offer1Claimed: true,
+    offer2Claimed: false,
+    ...overrides,
+  };
+}
 
 const giftProduct = {
   id: 'ice-cream-1',
@@ -83,16 +101,14 @@ describe('evaluateLoyaltyOffers', () => {
   });
 
   it('applies Offer 2 gift on exactly the 2nd order within window', () => {
-    const firstOrderAt = new Date('2026-08-10T12:00:00Z');
+    const firstPlacedOrderAt = new Date('2026-08-10T12:00:00Z');
     const result = evaluateLoyaltyOffers({
       campaign: makeCampaign(),
-      stats: {
+      stats: statsAfterFirstPlacedOrder(firstPlacedOrderAt, {
         validOrderCount: 1,
         validOrderSubtotals: [1200],
-        firstOrderAt,
-        offer1Claimed: true,
-        offer2Claimed: false,
-      },
+        firstOrderAt: firstPlacedOrderAt,
+      }),
       subtotal: 1500,
       userId: 'user-1',
       giftProduct,
@@ -105,17 +121,29 @@ describe('evaluateLoyaltyOffers', () => {
     expect(result.cartDiscount?.giftLabel).toBe('Free Vanilla Ice Cream');
   });
 
+  it('applies Offer 2 gift when first order is placed but not yet paid', () => {
+    const firstPlacedOrderAt = new Date('2026-08-10T12:00:00Z');
+    const result = evaluateLoyaltyOffers({
+      campaign: makeCampaign(),
+      stats: statsAfterFirstPlacedOrder(firstPlacedOrderAt),
+      subtotal: 1500,
+      userId: 'user-1',
+      giftProduct,
+      now: new Date('2026-08-12T12:00:00Z'),
+    });
+    expect(result.cartDiscount?.offerKey).toBe('OFFER_2');
+    expect(result.cartDiscount?.giftProduct?.id).toBe('ice-cream-1');
+  });
+
   it('does not set giftCost for Offer 2 percentage discounts', () => {
-    const firstOrderAt = new Date('2026-08-10T12:00:00Z');
+    const firstPlacedOrderAt = new Date('2026-08-10T12:00:00Z');
     const result = evaluateLoyaltyOffers({
       campaign: makeCampaign({ offer2RewardType: 'DISCOUNT' }),
-      stats: {
+      stats: statsAfterFirstPlacedOrder(firstPlacedOrderAt, {
         validOrderCount: 1,
         validOrderSubtotals: [1200],
-        firstOrderAt,
-        offer1Claimed: true,
-        offer2Claimed: false,
-      },
+        firstOrderAt: firstPlacedOrderAt,
+      }),
       subtotal: 1500,
       userId: 'user-1',
       giftProduct,
@@ -133,6 +161,8 @@ describe('evaluateLoyaltyOffers', () => {
         validOrderCount: 2,
         validOrderSubtotals: [1200, 1500],
         firstOrderAt: new Date('2026-08-10T12:00:00Z'),
+        placedOrderCount: 2,
+        firstPlacedOrderAt: new Date('2026-08-10T12:00:00Z'),
         offer1Claimed: true,
         offer2Claimed: true,
       },
@@ -145,16 +175,14 @@ describe('evaluateLoyaltyOffers', () => {
   });
 
   it('does not apply Offer 2 after window expires', () => {
-    const firstOrderAt = new Date('2026-08-01T12:00:00Z');
+    const firstPlacedOrderAt = new Date('2026-08-01T12:00:00Z');
     const result = evaluateLoyaltyOffers({
       campaign: makeCampaign(),
-      stats: {
+      stats: statsAfterFirstPlacedOrder(firstPlacedOrderAt, {
         validOrderCount: 1,
         validOrderSubtotals: [1200],
-        firstOrderAt,
-        offer1Claimed: true,
-        offer2Claimed: false,
-      },
+        firstOrderAt: firstPlacedOrderAt,
+      }),
       subtotal: 1500,
       userId: 'user-1',
       giftProduct,
@@ -164,16 +192,15 @@ describe('evaluateLoyaltyOffers', () => {
   });
 
   it('does not re-apply Offer 2 when it was already claimed on an unpaid 2nd order', () => {
-    const firstOrderAt = new Date('2026-08-10T12:00:00Z');
+    const firstPlacedOrderAt = new Date('2026-08-10T12:00:00Z');
     const result = evaluateLoyaltyOffers({
       campaign: makeCampaign(),
-      stats: {
+      stats: statsAfterFirstPlacedOrder(firstPlacedOrderAt, {
         validOrderCount: 1,
         validOrderSubtotals: [1200],
-        firstOrderAt,
-        offer1Claimed: true,
+        firstOrderAt: firstPlacedOrderAt,
         offer2Claimed: true,
-      },
+      }),
       subtotal: 1500,
       userId: 'user-1',
       giftProduct,
@@ -183,16 +210,14 @@ describe('evaluateLoyaltyOffers', () => {
   });
 
   it('does not apply Offer 2 when subtotal below minimum', () => {
-    const firstOrderAt = new Date('2026-08-10T12:00:00Z');
+    const firstPlacedOrderAt = new Date('2026-08-10T12:00:00Z');
     const result = evaluateLoyaltyOffers({
       campaign: makeCampaign({ offer2MinSubtotal: 1000 }),
-      stats: {
+      stats: statsAfterFirstPlacedOrder(firstPlacedOrderAt, {
         validOrderCount: 1,
         validOrderSubtotals: [1200],
-        firstOrderAt,
-        offer1Claimed: true,
-        offer2Claimed: false,
-      },
+        firstOrderAt: firstPlacedOrderAt,
+      }),
       subtotal: 800,
       userId: 'user-1',
       giftProduct,
@@ -208,6 +233,8 @@ describe('evaluateLoyaltyOffers', () => {
         validOrderCount: 3,
         validOrderSubtotals: [800, 900, 1200],
         firstOrderAt: new Date('2026-08-01T12:00:00Z'),
+        placedOrderCount: 3,
+        firstPlacedOrderAt: new Date('2026-08-01T12:00:00Z'),
         offer1Claimed: false,
         offer2Claimed: false,
       },
@@ -225,6 +252,8 @@ describe('evaluateLoyaltyOffers', () => {
         validOrderCount: 3,
         validOrderSubtotals: [800, 900, 500],
         firstOrderAt: new Date('2026-08-01T12:00:00Z'),
+        placedOrderCount: 3,
+        firstPlacedOrderAt: new Date('2026-08-01T12:00:00Z'),
         offer1Claimed: false,
         offer2Claimed: false,
       },
@@ -241,6 +270,8 @@ describe('evaluateLoyaltyOffers', () => {
         validOrderCount: 4,
         validOrderSubtotals: [800, 900, 500, 1500],
         firstOrderAt: new Date('2026-08-01T12:00:00Z'),
+        placedOrderCount: 4,
+        firstPlacedOrderAt: new Date('2026-08-01T12:00:00Z'),
         offer1Claimed: false,
         offer2Claimed: false,
       },
@@ -257,6 +288,8 @@ describe('evaluateLoyaltyOffers', () => {
         validOrderCount: 2,
         validOrderSubtotals: [2000, 2000],
         firstOrderAt: new Date('2026-08-01T12:00:00Z'),
+        placedOrderCount: 2,
+        firstPlacedOrderAt: new Date('2026-08-01T12:00:00Z'),
         offer1Claimed: false,
         offer2Claimed: false,
       },

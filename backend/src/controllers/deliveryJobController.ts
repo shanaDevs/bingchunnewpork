@@ -24,6 +24,7 @@ import {
   distanceMeters,
   fetchDriverComplaintsByOrderIds,
   finalizeDeliveryJob,
+  persistJobActualRouteFromGps,
   formatJobOrder,
   groupFailedOrderIdsByJob,
   isRejectAllowed,
@@ -1282,6 +1283,12 @@ async function executeVehicleFailureReport(
     lat,
     lng,
     note: note ?? undefined,
+  });
+  await persistJobActualRouteFromGps(link.job.id).catch((err) => {
+    logger.error('persistJobActualRouteFromGps failed after vehicle failure', {
+      jobId: link.job.id,
+      err,
+    });
   });
   const orderId = orderIds[0] ?? link.orderId;
   broadcastVehicleFailureReported(link.job.storeId, {
