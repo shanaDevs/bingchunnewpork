@@ -850,43 +850,6 @@ function driverListWhere(
   };
 }
 
-async function listSafeTextByDriverId(driverIds: string[]): Promise<
-  Map<string, { address: string | null; disabilities: string | null; profilePhotoUrl: string | null; licenseImageUrl: string | null }>
-> {
-  const map = new Map<
-    string,
-    { address: string | null; disabilities: string | null; profilePhotoUrl: string | null; licenseImageUrl: string | null }
-  >();
-  if (driverIds.length === 0) return map;
-
-  const rows = await prisma.$queryRaw<
-    Array<{
-      id: string;
-      address: string | null;
-      disabilities: string | null;
-      profilePhotoUrl: string | null;
-      licenseImageUrl: string | null;
-    }>
-  >`
-    SELECT id,
-      CASE WHEN length(address) <= 4000 THEN address ELSE NULL END AS address,
-      CASE WHEN length(disabilities) <= 4000 THEN disabilities ELSE NULL END AS disabilities,
-      CASE
-        WHEN length("profilePhotoUrl") <= 2048 AND "profilePhotoUrl" LIKE 'http%'
-        THEN "profilePhotoUrl" ELSE NULL
-      END AS "profilePhotoUrl",
-      CASE
-        WHEN length("licenseImageUrl") <= 2048 AND "licenseImageUrl" LIKE 'http%'
-        THEN "licenseImageUrl" ELSE NULL
-      END AS "licenseImageUrl"
-    FROM admin_users
-    WHERE id IN (${Prisma.join(driverIds)})
-  `;
-
-  for (const row of rows) map.set(row.id, row);
-  return map;
-}
-
 async function loadMappedDrivers(args: {
   where: Prisma.AdminUserWhereInput;
   statsStoreId?: string;
@@ -904,26 +867,24 @@ async function loadMappedDrivers(args: {
   });
 
   const driverIds = drivers.map((driver) => driver.id);
-  const [ratingAggs, jobStats, textById] = await Promise.all([
+  const [ratingAggs, jobStats] = await Promise.all([
     riderRatingAggsByDriverId(driverIds),
     completedJobStatsByDriverId(driverIds, args.jobStoreId ?? args.statsStoreId),
-    listSafeTextByDriverId(driverIds),
   ]);
   return Promise.all(
-    drivers.map((driver) => {
-      const text = textById.get(driver.id);
-      return mapDriverWithStats(
+    drivers.map((driver) =>
+      mapDriverWithStats(
         {
           ...driver,
-          address: text?.address ?? null,
-          disabilities: text?.disabilities ?? null,
-          profilePhotoUrl: text?.profilePhotoUrl ?? null,
-          licenseImageUrl: text?.licenseImageUrl ?? null,
+          address: null,
+          disabilities: null,
+          profilePhotoUrl: null,
+          licenseImageUrl: null,
         },
         jobStats.get(driver.id),
         ratingAggs.get(driver.id),
-      );
-    }),
+      ),
+    ),
   );
 }
 
