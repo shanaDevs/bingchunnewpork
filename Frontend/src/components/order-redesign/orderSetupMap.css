@@ -1,0 +1,25 @@
+/* Map + branch list inside the redesign order setup dialog (reference BranchSelectModal branch step). */
+.home-redesign .order-flow.flex .address-map-overlay {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-redesign .order-flow.flex .address-map-overlay__map {
+  flex: 1;
+  min-height: 12rem;
+}
+
+.home-redesign .order-flow.flex .order-delivery-stage {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-redesign .order-flow.flex .order-delivery-stage > .address-map-picker,
+.home-redesign .order-flow.flex .order-delivery-stage > div {
+  flex: 1;
+  min-height: 0;
+}
