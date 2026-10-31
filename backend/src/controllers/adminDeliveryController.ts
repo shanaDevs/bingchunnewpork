@@ -19,7 +19,7 @@ import { buildDeliveryRoutePayload } from '../lib/deliveryRouteResponse';
 import { decimalFieldToLkrNumber, parseDecimalFromDb } from '../lib/moneyDecimal';
 import { serializeDeliveryJobFees } from '../lib/walletApiMoney';
 import {
-  adminJobOrdersInclude,
+  adminOrderDetailInclude,
   classifyIncompleteJob,
   deriveAdminOrderDeliveryState,
   DRIVER_HELD_JOB_STATUSES,
@@ -30,6 +30,8 @@ import {
   resolveJobPickupOverride,
   resolveJobRouteOrigin,
   fetchOrderComplaintsByOrderIds,
+  findOrdersByIds,
+  findOrdersByIdsInclude,
   formatJobOrder,
   isActiveDeliveryJobStatus,
   jobOrdersWithDetails,
@@ -264,12 +266,28 @@ export async function listAdminDeliveryJobs(req: Request, res: Response, next: N
         ...(completedAtFilter ? { completedAt: completedAtFilter } : {}),
         ...(scheduledAtFilter ? { scheduledAt: scheduledAtFilter } : {}),
       },
-      include: {
+      select: {
+        id: true,
+        rideCode: true,
+        title: true,
+        status: true,
+        createdAt: true,
+        scheduledAt: true,
+        assignedAt: true,
+        startedAt: true,
+        returnStartedAt: true,
+        completedAt: true,
+        totalCups: true,
+        totalDistanceKm: true,
+        estimatedDistanceKm: true,
+        estimatedMinutes: true,
+        actualDistanceKm: true,
+        totalDeliveryFees: true,
+        storeId: true,
+        driverId: true,
         store: { select: { id: true, name: true, city: true } },
         driver: { select: { id: true, name: true, email: true } },
-        jobOrders: {
-          include: { order: { select: { status: true, total: true } } },
-        },
+        jobOrders: { select: { orderId: true } },
       },
       // Latest scheduled job first, regardless of status — so Active isn't
       // grouped alphabetically by status ahead of recency.
@@ -281,10 +299,28 @@ export async function listAdminDeliveryJobs(req: Request, res: Response, next: N
       jobs = jobs.filter((j) => j.status !== 'VEHICLE_FAILURE');
     }
 
+    const [orderById, jobsWithRoute] = await Promise.all([
+      findOrdersByIds(
+        jobs.flatMap((job) => job.jobOrders.map((link) => link.orderId)),
+        { id: true, status: true, total: true },
+      ),
+      jobs.length === 0
+        ? Promise.resolve([])
+        : prisma.deliveryJob.findMany({
+            where: { id: { in: jobs.map((job) => job.id) }, actualRoute: { not: null } },
+            select: { id: true },
+          }),
+    ]);
+    const routeIds = new Set(jobsWithRoute.map((job) => job.id));
+
     return success(
       res,
       jobs.map((j) => {
-        const visibleOrders = visibleJobOrderLinksForDeliveryJob(j.status, j.jobOrders);
+        const linkedOrders = j.jobOrders.flatMap((link) => {
+          const order = orderById.get(link.orderId);
+          return order ? [{ order }] : [];
+        });
+        const visibleOrders = visibleJobOrderLinksForDeliveryJob(j.status, linkedOrders);
         const deliveredCount = visibleOrders.filter((jo) => jo.order.status === 'DELIVERED').length;
         const totalRevenue = visibleOrders.reduce((sum, jo) => sum + jo.order.total, 0);
         return {
@@ -322,7 +358,7 @@ export async function listAdminDeliveryJobs(req: Request, res: Response, next: N
             j.totalDeliveryFees != null
               ? serializeDeliveryJobFees(parseDecimalFromDb(j.totalDeliveryFees))
               : null,
-          hasActualRoute: Boolean(j.actualRoute),
+          hasActualRoute: routeIds.has(j.id),
           storeName: j.store.name,
           storeId: j.storeId,
           driver: j.driver ? { id: j.driver.id, name: j.driver.name, email: j.driver.email } : null,
@@ -344,17 +380,26 @@ export async function getAdminDeliveryJob(req: Request, res: Response, next: Nex
       include: {
         store: { select: { id: true, name: true, addressLine: true, city: true, lat: true, lng: true } },
         driver: { select: { id: true, name: true, email: true } },
-        jobOrders: adminJobOrdersInclude(jobId),
+        jobOrders: { orderBy: { sequence: 'asc' }, select: { orderId: true, sequence: true } },
       },
     });
     if (!job || job.storeId !== storeId) throw new AppError('Job not found', 404);
     assertCashierCanViewJob(req.user?.role, job);
 
-    const complaintsByOrder = await fetchOrderComplaintsByOrderIds(
+    const orderById = await findOrdersByIdsInclude(
       job.jobOrders.map((jo) => jo.orderId),
+      adminOrderDetailInclude(jobId),
+    );
+    const jobOrders = job.jobOrders.flatMap((jo) => {
+      const order = orderById.get(jo.orderId);
+      return order ? [{ ...jo, order }] : [];
+    });
+
+    const complaintsByOrder = await fetchOrderComplaintsByOrderIds(
+      jobOrders.map((jo) => jo.orderId),
     );
 
-    const orders = job.jobOrders.map((jo) => {
+    const orders = jobOrders.map((jo) => {
       const base = formatJobOrder(jo.order, jo.sequence, { redactPricing: false });
       const latestComplaint = (complaintsByOrder.get(jo.orderId) ?? []).find(
         (complaint) => complaint.status !== 'DISMISSED',
@@ -444,14 +489,23 @@ export async function getAdminDeliveryJobRoute(req: Request, res: Response, next
       where: { id: jobId },
       include: {
         store: { select: { id: true, name: true, lat: true, lng: true, addressLine: true, city: true } },
-        jobOrders: jobOrdersWithDetails,
+        jobOrders: { orderBy: { sequence: 'asc' }, select: { orderId: true, sequence: true } },
       },
     });
     if (!job || job.storeId !== storeId) throw new AppError('Job not found', 404);
     assertCashierCanViewJob(req.user?.role, job);
 
+    const routeOrderById = await findOrdersByIdsInclude(
+      job.jobOrders.map((jo) => jo.orderId),
+      jobOrdersWithDetails.include.order.include,
+    );
+    const routeJobOrders = job.jobOrders.flatMap((jo) => {
+      const order = routeOrderById.get(jo.orderId);
+      return order ? [{ ...jo, order }] : [];
+    });
+
     const rawStops: Omit<RouteStop, 'sequence' | 'distanceFromPreviousKm' | 'etaMinutesFromPrevious'>[] = [];
-    for (const jo of job.jobOrders) {
+    for (const jo of routeJobOrders) {
       if (isActiveDeliveryJobStatus(job.status) && jo.order.status === 'CANCELLED') continue;
       const order = jo.order;
       const lat = order.deliveryLat ?? order.address?.lat;
@@ -1399,66 +1453,62 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
   }
 }
 
-const deliveryFailureListInclude = {
-  driver: { select: { id: true, name: true } },
-  order: {
-    select: {
-      id: true,
-      orderNumber: true,
-      status: true,
-      storeId: true,
-      deliveryAddressLine: true,
-      deliveryCity: true,
-      deliveryDistrict: true,
-      deliveryLat: true,
-      deliveryLng: true,
-      guestName: true,
-      guestPhone: true,
-      user: { select: { name: true, phone: true } },
-      store: {
-        select: { id: true, name: true, lat: true, lng: true, addressLine: true },
-      },
-    },
+const deliveryFailureAttemptSelect = {
+  id: true,
+  orderId: true,
+  jobId: true,
+  driverId: true,
+  attemptNo: true,
+  outcome: true,
+  note: true,
+  lat: true,
+  lng: true,
+  createdAt: true,
+} as const;
+
+const deliveryFailureOrderSelect = {
+  id: true,
+  orderNumber: true,
+  status: true,
+  storeId: true,
+  deliveryAddressLine: true,
+  deliveryCity: true,
+  deliveryDistrict: true,
+  deliveryLat: true,
+  deliveryLng: true,
+  guestName: true,
+  guestPhone: true,
+  user: { select: { name: true, phone: true } },
+  store: {
+    select: { id: true, name: true, lat: true, lng: true, addressLine: true },
   },
 } as const;
 
 async function buildDeliveryFailuresPayload(
-  rows: Prisma.DeliveryAttemptGetPayload<{ include: typeof deliveryFailureListInclude }>[],
+  rows: Prisma.DeliveryAttemptGetPayload<{ select: typeof deliveryFailureAttemptSelect }>[],
 ) {
 
     const orderIds = [...new Set(rows.map((row) => row.orderId))];
     const jobIds = [...new Set(rows.map((row) => row.jobId))];
-    const [links, originalStops, jobs] = await Promise.all([
+    const driverIds = [...new Set(rows.map((row) => row.driverId))];
+    const [drivers, linkRows, originalStops, jobs] = await Promise.all([
+      driverIds.length === 0
+        ? Promise.resolve([])
+        : prisma.adminUser.findMany({
+            where: { id: { in: driverIds } },
+            select: { id: true, name: true },
+          }),
       orderIds.length === 0
         ? Promise.resolve([])
         : prisma.deliveryJobOrder.findMany({
-            where: {
-              orderId: { in: orderIds },
-              job: { status: { in: [...REDELIVERY_JOB_STATUSES] } },
-            },
-            select: {
-              orderId: true,
-              jobId: true,
-              job: {
-                select: {
-                  id: true,
-                  status: true,
-                  createdAt: true,
-                  driver: { select: { id: true, name: true } },
-                },
-              },
-            },
+            where: { orderId: { in: orderIds } },
+            select: { orderId: true, jobId: true },
           }),
       jobIds.length === 0
         ? Promise.resolve([])
         : prisma.deliveryJobOrder.findMany({
             where: { jobId: { in: jobIds } },
-            select: {
-              jobId: true,
-              orderId: true,
-              sequence: true,
-              order: { select: { orderNumber: true, status: true } },
-            },
+            select: { jobId: true, orderId: true, sequence: true },
           }),
       jobIds.length === 0
         ? Promise.resolve([])
@@ -1471,6 +1521,33 @@ async function buildDeliveryFailuresPayload(
             },
           }),
     ]);
+
+    const redeliveryJobs =
+      linkRows.length === 0
+        ? []
+        : await prisma.deliveryJob.findMany({
+            where: {
+              id: { in: [...new Set(linkRows.map((link) => link.jobId))] },
+              status: { in: [...REDELIVERY_JOB_STATUSES] },
+            },
+            select: {
+              id: true,
+              status: true,
+              createdAt: true,
+              driver: { select: { id: true, name: true } },
+            },
+          });
+    const redeliveryById = new Map(redeliveryJobs.map((job) => [job.id, job]));
+    const links = linkRows.flatMap((link) => {
+      const job = redeliveryById.get(link.jobId);
+      return job ? [{ ...link, job }] : [];
+    });
+
+    const orderById = await findOrdersByIds(
+      [...orderIds, ...originalStops.map((stop) => stop.orderId)],
+      deliveryFailureOrderSelect,
+    );
+    const driverById = new Map(drivers.map((driver) => [driver.id, driver]));
 
     const linksByOrder = new Map<string, typeof links>();
     for (const link of links) {
@@ -1496,33 +1573,44 @@ async function buildDeliveryFailuresPayload(
     }
 
     return rows.map((row) => {
-      const derived = deriveFailureReassignment({
-        orderStatus: row.order.status,
-        originalJobId: row.jobId,
-        jobsForOrder: linksByOrder.get(row.orderId) ?? [],
-      });
-      const customerName = resolveCustomerDisplayName({
-        guestName: row.order.guestName,
-        userName: row.order.user?.name,
-        phone: row.order.guestPhone ?? row.order.user?.phone,
-      });
+      const order = orderById.get(row.orderId) ?? null;
+      const derived = order
+        ? deriveFailureReassignment({
+            orderStatus: order.status,
+            originalJobId: row.jobId,
+            jobsForOrder: linksByOrder.get(row.orderId) ?? [],
+          })
+        : { reassignmentStatus: 'done' as const, activeRedeliveryJob: null };
+      const customerName = order
+        ? resolveCustomerDisplayName({
+            guestName: order.guestName,
+            userName: order.user?.name,
+            phone: order.guestPhone ?? order.user?.phone,
+          })
+        : 'Unknown customer';
       const isLatestForOrder = latestAttemptIdByOrder.get(row.orderId) === row.id;
       const forwardOrders = collectForwardOrders({
         failedOrderId: row.orderId,
-        stops: (stopsByJob.get(row.jobId) ?? []).map((stop) => ({
-          orderId: stop.orderId,
-          sequence: stop.sequence,
-          orderNumber: stop.order.orderNumber,
-          status: stop.order.status,
-        })),
+        stops: (stopsByJob.get(row.jobId) ?? []).flatMap((stop) => {
+          const stopOrder = orderById.get(stop.orderId);
+          if (!stopOrder) return [];
+          return [{
+            orderId: stop.orderId,
+            sequence: stop.sequence,
+            orderNumber: stopOrder.orderNumber,
+            status: stopOrder.status,
+          }];
+        }),
       });
       return {
         ...row,
+        driver: driverById.get(row.driverId) ?? null,
+        order,
         job: jobById.get(row.jobId) ?? null,
         customerName,
         reassignmentStatus: derived.reassignmentStatus,
         activeRedeliveryJob: derived.activeRedeliveryJob,
-        canAssign: derived.reassignmentStatus === 'needs_assignment' && isLatestForOrder,
+        canAssign: derived.reassignmentStatus === 'needs_assignment' && isLatestForOrder && Boolean(order),
         forwardOrders,
       };
     });
@@ -1547,7 +1635,7 @@ export async function listDeliveryFailures(req: Request, res: Response, next: Ne
           orderBy,
           skip,
           take: pageSize,
-          include: deliveryFailureListInclude,
+          select: deliveryFailureAttemptSelect,
         }),
       ]);
       const payload = await buildDeliveryFailuresPayload(rows);
@@ -1558,7 +1646,7 @@ export async function listDeliveryFailures(req: Request, res: Response, next: Ne
       where,
       orderBy,
       take: 200,
-      include: deliveryFailureListInclude,
+      select: deliveryFailureAttemptSelect,
     });
     const payload = await buildDeliveryFailuresPayload(rows);
     return success(res, payload);
@@ -1593,38 +1681,48 @@ export async function reassignDeliveryFailure(req: Request, res: Response, next:
   }
 }
 
-const driverComplaintListInclude = {
-  driver: { select: { id: true, name: true } },
-  order: {
-    select: {
-      id: true,
-      orderNumber: true,
-      status: true,
-      deliveryAddressLine: true,
-      deliveryCity: true,
-      deliveryDistrict: true,
-      guestName: true,
-      guestPhone: true,
-      user: { select: { name: true, phone: true } },
-    },
-  },
+const driverComplaintOrderSelect = {
+  id: true,
+  orderNumber: true,
+  status: true,
+  deliveryAddressLine: true,
+  deliveryCity: true,
+  deliveryDistrict: true,
+  guestName: true,
+  guestPhone: true,
+  user: { select: { name: true, phone: true } },
 } as const;
 
 async function mapDriverComplaintRows(
-  rows: Prisma.DriverComplaintGetPayload<{ include: typeof driverComplaintListInclude }>[],
+  rows: Awaited<ReturnType<typeof prisma.driverComplaint.findMany>>,
 ) {
   const resolverIds = [...new Set(rows.map((r) => r.resolvedBy).filter(Boolean))] as string[];
-  const resolvers =
+  const driverIds = [...new Set(rows.map((row) => row.driverId))];
+  const [resolvers, drivers, orderById] = await Promise.all([
     resolverIds.length > 0
-      ? await prisma.adminUser.findMany({
+      ? prisma.adminUser.findMany({
           where: { id: { in: resolverIds } },
           select: { id: true, name: true },
         })
-      : [];
+      : Promise.resolve([]),
+    driverIds.length > 0
+      ? prisma.adminUser.findMany({
+          where: { id: { in: driverIds } },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
+    findOrdersByIds(
+      rows.map((row) => row.orderId),
+      driverComplaintOrderSelect,
+    ),
+  ]);
   const resolverNames = new Map(resolvers.map((u) => [u.id, u.name]));
+  const driverById = new Map(drivers.map((driver) => [driver.id, driver]));
 
   return rows.map((row) => ({
     ...row,
+    driver: driverById.get(row.driverId) ?? null,
+    order: orderById.get(row.orderId) ?? null,
     resolvedByName: row.resolvedBy ? (resolverNames.get(row.resolvedBy) ?? null) : null,
   }));
 }
@@ -1645,7 +1743,6 @@ export async function listDriverComplaints(req: Request, res: Response, next: Ne
           orderBy,
           skip,
           take: pageSize,
-          include: driverComplaintListInclude,
         }),
       ]);
       const mapped = await mapDriverComplaintRows(rows);
@@ -1656,7 +1753,6 @@ export async function listDriverComplaints(req: Request, res: Response, next: Ne
       where,
       orderBy,
       take: 200,
-      include: driverComplaintListInclude,
     });
     const mapped = await mapDriverComplaintRows(rows);
     return success(res, mapped);
@@ -1670,63 +1766,64 @@ export async function getDriverComplaint(req: Request, res: Response, next: Next
     const id = req.params.id as string;
     const scopedStoreId = await adminStoreIdOptional(req);
 
-    const row = await prisma.driverComplaint.findUnique({
-      where: { id },
-      include: {
-        driver: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            meritPoints: true,
-            vehicleType: true,
-            vehicleNumber: true,
-          },
-        },
-        order: {
-          select: {
-            id: true,
-            orderNumber: true,
-            status: true,
-            orderMode: true,
-            channel: true,
-            createdAt: true,
-            notes: true,
-            paymentMethod: true,
-            paymentStatus: true,
-            subtotal: true,
-            deliveryFee: true,
-            convenientFee: true,
-            discount: true,
-            loyaltyDiscount: true,
-            total: true,
-            deliveryAddressLine: true,
-            deliveryCity: true,
-            deliveryDistrict: true,
-            deliveryLat: true,
-            deliveryLng: true,
-            guestName: true,
-            guestPhone: true,
-            user: { select: { name: true, phone: true } },
-            items: {
-              select: {
-                productName: true,
-                size: true,
-                quantity: true,
-                unitPrice: true,
-                totalPrice: true,
-                toppings: { select: { toppingName: true, extraPrice: true } },
-              },
-            },
-          },
-        },
-      },
-    });
+    const row = await prisma.driverComplaint.findUnique({ where: { id } });
 
     if (!row) throw new AppError('Complaint not found', 404);
     if (scopedStoreId && row.storeId !== scopedStoreId) {
       throw new AppError('Complaint not found', 404);
     }
+
+    const [driver, order] = await Promise.all([
+      prisma.adminUser.findUnique({
+        where: { id: row.driverId },
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          meritPoints: true,
+          vehicleType: true,
+          vehicleNumber: true,
+        },
+      }),
+      prisma.order.findUnique({
+        where: { id: row.orderId },
+        select: {
+          id: true,
+          orderNumber: true,
+          status: true,
+          orderMode: true,
+          channel: true,
+          createdAt: true,
+          notes: true,
+          paymentMethod: true,
+          paymentStatus: true,
+          subtotal: true,
+          deliveryFee: true,
+          convenientFee: true,
+          discount: true,
+          loyaltyDiscount: true,
+          total: true,
+          deliveryAddressLine: true,
+          deliveryCity: true,
+          deliveryDistrict: true,
+          deliveryLat: true,
+          deliveryLng: true,
+          guestName: true,
+          guestPhone: true,
+          user: { select: { name: true, phone: true } },
+          items: {
+            select: {
+              productName: true,
+              size: true,
+              quantity: true,
+              unitPrice: true,
+              totalPrice: true,
+              toppings: { select: { toppingName: true, extraPrice: true } },
+            },
+          },
+        },
+      }),
+    ]);
 
     let resolvedByName: string | null = null;
     if (row.resolvedBy) {
@@ -1743,6 +1840,8 @@ export async function getDriverComplaint(req: Request, res: Response, next: Next
 
     return success(res, {
       ...row,
+      driver,
+      order,
       resolvedByName,
       otherComplaintsCount,
     });
