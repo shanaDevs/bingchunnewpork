@@ -118,10 +118,10 @@ services:
       - key: NODE_ENV
         scope: RUN_TIME
         value: production
-      # Same-origin /api (cookie auth). Server proxy BACKEND_URL → shop/core, not delivery-service.
+      # Browser → shop/core absolute URL (not delivery-service). Requires ADMIN_COOKIE_SAMESITE=none on shop-api.
       - key: NEXT_PUBLIC_API_URL
         scope: RUN_AND_BUILD_TIME
-        value: /api
+        value: "https://bing-chun-ui2ow.ondigitalocean.app/api"
       - key: DELIVERY_SERVICE_URL
         scope: RUN_TIME
         value: "${delivery.PRIVATE_URL}"
@@ -131,14 +131,12 @@ services:
       - key: API_PROXY_URL
         scope: RUN_AND_BUILD_TIME
         value: "https://bing-chun-ui2ow.ondigitalocean.app"
-      # Same-origin sockets; next.config rewrites /socket.io → BACKEND_URL (shop).
       - key: NEXT_PUBLIC_SOCKET_URL
         scope: RUN_AND_BUILD_TIME
-        value: ""
+        value: "https://bing-chun-ui2ow.ondigitalocean.app"
       - key: NEXT_PUBLIC_SITE_URL
         scope: RUN_AND_BUILD_TIME
         value: "https://bingchun-delivery-6mgs2.ondigitalocean.app"
-      # Admin delivery reads use shop /api (runtime proxy to main shop/core API).
       - key: NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE
         scope: RUN_AND_BUILD_TIME
         value: "true"

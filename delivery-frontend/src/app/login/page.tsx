@@ -11,6 +11,7 @@ import {
   ensureAdminAccessToken,
   hasAdminCsrfCookie,
   saveAdminAuth,
+  saveAdminCsrfToken,
 } from '@/lib/adminSession';
 import { primeBranchOrderAudio } from '@/lib/uiSounds';
 import { getApiBaseOverride } from '@/lib/apiBase';
@@ -59,6 +60,7 @@ const LOGO_TAP_WINDOW_MS = 2500;
 type AdminAuthResult = {
   admin: AdminSession;
   accessExpiresAt?: number;
+  csrfToken?: string;
 };
 
 export default function AdminLoginPage() {
@@ -114,8 +116,9 @@ export default function AdminLoginPage() {
       toast.error('Unexpected login response from server');
       return;
     }
-    const { admin, accessExpiresAt } = result;
+    const { admin, accessExpiresAt, csrfToken } = result;
     saveAdminAuth(admin, accessExpiresAt);
+    saveAdminCsrfToken(csrfToken);
     if (!hasAdminCsrfCookie()) {
       toast.error('Login incomplete — auth cookies were not set. Try again or check API proxy settings.');
       return;
@@ -140,6 +143,7 @@ export default function AdminLoginPage() {
       completeLoginSuccess({
         admin: res.admin,
         accessExpiresAt: res.accessExpiresAt,
+        csrfToken: res.csrfToken,
       });
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Login failed');

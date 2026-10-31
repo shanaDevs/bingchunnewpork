@@ -96,7 +96,8 @@ export function getBackendOrigin(): string {
 
 /**
  * API base URL (includes /api suffix).
- * Set NEXT_PUBLIC_API_URL in .env — use `/api` in production (proxied via BACKEND_URL).
+ * Production delivery console uses absolute shop/core URL
+ * (`https://bing-chun-ui2ow.ondigitalocean.app/api`). Local/dev may use `/api` (proxied).
  * Staff Login 5-tap override wins in the browser when set.
  */
 export function getApiBaseUrl(): string {
@@ -125,7 +126,7 @@ export function getSocketUrl(): string {
     return stripTrailingSlash(configuredSocket);
   }
   const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
-  // Same-origin `/api` on the delivery host: connect to this origin; /socket.io is rewritten to shop.
+  // Relative `/api` (local proxy): same-origin sockets. Absolute shop API: shop origin.
   if (configured.startsWith('/') && typeof window !== 'undefined') {
     return window.location.origin;
   }

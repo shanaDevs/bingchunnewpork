@@ -110,6 +110,10 @@ services:
       - key: FRONTEND_URL
         scope: RUN_TIME
         value: "https://bing-chun-ui2ow.ondigitalocean.app"
+      # Delivery ops console calls this API cross-origin; Lax cookies would 401 every request.
+      - key: ADMIN_COOKIE_SAMESITE
+        scope: RUN_TIME
+        value: "none"
       - key: DELIVERY_FRONTEND_URL
         scope: RUN_TIME
         value: "https://bingchun-delivery-6mgs2.ondigitalocean.app"

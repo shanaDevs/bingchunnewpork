@@ -22,7 +22,8 @@ function base() {
   } as const;
 }
 
-export function setAdminAuthCookies(res: Response, accessToken: string, refreshToken: string): void {
+/** Sets auth cookies and returns the CSRF value (needed when the UI cannot read cross-origin cookies). */
+export function setAdminAuthCookies(res: Response, accessToken: string, refreshToken: string): string {
   const shared = base();
   const csrf = randomBytes(24).toString('base64url');
   res.cookie(ADMIN_ACCESS_COOKIE, accessToken, {
@@ -43,6 +44,7 @@ export function setAdminAuthCookies(res: Response, accessToken: string, refreshT
     path: '/',
     maxAge: adminRefreshTokenMaxAgeMs(),
   });
+  return csrf;
 }
 
 export function clearAdminAuthCookies(res: Response): void {
