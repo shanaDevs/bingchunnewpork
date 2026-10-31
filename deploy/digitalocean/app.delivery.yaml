@@ -118,10 +118,10 @@ services:
       - key: NODE_ENV
         scope: RUN_TIME
         value: production
-      # Browser → admin API (delivery-jobs / drivers / ops live on admin surface).
+      # Same-origin /api so the session cookie is first-party. delivery-web proxies to BACKEND_URL.
       - key: NEXT_PUBLIC_API_URL
         scope: RUN_AND_BUILD_TIME
-        value: "https://bingchun-admin-a4ndy.ondigitalocean.app/api"
+        value: "/api"
       - key: DELIVERY_SERVICE_URL
         scope: RUN_TIME
         value: "${delivery.PRIVATE_URL}"

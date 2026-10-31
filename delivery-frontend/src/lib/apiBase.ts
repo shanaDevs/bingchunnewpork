@@ -96,23 +96,24 @@ export function getBackendOrigin(): string {
 
 /**
  * API base URL (includes /api suffix).
- * Production delivery console uses absolute admin API URL
- * (`https://bingchun-admin-a4ndy.ondigitalocean.app/api`). Local/dev may use `/api` (proxied).
+ * The browser always uses same-origin `/api`. The delivery console proxies that
+ * to the admin API and keeps the session cookie on this host. Calling the admin
+ * host directly is cross-site, so the browser does not send the cookie and every
+ * admin call returns 401 Unauthorised.
  * Staff Login 5-tap override wins in the browser when set.
  */
 export function getApiBaseUrl(): string {
   const override = getApiBaseOverride();
   if (override) return ensureApiSuffix(override);
 
-  const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
-
-  if (configured.startsWith('/')) {
-    if (typeof window !== 'undefined') {
-      return joinUrl(window.location.origin, configured);
-    }
-    return joinUrl(getBackendOrigin(), configured);
+  if (typeof window !== 'undefined') {
+    return joinUrl(window.location.origin, '/api');
   }
 
+  const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
+  if (configured.startsWith('/')) {
+    return joinUrl(getBackendOrigin(), configured);
+  }
   return normalizeUrlPath(configured);
 }
 

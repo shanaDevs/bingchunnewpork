@@ -704,15 +704,6 @@ const driverListSelect = {
   pinLookup: true,
   store: { select: { id: true, name: true, city: true } },
   accessibleStores: { select: { id: true, name: true, city: true } },
-  deliveryJobs: {
-    where: { status: 'COMPLETED' as const },
-    select: {
-      storeId: true,
-      totalDeliveryFees: true,
-      riderRatingSum: true,
-      riderRatingCount: true,
-    },
-  },
 } as const;
 
 type DriverWithStats = {
@@ -735,13 +726,9 @@ type DriverWithStats = {
   pinLookup: string | null;
   store: { id: string; name: string; city: string } | null;
   accessibleStores: { id: string; name: string; city: string }[];
-  deliveryJobs: Array<{
-    storeId: string;
-    totalDeliveryFees: import('@prisma/client').Prisma.Decimal | null;
-    riderRatingSum: number;
-    riderRatingCount: number;
-  }>;
 };
+
+type CompletedJobStats = { count: number; totalDeliveryFees: number };
 
 type RiderRatingAgg = { avg: number | null; count: number };
 
@@ -767,19 +754,41 @@ async function riderRatingAggsByDriverId(
   return map;
 }
 
+async function completedJobStatsByDriverId(
+  driverIds: string[],
+  storeId?: string,
+): Promise<Map<string, CompletedJobStats>> {
+  const map = new Map<string, CompletedJobStats>();
+  if (driverIds.length === 0) return map;
+
+  const rows = await prisma.deliveryJob.groupBy({
+    by: ['driverId'],
+    where: {
+      status: 'COMPLETED',
+      driverId: { in: driverIds },
+      ...(storeId ? { storeId } : {}),
+    },
+    _count: { _all: true },
+    _sum: { totalDeliveryFees: true },
+  });
+
+  for (const row of rows) {
+    if (!row.driverId) continue;
+    map.set(row.driverId, {
+      count: row._count._all,
+      totalDeliveryFees: decimalFieldToLkrNumber(row._sum.totalDeliveryFees),
+    });
+  }
+  return map;
+}
+
 async function mapDriverWithStats(
   driver: DriverWithStats,
-  storeId?: string,
+  stats?: CompletedJobStats,
   rating?: RiderRatingAgg,
 ) {
-  const relevantJobs = storeId
-    ? driver.deliveryJobs.filter((job) => job.storeId === storeId)
-    : driver.deliveryJobs;
-  const completedJobCount = relevantJobs.length;
-  const totalDeliveryFees = relevantJobs.reduce(
-    (sum, job) => sum + (job.totalDeliveryFees != null ? decimalFieldToLkrNumber(job.totalDeliveryFees) : 0),
-    0,
-  );
+  const completedJobCount = stats?.count ?? 0;
+  const totalDeliveryFees = stats?.totalDeliveryFees ?? 0;
   const riderRatingCount = rating?.count ?? 0;
   const avgRiderRating = riderRatingCount > 0 ? rating?.avg ?? null : null;
 
@@ -855,29 +864,21 @@ async function loadMappedDrivers(args: {
 }) {
   const drivers = await prisma.adminUser.findMany({
     where: args.where,
-    select: {
-      ...driverListSelect,
-      deliveryJobs: {
-        where: {
-          status: 'COMPLETED',
-          ...(args.jobStoreId ? { storeId: args.jobStoreId } : {}),
-        },
-        select: {
-          storeId: true,
-          totalDeliveryFees: true,
-          riderRatingSum: true,
-          riderRatingCount: true,
-        },
-      },
-    },
+    select: driverListSelect,
     orderBy: args.orderBy,
     ...(args.skip !== undefined ? { skip: args.skip } : {}),
     ...(args.take !== undefined ? { take: args.take } : {}),
   });
 
-  const ratingAggs = await riderRatingAggsByDriverId(drivers.map((driver) => driver.id));
+  const driverIds = drivers.map((driver) => driver.id);
+  const [ratingAggs, jobStats] = await Promise.all([
+    riderRatingAggsByDriverId(driverIds),
+    completedJobStatsByDriverId(driverIds, args.jobStoreId ?? args.statsStoreId),
+  ]);
   return Promise.all(
-    drivers.map((driver) => mapDriverWithStats(driver, args.statsStoreId, ratingAggs.get(driver.id))),
+    drivers.map((driver) =>
+      mapDriverWithStats(driver, jobStats.get(driver.id), ratingAggs.get(driver.id)),
+    ),
   );
 }
 
