@@ -120,13 +120,14 @@ export function getSocketUrl(): string {
   if (getApiBaseOverride()) {
     return getBackendOrigin();
   }
-  if (process.env.NEXT_PUBLIC_SOCKET_URL) {
-    return stripTrailingSlash(process.env.NEXT_PUBLIC_SOCKET_URL);
+  const configuredSocket = (process.env.NEXT_PUBLIC_SOCKET_URL || '').trim();
+  if (configuredSocket) {
+    return stripTrailingSlash(configuredSocket);
   }
   const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
-  // Same-origin `/api` (delivery console on App Platform): admin Socket.IO runs on shop API.
+  // Same-origin `/api` on the delivery host: connect to this origin; /socket.io is rewritten to shop.
   if (configured.startsWith('/') && typeof window !== 'undefined') {
-    return getBackendOrigin();
+    return window.location.origin;
   }
   return getBackendOrigin();
 }

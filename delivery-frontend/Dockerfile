@@ -11,7 +11,8 @@ COPY delivery-frontend ./delivery-frontend
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
-ARG NEXT_PUBLIC_API_URL=https://bingchunsrilanka.com/api
+# Browser stays same-origin (/api) so httpOnly admin cookies work; Next proxies to shop at runtime.
+ARG NEXT_PUBLIC_API_URL=/api
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ARG BACKEND_URL=https://bingchunsrilanka.com
 ENV BACKEND_URL=$BACKEND_URL
@@ -19,7 +20,8 @@ ARG API_PROXY_URL=https://bingchunsrilanka.com
 ENV API_PROXY_URL=$API_PROXY_URL
 ARG DELIVERY_SERVICE_URL=
 ENV DELIVERY_SERVICE_URL=$DELIVERY_SERVICE_URL
-ARG NEXT_PUBLIC_SOCKET_URL=https://bingchunsrilanka.com
+# Empty = same-origin /socket.io rewrite to BACKEND_URL (avoids cross-site cookie issues).
+ARG NEXT_PUBLIC_SOCKET_URL=
 ENV NEXT_PUBLIC_SOCKET_URL=$NEXT_PUBLIC_SOCKET_URL
 ARG NEXT_PUBLIC_SITE_URL=https://bingchun-delivery-6mgs2.ondigitalocean.app
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL

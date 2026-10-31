@@ -118,10 +118,10 @@ services:
       - key: NODE_ENV
         scope: RUN_TIME
         value: production
-      # Absolute shop/core URL so the browser never calls delivery-service for ops APIs.
+      # Same-origin /api (cookie auth). Server proxy BACKEND_URL → shop/core, not delivery-service.
       - key: NEXT_PUBLIC_API_URL
         scope: RUN_AND_BUILD_TIME
-        value: "https://bingchunsrilanka.com/api"
+        value: /api
       - key: DELIVERY_SERVICE_URL
         scope: RUN_TIME
         value: "${delivery.PRIVATE_URL}"
@@ -131,9 +131,10 @@ services:
       - key: API_PROXY_URL
         scope: RUN_AND_BUILD_TIME
         value: "https://bingchunsrilanka.com"
+      # Same-origin sockets; next.config rewrites /socket.io → BACKEND_URL (shop).
       - key: NEXT_PUBLIC_SOCKET_URL
         scope: RUN_AND_BUILD_TIME
-        value: "https://bingchunsrilanka.com"
+        value: ""
       - key: NEXT_PUBLIC_SITE_URL
         scope: RUN_AND_BUILD_TIME
         value: "https://bingchun-delivery-6mgs2.ondigitalocean.app"

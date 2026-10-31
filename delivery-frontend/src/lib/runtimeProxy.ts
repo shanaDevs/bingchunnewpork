@@ -90,8 +90,14 @@ export async function proxyTo(req: NextRequest, origin: string): Promise<Respons
     if (HOP_BY_HOP.has(k) || k === 'content-encoding' || k === 'set-cookie') return;
     outHeaders.set(key, value);
   });
-  // Preserve every Set-Cookie header (auth cookies) individually.
-  for (const cookie of upstream.headers.getSetCookie()) outHeaders.append('set-cookie', cookie);
+  // Preserve Set-Cookie, but drop Domain so the browser binds cookies to this host
+  // (delivery console → /api proxy → shop). Cross-origin Domain=shop would 401 every call.
+  for (const cookie of upstream.headers.getSetCookie()) {
+    outHeaders.append(
+      'set-cookie',
+      cookie.replace(/;\s*Domain=[^;]*/gi, ''),
+    );
+  }
 
   return new Response(upstream.body, {
     status: upstream.status,
