@@ -44,6 +44,7 @@ import AdminDeliveryDashboard from '@/components/admin/AdminDeliveryDashboard';
 import { orderDateRange } from '@/components/admin/DashboardPeriodFilter';
 import SearchableBranchSelect from '@/components/admin/SearchableBranchSelect';
 import { useDriverManagementAccess } from '@/hooks/useDriverManagementAccess';
+import { mainAdminPage } from '@/lib/mainAdminUrl';
 
 type DeliveryTab =
   | 'dashboard'
@@ -671,8 +672,8 @@ function AdminDeliveryContent() {
               'Live fleet, period performance, and partner earnings'
             ) : tab === 'jobs' ? (
               <>
-                Scheduled delivery runs Â· classify new orders on the{' '}
-                <Link href="/admin/orders" className="text-brand hover:underline">
+                Scheduled delivery runs · classify new orders on the{' '}
+                <Link href={mainAdminPage('/admin/orders')} className="text-brand hover:underline">
                   Orders
                 </Link>{' '}
                 page
@@ -912,7 +913,7 @@ function AdminDeliveryContent() {
                 <div className="p-8 text-center text-muted">
                   <MapPin size={32} className="mx-auto mb-2 opacity-40" />
                   <p className="text-sm">No active delivery schedules.</p>
-                  <Link href="/admin/orders" className="text-brand text-sm hover:underline mt-2 inline-block">
+                  <Link href={mainAdminPage('/admin/orders')} className="text-brand text-sm hover:underline mt-2 inline-block">
                     Classify orders on Orders page →
                   </Link>
                 </div>

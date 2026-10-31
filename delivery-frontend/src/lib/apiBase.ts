@@ -96,7 +96,8 @@ export function getBackendOrigin(): string {
 
 /**
  * API base URL (includes /api suffix).
- * Set NEXT_PUBLIC_API_URL in .env — use `/api` in production (proxied via BACKEND_URL).
+ * Production delivery console uses absolute admin API URL
+ * (`https://bingchun-admin-a4ndy.ondigitalocean.app/api`). Local/dev may use `/api` (proxied).
  * Staff Login 5-tap override wins in the browser when set.
  */
 export function getApiBaseUrl(): string {
@@ -120,13 +121,14 @@ export function getSocketUrl(): string {
   if (getApiBaseOverride()) {
     return getBackendOrigin();
   }
-  if (process.env.NEXT_PUBLIC_SOCKET_URL) {
-    return stripTrailingSlash(process.env.NEXT_PUBLIC_SOCKET_URL);
+  const configuredSocket = (process.env.NEXT_PUBLIC_SOCKET_URL || '').trim();
+  if (configuredSocket) {
+    return stripTrailingSlash(configuredSocket);
   }
   const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
-  // Same-origin `/api` (delivery console on App Platform): admin Socket.IO runs on shop API.
+  // Relative `/api` (local proxy): same-origin sockets. Absolute shop API: shop origin.
   if (configured.startsWith('/') && typeof window !== 'undefined') {
-    return getBackendOrigin();
+    return window.location.origin;
   }
   return getBackendOrigin();
 }

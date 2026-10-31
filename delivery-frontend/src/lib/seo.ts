@@ -1,5 +1,5 @@
 /** Canonical public site origin for SEO (metadata, sitemap, robots, JSON-LD). */
-export const SITE_URL = 'https://bingchunsrilanka.com';
+export const SITE_URL = 'https://bingchun-delivery-6mgs2.ondigitalocean.app';
 
 export const SITE_NAME = 'Bing Chun Sri Lanka';
 

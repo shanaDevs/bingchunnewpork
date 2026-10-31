@@ -15,22 +15,18 @@ export function getCoreApiBaseUrl(): string {
 }
 
 /**
- * Route delivery admin list/detail APIs through shop `/api/admin/*` instead of `/delivery-api`.
- * Used when App Platform ingress still sends `/delivery-api` to Engine.IO (Transport unknown),
- * and for explicit debugging via `NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE=true`.
+ * Route delivery admin APIs through shop/core `/api/admin/*` instead of `/delivery-api`.
+ * Default is core (shop). Opt out only with NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE=false
+ * for local dual-backend CapRover-style setups.
  */
 export function deliveryAdminViaCore(): boolean {
-  if (process.env.NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE === 'true') return true;
-  if (process.env.DELIVERY_ADMIN_VIA_CORE === 'true') return true;
-  if (typeof window !== 'undefined' && /\.ondigitalocean\.app$/i.test(window.location.hostname)) {
-    return true;
-  }
-  return false;
+  if (process.env.NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE === 'false') return false;
+  if (process.env.DELIVERY_ADMIN_VIA_CORE === 'false') return false;
+  return true;
 }
 
 /**
- * Delivery ops console: delivery admin APIs go to `/delivery-api/admin/...`.
- * Set `NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE=true` to force core `/api/admin/...` (e.g. debugging).
+ * Delivery ops console: always prefer shop/core `/api/admin/...` unless via-core is opted out.
  */
 export function resolveAdminRequestUrl(endpoint: string): string {
   const qIndex = endpoint.indexOf('?');

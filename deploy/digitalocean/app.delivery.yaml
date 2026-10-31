@@ -24,12 +24,14 @@ databases:
     cluster_name: bingchun-valkey
 ingress:
   rules:
+    # Admin HTTP APIs for delivery-service (when not via shop /api).
     - match:
         path:
           prefix: /delivery-api
       component:
         name: delivery
         preserve_path_prefix: true
+    # Socket.IO must hit delivery-web so Next can rewrite to shop BACKEND_URL.
     - match:
         path:
           prefix: /socket.io
@@ -116,25 +118,37 @@ services:
       - key: NODE_ENV
         scope: RUN_TIME
         value: production
+      # Browser → admin API (delivery-jobs / drivers / ops live on admin surface).
       - key: NEXT_PUBLIC_API_URL
         scope: RUN_AND_BUILD_TIME
-        value: /api
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app/api"
       - key: DELIVERY_SERVICE_URL
         scope: RUN_TIME
         value: "${delivery.PRIVATE_URL}"
       - key: BACKEND_URL
-        scope: RUN_TIME
-        value: "https://bingchunsrilanka.com"
+        scope: RUN_AND_BUILD_TIME
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
       - key: API_PROXY_URL
-        scope: RUN_TIME
-        value: "https://bingchunsrilanka.com"
+        scope: RUN_AND_BUILD_TIME
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
       - key: NEXT_PUBLIC_SOCKET_URL
         scope: RUN_AND_BUILD_TIME
-        value: "https://bingchunsrilanka.com"
-      # Until ingress sends /delivery-api to the delivery component, admin reads use shop /api (runtime proxy).
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
+      - key: NEXT_PUBLIC_SITE_URL
+        scope: RUN_AND_BUILD_TIME
+        value: "https://bingchun-delivery-6mgs2.ondigitalocean.app"
       - key: NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE
         scope: RUN_AND_BUILD_TIME
         value: "true"
       - key: DELIVERY_ADMIN_VIA_CORE
         scope: RUN_TIME
         value: "true"
+      - key: MAIN_ADMIN_URL
+        scope: RUN_TIME
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app/admin"
+      - key: ADMIN_WEB_URL
+        scope: RUN_TIME
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
+      - key: NEXT_PUBLIC_MAIN_ADMIN_URL
+        scope: RUN_AND_BUILD_TIME
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app/admin"
