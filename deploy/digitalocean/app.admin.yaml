@@ -96,13 +96,13 @@ services:
         type: SECRET
       - key: FRONTEND_URL
         scope: RUN_TIME
-        value: "https://bingchunsrilanka.com"
+        value: "https://bing-chun-ui2ow.ondigitalocean.app"
       - key: ADMIN_WEB_URL
         scope: RUN_TIME
-        value: "https://replace-admin-host.example"
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
       - key: POS_WEB_URL
         scope: RUN_TIME
-        value: "https://replace-cashier-host.example"
+        value: "https://bingchun-pos-i8pq3.ondigitalocean.app"
   - name: admin-web
     github:
       repo: Bing-Chung-Dart/bingchun

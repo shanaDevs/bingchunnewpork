@@ -127,10 +127,10 @@ services:
         value: "${delivery.PRIVATE_URL}"
       - key: BACKEND_URL
         scope: RUN_AND_BUILD_TIME
-        value: "https://bingchunsrilanka.com"
+        value: "https://bing-chun-ui2ow.ondigitalocean.app"
       - key: API_PROXY_URL
         scope: RUN_AND_BUILD_TIME
-        value: "https://bingchunsrilanka.com"
+        value: "https://bing-chun-ui2ow.ondigitalocean.app"
       # Same-origin sockets; next.config rewrites /socket.io → BACKEND_URL (shop).
       - key: NEXT_PUBLIC_SOCKET_URL
         scope: RUN_AND_BUILD_TIME

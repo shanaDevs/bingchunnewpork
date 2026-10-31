@@ -26,7 +26,7 @@ function getBackendOrigin(): string {
   const api = process.env.NEXT_PUBLIC_API_URL || '/api';
   if (api.startsWith('/')) {
     if (process.env.NODE_ENV === 'production' && !fromEnv) {
-      return 'https://bing-chung-b.mp.dartcodes.com';
+      return 'https://bing-chun-ui2ow.ondigitalocean.app';
     }
     return fromEnv || 'http://localhost:4000';
   }

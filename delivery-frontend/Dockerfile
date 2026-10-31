@@ -14,9 +14,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # Browser stays same-origin (/api) so httpOnly admin cookies work; Next proxies to shop at runtime.
 ARG NEXT_PUBLIC_API_URL=/api
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ARG BACKEND_URL=https://bingchunsrilanka.com
+ARG BACKEND_URL=https://bing-chun-ui2ow.ondigitalocean.app
 ENV BACKEND_URL=$BACKEND_URL
-ARG API_PROXY_URL=https://bingchunsrilanka.com
+ARG API_PROXY_URL=https://bing-chun-ui2ow.ondigitalocean.app
 ENV API_PROXY_URL=$API_PROXY_URL
 ARG DELIVERY_SERVICE_URL=
 ENV DELIVERY_SERVICE_URL=$DELIVERY_SERVICE_URL

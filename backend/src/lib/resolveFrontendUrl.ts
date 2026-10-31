@@ -10,30 +10,30 @@ import { buildConfiguredCorsOrigins, isLocalhostOrigin, normalizeOrigin } from '
 export const CUSTOMER_SHOP_URL =
   process.env.LIVE_SHOP_URL?.replace(/\/$/, '')
   || process.env.FRONTEND_URL?.replace(/\/$/, '')
-  || 'https://bingchunsrilanka.com';
+  || 'https://bing-chun-ui2ow.ondigitalocean.app';
 
 const LIVE_SHOP = CUSTOMER_SHOP_URL;
 
-/** Delivery ops admin — not the customer shop; must stay on the CORS allowlist. */
-const DELIVERY_ADMIN_ORIGIN = 'https://bing-chun-delivery-frontend.bc.dartcodes.com';
+/** Delivery ops console — not the customer shop; must stay on the CORS allowlist. */
+const DELIVERY_ADMIN_ORIGIN = 'https://bingchun-delivery-6mgs2.ondigitalocean.app';
 
-/** CapRover surface frontends (split from the old monolith). Always allowlisted. */
-const ADMIN_WEB_ORIGIN = 'https://bing-chun-admin-web.bc.dartcodes.com';
-const POS_WEB_ORIGIN = 'https://bing-chun-pos-web.bc.dartcodes.com';
+/** DigitalOcean surface frontends (split from the old monolith). Always allowlisted. */
+const ADMIN_WEB_ORIGIN = 'https://bingchun-admin-a4ndy.ondigitalocean.app';
+const POS_WEB_ORIGIN = 'https://bingchun-pos-i8pq3.ondigitalocean.app';
 
-/** Legacy CapRover app hostnames that must be redirected to LIVE_SHOP (never the API host itself). */
+/** Legacy CapRover / old hosts that must be redirected to LIVE_SHOP (never the API host itself). */
 const LEGACY_DEAD_HOSTNAME_PATTERNS = [
   /server\.dartcodes\.com$/i,
   /^bing-chung-b\./i,
-  // Exact shop host only — do not match bing-chun-core / admin-web / pos-web / delivery-frontend.
+  // Exact CapRover shop host only — do not match core / admin-web / pos-web / delivery-frontend.
   /^bing-chun\.bc\.dartcodes\.com$/i,
 ];
 
-/** Always-allowlisted live shop hosts (custom domain + CapRover default). */
+/** Always-allowlisted live shop hosts (DO default + custom domain). */
 const LIVE_SHOP_ORIGINS = [
+  'https://bing-chun-ui2ow.ondigitalocean.app',
   'https://bingchunsrilanka.com',
   'https://www.bingchunsrilanka.com',
-  'https://bing-chun.bc.dartcodes.com',
 ];
 
 function productionCorsOrigins(): string[] {
@@ -157,9 +157,9 @@ function isBingChunSurfaceWebOrigin(origin: string): boolean {
 function isLiveShopHostname(hostname: string): boolean {
   const host = hostname.toLowerCase();
   return (
-    host === 'bingchunsrilanka.com'
+    host === 'bing-chun-ui2ow.ondigitalocean.app'
+    || host === 'bingchunsrilanka.com'
     || host === 'www.bingchunsrilanka.com'
-    || host === 'bing-chun.bc.dartcodes.com'
   );
 }
 

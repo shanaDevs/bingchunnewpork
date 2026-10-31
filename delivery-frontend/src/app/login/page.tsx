@@ -291,7 +291,7 @@ export default function AdminLoginPage() {
 
         <p className="text-center text-sm text-muted mt-6">
           Shop customer?{' '}
-          <Link href="https://bing-chun.bc.dartcodes.com/account/login" className="text-brand hover:text-brand-light font-medium">
+          <Link href="https://bing-chun-ui2ow.ondigitalocean.app/account/login" className="text-brand hover:text-brand-light font-medium">
             Sign in on the storefront
           </Link>
         </p>
