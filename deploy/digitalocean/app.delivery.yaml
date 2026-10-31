@@ -118,9 +118,10 @@ services:
       - key: NODE_ENV
         scope: RUN_TIME
         value: production
+      # Absolute shop/core URL so the browser never calls delivery-service for ops APIs.
       - key: NEXT_PUBLIC_API_URL
         scope: RUN_AND_BUILD_TIME
-        value: /api
+        value: "https://bingchunsrilanka.com/api"
       - key: DELIVERY_SERVICE_URL
         scope: RUN_TIME
         value: "${delivery.PRIVATE_URL}"
@@ -133,6 +134,9 @@ services:
       - key: NEXT_PUBLIC_SOCKET_URL
         scope: RUN_AND_BUILD_TIME
         value: "https://bingchunsrilanka.com"
+      - key: NEXT_PUBLIC_SITE_URL
+        scope: RUN_AND_BUILD_TIME
+        value: "https://bingchun-delivery-6mgs2.ondigitalocean.app"
       # Admin delivery reads use shop /api (runtime proxy to main shop/core API).
       - key: NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE
         scope: RUN_AND_BUILD_TIME

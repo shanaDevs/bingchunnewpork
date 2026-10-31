@@ -9,7 +9,7 @@ import path from 'path';
  *
  * Only socket.io stays a rewrite (route handlers cannot proxy websocket upgrades).
  */
-const PRODUCTION_CORE_ORIGIN = 'https://bing-chun-core.bc.dartcodes.com';
+const PRODUCTION_CORE_ORIGIN = 'https://bingchunsrilanka.com';
 
 function getBackendOrigin(): string {
   const fromEnv = (process.env.BACKEND_URL || process.env.API_PROXY_URL || '').replace(/\/$/, '');
