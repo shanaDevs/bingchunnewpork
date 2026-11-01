@@ -37,6 +37,7 @@ import {
   paymentStatusOnOrderStatus,
   fulfillmentQueuePaymentWhere,
   shouldDeductStockOnOrderCreate,
+  shouldCreditWalletOnOrderCreate,
   type FulfillmentQueueKind,
   canAdminEditOrder,
   canAdminAddOrderItems,
@@ -1367,6 +1368,15 @@ export async function placeOrder(req: Request, res: Response, next: NextFunction
         deductLines.push({ productId: giftProductId, quantity: 1 });
       }
       await deductOrderItemsOnce(fulfillingStoreId, deductLines, order.id);
+    }
+
+    if (shouldCreditWalletOnOrderCreate(data.paymentMethod as any)) {
+      creditWalletForOrder(
+        order.id,
+        fulfillingStoreId,
+        order.total,
+        data.paymentMethod,
+      ).catch(() => {});
     }
 
     let orderResponse = order;

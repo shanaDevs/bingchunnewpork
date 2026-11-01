@@ -196,12 +196,13 @@ function WalletOverviewPageContent() {
   }, [queryClient]);
 
   const handleBranchPayoutCompleted = useCallback(
-    async (meta: BranchPayoutCompletedMeta) => {
+    (meta: BranchPayoutCompletedMeta) => {
       setInitiatePayoutTarget(null);
       setInitiatePayoutPreset(null);
       removePaidBranchFromPayoutsDueCache(queryClient, meta);
       invalidateWalletData();
-      await refreshBranchPayoutsDueQueries(queryClient);
+      void queryClient.invalidateQueries({ queryKey: payoutPeriodsQueryKey(meta.storeId) });
+      refreshBranchPayoutsDueQueries(queryClient);
     },
     [queryClient, invalidateWalletData],
   );
@@ -478,6 +479,7 @@ function WalletOverviewPageContent() {
           periodFrom={duePeriodFocus ? null : periodFrom}
           periodTo={duePeriodFocus ? null : periodTo}
           periodLabel={duePeriodFocus ? null : periodLabel}
+          onBranchPayoutCompleted={handleBranchPayoutCompleted}
           onClose={() => {
             setBranchWalletTarget(null);
             setDuePeriodFocus(null);
