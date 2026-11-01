@@ -5,12 +5,38 @@ export function lkrToCents(lkr: number): number {
   return Math.round(lkr * 100);
 }
 
+/**
+ * Parse an LKR amount (string or number, up to 2 decimal places) to integer cents
+ * using Decimal arithmetic — avoids IEEE-754 drift from `number * 100`.
+ */
+export function lkrInputToCents(value: unknown): number {
+  let s: string;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('Invalid LKR amount');
+    s = String(value);
+  } else if (typeof value === 'string') {
+    s = value.trim();
+  } else {
+    throw new Error('Invalid LKR amount');
+  }
+  if (!/^-?\d+(\.\d{1,2})?$/.test(s)) throw new Error('Invalid LKR amount');
+  const cents = new Prisma.Decimal(s).times(100).toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP);
+  const n = Number(cents.toFixed(0));
+  if (!Number.isSafeInteger(n)) throw new Error(`Cents value exceeds safe integer: ${cents}`);
+  return n;
+}
+
 /** Integer cents → whole rupees (may be fractional when cents are not a multiple of 100). */
 export function centsToLkr(cents: number): number {
   return cents / 100;
 }
 
-/** Wallet/platform/Jason/delivery job fees/payouts DB amounts are integer cents. API wallet JSON uses cent strings. */
+/**
+ * Wallet/platform/Jason/delivery-job-fee/payout DB amounts are integer cents
+ * (`Decimal(20,4)` scale is unused — values are whole cents).
+ * Delivery job API exposes whole LKR via `decimalToLkrString` (cents ÷ 100, rounded).
+ * Fractional LKR is not supported on delivery fees; reject at write boundaries instead.
+ */
 export function centsToDecimal(value: number | string | Prisma.Decimal): Prisma.Decimal {
   if (value instanceof Prisma.Decimal) return value;
   const s = typeof value === 'number' ? String(Math.trunc(value)) : String(value).trim();
@@ -20,13 +46,19 @@ export function centsToDecimal(value: number | string | Prisma.Decimal): Prisma.
   return new Prisma.Decimal(s);
 }
 
-/** Persist a whole-LKR commerce amount into a finance `Decimal(20,4)` integer-cents column. */
+/**
+ * Persist a whole-LKR amount into a finance `Decimal(20,4)` integer-cents column.
+ * Rejects fractional LKR — delivery fees and commerce write paths are whole rupees only.
+ */
 export function lkrToDecimal(lkrWhole: number | string | Prisma.Decimal): Prisma.Decimal {
   if (lkrWhole instanceof Prisma.Decimal) {
     return centsToDecimal(decimalFieldToCentsNumber(lkrWhole));
   }
   const n = typeof lkrWhole === 'number' ? lkrWhole : Number(String(lkrWhole).trim());
   if (!Number.isFinite(n)) throw new Error(`Invalid LKR amount: ${lkrWhole}`);
+  if (!Number.isInteger(n)) {
+    throw new Error(`LKR amount must be a whole number of rupees: ${lkrWhole}`);
+  }
   return centsToDecimal(lkrToCents(n));
 }
 
@@ -101,6 +133,10 @@ export function coerceInputToCents(value: unknown): number {
 
 export const zMoneyCentsInput = (zod: typeof import('zod').z) =>
   zod.union([zod.string(), zod.number()]).transform((v) => coerceInputToCents(v));
+
+/** Zod: LKR (string|number, ≤2 dp) → integer cents via Decimal. */
+export const zLkrToCentsInput = (zod: typeof import('zod').z) =>
+  zod.union([zod.string(), zod.number()]).transform((v) => lkrInputToCents(v));
 
 /** Prisma aggregate / model field → integer cents for in-process math. */
 export function decimalFieldToCentsNumber(value: Prisma.Decimal | number | null | undefined): number {

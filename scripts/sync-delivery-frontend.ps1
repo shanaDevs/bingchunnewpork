@@ -100,7 +100,7 @@ $adminGlob = @(
   'useTimelineRiderPosition.ts', 'AdminNotificationBell.tsx',
   'AdminBranchRequestReviewModal.tsx', 'AdminComplaintDetailModal.tsx', 'AdminRiderKpiDetailModal.tsx',
   'CustomerStopsWizard.tsx', 'DeliveryRouteTimeline.tsx', 'TimelineScooterIcon.tsx',
-  'ApiBaseUrlDialog.tsx', 'AdminTotpCodeForm.tsx', 'AdminOrderItemsCompact.tsx',
+  'ApiBaseUrlDialog.tsx', 'AdminOrderItemsCompact.tsx',
   'DashboardPeriodFilter.tsx',
   'DeliveryWallet*', 'DeliveryApprovePayoutModal.tsx', 'DeliveryFeesByBranchBreakdown.tsx',
   'DashboardKpiCard.tsx', 'BrandKpiIconBox.tsx', 'DateRangePicker.tsx', 'AdminTablePagination.tsx'

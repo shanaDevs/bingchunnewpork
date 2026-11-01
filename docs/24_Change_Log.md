@@ -168,7 +168,6 @@ unchanged; the only backend change is one additive read-only endpoint.
 ## Explicitly incomplete at this version
 
 - Production SMS (Dialog) and Email (SendGrid) adapters
-- Admin MFA challenge
 - Password reset API
 - Frontend unit tests; CI test stage
 - NGINX/PM2 configs in repo

@@ -67,7 +67,16 @@ export async function markOnlineOrderPaid(
   if (won) {
     await clearOrderPaymentFailure(order.id);
     await stampCancelWindowStart(order.id);
-    creditWalletForOrder(order.id, order.storeId, order.total, order.paymentMethod).catch(() => {});
+    creditWalletForOrder(order.id, order.storeId, order.total, order.paymentMethod).catch((err) => {
+      logger.error('Wallet credit failed after online payment marked PAID', {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        storeId: order.storeId,
+        amount: order.total,
+        paymentMethod: order.paymentMethod,
+        err,
+      });
+    });
   }
 
   await finalizeOrderAfterOnlinePayment(order.id);

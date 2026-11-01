@@ -35,7 +35,7 @@ Curated from code inspection. Severity is qualitative.
 | Feature | Status |
 |---------|--------|
 | Password reset API | Not Implemented |
-| Admin MFA login | Not Implemented |
+| Admin MFA login | Removed (not an open gap) |
 | Frontend unit tests | Not Implemented |
 | CI test stage | Not Implemented |
 | NGINX/PM2 in repo | Not Implemented |

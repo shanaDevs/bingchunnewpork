@@ -175,10 +175,29 @@ export async function sendOtp(phone: string, code: string, appSignature?: string
   // Android SMS Retriever requires the 11-char app hash on its own line at the end.
   const hash = (appSignature?.trim() || process.env.ANDROID_SMS_APP_HASH?.trim() || '');
   const signatureLine = hash ? `\n\n${hash}` : '';
-  await smsAdapter.send({
-    to: phone,
-    message: `Your Bing Chun verification code is: ${code}. Valid for 10 minutes.${signatureLine}`,
-  });
+  try {
+    await smsAdapter.send({
+      to: phone,
+      message: `Your Bing Chun verification code is: ${code}. Valid for 10 minutes.${signatureLine}`,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    logger.error('OTP SMS send failed', { phone, detail });
+    // Avoid opaque 500s on the public /api/auth/otp/request path.
+    const { AppError } = await import('../middleware/errorHandler');
+    if (/insufficient|credit|balance/i.test(detail)) {
+      throw new AppError(
+        'SMS service is temporarily unavailable. Please try again later.',
+        503,
+        'SMS_CREDIT_EXHAUSTED',
+      );
+    }
+    throw new AppError(
+      'Failed to send verification code. Please try again later.',
+      503,
+      'SMS_SEND_FAILED',
+    );
+  }
 }
 
 export async function sendDeliveryCodeSms(phone: string, orderNumber: string, code: string) {
