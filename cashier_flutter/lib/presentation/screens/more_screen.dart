@@ -14,6 +14,7 @@ import '../labels.dart';
 import '../state/auth_controller.dart';
 import '../theme/pos_theme.dart';
 import 'login_screen.dart';
+import 'printer_settings_screen.dart';
 
 /// Profile + settings + sign out.
 class MoreScreen extends StatelessWidget {
@@ -121,6 +122,21 @@ class MoreScreen extends StatelessWidget {
             ),
           ),
         ],
+        const SizedBox(height: PosSpacing.lg),
+        SectionLabel(tr('Hardware')),
+        PosCard(
+          padding: EdgeInsets.zero,
+          child: _SettingTile(
+            icon: Icons.print_outlined,
+            title: tr('Printer'),
+            value: rc.hasBluetoothPrinter
+                ? (rc.bluetoothPrinterName ?? rc.bluetoothPrinterMac!)
+                : tr('Not set'),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const PrinterSettingsScreen()),
+            ),
+          ),
+        ),
         const SizedBox(height: PosSpacing.lg),
         SectionLabel(tr('Preferences')),
         PosCard(

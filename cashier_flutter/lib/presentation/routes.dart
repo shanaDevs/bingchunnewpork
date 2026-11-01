@@ -8,9 +8,9 @@ abstract final class AppRoutes {
 
   /// Opens the order detail. Resolves true when the order changed (status, items, pickup).
   static Future<bool> openOrder(BuildContext context, String orderKey) async {
-    final changed = await Navigator.of(
-      context,
-    ).push<bool>(MaterialPageRoute(builder: (_) => OrderDetailScreen(orderKey: orderKey)));
+    final changed = await Navigator.of(context, rootNavigator: true).push<bool>(
+      MaterialPageRoute(fullscreenDialog: false, builder: (_) => OrderDetailScreen(orderKey: orderKey)),
+    );
     return changed ?? false;
   }
 }

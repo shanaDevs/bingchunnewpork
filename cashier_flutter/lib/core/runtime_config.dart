@@ -105,6 +105,8 @@ class RuntimeConfig extends ChangeNotifier {
   static const _keySound = 'sound_enabled';
   static const _keyHaptics = 'haptics_enabled';
   static const _keyLanguage = 'app_language';
+  static const _keyPrinterMac = 'bluetooth_printer';
+  static const _keyPrinterName = 'bluetooth_printer_name';
   static const _defaultTheme = 'LIGHT';
 
   SharedPreferences? _prefs;
@@ -113,12 +115,16 @@ class RuntimeConfig extends ChangeNotifier {
   String _themeMode = _defaultTheme;
   bool _soundEnabled = true;
   bool _hapticsEnabled = true;
+  String? _printerMac;
+  String? _printerName;
 
   Future<void> init() async {
     _prefs ??= await SharedPreferences.getInstance();
     _themeMode = _prefs?.getString(_keyTheme) ?? _defaultTheme;
     _soundEnabled = _prefs?.getBool(_keySound) ?? true;
     _hapticsEnabled = _prefs?.getBool(_keyHaptics) ?? true;
+    _printerMac = _prefs?.getString(_keyPrinterMac);
+    _printerName = _prefs?.getString(_keyPrinterName);
     L10n.current = AppLanguage.fromCode(_prefs?.getString(_keyLanguage));
   }
 
@@ -171,6 +177,27 @@ class RuntimeConfig extends ChangeNotifier {
   set hapticsEnabled(bool value) {
     _hapticsEnabled = value;
     _prefs?.setBool(_keyHaptics, value);
+    notifyListeners();
+  }
+
+  /// Saved bonded thermal printer MAC (SUN-style `bluetooth_printer` prefs key).
+  String? get bluetoothPrinterMac => _printerMac;
+  String? get bluetoothPrinterName => _printerName;
+  bool get hasBluetoothPrinter => (_printerMac ?? '').trim().isNotEmpty;
+
+  Future<void> setBluetoothPrinter({required String mac, required String name}) async {
+    _printerMac = mac;
+    _printerName = name;
+    await _prefs?.setString(_keyPrinterMac, mac);
+    await _prefs?.setString(_keyPrinterName, name);
+    notifyListeners();
+  }
+
+  Future<void> clearBluetoothPrinter() async {
+    _printerMac = null;
+    _printerName = null;
+    await _prefs?.remove(_keyPrinterMac);
+    await _prefs?.remove(_keyPrinterName);
     notifyListeners();
   }
 

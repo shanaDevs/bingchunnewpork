@@ -21,6 +21,7 @@ import '../components/states.dart';
 import '../labels.dart';
 import '../state/order_detail_controller.dart';
 import '../theme/pos_theme.dart';
+import 'item_slips_preview_screen.dart';
 import 'order_edit_screen.dart';
 import 'receipt_screen.dart';
 
@@ -49,6 +50,13 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
   bool _changed = false;
 
   void _close() => Navigator.of(context).pop(_changed);
+
+  Future<void> _printSlips(OrderDetail order) async {
+    if (order.items.isEmpty) return;
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => ItemSlipsPreviewScreen(order: order)),
+    );
+  }
 
   Future<void> _act(Future<void> Function() action, String success) async {
     try {
@@ -120,6 +128,11 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
         if (!didPop) _close();
       },
       child: Scaffold(
+        backgroundColor: c.canvas,
+        // Phantom keyboard insets on some phones collapsed the scroll area when the
+        // footer used [bottomNavigationBar]. Allow inset only for counter cash entry.
+        resizeToAvoidBottomInset:
+            o != null && o.status == OrderStatus.ready && !o.isDelivery && ctrl.needsCounterPayment,
         appBar: AppBar(
           leading: IconButton(onPressed: _close, icon: const Icon(Icons.arrow_back_rounded)),
           titleSpacing: 0,
@@ -131,6 +144,18 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
                 o?.orderNumber ?? ctrl.orderKey,
                 style: PosType.heading.copyWith(color: c.text, fontFeatures: PosType.tabular),
               ),
+              if (o != null) ...[
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    PaymentMethodBadge(method: o.paymentMethod),
+                    PaymentStateBadge(order: o, long: true),
+                    ChannelBadge(channel: o.channel),
+                  ],
+                ),
+              ],
             ],
           ),
           actions: [
@@ -142,22 +167,28 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
               ),
           ],
         ),
-        body: ctrl.loading
-            ? LoadingView(message: tr('Loading order…'))
-            : ctrl.error != null || o == null
-            ? ErrorView(message: ctrl.error ?? tr('Failed to load order'), onRetry: ctrl.load)
-            : _Body(ctrl: ctrl, order: o, onEdit: (m) => _edit(ctrl, m)),
-        bottomNavigationBar: o == null || ctrl.loading
-            ? null
-            : _Footer(
+        body: Column(
+          children: [
+            Expanded(
+              child: ctrl.loading
+                  ? LoadingView(message: tr('Loading order…'))
+                  : ctrl.error != null || o == null
+                  ? ErrorView(message: ctrl.error ?? tr('Failed to load order'), onRetry: ctrl.load)
+                  : _Body(ctrl: ctrl, order: o, onEdit: (m) => _edit(ctrl, m)),
+            ),
+            if (o != null && !ctrl.loading)
+              _Footer(
                 ctrl: ctrl,
                 order: o,
                 onAccept: () => _act(ctrl.accept, tr('Order #{n} updated', {'n': o.orderNumber})),
                 onReject: () => _reject(ctrl),
                 onComplete: () => _act(ctrl.markReady, tr('Order #{n} updated', {'n': o.orderNumber})),
+                onPrint: () => _printSlips(o),
                 onPickup: () => _confirmPickup(ctrl),
                 onReceipt: () => _receipt(o),
               ),
+          ],
+        ),
       ),
     );
   }
@@ -189,9 +220,6 @@ class _Body extends StatelessWidget {
           children: [
             OrderStatusBadge(order: o),
             ModeBadge(mode: o.orderMode),
-            PaymentMethodBadge(method: o.paymentMethod),
-            PaymentStateBadge(order: o, long: true),
-            ChannelBadge(channel: o.channel),
           ],
         ),
         const SizedBox(height: PosSpacing.md),
@@ -525,6 +553,7 @@ class _Footer extends StatelessWidget {
     required this.onAccept,
     required this.onReject,
     required this.onComplete,
+    required this.onPrint,
     required this.onPickup,
     required this.onReceipt,
   });
@@ -534,6 +563,7 @@ class _Footer extends StatelessWidget {
   final VoidCallback onAccept;
   final VoidCallback onReject;
   final VoidCallback onComplete;
+  final VoidCallback onPrint;
   final VoidCallback onPickup;
   final VoidCallback onReceipt;
 
@@ -579,11 +609,28 @@ class _Footer extends StatelessWidget {
           );
         }
       case OrderStatus.preparing:
-        content = PosButton(
-          label: tr('Complete'),
-          icon: Icons.check_circle_outline_rounded,
-          loading: ctrl.busy,
-          onPressed: onComplete,
+        content = Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: PosButton(
+                label: tr('Print'),
+                icon: Icons.print_outlined,
+                variant: PosButtonVariant.outline,
+                onPressed: ctrl.busy || o.items.isEmpty ? null : onPrint,
+              ),
+            ),
+            const SizedBox(width: PosSpacing.sm),
+            Expanded(
+              flex: 3,
+              child: PosButton(
+                label: tr('Complete'),
+                icon: Icons.check_circle_outline_rounded,
+                loading: ctrl.busy,
+                onPressed: onComplete,
+              ),
+            ),
+          ],
         );
       case OrderStatus.ready when !o.isDelivery:
         final label = !paid
