@@ -177,7 +177,7 @@ Full catalog: [06_API_Documentation.md](06_API_Documentation.md).
 
 1. Next.js App Router pages (mostly `'use client'`).
 2. Customer: Zustand (`authStore`, `cartStore`) + React Query + `lib/api.ts` Bearer from `bc_token`.
-3. Admin: localStorage `bc_admin_token` / refresh; per-page `adminFetch`; session idle guard (~15m).
+3. Admin: httpOnly cookies + refresh; per-page `adminFetch`; keep-alive refresh (no idle auto-logout).
 4. Socket providers join user/order/admin rooms for live updates.
 5. **Next.js `middleware.ts`:** Not Implemented — guards are client-side.
 
