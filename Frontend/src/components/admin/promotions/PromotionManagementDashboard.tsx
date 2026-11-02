@@ -25,7 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import { confirmDialog } from '@/store/confirmStore';
 import { parseBranchShareSplits } from '@/lib/promotionCriteria';
 import { formatBranchSelectionLabel } from '@/lib/promotionBranches';
@@ -43,20 +43,6 @@ import { branchDisplayName } from '@/components/admin/reports/reportUtils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 const PROMOS_PAGE_SIZE = ADMIN_TABLE_PAGE_SIZE;
-
-function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return data.data ?? data;
-  });
-}
 
 function sharedShareBadge(promo: AdminPromoRow) {
   if (promo.ownership !== 'SHARED') return null;

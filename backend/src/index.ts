@@ -15,6 +15,7 @@ import { WEBXPAY_FORM_ACTIONS } from './lib/webxpayPayment';
 import { isCorsAllowedOrigin } from './lib/resolveFrontendUrl';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { createApiRouter } from './routes/surfaces';
+import { probeSpacesReachability } from './lib/spaces';
 import { connectDb, disconnectDb } from './lib/prisma';
 import { initSocket, closeSocket } from './lib/socket';
 import { ensureStoreInventoryReady } from './lib/storeInventory';
@@ -106,7 +107,7 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: false, limit: '256kb' }));
 app.use(cookieParser());
 
 // Rate limiting
@@ -125,6 +126,27 @@ app.get(['/', '/health'], (_req, res) =>
     buildTag: 'cors-surface-web-2026-10-26',
   }),
 );
+
+app.get('/health/spaces', async (_req, res) => {
+  const probe = await probeSpacesReachability();
+  const status = !probe.configured ? 503 : probe.reachable ? 200 : 503;
+  res.status(status).json({
+    service: 'spaces',
+    timestamp: new Date().toISOString(),
+    ...probe,
+  });
+});
+
+/** Same probe under /api — live DO ingress routes /api to admin-api ( /health may hit admin-web ). */
+app.get('/api/health/spaces', async (_req, res) => {
+  const probe = await probeSpacesReachability();
+  const status = !probe.configured ? 503 : probe.reachable ? 200 : 503;
+  res.status(status).json({
+    service: 'spaces',
+    timestamp: new Date().toISOString(),
+    ...probe,
+  });
+});
 
 // Static assets (mascots, product photos for mobile + web)
 const publicDir = path.join(__dirname, '..', 'public');

@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { Prisma, prisma } from '../lib/prisma';
 import { config } from '../config';
 import { AppError } from '../middleware/errorHandler';
@@ -18,13 +19,13 @@ import {
 } from '../lib/walletSecurityAuditSchema';
 import { z } from 'zod';
 import { resolveBranchCancellationGatewayFeeLkr } from '../lib/refundPaymentStructure';
-import { isOnlinePaymentMethod } from '../lib/orderPayment';
+import { isWalletCreditPaymentMethod } from '../lib/orderPayment';
 import { ensureWalletSettlementColumns } from '../lib/walletSchema';
 import { ensureWithdrawalSchema } from '../lib/withdrawalSchema';
 import {
   listWithdrawalsUnsettledForDartCodes,
 } from '../lib/settlementWithdrawalQuery';
-import { summarizeOrderRevenue } from '../lib/walletRevenue';
+import { fetchSummarizedPaidOrderRevenue } from '../lib/walletRevenue';
 import { getWalletAnalysis } from '../lib/walletAnalysis';
 import { recalculateWalletBalance, syncMissingWalletPayments } from '../lib/walletSync';
 import {
@@ -32,7 +33,9 @@ import {
   decimalFieldToCentsNumber,
   lkrToCents,
   parseDecimalFromDb,
+  zLkrToCentsInput,
 } from '../lib/moneyDecimal';
+import { insertWalletLedgerRow } from '../lib/walletTransactionInsert';
 import { parseLockedStoreWallet, walletDataAfterBalanceDelta, walletDataAfterDebit } from '../lib/walletStoreUpdates';
 import {
   serializeStoreWallet,
@@ -127,7 +130,7 @@ const walletPinSchema = z.object({
 });
 
 const withdrawalRequestSchema = z.object({
-  amount: z.number().positive(),
+  amount: zLkrToCentsInput(z).pipe(z.number().int().positive()),
   periodDays: z.coerce.number().refine((n) => (PAYOUT_PERIOD_DAYS as readonly number[]).includes(n), {
     message: `periodDays must be one of: ${PAYOUT_PERIOD_DAYS.join(', ')}`,
   }),
@@ -178,7 +181,7 @@ const approveWithdrawalBodySchema = z
 
 const initiatePayoutBodySchema = z
   .object({
-    amount: z.coerce.number().positive(),
+    amount: zLkrToCentsInput(z).pipe(z.number().int().positive()),
     periodDays: z.coerce.number().refine((n) => (PAYOUT_PERIOD_DAYS as readonly number[]).includes(n), {
       message: `periodDays must be one of: ${PAYOUT_PERIOD_DAYS.join(', ')}`,
     }),
@@ -251,8 +254,9 @@ export async function getPayoutPeriodInfoHandler(req: Request, res: Response, ne
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /admin/wallet/payouts-due
-// Super Admin queue: outstanding branch payout periods overlapping the wallet date range.
-// Optional query `from`/`to` (YYYY-MM-DD); when omitted, defaults to calendar month-to-date.
+// Super Admin queue: all elapsed unpaid branch payout periods (oldest first).
+// Optional query `from`/`to` are ignored (wallet month filter does not scope this list).
+// Optional `cursor` paginates active branches.
 // ──────────────────────────────────────────────────────────────────────────────
 function invalidateWalletPayoutsDueCache(): void {
   invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-payouts-due']));
@@ -485,7 +489,7 @@ export async function requestWithdrawalHandler(req: Request, res: Response, next
     // Independently verify PIN on every payout request (do not trust client pre-check alone).
     await verifyAdminPin(user.sub, data.password);
 
-    const amountCents = lkrToCents(data.amount);
+    const amountCents = data.amount;
 
     const withdrawal = await requestWithdrawal(
       storeId,
@@ -630,7 +634,7 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
 
     await verifyAdminPin(user.sub, data.password);
 
-    const amountCents = lkrToCents(data.amount);
+    const amountCents = data.amount;
     const proofUrl = await requireSettlementProofUpload(req.file, storeId);
     const checkDate = parseSettlementCheckDate(data.paymentMethod, data.checkDate);
 
@@ -762,16 +766,15 @@ export async function getWallet(req: Request, res: Response) {
 
   const dashboardPeriod = parseOptionalWalletPeriod(req);
   const wallet = await getOrCreateWallet(storeId as string);
-  const [pendingTotal, netTransferableEarnings] = await Promise.all([
+  const [pendingTotal, netTransferableEarnings, dashboard, store] = await Promise.all([
     getPendingWithdrawalTotal(storeId as string),
     computeNetTransferableEarnings(storeId as string),
+    getBranchWalletDashboard(storeId as string, dashboardPeriod),
+    prisma.store.findUnique({
+      where: { id: storeId as string },
+      select: { id: true, name: true, city: true, addressLine: true, phone: true },
+    }),
   ]);
-  const dashboard = await getBranchWalletDashboard(storeId as string, dashboardPeriod);
-
-  const store = await prisma.store.findUnique({
-    where: { id: storeId as string },
-    select: { id: true, name: true, city: true, addressLine: true, phone: true },
-  });
 
   res.json({
     success: true,
@@ -827,25 +830,20 @@ export async function getWalletTransactions(req: Request, res: Response) {
     };
   });
 
-  // Revenue summary from paid orders (matches order totals on admin orders page)
-  const paidOrders = await prisma.order.findMany({
-    where: {
-      storeId: storeId as string,
-      paymentStatus: 'PAID',
-      ...(from || to
-        ? {
-            createdAt: {
-              ...(from ? { gte: new Date(`${from}T00:00:00.000Z`) } : {}),
-              ...(to ? { lte: new Date(`${to}T23:59:59.999Z`) } : {}),
-            },
-          }
-        : {}),
-    },
-    select: { total: true, orderMode: true, paymentMethod: true },
-  });
-  const revenue = summarizeOrderRevenue(paidOrders);
+  const paidOrderWhere = {
+    storeId: storeId as string,
+    ...(from || to
+      ? {
+          createdAt: {
+            ...(from ? { gte: new Date(`${from}T00:00:00.000Z`) } : {}),
+            ...(to ? { lte: new Date(`${to}T23:59:59.999Z`) } : {}),
+          },
+        }
+      : {}),
+  };
 
-  const [aggOut] = await Promise.all([
+  const [revenue, aggOut] = await Promise.all([
+    fetchSummarizedPaidOrderRevenue(paidOrderWhere),
     prisma.walletTransaction.aggregate({
       _sum: { amount: true },
       where: { ...where, type: { in: ['REFUND', 'PAYOUT'] } } as any,
@@ -923,6 +921,9 @@ export async function adjustWallet(req: Request, res: Response, next: NextFuncti
       totalEarnings: currentEarnings,
       totalWithdrawn: currentWithdrawn,
     });
+    if (next.balance.lt(0)) {
+      throw new AppError('Insufficient wallet balance for debit', 400);
+    }
     const balanceAfter = Number(next.balance.toFixed(0));
     const updatedWallet = await tx.storeWallet.update({
       where: { storeId: storeId as string },
@@ -1194,7 +1195,7 @@ export async function creditWalletForOrder(
   amount: number,
   paymentMethod: string,
 ): Promise<void> {
-  if (!isOnlinePaymentMethod(paymentMethod as any)) {
+  if (!isWalletCreditPaymentMethod(paymentMethod as any)) {
     return;
   }
 
@@ -1219,9 +1220,7 @@ export async function creditWalletForOrder(
   });
 
   const centsAmount = lkrToCents(amount);
-  const wallet = await getOrCreateWallet(storeId);
-  const newBalance =
-    Number(parseDecimalFromDb(wallet.balance).toFixed(0)) + centsAmount;
+  await getOrCreateWallet(storeId);
 
   const descParts = [
     `Order #${order?.orderNumber ?? orderId}`,
@@ -1240,26 +1239,26 @@ export async function creditWalletForOrder(
       if (!lockedRows[0]) throw new AppError('Wallet not found', 404);
       const bal = parseDecimalFromDb(lockedRows[0].balance);
       const earnings = parseDecimalFromDb(lockedRows[0].totalEarnings);
+      const balanceAfter = bal.plus(centsToDecimal(centsAmount));
       await tx.storeWallet.update({
         where: { storeId },
         data: {
-          balance: bal.plus(centsToDecimal(centsAmount)),
+          balance: balanceAfter,
           totalEarnings: earnings.plus(centsToDecimal(centsAmount)),
         },
       });
-      await tx.walletTransaction.create({
-        data: {
-          id: require('crypto').randomUUID(),
-          storeId,
-          orderId,
-          type: 'ORDER_PAYMENT',
-          amount: centsToDecimal(centsAmount),
-          balanceAfter: centsToDecimal(newBalance),
-          paymentMethod: paymentMethod as any,
-          paymentRef: order?.paymentRef ?? null,
-          description: descParts,
-          reference: order?.orderNumber ?? null,
-        },
+      const ledgerId = crypto.randomUUID();
+      await insertWalletLedgerRow(tx, {
+        id: ledgerId,
+        storeId,
+        orderId,
+        type: 'ORDER_PAYMENT',
+        amountCents: centsAmount,
+        balanceAfterCents: Number(balanceAfter.toFixed(0)),
+        paymentMethod,
+        paymentRef: order?.paymentRef ?? null,
+        description: descParts,
+        reference: order?.orderNumber ?? null,
       });
     });
   } catch (err) {
@@ -1291,9 +1290,7 @@ export async function creditWalletAddonPayment(
   });
 
   const centsAmount = lkrToCents(amountLkr);
-  const wallet = await getOrCreateWallet(storeId);
-  const newBalance =
-    Number(parseDecimalFromDb(wallet.balance).toFixed(0)) + centsAmount;
+  await getOrCreateWallet(storeId);
   const methodLabel = paymentMethod === 'CARD' ? 'card at counter' : 'cash at counter';
 
   try {
@@ -1304,10 +1301,11 @@ export async function creditWalletAddonPayment(
       if (!lockedRows[0]) throw new AppError('Wallet not found', 404);
       const bal = parseDecimalFromDb(lockedRows[0].balance);
       const earnings = parseDecimalFromDb(lockedRows[0].totalEarnings);
+      const balanceAfter = bal.plus(centsToDecimal(centsAmount));
       await tx.storeWallet.update({
         where: { storeId },
         data: {
-          balance: bal.plus(centsToDecimal(centsAmount)),
+          balance: balanceAfter,
           totalEarnings: earnings.plus(centsToDecimal(centsAmount)),
         },
       });
@@ -1318,7 +1316,7 @@ export async function creditWalletAddonPayment(
           orderId,
           type: 'ORDER_ADDON_PAYMENT',
           amount: centsToDecimal(centsAmount),
-          balanceAfter: centsToDecimal(newBalance),
+          balanceAfter,
           paymentMethod: paymentMethod as any,
           description: `Order #${order?.orderNumber ?? orderId} · add-on items (${methodLabel})`,
           reference: order?.orderNumber ?? null,
@@ -1491,7 +1489,7 @@ export async function listWalletSecurityAuditLogsHandler(req: Request, res: Resp
 
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /admin/wallet/sync
-// Run full orders to wallets sync (SYSTEM_ADMIN only)
+// Reconcile missing paid-order credits; branch users are scoped to their store, system admin to all stores.
 // ──────────────────────────────────────────────────────────────────────────────
 export async function syncWallets(req: Request, res: Response, next: NextFunction) {
   try {

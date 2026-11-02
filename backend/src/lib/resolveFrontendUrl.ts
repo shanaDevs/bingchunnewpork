@@ -10,23 +10,30 @@ import { buildConfiguredCorsOrigins, isLocalhostOrigin, normalizeOrigin } from '
 export const CUSTOMER_SHOP_URL =
   process.env.LIVE_SHOP_URL?.replace(/\/$/, '')
   || process.env.FRONTEND_URL?.replace(/\/$/, '')
-  || 'https://bing-chung.mp.dartcodes.com';
+  || 'https://bing-chun-ui2ow.ondigitalocean.app';
 
 const LIVE_SHOP = CUSTOMER_SHOP_URL;
 
-/** Delivery ops admin — not the customer shop; must stay on the CORS allowlist. */
-const DELIVERY_ADMIN_ORIGIN = 'https://bing-chun-delivery-frontend.bc.dartcodes.com';
+/** Delivery ops console — not the customer shop; must stay on the CORS allowlist. */
+const DELIVERY_ADMIN_ORIGIN = 'https://bingchun-delivery-6mgs2.ondigitalocean.app';
 
-/** CapRover surface frontends (split from the old monolith). Always allowlisted. */
-const ADMIN_WEB_ORIGIN = 'https://bing-chun-admin-web.bc.dartcodes.com';
-const POS_WEB_ORIGIN = 'https://bing-chun-pos-web.bc.dartcodes.com';
+/** DigitalOcean surface frontends (split from the old monolith). Always allowlisted. */
+const ADMIN_WEB_ORIGIN = 'https://bingchun-admin-a4ndy.ondigitalocean.app';
+const POS_WEB_ORIGIN = 'https://bingchun-pos-i8pq3.ondigitalocean.app';
 
-/** Legacy CapRover app hostnames that must be redirected to LIVE_SHOP (never the API host itself). */
+/** Legacy CapRover / old hosts that must be redirected to LIVE_SHOP (never the API host itself). */
 const LEGACY_DEAD_HOSTNAME_PATTERNS = [
   /server\.dartcodes\.com$/i,
   /^bing-chung-b\./i,
-  // Exact shop host only — do not match bing-chun-core / admin-web / pos-web / delivery-frontend.
+  // Exact CapRover shop host only — do not match core / admin-web / pos-web / delivery-frontend.
   /^bing-chun\.bc\.dartcodes\.com$/i,
+];
+
+/** Always-allowlisted live shop hosts (DO default + custom domain). */
+const LIVE_SHOP_ORIGINS = [
+  'https://bing-chun-ui2ow.ondigitalocean.app',
+  'https://bingchunsrilanka.com',
+  'https://www.bingchunsrilanka.com',
 ];
 
 function productionCorsOrigins(): string[] {
@@ -38,6 +45,7 @@ function productionCorsOrigins(): string[] {
     DELIVERY_ADMIN_ORIGIN,
     ADMIN_WEB_ORIGIN,
     POS_WEB_ORIGIN,
+    ...LIVE_SHOP_ORIGINS,
   ].filter((value): value is string => Boolean(value?.trim()));
 
   return buildConfiguredCorsOrigins({
@@ -81,6 +89,19 @@ function isBackendApiOrigin(origin: string): boolean {
   const candidate = normalizeOrigin(origin);
   if (!api || !candidate) return false;
   return candidate === api;
+}
+
+/**
+ * App Platform publishes the storefront and `/api` on one `*.ondigitalocean.app` host.
+ * That host is also `API_BASE_URL`, so it must stay a valid browser origin.
+ */
+function isSharedAppPlatformOrigin(origin: string): boolean {
+  if (!isBackendApiOrigin(origin)) return false;
+  try {
+    return new URL(origin).hostname.endsWith('.ondigitalocean.app');
+  } catch {
+    return false;
+  }
 }
 
 /** True when deployed on CapRover/production hosts, even if NODE_ENV was not set. */
@@ -133,21 +154,46 @@ function isBingChunSurfaceWebOrigin(origin: string): boolean {
   }
 }
 
+function isLiveShopHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    host === 'bing-chun-ui2ow.ondigitalocean.app'
+    || host === 'bingchunsrilanka.com'
+    || host === 'www.bingchunsrilanka.com'
+  );
+}
+
 function isAllowedFrontendOrigin(origin: string): boolean {
-  const canonical = canonicalizeFrontendUrl(origin);
-  if (isBackendApiOrigin(canonical)) return false;
-  if (productionCorsOrigins().includes(canonical)) return true;
-  if (isBingChunSurfaceWebOrigin(canonical)) return true;
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) return false;
+
+  // Match raw + canonical forms — CapRover may still have FRONTEND_URL on the
+  // old shop host while the browser sends https://bingchunsrilanka.com.
+  // An explicitly configured origin wins even when it is also API_BASE_URL,
+  // which is the case for the shared DigitalOcean app hostname.
+  const allowlist = new Set(productionCorsOrigins());
+  if (allowlist.has(normalized) || isSharedAppPlatformOrigin(normalized)) return true;
+  if (isBackendApiOrigin(normalized)) return false;
+
+  const canonical = canonicalizeFrontendUrl(normalized);
+  if (!isBackendApiOrigin(canonical) && allowlist.has(canonical)) return true;
+  if (isBingChunSurfaceWebOrigin(canonical) || isBingChunSurfaceWebOrigin(normalized)) return true;
+
+  try {
+    if (isLiveShopHostname(new URL(normalized).hostname)) return true;
+  } catch {
+    /* ignore */
+  }
 
   const configured = getEffectiveFrontendUrl();
-  if (canonical === configured) return true;
+  if (canonical === configured || normalized === configured) return true;
 
   if (isProductionDeployment()) {
     return false;
   }
 
-  if (isLocalhostOrigin(origin)) return true;
-  if (/^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/i.test(origin)) return true;
+  if (isLocalhostOrigin(normalized)) return true;
+  if (/^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/i.test(normalized)) return true;
   return false;
 }
 
@@ -179,10 +225,8 @@ export function resolveFrontendUrl(req: Request, explicit?: string): string {
 
   for (const raw of candidates) {
     const origin = normalizeOrigin(raw);
-    if (!origin || isBackendApiOrigin(origin)) continue;
-    if (isAllowedFrontendOrigin(origin)) {
-      return canonicalizeFrontendUrl(origin);
-    }
+    if (!origin || !isAllowedFrontendOrigin(origin)) continue;
+    return canonicalizeFrontendUrl(origin);
   }
 
   return getEffectiveFrontendUrl();

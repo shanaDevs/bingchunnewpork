@@ -1,6 +1,6 @@
 'use client';
 
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -54,20 +54,6 @@ const EMPTY_FORM = {
   description: '',
   occurredAt: todayDateString(),
 };
-
-function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
-  }).then(async (r) => {
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.message || 'Request failed');
-    return d.data ?? d;
-  });
-}
 
 const TYPE_TABS: { id: TypeFilter; label: string }[] = [
   { id: 'ALL', label: 'All' },

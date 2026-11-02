@@ -42,6 +42,28 @@ export function prismaKnowsDeliveryJobStatus(status: string): boolean {
  */
 export const ALERT_MUTE_JOB_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'QUEUED'] as const;
 
+export type ActiveRidePhase = 'NONE' | 'ASSIGNED' | 'IN_PROGRESS' | 'RETURNING' | 'QUEUED';
+
+/** Single-pass flags from held job rows (same rules as the async helpers). */
+export function deriveDriverJobFlags(
+  heldJobs: ReadonlyArray<{ status: string }>,
+): { alertEligible: boolean; activeRidePhase: ActiveRidePhase; canClaimMore: boolean } {
+  const statuses = heldJobs.map((j) => j.status);
+  const alertEligible = !statuses.some((s) =>
+    (ALERT_MUTE_JOB_STATUSES as readonly string[]).includes(s),
+  );
+  let activeRidePhase: ActiveRidePhase = 'NONE';
+  if (statuses.includes('IN_PROGRESS')) activeRidePhase = 'IN_PROGRESS';
+  else if (statuses.includes('ASSIGNED')) activeRidePhase = 'ASSIGNED';
+  else if (statuses.includes('RETURNING')) activeRidePhase = 'RETURNING';
+  else if (statuses.includes('QUEUED')) activeRidePhase = 'QUEUED';
+
+  const hasCurrentRun = statuses.some((s) => s === 'IN_PROGRESS' || s === 'ASSIGNED');
+  const hasQueued = statuses.some((s) => s === 'QUEUED');
+  const canClaimMore = !(hasCurrentRun && hasQueued);
+  return { alertEligible, activeRidePhase, canClaimMore };
+}
+
 /**
  * Cap: one active run (ASSIGNED / IN_PROGRESS) plus at most one QUEUED next job.
  * RETURNING does not count as a current run, so a driver heading back to the
@@ -53,10 +75,7 @@ export async function canDriverClaimMore(driverId: string): Promise<boolean> {
     where: { driverId, status: { in: [...DRIVER_HELD_JOB_STATUSES] } },
     select: { status: true },
   });
-  const hasCurrentRun = runs.some((j) => j.status === 'IN_PROGRESS' || j.status === 'ASSIGNED');
-  const hasQueued = runs.some((j) => j.status === 'QUEUED');
-  // Block only when both slots are full (active run + queued next).
-  return !(hasCurrentRun && hasQueued);
+  return deriveDriverJobFlags(runs).canClaimMore;
 }
 
 export type JobPreviewStop = { customerName: string; addressLine: string; city: string; district: string };
@@ -478,27 +497,19 @@ export async function syncJobDeliveryEventForOrderStatus(
  * QUEUED ride (idle ONLINE, or only RETURNING with no extra claim taken yet).
  */
 export async function isDriverAlertEligible(driverId: string): Promise<boolean> {
-  const muted = await prisma.deliveryJob.count({
-    where: {
-      driverId,
-      status: { in: [...ALERT_MUTE_JOB_STATUSES] },
-    },
+  const jobs = await prisma.deliveryJob.findMany({
+    where: { driverId, status: { in: [...DRIVER_HELD_JOB_STATUSES] } },
+    select: { status: true },
   });
-  return muted === 0;
+  return deriveDriverJobFlags(jobs).alertEligible;
 }
-
-export type ActiveRidePhase = 'NONE' | 'ASSIGNED' | 'IN_PROGRESS' | 'RETURNING' | 'QUEUED';
 
 export async function getDriverActiveRidePhase(driverId: string): Promise<ActiveRidePhase> {
   const jobs = await prisma.deliveryJob.findMany({
     where: { driverId, status: { in: [...DRIVER_HELD_JOB_STATUSES] } },
     select: { status: true },
   });
-  if (jobs.some((j) => j.status === 'IN_PROGRESS')) return 'IN_PROGRESS';
-  if (jobs.some((j) => j.status === 'ASSIGNED')) return 'ASSIGNED';
-  if (jobs.some((j) => j.status === 'RETURNING')) return 'RETURNING';
-  if (jobs.some((j) => j.status === 'QUEUED')) return 'QUEUED';
-  return 'NONE';
+  return deriveDriverJobFlags(jobs).activeRidePhase;
 }
 
 /** Allocate the next human-readable ride code (RIDE-1024, …). */
@@ -849,6 +860,7 @@ export {
   creditedDeliveredTotals,
   deliveredOrderDeliveryFees,
   finalizeDeliveryJob,
+  persistJobActualRouteFromGps,
 } from '@bingchun/delivery-domain';
 
 /**

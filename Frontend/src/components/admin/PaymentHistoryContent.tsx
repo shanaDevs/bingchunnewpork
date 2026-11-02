@@ -49,6 +49,9 @@ import {
   monthRange,
   todayDateStr,
 } from '@/components/admin/useWalletPeriodFilter';
+import {
+  filterPayoutRowsForDisplay,
+} from '@/components/admin/paymentHistoryPayoutFilter';
 
 type PayoutRow = {
   id: string;
@@ -101,11 +104,6 @@ function formatMonthOption(ym: string) {
 function payoutPaidOn(row: PayoutRow): string {
   const d = new Date(row.paidAt);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function payoutPaidInRange(row: PayoutRow, from: string, to: string) {
-  const paidOn = payoutPaidOn(row);
-  return paidOn >= from && paidOn <= to;
 }
 
 function formatPeriodLabel(from: string, to: string) {
@@ -284,6 +282,8 @@ export default function PaymentHistoryContent({
     placeholderData: keepPreviousData,
   });
 
+  const tableLoading = isLoading || isFetching;
+
   const canProcessPayment = superAdmin && !!periodFrom && !!periodTo;
 
   useEffect(() => {
@@ -357,29 +357,18 @@ export default function PaymentHistoryContent({
 
   const filteredPayouts = useMemo(() => {
     if (!data?.payouts) return [];
-    if (periodControlled) {
-      return data.payouts.filter((row) => payoutPaidInRange(row, periodFrom, periodTo));
-    }
-    if (embedded) {
-      return data.payouts;
-    }
-    let from = payoutDateFrom;
-    let to = payoutDateTo;
-    if (payoutMonth) {
-      const range = monthRange(payoutMonth);
-      from = range.from;
-      to = range.to;
-    }
-    if (!from && !to) return data.payouts;
-    return data.payouts.filter((row) =>
-      payoutPaidInRange(row, from || '1970-01-01', to || '9999-12-31'),
-    );
+    return filterPayoutRowsForDisplay(data.payouts, {
+      periodControlled,
+      embedded,
+      payoutMonth,
+      payoutDateFrom,
+      payoutDateTo,
+      monthRange,
+    });
   }, [
     data?.payouts,
     embedded,
     periodControlled,
-    periodFrom,
-    periodTo,
     payoutMonth,
     payoutDateFrom,
     payoutDateTo,
@@ -554,6 +543,7 @@ export default function PaymentHistoryContent({
           slabInfo={data?.slabInfo}
           periodLabel={formatPeriodLabel(periodFrom, periodTo)}
           isCurrentMonth={viewingCurrentMonth}
+          showActiveTierLabel={!superAdmin}
         />
       </div>
 
@@ -567,7 +557,7 @@ export default function PaymentHistoryContent({
                 <p className="text-xs text-[var(--color-text-muted)]">
                   {hideLocalPeriodControls
                     ? `Click a row to view the settlement breakdown · ${formatPeriodLabel(periodFrom, periodTo)}`
-                    : 'Click a row to view the settlement breakdown · filter by settlement date'}
+                    : 'Click a row to view the settlement breakdown · filter by settlement billing period'}
                 </p>
               </div>
             </div>
@@ -667,27 +657,32 @@ export default function PaymentHistoryContent({
               </tr>
             </thead>
             <tbody>
-              {isLoading && <PaymentHistoryTableSkeleton colSpan={payoutTableColSpan} />}
-              {!isLoading && !isError && filteredPayouts.length === 0 && (
+              {tableLoading && <PaymentHistoryTableSkeleton colSpan={payoutTableColSpan} />}
+              {!tableLoading && !isError && filteredPayouts.length === 0 && (
                 <tr>
                   <td colSpan={payoutTableColSpan} className="px-4 py-8 text-center">
                     <div className="mx-auto flex max-w-md flex-col items-center gap-2 text-[var(--color-text-muted)]">
                       <CreditCard size={28} className="opacity-40" />
                       <p className="text-sm font-medium text-[var(--color-text)]">
-                        {payoutFiltersActive || hideLocalPeriodControls
+                        {payoutFiltersActive
                           ? 'No settlements match your filters'
-                          : 'No settlements recorded yet'}
+                          : hideLocalPeriodControls
+                            ? 'No settlements recorded for this period'
+                            : 'No settlements recorded yet'}
                       </p>
                       <p className="text-xs leading-relaxed">
-                        {payoutFiltersActive || hideLocalPeriodControls
-                          ? 'Try a different month or date range, or reset the shared period filter.'
-                          : 'Commission is calculated from paid orders. Payout records will appear here once settlements are submitted.'}
+                        {payoutFiltersActive
+                          ? 'Try a different month or date range, or clear the payout filters.'
+                          : hideLocalPeriodControls
+                            ? 'Commission is calculated from paid orders. Payout records appear here once settlements are submitted for this billing period.'
+                            : 'Commission is calculated from paid orders. Payout records will appear here once settlements are submitted.'}
                       </p>
                     </div>
                   </td>
                 </tr>
               )}
-              {filteredPayouts.map((row) => {
+              {!tableLoading &&
+                filteredPayouts.map((row) => {
                 const isSelected =
                   selectedPayoutId === row.id ||
                   (row.periodFrom === periodFrom && row.periodTo === periodTo);

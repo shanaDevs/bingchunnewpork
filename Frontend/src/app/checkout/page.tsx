@@ -60,6 +60,7 @@ import {
 } from '@/lib/inventoryReservation';
 import { rewardFromSpinClaim } from '@/lib/spinClaim';
 import PromoOffersPanel from '@/components/promotions/PromoOffersPanel';
+import { isLoyaltyCampaignOffer } from '@/lib/promotionAutoApply';
 import { usePromoStore, rewardFromEligibleOffer } from '@/store/promoStore';
 import { usePromoSubtotalDiscount } from '@/hooks/usePromoSubtotalDiscount';
 import { freeProductBenefitLabel, displayPaidSubtotal, showsFreeProductSummaryLine } from '@/lib/promoFreeProduct';
@@ -810,6 +811,15 @@ function CheckoutPage() {
         }
       }
 
+      const loyaltyAutoApplySkipped = dismissedCodes.some((code) =>
+        isLoyaltyCampaignOffer({ code }),
+      );
+      const loyaltyAutoAppliedOnCup =
+        reward != null &&
+        isLoyaltyCampaignOffer(reward) &&
+        reward.source === 'auto' &&
+        reward.locked;
+
       const body: Record<string, unknown> = {
         orderMode,
         storeId,
@@ -824,10 +834,8 @@ function CheckoutPage() {
         ...(usePoints > 0
           ? { usePoints }
           : {
-              promoCode: reward?.code,
-              ...(skipAutoApply || (!reward && dismissedCodes.length > 0)
-                ? { skipLoyaltyAutoApply: true }
-                : {}),
+              promoCode: loyaltyAutoAppliedOnCup ? undefined : reward?.code,
+              ...(loyaltyAutoApplySkipped ? { skipLoyaltyAutoApply: true } : {}),
             }),
         items: orderItems,
         frontendOrigin: getFrontendOrigin(),

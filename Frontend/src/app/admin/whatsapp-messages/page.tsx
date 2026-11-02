@@ -1,26 +1,12 @@
 'use client';
 
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { MessageCircle, RefreshCw, Search, Send, User } from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-
-function adminFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return (data.data ?? data) as T;
-  });
-}
 
 type ConversationRow = {
   channel: string;

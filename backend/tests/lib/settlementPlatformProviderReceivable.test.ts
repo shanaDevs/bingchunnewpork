@@ -53,6 +53,7 @@ describe('@bingchun/settlement computePlatformProviderReceivable', () => {
     const input = platformProviderReceivableInputFromBreakdownCents({
       commissionFee: 125000,
       platformPaybackTotal: 5000,
+      platformOwnedPromoDiscountTotal: 12000,
       periodLoyaltyDiscountTotal: 1000,
       sharedPromoPlatformContributionAmount: 2000,
       convenienceFee: 8200,
@@ -62,6 +63,7 @@ describe('@bingchun/settlement computePlatformProviderReceivable', () => {
     });
 
     expect(input.commissionFeeCents).toBe(125000);
+    expect(input.platformPaybackCents).toBe(12000);
     expect(input.gatewayRatePct).toBe(1.9);
   });
 

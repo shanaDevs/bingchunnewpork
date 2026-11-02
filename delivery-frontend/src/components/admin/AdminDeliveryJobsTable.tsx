@@ -1,7 +1,6 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch, adminApiJson } from '@/lib/adminApi';
 
 import { Fragment, useEffect, useState, type MouseEvent } from 'react';
 import { Bell, ChevronLeft, ChevronRight, Loader2, MapPin, Route } from 'lucide-react';
@@ -118,14 +117,10 @@ function formatJobStatusLabel(status: string): string {
 }
 
 async function fetchJobDetail(jobId: string, storeId: string): Promise<DeliveryJobDetail> {
-    const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  const res = await fetch(
-    `${getApiBaseUrl()}/admin/delivery-jobs/${encodeURIComponent(jobId)}${qs}`,
-    { headers: adminAuthHeaders() },
+  const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
+  return adminApiFetch<DeliveryJobDetail>(
+    `/admin/delivery-jobs/${encodeURIComponent(jobId)}${qs}`,
   );
-  const json = await res.json();
-  if (!json.success) throw new Error(json.message || 'Job not found');
-  return json.data as DeliveryJobDetail;
 }
 
 function formatScheduleDate(value: string) {
@@ -163,13 +158,9 @@ function ReRingButton({ job }: { job: DeliveryJobListItem }) {
     setSending(true);
     setErrorMsg(null);
     try {
-            const res = await fetch(`${getApiBaseUrl()}/admin/delivery-jobs/${encodeURIComponent(job.id)}/re-ring`, {
+      await adminApiJson(`/admin/delivery-jobs/${encodeURIComponent(job.id)}/re-ring`, {
         method: 'POST',
-        headers: adminAuthHeaders(),
-        credentials: 'include',
       });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || 'Could not re-ring drivers');
       setLastRungAt(Date.now());
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Could not re-ring drivers');

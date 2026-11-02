@@ -22,7 +22,8 @@ function base() {
   } as const;
 }
 
-export function setAdminAuthCookies(res: Response, accessToken: string, refreshToken: string): void {
+/** Sets auth cookies and returns the CSRF value (needed when the UI cannot read cross-origin cookies). */
+export function setAdminAuthCookies(res: Response, accessToken: string, refreshToken: string): string {
   const shared = base();
   const csrf = randomBytes(24).toString('base64url');
   res.cookie(ADMIN_ACCESS_COOKIE, accessToken, {
@@ -43,6 +44,7 @@ export function setAdminAuthCookies(res: Response, accessToken: string, refreshT
     path: '/',
     maxAge: adminRefreshTokenMaxAgeMs(),
   });
+  return csrf;
 }
 
 export function clearAdminAuthCookies(res: Response): void {
@@ -78,9 +80,13 @@ export function assertAdminCsrf(req: Request): void {
   if (typeof cookie !== 'string' || !header || !tokensEqual(cookie, header)) {
     throw new AppError('Invalid CSRF token', 403);
   }
-  const origin = req.get('origin');
+  const origin = req.get('origin') || undefined;
   if (origin && !isCorsAllowedOrigin(origin)) {
-    throw new AppError('Origin not allowed', 403);
+    // Same-origin Next.js proxies sometimes omit/alter Origin; accept an allowlisted Referer.
+    const referer = req.get('referer') || undefined;
+    if (!referer || !isCorsAllowedOrigin(referer)) {
+      throw new AppError('Origin not allowed', 403);
+    }
   }
 }
 

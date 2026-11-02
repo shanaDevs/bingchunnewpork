@@ -82,4 +82,57 @@ describe('dashboardOrderAggregates', () => {
     expect(channels.pickupCash).toBe(1000);
     expect(channels.deliveryCard).toBe(2000);
   });
+
+  it('puts online card pickup on pickup online and counter card on pickup card', async () => {
+    vi.mocked(prisma.$queryRaw)
+      .mockResolvedValueOnce([
+        {
+          orderMode: 'TAKEAWAY',
+          paymentMethod: 'CARD',
+          onlineCard: true,
+          total_sum: 2500,
+          addon_sum: 0,
+          subtotal_sum: 2500,
+          discount_sum: 0,
+          loyalty_discount_sum: 0,
+          delivery_fee_sum: 0,
+          convenient_fee_sum: 0,
+          delivery_item_sales_sum: 0,
+          order_count: 2,
+        },
+        {
+          orderMode: 'TAKEAWAY',
+          paymentMethod: 'CARD',
+          onlineCard: false,
+          total_sum: 400,
+          addon_sum: 0,
+          subtotal_sum: 400,
+          discount_sum: 0,
+          loyalty_discount_sum: 0,
+          delivery_fee_sum: 0,
+          convenient_fee_sum: 0,
+          delivery_item_sales_sum: 0,
+          order_count: 1,
+        },
+        {
+          orderMode: 'TAKEAWAY',
+          paymentMethod: 'PAYHERE',
+          onlineCard: false,
+          total_sum: 900,
+          addon_sum: 0,
+          subtotal_sum: 900,
+          discount_sum: 0,
+          loyalty_discount_sum: 0,
+          delivery_fee_sum: 0,
+          convenient_fee_sum: 0,
+          delivery_item_sales_sum: 0,
+          order_count: 1,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const channels = await summarizeRevenueChannelsForScope(scope);
+    expect(channels.pickupOnline).toBe(3400);
+    expect(channels.pickupCard).toBe(400);
+  });
 });

@@ -6,7 +6,7 @@ import { Plus, Power, KeyRound, Pencil } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { getAdminSession, isSuperAdmin } from '@/lib/adminAuth';
-import { adminApiFetch } from '@/lib/adminApi';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import {
   hasMenuCreateAccess,
   hasMenuDeleteAccess,
@@ -21,10 +21,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-
-function adminFetch(endpoint: string, options?: RequestInit) {
-  return adminApiFetch(endpoint, options);
-}
 
 const EMPTY = { name: '', email: '', password: '' };
 const EDIT_EMPTY = { name: '', email: '' };

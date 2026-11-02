@@ -1,50 +1,25 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
-import { getApiBaseUrl, getSocketUrl } from '@/lib/apiBase';
+import { adminFetch, adminFetchForm } from '@/lib/adminApi';
+import { createAdminSocket } from '@/lib/adminSocket';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Copy, Loader2, Plus, Power, RefreshCw, Search, Star, UserCircle2, X } from 'lucide-react';
-import { io, type Socket } from 'socket.io-client';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Copy, Loader2, Plus, Power, RefreshCw, Star, UserCircle2, X } from 'lucide-react';
+import type { Socket } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import SearchableBranchSelect from '@/components/admin/SearchableBranchSelect';
+import SearchableRiderNameField from '@/components/admin/SearchableRiderNameField';
 import AdminDriverRegistrationModal, {
   type DriverRegistrationFormState,
 } from '@/components/admin/AdminDriverRegistrationModal';
 import AdminDriverDetailSheet, {
   type DriverEditFormState,
 } from '@/components/admin/AdminDriverDetailSheet';
+import AdminTablePagination from '@/components/admin/AdminTablePagination';
 import { validateImageFile } from '@/lib/imageUpload';
+import { ADMIN_TABLE_PAGE_SIZE, buildPageList } from '@/lib/pagination';
 import type { Driver, DriverDutyStatus } from '@/types';
-
-async function adminFetch(endpoint: string, options?: RequestInit) {
-    const res = await fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: adminAuthHeaders({ 'Content-Type': 'application/json', ...(options?.headers as Record<string, string> | undefined),
-    credentials: 'include',
-  }),
-  });
-  const json = await res.json();
-  if (!json.success) throw new Error(json.message || 'Request failed');
-  return json;
-}
-
-async function adminFetchForm(endpoint: string, formData: FormData, method: 'POST' | 'PATCH' = 'POST') {
-    const res = await fetch(`${getApiBaseUrl()}${endpoint}`, {
-    method,
-    headers: adminAuthHeaders(), credentials: 'include',
-    body: formData,
-  });
-  let json: { success?: boolean; message?: string; data?: unknown };
-  try {
-    json = await res.json();
-  } catch {
-    throw new Error(res.ok ? 'Invalid server response' : `Upload failed (${res.status})`);
-  }
-  if (!json.success) throw new Error(json.message || 'Request failed');
-  return json;
-}
 
 function dutyStatusLabel(status: DriverDutyStatus): string {
   if (status === 'ONLINE') return 'Online';
@@ -63,6 +38,7 @@ type Props = {
   showAllBranches?: boolean;
   stores?: { id: string; name: string }[];
   canRegisterDrivers?: boolean;
+  canEditDrivers?: boolean;
 };
 
 type DriverFilters = {
@@ -97,11 +73,42 @@ type CreatedDriverPin = {
   pin: string;
 };
 
+type DriverPage = {
+  rows: Driver[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+function toDriverPage(data: unknown, page: number, pageSize: number): DriverPage {
+  if (data && typeof data === 'object' && Array.isArray((data as DriverPage).rows)) {
+    const pageData = data as DriverPage;
+    return {
+      rows: pageData.rows,
+      total: typeof pageData.total === 'number' ? pageData.total : pageData.rows.length,
+      page: pageData.page ?? page,
+      pageSize: pageData.pageSize ?? pageSize,
+    };
+  }
+  if (Array.isArray(data)) {
+    const rows = data as Driver[];
+    const start = (page - 1) * pageSize;
+    return {
+      rows: rows.slice(start, start + pageSize),
+      total: rows.length,
+      page,
+      pageSize,
+    };
+  }
+  return { rows: [], total: 0, page, pageSize };
+}
+
 export default function AdminDriversPanel({
   storeId,
   showAllBranches = false,
   stores = [],
   canRegisterDrivers = false,
+  canEditDrivers = false,
 }: Props) {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
@@ -116,34 +123,70 @@ export default function AdminDriversPanel({
   });
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [createdPin, setCreatedPin] = useState<CreatedDriverPin | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(ADMIN_TABLE_PAGE_SIZE);
+  const [nameQuery, setNameQuery] = useState('');
 
   const poolStoreId = showAllBranches ? filters.storeId || undefined : storeId || undefined;
 
-  const poolQuery = useMemo(() => {
-    if (!poolStoreId) return '';
+  useEffect(() => {
+    const handle = window.setTimeout(() => setNameQuery(filters.name.trim()), 300);
+    return () => window.clearTimeout(handle);
+  }, [filters.name]);
+
+  const listFilterKey = `${nameQuery}\0${filters.storeId}\0${filters.status}\0${filters.dutyStatus}\0${pageSize}\0${poolStoreId ?? ''}`;
+
+  useEffect(() => {
+    setPage(1);
+  }, [listFilterKey]);
+
+  const listEndpoint = useMemo(() => {
     const qs = new URLSearchParams();
+    qs.set('page', String(page));
+    qs.set('pageSize', String(pageSize));
+    if (nameQuery) qs.set('name', nameQuery);
     if (filters.status === 'active') qs.set('isActive', 'true');
     if (filters.status === 'inactive') qs.set('isActive', 'false');
     if (filters.dutyStatus) qs.set('dutyStatus', filters.dutyStatus);
-    const query = qs.toString();
-    return query ? `?${query}` : '';
-  }, [poolStoreId, filters.status, filters.dutyStatus]);
-
-  const listEndpoint = poolStoreId
-    ? `/admin/branches/${encodeURIComponent(poolStoreId)}/driver-pool${poolQuery}`
-    : `/admin/drivers${showAllBranches && filters.storeId ? `?storeId=${encodeURIComponent(filters.storeId)}` : ''}`;
+    if (!poolStoreId && showAllBranches && filters.storeId) qs.set('storeId', filters.storeId);
+    const query = `?${qs.toString()}`;
+    return poolStoreId
+      ? `/admin/branches/${encodeURIComponent(poolStoreId)}/driver-pool${query}`
+      : `/admin/drivers${query}`;
+  }, [
+    page,
+    pageSize,
+    nameQuery,
+    filters.status,
+    filters.dutyStatus,
+    filters.storeId,
+    poolStoreId,
+    showAllBranches,
+  ]);
 
   const driversQueryKey = ['admin-driver-pool', listEndpoint] as const;
 
-  const { data: drivers = [], isLoading, refetch } = useQuery({
+  const { data: driverPage, isLoading, isError, error, refetch } = useQuery({
     queryKey: driversQueryKey,
-    queryFn: async () => (await adminFetch(listEndpoint)).data as Driver[],
+    queryFn: async () => toDriverPage((await adminFetch(listEndpoint)).data, page, pageSize),
     enabled: showAllBranches || !!storeId,
+    placeholderData: keepPreviousData,
   });
+
+  const drivers = driverPage?.rows ?? [];
+  const totalItems = driverPage?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const rangeStart = totalItems === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const rangeEnd = Math.min(safePage * pageSize, totalItems);
+
+  useEffect(() => {
+    if (driverPage && page > totalPages) setPage(totalPages);
+  }, [driverPage, page, totalPages]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-        const adminRaw = localStorage.getItem('bc_admin');
+    const adminRaw = localStorage.getItem('bc_admin');
     let adminId: string | undefined;
     let adminStoreId: string | undefined;
     try {
@@ -155,38 +198,41 @@ export default function AdminDriversPanel({
     } catch {
       /* ignore */
     }
+    if (!adminId) return;
 
     let socket: Socket | null = null;
-    try {
-      socket = io(getSocketUrl(), {
-        path: '/socket.io',
-        transports: ['websocket', 'polling'],
-        withCredentials: true,
-      });
-      if (adminId) {
-        socket.emit('joinAdmin', {
-          adminId,
-          storeId: poolStoreId || adminStoreId || storeId || undefined,
-        });
-      }
-      // Also join explicit store rooms for each visible branch when super-admin views all.
-      const joinIds = new Set<string>();
-      if (poolStoreId) joinIds.add(poolStoreId);
-      if (storeId) joinIds.add(storeId);
-      if (showAllBranches) stores.forEach((s) => joinIds.add(s.id));
-      for (const id of joinIds) {
-        socket.emit('joinAdmin', { adminId: adminId || 'admin', storeId: id });
-      }
+    let cancelled = false;
 
+    const joinIds = new Set<string>();
+    if (poolStoreId) joinIds.add(poolStoreId);
+    if (storeId) joinIds.add(storeId);
+    if (adminStoreId) joinIds.add(adminStoreId);
+    if (showAllBranches) stores.forEach((s) => joinIds.add(s.id));
+    if (joinIds.size === 0) joinIds.add('');
+
+    void createAdminSocket({ autoConnect: false }).then((created) => {
+      if (cancelled || !created) return;
+      socket = created;
+      socket.on('connect', () => {
+        for (const id of joinIds) {
+          socket?.emit('joinAdmin', {
+            adminId,
+            storeId: id || undefined,
+          });
+        }
+      });
       socket.on(
         'driverDutyChanged',
         (payload: { driverId: string; name?: string; dutyStatus: DriverDutyStatus }) => {
           if (!payload?.driverId || !payload.dutyStatus) return;
-          queryClient.setQueryData<Driver[]>(driversQueryKey, (prev) => {
+          queryClient.setQueryData<DriverPage>(driversQueryKey, (prev) => {
             if (!prev) return prev;
-            return prev.map((d) =>
-              d.id === payload.driverId ? { ...d, dutyStatus: payload.dutyStatus } : d,
-            );
+            return {
+              ...prev,
+              rows: prev.rows.map((d) =>
+                d.id === payload.driverId ? { ...d, dutyStatus: payload.dutyStatus } : d,
+              ),
+            };
           });
           setSelectedDriver((current) =>
             current && current.id === payload.driverId
@@ -195,32 +241,15 @@ export default function AdminDriversPanel({
           );
         },
       );
-    } catch {
-      /* socket optional */
-    }
+      socket.connect();
+    });
 
     return () => {
+      cancelled = true;
       socket?.off('driverDutyChanged');
       socket?.disconnect();
     };
   }, [poolStoreId, storeId, showAllBranches, stores, queryClient, listEndpoint]);
-
-  const filteredDrivers = useMemo(() => {
-    const nameQuery = filters.name.trim().toLowerCase();
-    return drivers.filter((driver) => {
-      if (nameQuery && !driver.name.toLowerCase().includes(nameQuery)) return false;
-      if (!poolStoreId && filters.storeId) {
-        const inBranch =
-          driver.store?.id === filters.storeId ||
-          driver.accessibleStores.some((s) => s.id === filters.storeId);
-        if (!inBranch) return false;
-      }
-      if (filters.status === 'active' && !driver.isActive) return false;
-      if (filters.status === 'inactive' && driver.isActive) return false;
-      if (filters.dutyStatus && driver.dutyStatus !== filters.dutyStatus) return false;
-      return true;
-    });
-  }, [drivers, filters.name, filters.status, filters.dutyStatus, filters.storeId, poolStoreId]);
 
   const createDriver = useMutation({
     mutationFn: async () => {
@@ -317,9 +346,12 @@ export default function AdminDriversPanel({
   });
 
   function openRegistrationForm() {
+    const defaultBranchId =
+      (filters.storeId && stores.some((s) => s.id === filters.storeId) ? filters.storeId : null) ??
+      stores[0]?.id;
     setForm({
       ...EMPTY_FORM,
-      branchIds: stores[0] ? [stores[0].id] : [],
+      branchIds: defaultBranchId ? [defaultBranchId] : [],
     });
     setProfilePreview(null);
     setLicensePreview(null);
@@ -458,18 +490,20 @@ export default function AdminDriversPanel({
         driver={selectedDriver}
         open={!!selectedDriver}
         onClose={() => setSelectedDriver(null)}
-        canManageStatus={canRegisterDrivers}
+        canManageStatus={canEditDrivers}
         stores={stores}
         onSave={
-          canRegisterDrivers
+          canEditDrivers
             ? async (id, form) => {
                 await updateDriver.mutateAsync({ id, form });
               }
             : undefined
         }
         isSaving={updateDriver.isPending}
-        onToggleStatus={(driver) =>
-          updateDriverStatus.mutate({ id: driver.id, isActive: !driver.isActive })
+        onToggleStatus={
+          canEditDrivers
+            ? (driver) => updateDriverStatus.mutate({ id: driver.id, isActive: !driver.isActive })
+            : undefined
         }
         isUpdatingStatus={updateDriverStatus.isPending}
       />
@@ -478,26 +512,14 @@ export default function AdminDriversPanel({
         <div className="border-b border-navy-border px-4 py-4 sm:px-5 flex flex-wrap gap-3 items-end">
           <div className="w-full sm:max-w-xs">
             <label className="block text-xs text-muted mb-1">Search rider</label>
-            <div className={`input-icon-wrap w-full${filters.name ? ' input-icon-wrap--end' : ''}`}>
-              <Search size={14} className="input-icon" aria-hidden />
-              <input
-                type="text"
-                value={filters.name}
-                onChange={(e) => setFilters((f) => ({ ...f, name: e.target.value }))}
-                placeholder="Search by rider name..."
-                className="input-field text-sm w-full"
-              />
-              {filters.name && (
-                <button
-                  type="button"
-                  onClick={() => setFilters((f) => ({ ...f, name: '' }))}
-                  className="input-action p-1 text-muted hover:text-fg"
-                  aria-label="Clear search"
-                >
-                  <X size={14} />
-                </button>
-              )}
-            </div>
+            <SearchableRiderNameField
+              value={filters.name}
+              onChange={(name) => setFilters((f) => ({ ...f, name }))}
+              poolStoreId={poolStoreId}
+              showAllBranches={showAllBranches}
+              filterStoreId={filters.storeId}
+              enabled={showAllBranches || !!storeId}
+            />
           </div>
           {showAllBranches && stores.length > 0 && (
             <div>
@@ -561,15 +583,19 @@ export default function AdminDriversPanel({
           <div className="p-8 text-center text-muted flex items-center justify-center gap-2">
             <Loader2 size={16} className="animate-spin" /> Loading drivers…
           </div>
-        ) : filteredDrivers.length === 0 ? (
+        ) : isError ? (
+          <div className="p-8 text-center text-muted">
+            <p className="text-sm">{error instanceof Error ? error.message : 'Could not load drivers.'}</p>
+          </div>
+        ) : drivers.length === 0 ? (
           <div className="p-8 text-center text-muted">
             <UserCircle2 size={32} className="mx-auto mb-2 opacity-40" />
             <p className="text-sm">
-              {drivers.length === 0
-                ? showAllBranches
+              {filters.name || filters.storeId || filters.status || filters.dutyStatus
+                ? 'No riders match your filters.'
+                : showAllBranches
                   ? 'No drivers found.'
-                  : 'No drivers in this branch pool.'
-                : 'No riders match your filters.'}
+                  : 'No drivers in this branch pool.'}
             </p>
           </div>
         ) : (
@@ -584,7 +610,7 @@ export default function AdminDriversPanel({
                     'System status',
                     'Completed',
                     'Rating',
-                    ...(canRegisterDrivers ? ['Actions'] : []),
+                    ...(canEditDrivers ? ['Actions'] : []),
                   ].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-muted text-xs font-medium whitespace-nowrap">
                       {h}
@@ -593,7 +619,7 @@ export default function AdminDriversPanel({
                 </tr>
               </thead>
               <tbody>
-                {filteredDrivers.map((d) => (
+                {drivers.map((d) => (
                   <tr
                     key={d.id}
                     onClick={() => setSelectedDriver(d)}
@@ -647,7 +673,7 @@ export default function AdminDriversPanel({
                         <span className="text-muted">No ratings</span>
                       )}
                     </td>
-                    {canRegisterDrivers && (
+                    {canEditDrivers && (
                       <td className="px-4 py-3">
                         <button
                           type="button"
@@ -674,6 +700,23 @@ export default function AdminDriversPanel({
             <p className="px-4 py-3 text-xs text-muted border-t border-navy-border">
               Click a row to view customer reviews, rider profile, and documents.
             </p>
+          </div>
+        )}
+        {totalItems > 0 && (
+          <div className="border-t border-navy-border px-4 py-3 sm:px-5">
+            <AdminTablePagination
+              pageSize={pageSize}
+              onPageSizeChange={setPageSize}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
+              totalItems={totalItems}
+              safePage={safePage}
+              totalPages={totalPages}
+              pageList={buildPageList(safePage, totalPages)}
+              onPageChange={setPage}
+              itemLabel="riders"
+              ariaLabel="Rider table pagination"
+            />
           </div>
         )}
       </div>

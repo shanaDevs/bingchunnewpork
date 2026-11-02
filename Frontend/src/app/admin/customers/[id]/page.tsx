@@ -32,7 +32,7 @@ import {
   Search,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import { isSuperAdmin, getAdminSession } from '@/lib/adminAuth';
 import { formatDate, formatDateTime } from '@/lib/datetime';
 import { formatMoney } from '@/lib/receipt';
@@ -55,23 +55,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-
-/* ------------------------------------------------------------------ */
-/*  API Helper                                                         */
-/* ------------------------------------------------------------------ */
-function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
-  }).then(async (r) => {
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.message || 'Request failed');
-    return d.data ?? d;
-  });
-}
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

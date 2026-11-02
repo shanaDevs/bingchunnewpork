@@ -31,6 +31,8 @@ type SharedPromoUsageRow = {
   totalDiscountAmount: number;
   branchShareAmount: number;
   platformShareAmount: number;
+  branchSharePct?: number | null;
+  platformSharePct?: number | null;
   contributionSource: string | null;
 };
 
@@ -57,6 +59,41 @@ function isPlatformContributionSource(source: string | null | undefined): boolea
   return (source ?? 'JASON').toUpperCase() === 'PLATFORM';
 }
 
+function validSharePercentages(
+  branchSharePct: number | null | undefined,
+  platformSharePct: number | null | undefined,
+): branchSharePct is number {
+  return (
+    typeof branchSharePct === 'number' &&
+    Number.isFinite(branchSharePct) &&
+    typeof platformSharePct === 'number' &&
+    Number.isFinite(platformSharePct) &&
+    branchSharePct + platformSharePct === 100
+  );
+}
+
+/** Split one usage row to cents from total + percentages; fallback to stored share columns. */
+function splitSharedPromoUsageRowToCents(row: SharedPromoUsageRow): {
+  totalCents: number;
+  branchCents: number;
+  secondPartyCents: number;
+} {
+  const totalCents = lkrToCents(row.totalDiscountAmount);
+  if (validSharePercentages(row.branchSharePct, row.platformSharePct)) {
+    const branchCents = Math.round((totalCents * row.branchSharePct) / 100);
+    return {
+      totalCents,
+      branchCents,
+      secondPartyCents: totalCents - branchCents,
+    };
+  }
+  return {
+    totalCents,
+    branchCents: lkrToCents(row.branchShareAmount),
+    secondPartyCents: lkrToCents(row.platformShareAmount),
+  };
+}
+
 /** Sum SHARED promotion usage rows (amounts in DB are LKR; totals are cents). */
 export function aggregateSharedPromoUsageRows(rows: SharedPromoUsageRow[]): SharedPromoAmountTotals {
   const totals: SharedPromoAmountTotals = {
@@ -67,13 +104,13 @@ export function aggregateSharedPromoUsageRows(rows: SharedPromoUsageRow[]): Shar
   };
 
   for (const row of rows) {
-    totals.totalDiscount += lkrToCents(row.totalDiscountAmount);
-    totals.branch += lkrToCents(row.branchShareAmount);
-    const secondParty = lkrToCents(row.platformShareAmount);
+    const split = splitSharedPromoUsageRowToCents(row);
+    totals.totalDiscount += split.totalCents;
+    totals.branch += split.branchCents;
     if (isPlatformContributionSource(row.contributionSource)) {
-      totals.platform += secondParty;
+      totals.platform += split.secondPartyCents;
     } else {
-      totals.jason += secondParty;
+      totals.jason += split.secondPartyCents;
     }
   }
 
@@ -109,6 +146,8 @@ export async function computeSharedPromoContribution(
       totalDiscountAmount: true,
       branchShareAmount: true,
       platformShareAmount: true,
+      branchSharePct: true,
+      platformSharePct: true,
       contributionSource: true,
     },
   });

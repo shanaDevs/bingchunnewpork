@@ -99,7 +99,7 @@ Versions taken from package manifests as of documentation date (2026-07-25).
 | OTP records | Implemented (SMS delivery mock/stub) |
 | Driver PIN login | Implemented |
 | Cookie sessions as primary auth | Not Implemented |
-| Admin MFA challenge | Not Implemented (fields only) |
+| Admin MFA | Removed (email + password only) |
 | OAuth redirect server flow | Not Implemented (token verify only) |
 
 ---

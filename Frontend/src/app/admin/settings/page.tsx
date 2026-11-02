@@ -1,5 +1,6 @@
 'use client';
-import { getApiBaseUrl, getWebxpayReturnUrlHint } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
+import { getWebxpayReturnUrlHint } from '@/lib/apiBase';
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,20 +11,6 @@ import LoyaltyCampaignDashboard from '@/components/admin/loyalty/LoyaltyCampaign
 import PlatformDiscountPaybackSettings from '@/components/admin/PlatformDiscountPaybackSettings';
 import { isSuperAdmin, type AdminSession } from '@/lib/adminAuth';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-
-function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return data.data ?? data;
-  });
-}
 
 type MethodKey = 'PAYHERE' | 'CASH_AT_COUNTER';
 
@@ -122,7 +109,7 @@ export default function AdminSettingsPage() {
   const [whatsappConfigured, setWhatsappConfigured] = useState(false);
   const [whatsappWebhookPath, setWhatsappWebhookPath] = useState('/api/whatsapp/webhook');
   const [whatsappWebhookUrl, setWhatsappWebhookUrl] = useState(
-    'https://bing-chung-b.mp.dartcodes.com/api/whatsapp/webhook',
+    'https://bing-chun-ui2ow.ondigitalocean.app/api/whatsapp/webhook',
   );
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [smsProvider, setSmsProvider] = useState<'smslenz' | 'mock'>('smslenz');
@@ -187,7 +174,8 @@ export default function AdminSettingsPage() {
   const { data: messagingSettings } = useQuery({
     queryKey: ['admin-messaging-settings'],
     queryFn: () => adminFetch('/settings/messaging'),
-    enabled: superAdmin,
+    enabled: superAdmin && resolvedTab === 'messaging',
+    staleTime: 5 * 60_000,
   });
 
   const { data: whatsappLiveStatus } = useQuery({
@@ -197,8 +185,8 @@ export default function AdminSettingsPage() {
         token: { ok: boolean; status: string; detail: string; displayPhoneNumber?: string };
         lastInbound: { at: string; from: string; preview: string; source: string } | null;
       }>,
-    enabled: superAdmin,
-    refetchInterval: 30000,
+    enabled: superAdmin && resolvedTab === 'messaging',
+    refetchInterval: resolvedTab === 'messaging' ? 60_000 : false,
   });
 
   useEffect(() => {
@@ -225,7 +213,7 @@ export default function AdminSettingsPage() {
       setWhatsappWebhookPath(wa.webhookPath || '/api/whatsapp/webhook');
       setWhatsappWebhookUrl(
         wa.webhookUrl ||
-          'https://bing-chung-b.mp.dartcodes.com/api/whatsapp/webhook',
+          'https://bing-chun-ui2ow.ondigitalocean.app/api/whatsapp/webhook',
       );
     }
     const sms = messagingSettings?.sms;
@@ -1247,7 +1235,7 @@ export default function AdminSettingsPage() {
                 <label className="text-xs text-muted block mb-1">Webhook callback URL (Meta)</label>
                 <input
                   className="input-field font-mono text-sm"
-                  placeholder="https://bing-chung-b.mp.dartcodes.com/api/whatsapp/webhook"
+                  placeholder="https://bing-chun-ui2ow.ondigitalocean.app/api/whatsapp/webhook"
                   value={whatsappWebhookUrl}
                   onChange={(e) => setWhatsappWebhookUrl(e.target.value)}
                 />

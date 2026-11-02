@@ -929,14 +929,9 @@ describe('getPayoutsDueHandler', () => {
       { id: 'store-zero', name: 'Bing Chun - Galle' },
     ] as never);
     vi.spyOn(walletControllerSupport, 'listSuperAdminPayoutsDueItems').mockImplementation(
-      async (query) => {
-        const from = query?.from ?? '2026-10-01';
-        const to = query?.to ?? '2026-10-12';
+      async () => {
         const periodFrom = '2026-07-01';
         const periodTo = '2026-07-15';
-        if (periodFrom > to || periodTo < from) {
-          return { items: [], nextCursor: null, done: true };
-        }
         return {
           items: [
             {
@@ -956,7 +951,7 @@ describe('getPayoutsDueHandler', () => {
     );
   });
 
-  it('returns pending branch periods that overlap the requested date range', async () => {
+  it('returns pending branch periods (from/to query is forwarded but does not filter the queue)', async () => {
     const req = createMockReq({
       user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
       query: { from: '2026-07-01', to: '2026-07-31' },
@@ -990,7 +985,7 @@ describe('getPayoutsDueHandler', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('excludes periods outside the requested date range', async () => {
+  it('still returns due items when from/to would not overlap the period (queue is not month-scoped)', async () => {
     const req = createMockReq({
       user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
       query: { from: '2026-08-01', to: '2026-08-31' },
@@ -1005,7 +1000,17 @@ describe('getPayoutsDueHandler', () => {
     });
     expect(res.json).toHaveBeenCalledWith({
       success: true,
-      data: { items: [], nextCursor: null, done: true },
+      data: {
+        items: [
+          expect.objectContaining({
+            storeId: 'store-due',
+            periodFrom: '2026-07-01',
+            periodTo: '2026-07-15',
+          }),
+        ],
+        nextCursor: null,
+        done: true,
+      },
     });
   });
 
@@ -1074,25 +1079,38 @@ describe('listSuperAdminPayoutsDueItems', () => {
     } as never);
   });
 
-  it('defaults to month-to-date when no date filter is passed', async () => {
+  it('returns elapsed unpaid windows from the next payout start (ignores month filter)', async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-10-21T12:00:00.000Z'));
-    vi.mocked(prisma.order.findFirst).mockResolvedValue({
-      storeId: 'store-1',
-      createdAt: new Date('2026-10-01T00:00:00.000Z'),
-    } as never);
+    vi.setSystemTime(new Date('2026-10-29T12:00:00.000Z'));
+    vi.mocked(prisma.storeWithdrawal.findMany).mockResolvedValue([
+      {
+        id: 'wd-1',
+        storeId: 'store-1',
+        amount: 10_000,
+        status: 'APPROVED',
+        periodFrom: new Date('2026-08-23T00:00:00.000Z'),
+        periodTo: new Date('2026-09-06T00:00:00.000Z'),
+        breakdown: { orderCount: 2 },
+      },
+    ] as never);
 
-    const page = await listSuperAdminPayoutsDueItems();
-
-    expect(page.items).toHaveLength(1);
-    expect(page.items[0]).toMatchObject({
-      periodFrom: '2026-10-01',
-      periodTo: '2026-10-15',
+    const page = await listSuperAdminPayoutsDueItems({
+      from: '2026-10-01',
+      to: '2026-10-31',
     });
+
+    expect(page.items.map((item) => item.periodFrom)).toEqual([
+      '2026-09-07',
+      '2026-09-22',
+      '2026-10-07',
+    ]);
+    expect(page.items[0].periodTo).toBe('2026-09-21');
     vi.useRealTimers();
   });
 
-  it('limits rows to periods overlapping an explicit from/to range', async () => {
+  it('includes the full unpaid chain when explicit from/to is passed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-31T12:00:00.000Z'));
     vi.mocked(prisma.order.findFirst).mockResolvedValue({
       storeId: 'store-1',
       createdAt: new Date('2026-07-01T00:00:00.000Z'),
@@ -1103,15 +1121,10 @@ describe('listSuperAdminPayoutsDueItems', () => {
       to: '2026-07-31',
     });
 
-    expect(page.items.length).toBeGreaterThanOrEqual(1);
-    expect(
-      page.items.every(
-        (row) => row.periodFrom <= '2026-07-31' && row.periodTo >= '2026-07-20',
-      ),
-    ).toBe(true);
-    expect(page.items.some((row) => row.periodFrom === '2026-07-16' && row.periodTo === '2026-07-30')).toBe(
-      true,
-    );
+    expect(page.items.length).toBeGreaterThanOrEqual(2);
+    expect(page.items[0]).toMatchObject({ periodFrom: '2026-07-01', periodTo: '2026-07-15' });
+    expect(page.items[1]).toMatchObject({ periodFrom: '2026-07-16', periodTo: '2026-07-30' });
+    vi.useRealTimers();
   });
 });
 

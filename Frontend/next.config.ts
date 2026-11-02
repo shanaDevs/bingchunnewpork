@@ -26,7 +26,7 @@ function getBackendOrigin(): string {
   const api = process.env.NEXT_PUBLIC_API_URL || '/api';
   if (api.startsWith('/')) {
     if (process.env.NODE_ENV === 'production' && !fromEnv) {
-      return 'https://bing-chung-b.mp.dartcodes.com';
+      return 'https://bing-chun-ui2ow.ondigitalocean.app';
     }
     return fromEnv || 'http://localhost:4000';
   }
@@ -78,8 +78,10 @@ const BASE_SECURITY_HEADERS = [
   { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self), payment=(self)' },
+  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
   ...(process.env.NODE_ENV === 'production'
-    ? [{ key: 'Strict-Transport-Security', value: 'max-age=31536000' }]
+    ? [{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' }]
     : []),
 ] as const;
 
@@ -191,6 +193,12 @@ const nextConfig: NextConfig = {
     return [];
   },
   async rewrites() {
+    // Production App Platform injects the API hostname only after the
+    // container starts. A rewrite baked here would keep pointing at
+    // localhost:4000. Request handlers under src/app/api and
+    // src/app/delivery-api proxy with the live URL instead.
+    if (process.env.NODE_ENV === 'production') return [];
+
     const surface = getWebSurface();
     const apiOrigin = surface === 'admin'
       ? getAdminApiOrigin()

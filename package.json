@@ -16,7 +16,7 @@
     "dev:all": "concurrently -n backend,frontend,delivery,orders,payments,notify -c blue,green,magenta,yellow,cyan,red \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:delivery\" \"npm run dev:orders\" \"npm run dev:payments\" \"npm run dev:notify\"",
     "dev:backend": "npm run dev -w @bingchun/backend",
     "dev:frontend": "npm run dev -w @bingchun/frontend",
-    "dev:delivery": "cross-env DELIVERY_LOAD_BACKEND_ENV=true npm run dev -w @bingchun/delivery-service",
+    "dev:delivery": "cross-env DELIVERY_LOAD_BACKEND_ENV=true DELIVERY_PORT=4100 npm run dev -w @bingchun/delivery-service",
     "dev:delivery-frontend": "npm run dev -w @bingchun/delivery-frontend",
     "dev:orders": "npm run dev -w @bingchun/order-service",
     "dev:payments": "npm run dev -w @bingchun/payment-service",

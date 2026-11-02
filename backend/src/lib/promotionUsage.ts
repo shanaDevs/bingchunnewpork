@@ -215,7 +215,7 @@ export function computePromotionCostSplit(params: {
 
     offerDetails.scope = 'product';
     offerDetails.affectedSubtotal = affectedSubtotal;
-    offerDetails.lines = affectedLines.map((line) => {
+    const lines = affectedLines.map((line) => {
       const lineDiscount =
         affectedSubtotal > 0 ? Math.floor((totalDiscount * line.lineTotal) / affectedSubtotal) : 0;
       const lineBranch = Math.floor((lineDiscount * branchSharePct) / 100);
@@ -229,6 +229,16 @@ export function computePromotionCostSplit(params: {
         platformShareAmount: lineDiscount - lineBranch,
       };
     });
+    // Assign floored remainder to the last line so line shares equal totalDiscount.
+    const allocated = lines.reduce((sum, line) => sum + line.discountAmount, 0);
+    const remainder = totalDiscount - allocated;
+    if (remainder !== 0 && lines.length > 0) {
+      const last = lines[lines.length - 1]!;
+      last.discountAmount += remainder;
+      last.branchShareAmount = Math.floor((last.discountAmount * branchSharePct) / 100);
+      last.platformShareAmount = last.discountAmount - last.branchShareAmount;
+    }
+    offerDetails.lines = lines;
   } else {
     offerDetails.scope = 'order';
   }

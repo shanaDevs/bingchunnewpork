@@ -116,17 +116,45 @@ export function getApiBaseUrl(): string {
   return normalizeUrlPath(configured);
 }
 
-/** Socket.io server origin (no /api suffix). Follows API override when set. */
+/**
+ * Socket.io server origin (no /api suffix).
+ * Prefer NEXT_PUBLIC_SOCKET_URL (direct API host). Never rely on same-origin
+ * `/socket.io` through the Next.js rewrite — CapRover/Next do not upgrade
+ * WebSockets reliably, which surfaces as "WebSocket is closed before the
+ * connection is established".
+ */
 export function getSocketUrl(): string {
   if (getApiBaseOverride()) {
     return getBackendOrigin();
   }
-  const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
-  if (configured.startsWith('/') && typeof window !== 'undefined') {
-    return window.location.origin;
+  const explicit = process.env.NEXT_PUBLIC_SOCKET_URL?.trim();
+  if (explicit) {
+    return stripTrailingSlash(explicit);
   }
-  if (process.env.NEXT_PUBLIC_SOCKET_URL) {
-    return stripTrailingSlash(process.env.NEXT_PUBLIC_SOCKET_URL);
+  // Absolute API URL → same host as REST.
+  const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
+  if (!configured.startsWith('/')) {
+    return stripTrailingSlash(configured.replace(/\/api\/?$/, ''));
+  }
+  // Relative `/api` in the browser: derive from SHOP/ADMIN rewrite targets baked
+  // at build time via BACKEND_URL when present; otherwise same-origin (dev only).
+  const backend = process.env.NEXT_PUBLIC_BACKEND_ORIGIN?.trim()
+    || process.env.BACKEND_URL?.trim()
+    || process.env.SHOP_API_URL?.trim();
+  if (backend) {
+    return stripTrailingSlash(backend);
+  }
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname.toLowerCase();
+    // Live shop custom domain — Next rewrite cannot upgrade WebSockets.
+    if (
+      host === 'bingchunsrilanka.com'
+      || host === 'www.bingchunsrilanka.com'
+      || host === 'bing-chun-ui2ow.ondigitalocean.app'
+    ) {
+      return window.location.origin;
+    }
+    return window.location.origin;
   }
   return getBackendOrigin();
 }

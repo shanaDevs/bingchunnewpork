@@ -46,7 +46,7 @@ import {
   driverPinLookup,
   hashDriverPin,
 } from '../lib/driverPin';
-import { uploadDriverAsset, viewableLicenseImageUrl } from '../lib/spaces';
+import { uploadDriverAsset, viewableLicenseImageUrl, viewableLicenseImageUrlWithTimeout } from '../lib/spaces';
 import { retryOnceOnDisconnect } from '../utils/prismaErrors';
 import { DriverDutyStatus, DeliveryDomainState, Prisma } from '@prisma/client';
 import { resolveCustomerDisplayName } from '../lib/customerName';
@@ -528,7 +528,10 @@ export async function getAdminDeliveryJobActualRoute(req: Request, res: Response
     let path = parseActualRouteJson(job.actualRoute);
     let source: 'stored' | 'gps_fallback' = path.length >= 2 ? 'stored' : 'gps_fallback';
 
-    if (path.length < 2 && job.status === 'COMPLETED') {
+    if (
+      path.length < 2 &&
+      (job.status === 'COMPLETED' || job.status === 'VEHICLE_FAILURE')
+    ) {
       const startedAt = job.startedAt ?? job.assignedAt ?? job.createdAt;
       const completedAt = job.completedAt ?? new Date();
       const locations = await fetchJobGpsLocations(jobId, startedAt, completedAt, job.driverId);
@@ -1127,7 +1130,7 @@ export async function createDeliveryDriver(req: Request, res: Response, next: Ne
       res,
       {
         ...driver,
-        licenseImageUrl: await viewableLicenseImageUrl(driver.licenseImageUrl),
+        licenseImageUrl: await viewableLicenseImageUrlWithTimeout(driver.licenseImageUrl),
         pin: body.pin,
       },
       201,
@@ -1389,39 +1392,32 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
   }
 }
 
-export async function listDeliveryFailures(req: Request, res: Response, next: NextFunction) {
-  try {
-    const storeId = await adminStoreIdOptional(req, req.query.storeId as string | undefined);
-    const rows = await prisma.deliveryAttempt.findMany({
-      where: {
-        outcome: { not: 'DELIVERED' },
-        ...(storeId ? { order: { storeId } } : {}),
+const deliveryFailureListInclude = {
+  driver: { select: { id: true, name: true } },
+  order: {
+    select: {
+      id: true,
+      orderNumber: true,
+      status: true,
+      storeId: true,
+      deliveryAddressLine: true,
+      deliveryCity: true,
+      deliveryDistrict: true,
+      deliveryLat: true,
+      deliveryLng: true,
+      guestName: true,
+      guestPhone: true,
+      user: { select: { name: true, phone: true } },
+      store: {
+        select: { id: true, name: true, lat: true, lng: true, addressLine: true },
       },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-      include: {
-        driver: { select: { id: true, name: true } },
-        order: {
-          select: {
-            id: true,
-            orderNumber: true,
-            status: true,
-            storeId: true,
-            deliveryAddressLine: true,
-            deliveryCity: true,
-            deliveryDistrict: true,
-            deliveryLat: true,
-            deliveryLng: true,
-            guestName: true,
-            guestPhone: true,
-            user: { select: { name: true, phone: true } },
-            store: {
-              select: { id: true, name: true, lat: true, lng: true, addressLine: true },
-            },
-          },
-        },
-      },
-    });
+    },
+  },
+} as const;
+
+async function buildDeliveryFailuresPayload(
+  rows: Prisma.DeliveryAttemptGetPayload<{ include: typeof deliveryFailureListInclude }>[],
+) {
 
     const orderIds = [...new Set(rows.map((row) => row.orderId))];
     const jobIds = [...new Set(rows.map((row) => row.jobId))];
@@ -1492,7 +1488,7 @@ export async function listDeliveryFailures(req: Request, res: Response, next: Ne
       }
     }
 
-    const payload = rows.map((row) => {
+    return rows.map((row) => {
       const derived = deriveFailureReassignment({
         orderStatus: row.order.status,
         originalJobId: row.jobId,
@@ -1523,7 +1519,41 @@ export async function listDeliveryFailures(req: Request, res: Response, next: Ne
         forwardOrders,
       };
     });
+}
 
+export async function listDeliveryFailures(req: Request, res: Response, next: NextFunction) {
+  try {
+    const storeId = await adminStoreIdOptional(req, req.query.storeId as string | undefined);
+    const where = {
+      outcome: { not: 'DELIVERED' as const },
+      ...(storeId ? { order: { storeId } } : {}),
+    };
+    const orderBy = { createdAt: 'desc' as const };
+    const paginate = wantsPagedList(req.query);
+
+    if (paginate) {
+      const { page, pageSize, skip } = parsePageQuery(req.query);
+      const [total, rows] = await Promise.all([
+        prisma.deliveryAttempt.count({ where }),
+        prisma.deliveryAttempt.findMany({
+          where,
+          orderBy,
+          skip,
+          take: pageSize,
+          include: deliveryFailureListInclude,
+        }),
+      ]);
+      const payload = await buildDeliveryFailuresPayload(rows);
+      return success(res, { rows: payload, total, page, pageSize });
+    }
+
+    const rows = await prisma.deliveryAttempt.findMany({
+      where,
+      orderBy,
+      take: 200,
+      include: deliveryFailureListInclude,
+    });
+    const payload = await buildDeliveryFailuresPayload(rows);
     return success(res, payload);
   } catch (err) {
     next(err);
@@ -1556,48 +1586,73 @@ export async function reassignDeliveryFailure(req: Request, res: Response, next:
   }
 }
 
+const driverComplaintListInclude = {
+  driver: { select: { id: true, name: true } },
+  order: {
+    select: {
+      id: true,
+      orderNumber: true,
+      status: true,
+      deliveryAddressLine: true,
+      deliveryCity: true,
+      deliveryDistrict: true,
+      guestName: true,
+      guestPhone: true,
+      user: { select: { name: true, phone: true } },
+    },
+  },
+} as const;
+
+async function mapDriverComplaintRows(
+  rows: Prisma.DriverComplaintGetPayload<{ include: typeof driverComplaintListInclude }>[],
+) {
+  const resolverIds = [...new Set(rows.map((r) => r.resolvedBy).filter(Boolean))] as string[];
+  const resolvers =
+    resolverIds.length > 0
+      ? await prisma.adminUser.findMany({
+          where: { id: { in: resolverIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+  const resolverNames = new Map(resolvers.map((u) => [u.id, u.name]));
+
+  return rows.map((row) => ({
+    ...row,
+    resolvedByName: row.resolvedBy ? (resolverNames.get(row.resolvedBy) ?? null) : null,
+  }));
+}
+
 export async function listDriverComplaints(req: Request, res: Response, next: NextFunction) {
   try {
     const storeId = await adminStoreIdOptional(req, req.query.storeId as string | undefined);
+    const where = storeId ? { storeId } : {};
+    const orderBy = { createdAt: 'desc' as const };
+    const paginate = wantsPagedList(req.query);
+
+    if (paginate) {
+      const { page, pageSize, skip } = parsePageQuery(req.query);
+      const [total, rows] = await Promise.all([
+        prisma.driverComplaint.count({ where }),
+        prisma.driverComplaint.findMany({
+          where,
+          orderBy,
+          skip,
+          take: pageSize,
+          include: driverComplaintListInclude,
+        }),
+      ]);
+      const mapped = await mapDriverComplaintRows(rows);
+      return success(res, { rows: mapped, total, page, pageSize });
+    }
+
     const rows = await prisma.driverComplaint.findMany({
-      where: storeId ? { storeId } : {},
-      orderBy: { createdAt: 'desc' },
+      where,
+      orderBy,
       take: 200,
-      include: {
-        driver: { select: { id: true, name: true } },
-        order: {
-          select: {
-            id: true,
-            orderNumber: true,
-            status: true,
-            deliveryAddressLine: true,
-            deliveryCity: true,
-            deliveryDistrict: true,
-            guestName: true,
-            guestPhone: true,
-            user: { select: { name: true, phone: true } },
-          },
-        },
-      },
+      include: driverComplaintListInclude,
     });
-
-    const resolverIds = [...new Set(rows.map((r) => r.resolvedBy).filter(Boolean))] as string[];
-    const resolvers =
-      resolverIds.length > 0
-        ? await prisma.adminUser.findMany({
-            where: { id: { in: resolverIds } },
-            select: { id: true, name: true },
-          })
-        : [];
-    const resolverNames = new Map(resolvers.map((u) => [u.id, u.name]));
-
-    return success(
-      res,
-      rows.map((row) => ({
-        ...row,
-        resolvedByName: row.resolvedBy ? (resolverNames.get(row.resolvedBy) ?? null) : null,
-      })),
-    );
+    const mapped = await mapDriverComplaintRows(rows);
+    return success(res, mapped);
   } catch (err) {
     next(err);
   }
@@ -1726,38 +1781,63 @@ export async function updateDriverComplaint(req: Request, res: Response, next: N
   }
 }
 
+const driverBranchRequestListInclude = {
+  driver: { select: { id: true, name: true, storeId: true } },
+} as const;
+
+async function mapDriverBranchRequestRows(
+  rows: Prisma.DriverBranchRequestGetPayload<{ include: typeof driverBranchRequestListInclude }>[],
+) {
+  const storeIds = [
+    ...new Set(rows.flatMap((r) => [r.toStoreId, r.fromStoreId].filter(Boolean))),
+  ];
+  const stores =
+    storeIds.length > 0
+      ? await prisma.store.findMany({
+          where: { id: { in: storeIds as string[] } },
+          select: { id: true, name: true },
+        })
+      : [];
+  const storeNames = new Map(stores.map((s) => [s.id, s.name]));
+
+  return rows.map((row) => ({
+    ...row,
+    toStoreName: storeNames.get(row.toStoreId) ?? null,
+    fromStoreName: row.fromStoreId ? storeNames.get(row.fromStoreId) ?? null : null,
+  }));
+}
+
 export async function listDriverBranchRequests(req: Request, res: Response, next: NextFunction) {
   try {
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const where = status ? { status: status as 'PENDING' | 'APPROVED' | 'REJECTED' } : {};
+    const orderBy = [{ status: 'asc' as const }, { createdAt: 'desc' as const }];
+    const paginate = wantsPagedList(req.query);
+
+    if (paginate) {
+      const { page, pageSize, skip } = parsePageQuery(req.query);
+      const [total, rows] = await Promise.all([
+        prisma.driverBranchRequest.count({ where }),
+        prisma.driverBranchRequest.findMany({
+          where,
+          orderBy,
+          skip,
+          take: pageSize,
+          include: driverBranchRequestListInclude,
+        }),
+      ]);
+      const mapped = await mapDriverBranchRequestRows(rows);
+      return success(res, { rows: mapped, total, page, pageSize });
+    }
+
     const rows = await prisma.driverBranchRequest.findMany({
-      where: status ? { status: status as 'PENDING' | 'APPROVED' | 'REJECTED' } : {},
-      orderBy: { createdAt: 'desc' },
+      where,
+      orderBy,
       take: 200,
-      include: {
-        driver: { select: { id: true, name: true, storeId: true } },
-      },
+      include: driverBranchRequestListInclude,
     });
-
-    const storeIds = [
-      ...new Set(rows.flatMap((r) => [r.toStoreId, r.fromStoreId].filter(Boolean))),
-    ];
-    const stores =
-      storeIds.length > 0
-        ? await prisma.store.findMany({
-            where: { id: { in: storeIds as string[] } },
-            select: { id: true, name: true },
-          })
-        : [];
-    const storeNames = new Map(stores.map((s) => [s.id, s.name]));
-
-    return success(
-      res,
-      rows.map((row) => ({
-        ...row,
-        toStoreName: storeNames.get(row.toStoreId) ?? null,
-        fromStoreName: row.fromStoreId ? storeNames.get(row.fromStoreId) ?? null : null,
-      })),
-    );
+    const mapped = await mapDriverBranchRequestRows(rows);
+    return success(res, mapped);
   } catch (err) {
     next(err);
   }
@@ -1821,6 +1901,11 @@ export async function reviewDriverBranchRequest(req: Request, res: Response, nex
 }
 
 const APP_TIMEZONE = 'Asia/Colombo';
+
+function wantsPagedList(query: Request['query']): boolean {
+  const pageRaw = Array.isArray(query.page) ? query.page[0] : query.page;
+  return pageRaw != null && String(pageRaw).trim() !== '';
+}
 
 function parsePageQuery(
   query: Request['query'],

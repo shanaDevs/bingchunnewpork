@@ -10,10 +10,24 @@ set -e
 
 export TZ="${TZ:-Asia/Colombo}"
 
+# Prefer DIRECT_URL (plain Postgres). Never run migrate deploy through PgBouncer
+# transaction pooling — advisory locks / DDL break there.
+if [ -n "${DIRECT_URL:-}" ]; then
+  export DATABASE_URL="$DIRECT_URL"
+  echo "[migrate] Using DIRECT_URL (direct Postgres, not PgBouncer)"
+fi
+
 if [ -z "$DATABASE_URL" ]; then
-  echo "[migrate] ERROR: DATABASE_URL is not set. Cannot run migrations."
+  echo "[migrate] ERROR: DATABASE_URL (or DIRECT_URL) is not set. Cannot run migrations."
   exit 1
 fi
+
+case "$DATABASE_URL" in
+  *pgbouncer=true*|*@*pgbouncer*)
+    echo "[migrate] ERROR: DATABASE_URL points at PgBouncer. Set DIRECT_URL to srv-captain--<postgres>:5432"
+    exit 1
+    ;;
+esac
 
 # Wait for the database to be reachable before running migrations
 DB_HOST=$(node -e "process.stdout.write(new URL(process.env.DATABASE_URL).hostname)")
@@ -36,6 +50,26 @@ echo "[migrate] Database is ready. Running Prisma migrations..."
 
 SCHEMA_PATH="/app/packages/db/prisma/schema.prisma"
 PRISMA_CLI="/app/node_modules/prisma/build/index.js"
+MIGRATIONS_DIR="/app/packages/db/prisma/migrations"
+PG_MIGRATIONS_DIR="/app/packages/db/prisma/migrations-pg"
+
+# The historical migrations folder is MySQL SQL. It cannot build an empty
+# Postgres database. App Platform uses the generated baseline instead.
+case "$DATABASE_URL" in
+  postgres://*|postgresql://*)
+    if [ ! -d "$PG_MIGRATIONS_DIR" ]; then
+      echo "[migrate] ERROR: Postgres migrations not found at $PG_MIGRATIONS_DIR"
+      exit 1
+    fi
+    HAS_USERS=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAqc "SELECT CASE WHEN to_regclass('public.users') IS NULL THEN 'f' ELSE 't' END")
+    if [ "$HAS_USERS" != "t" ]; then
+      echo "[migrate] Postgres has no application tables. Clearing the failed migration record."
+      psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP TABLE IF EXISTS public."_prisma_migrations";'
+    fi
+    rm -rf "$MIGRATIONS_DIR"
+    cp -a "$PG_MIGRATIONS_DIR" "$MIGRATIONS_DIR"
+    ;;
+esac
 
 if [ ! -f "$SCHEMA_PATH" ]; then
   echo "[migrate] ERROR: Prisma schema not found at $SCHEMA_PATH"

@@ -5,23 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Tag, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Image from 'next/image';
-import { getApiBaseUrl } from '@/lib/apiBase';
-import { adminAuthHeaders } from '@/lib/adminSession';
-
-function adminFetch(endpoint: string, options?: RequestInit) {
-  return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    credentials: 'include',
-    headers: {
-      ...adminAuthHeaders({ 'Content-Type': 'application/json' }),
-      ...(options?.headers || {}),
-    },
-  }).then(async (r) => {
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.message || 'Request failed');
-    return d.data ?? d;
-  });
-}
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 
 export default function AdminTodaySpecialCard() {
   const [specialProductId, setSpecialProductId] = useState('');

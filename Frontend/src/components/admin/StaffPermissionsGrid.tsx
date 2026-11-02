@@ -1,5 +1,5 @@
 'use client';
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import {
   AdminPermission,
   buildPermissionsMap,
@@ -13,23 +13,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Save, Check } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-
-/* ------------------------------------------------------------------ */
-/*  API helpers                                                        */
-/* ------------------------------------------------------------------ */
-function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  }).then(async (r) => {
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.message || 'Request failed');
-    return d.data ?? d;
-  });
-}
 
 interface AdminUser {
   role: { name: string };

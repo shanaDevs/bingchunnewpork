@@ -1,7 +1,6 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch } from '@/lib/adminApi';
 
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -26,6 +25,7 @@ import { resolveProductImageUrl } from '@/lib/productImageUrl';
 import { useAdminJobLiveRoute } from '@/hooks/useAdminJobLiveRoute';
 import { useAdminJobStatus } from '@/hooks/useAdminJobStatus';
 import { adminBadgeClass, DELIVERY_JOB_STATUS_BADGE, DELIVERY_JOB_STATUS_LABEL } from '@/lib/adminBadges';
+import { jobSupportsActualRouteReplay } from '@/lib/deliveryStopProgress';
 
 const AdminDeliveryRouteMap = dynamic(() => import('@/components/admin/AdminDeliveryRouteMap'), {
   ssr: false,
@@ -56,24 +56,16 @@ type PathOverlayResponse = {
 
 const LIVE_JOB_STATUSES = new Set(['ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING']);
 
-async function adminFetch<T>(endpoint: string): Promise<T> {
-    const res = await fetch(`${getApiBaseUrl()}${endpoint}`, {
-    headers: adminAuthHeaders(),
-    credentials: 'include',
-  });
-  const json = await res.json();
-  if (!json.success) throw new Error(json.message || 'Request failed');
-  return json.data as T;
-}
-
 async function fetchJobRoute(jobId: string, storeId: string): Promise<JobRouteResponse> {
   const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  return adminFetch<JobRouteResponse>(`/admin/delivery-jobs/${encodeURIComponent(jobId)}/route${qs}`);
+  return adminApiFetch<JobRouteResponse>(
+    `/admin/delivery-jobs/${encodeURIComponent(jobId)}/route${qs}`,
+  );
 }
 
 async function fetchActualRoute(jobId: string, storeId: string): Promise<PathOverlayResponse> {
   const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  return adminFetch<PathOverlayResponse>(
+  return adminApiFetch<PathOverlayResponse>(
     `/admin/delivery-jobs/${encodeURIComponent(jobId)}/actual-route${qs}`,
   );
 }
@@ -300,7 +292,7 @@ export default function AdminDeliveryRouteView({
 
   const jobStatus = jobStatusSync.status || route?.status || '';
   const isLiveJob = LIVE_JOB_STATUSES.has(jobStatus);
-  const isCompletedJob = jobStatus === 'COMPLETED';
+  const supportsActualRouteReplay = jobSupportsActualRouteReplay(jobStatus);
   const preStartBanner = preStartMessage(jobStatus);
 
   const liveRoute = useAdminJobLiveRoute({
@@ -357,7 +349,7 @@ export default function AdminDeliveryRouteView({
   }, [route?.jobId, route?.store?.id, storeId, jobStatusSync.refresh]);
 
   useEffect(() => {
-    if (!route || !isCompletedJob) return;
+    if (!route || !supportsActualRouteReplay) return;
 
     let cancelled = false;
     setActualLoading(true);
@@ -382,7 +374,7 @@ export default function AdminDeliveryRouteView({
     return () => {
       cancelled = true;
     };
-  }, [route, isCompletedJob, jobId, effectiveStoreId, storeId]);
+  }, [route, supportsActualRouteReplay, jobId, effectiveStoreId, storeId]);
 
   const headerTitle = useMemo(
     () => (route?.title ? formatDeliveryJobTitle(route.title) : 'Delivery route'),
@@ -412,7 +404,7 @@ export default function AdminDeliveryRouteView({
       : undefined);
   const overlayNotice = isLiveJob ? liveRoute.notice : actualNotice;
   const overlayLoading = isLiveJob ? liveRoute.loading : actualLoading;
-  const showPathOverlay = isLiveJob || isCompletedJob;
+  const showPathOverlay = isLiveJob || supportsActualRouteReplay;
 
   const comparisonSummary = useMemo(() => {
     if (!showPathOverlay) return null;

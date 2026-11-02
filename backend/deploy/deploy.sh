@@ -109,7 +109,7 @@ cp "$REPO_ROOT/packages/delivery-domain/package.json" "$STAGE_DIR/packages/deliv
 cp "$REPO_ROOT/delivery-service/package.json" "$STAGE_DIR/delivery-service/package.json"
 cp "$REPO_ROOT/Frontend/package.json" "$STAGE_DIR/Frontend/package.json"
 
-for dir in src prisma public; do
+for dir in src prisma public assets; do
   if [[ -d "$BACKEND_DIR/$dir" ]]; then
     cp -R "$BACKEND_DIR/$dir" "$STAGE_DIR/backend/$dir"
   fi

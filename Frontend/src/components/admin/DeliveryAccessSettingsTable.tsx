@@ -1,5 +1,5 @@
 'use client';
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -41,20 +41,6 @@ function resolveMilestone(row: DeliveryAccessRow): DeliveryMilestoneProgress {
     milestone1: DEFAULT_DELIVERY_MILESTONE_ORDERS.milestone1,
     milestone2: DEFAULT_DELIVERY_MILESTONE_ORDERS.milestone2,
     milestone3: DEFAULT_DELIVERY_MILESTONE_ORDERS.milestone3,
-  });
-}
-
-function adminFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers ?? {}),
-    },
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.message || 'Request failed');
-    return data.data ?? data;
   });
 }
 

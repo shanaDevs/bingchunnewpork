@@ -523,7 +523,7 @@ function AdminOrdersContent() {
         return (res as { meta?: { total?: number } }).meta?.total ?? 0;
       },
       enabled: mounted && customReady && !(pickupOnly && mode === 'DELIVERY'),
-      refetchInterval: 15000,
+      refetchInterval: 30_000,
       refetchIntervalInBackground: false,
     })),
   });
@@ -555,7 +555,7 @@ function AdminOrdersContent() {
         return (res as { meta?: { total?: number } }).meta?.total ?? 0;
       },
       enabled: mounted && !archiveView && customReady,
-      refetchInterval: 15000,
+      refetchInterval: 30_000,
       refetchIntervalInBackground: false,
     })),
   });
@@ -634,7 +634,7 @@ function AdminOrdersContent() {
     },
     enabled: mounted && customReady,
     placeholderData: keepPreviousData,
-    refetchInterval: appliedSearch ? false : 15000,
+    refetchInterval: appliedSearch ? false : 30_000,
     refetchIntervalInBackground: false,
   });
 

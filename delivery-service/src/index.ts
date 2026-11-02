@@ -38,17 +38,39 @@ if (process.env.TRUST_PROXY !== undefined) {
 const deliveryFrontendOrigin =
   process.env.DELIVERY_FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3100';
 
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(
-  cors({
-    origin: [
+const corsAllowlist = Array.from(
+  new Set(
+    [
       config.frontendUrl,
       config.adminUrl,
       deliveryFrontendOrigin,
+      process.env.LIVE_SHOP_URL,
+      ...(process.env.CORS_EXTRA_ORIGINS || '').split(','),
+      'https://bing-chun-ui2ow.ondigitalocean.app',
+      'https://bingchun-delivery-6mgs2.ondigitalocean.app',
+      'https://bingchun-admin-a4ndy.ondigitalocean.app',
+      'https://bingchun-pos-i8pq3.ondigitalocean.app',
+      'https://bingchunsrilanka.com',
+      'https://www.bingchunsrilanka.com',
       'http://localhost:3000',
       'http://localhost:3001',
       'http://localhost:3100',
-    ],
+    ]
+      .map((value) => (value || '').trim().replace(/\/$/, ''))
+      .filter(Boolean),
+  ),
+);
+
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || corsAllowlist.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
     credentials: true,
   })
 );

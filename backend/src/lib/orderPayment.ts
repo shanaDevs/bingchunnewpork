@@ -15,6 +15,7 @@ export function isOnlinePaymentMethod(method: PaymentMethod): boolean {
   return ONLINE_METHODS.includes(method);
 }
 
+/** Methods that create branch wallet ORDER_PAYMENT credits (live + sync must match). */
 export function isWalletCreditPaymentMethod(
   method: PaymentMethod,
 ): method is WalletCreditPaymentMethod {

@@ -1,7 +1,6 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Power, KeyRound, Save, Pencil, Search } from 'lucide-react';
@@ -36,19 +35,6 @@ import AdminTablePagination from '@/components/admin/AdminTablePagination';
 import SearchableBranchSelect from '@/components/admin/SearchableBranchSelect';
 import { DEFAULT_DELIVERY_MILESTONE_ORDERS } from '@/lib/deliveryAccessMilestones';
 import { ADMIN_TABLE_PAGE_SIZE, buildPageList } from '@/lib/pagination';
-
-function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...options,
-    headers: adminAuthHeaders({ 'Content-Type': 'application/json', ...(options?.headers as Record<string, string> | undefined),
-    credentials: 'include',
-  }),
-  }).then(async (r) => {
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.message || 'Request failed');
-    return d.data ?? d;
-  });
-}
 
 const EMPTY = { name: '', email: '', password: '', storeId: '' };
 const EDIT_EMPTY = { name: '', email: '', storeId: '' };

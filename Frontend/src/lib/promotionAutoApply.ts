@@ -45,10 +45,16 @@ export function isWelcomeFirstOrderPromo(promo: {
 }
 
 /** Loyalty campaign Offer 1 (first order) or Offer 2 (follow-up gift/discount). */
-export function isLoyaltyCampaignOffer(promo: {
-  promotionKind?: string | null;
-  code?: string;
-}): boolean {
+export function isLoyaltyCampaignOffer(
+  promo:
+    | {
+        promotionKind?: string | null;
+        code?: string;
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!promo) return false;
   if (isWelcomeFirstOrderPromo(promo)) return true;
   const kind = (promo.promotionKind || '').toUpperCase();
   if (kind === 'LOYALTY_OFFER_2' || kind === 'LOYALTY_OFFER_2_GIFT') return true;

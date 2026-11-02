@@ -120,7 +120,7 @@ Features still lightly or not fully documented at endpoint-detail depth:
 - Deep walkthrough of cash tender / change calculation UI in admin collect-payment
 - Flutter customer/driver diffs since last full inventory (not re-audited end-to-end in this sync)
 
-Still **Not Implemented** (correctly documented as gaps): production SMS/email adapters, admin MFA challenge, password-reset API, frontend unit tests, CI test stage, NGINX/PM2 in repo, several customer-mobile stubs.
+Still **Not Implemented** (correctly documented as gaps): production SMS/email adapters, password-reset API, frontend unit tests, CI test stage, NGINX/PM2 in repo, several customer-mobile stubs. Admin MFA was removed (not an open gap).
 
 ---
 

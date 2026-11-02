@@ -14,6 +14,18 @@ import { resolveProductImageFields, withProductImageUrl } from '../lib/productIm
 import { resolveCategoryIcon } from '../lib/categoryIcons';
 import { sortProductsByMode, sortProductsForDisplay } from '../lib/productSort';
 import { attachRatingAggregates, getProductRatingAggregates, listProductReviews } from '../lib/productRatings';
+import {
+  analyticsCacheKey,
+  invalidateAnalyticsCacheByPrefix,
+  withAnalyticsCache,
+} from '../lib/analyticsResponseCache';
+
+const MENU_CACHE_MS = 15_000;
+
+function invalidateMenuCatalogCache(): void {
+  invalidateAnalyticsCacheByPrefix('menu-products');
+  invalidateAnalyticsCacheByPrefix('menu-categories');
+}
 
 function withProductCostVisibility<T extends { cost?: number }>(
   product: T,
@@ -44,15 +56,21 @@ async function imageUrlsByProductId(ids: string[]): Promise<Map<string, unknown>
 
 export async function getCategories(_req: Request, res: Response, next: NextFunction) {
   try {
-    const categories = await prisma.category.findMany({
-      where: { isActive: true },
-      orderBy: { sortOrder: 'asc' },
-      include: { _count: { select: { products: { where: { isAvailable: true } } } } },
-    });
-    const normalized = categories.map((cat) => ({
-      ...cat,
-      icon: resolveCategoryIcon(cat.slug, cat.icon),
-    }));
+    const normalized = await withAnalyticsCache(
+      'menu-categories',
+      async () => {
+        const categories = await prisma.category.findMany({
+          where: { isActive: true },
+          orderBy: { sortOrder: 'asc' },
+          include: { _count: { select: { products: { where: { isAvailable: true } } } } },
+        });
+        return categories.map((cat) => ({
+          ...cat,
+          icon: resolveCategoryIcon(cat.slug, cat.icon),
+        }));
+      },
+      60_000,
+    );
     return success(res, normalized);
   } catch (err) { next(err); }
 }
@@ -207,14 +225,15 @@ function resolveStoreProductRow(
   };
 }
 
-export async function getProducts(req: Request, res: Response, next: NextFunction) {
-  try {
-    const { category, search, tag, available, all, storeId, sort } = productsQuerySchema.parse(req.query);
-    const trimmedSearch = search?.trim();
-    const sortMode = sort ?? 'name_asc';
-    const includeCost = shouldIncludeProductCost(req);
+async function loadMenuProducts(
+  query: z.infer<typeof productsQuerySchema>,
+  includeCost: boolean,
+) {
+  const { category, search, tag, available, all, storeId, sort } = query;
+  const trimmedSearch = search?.trim();
+  const sortMode = sort ?? 'name_asc';
 
-    let products = await prisma.product.findMany({
+  let products = await prisma.product.findMany({
       where: {
         ...(all
           ? {}
@@ -235,6 +254,7 @@ export async function getProducts(req: Request, res: Response, next: NextFunctio
         category: { select: { id: true, name: true, slug: true } },
         toppings: { include: { topping: true } },
         storeProducts: {
+          ...(storeId ? { where: { storeId } } : {}),
           select: {
             storeId: true,
             isAvailable: true,
@@ -249,9 +269,12 @@ export async function getProducts(req: Request, res: Response, next: NextFunctio
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
 
-    const aggregates = await getProductRatingAggregates(products.map((p) => p.id));
+    const productIds = products.map((p) => p.id);
+    const [aggregates, imageUrlMap] = await Promise.all([
+      getProductRatingAggregates(productIds),
+      imageUrlsByProductId(productIds),
+    ]);
     products = sortProductsByMode(attachRatingAggregates(products, aggregates), sortMode);
-    const imageUrlMap = await imageUrlsByProductId(products.map((p) => p.id));
 
     if (!storeId) {
       const withImages = products.map((p) => withProductCostVisibility(withProductImageUrl({
@@ -259,20 +282,24 @@ export async function getProducts(req: Request, res: Response, next: NextFunctio
         imageUrls: imageUrlMap.get(p.id),
         storeProducts: enrichStoreProducts(p.storeProducts),
       }), includeCost));
-      return success(res, withImages);
+      return withImages;
     }
 
-    const selectedStore = await prisma.store.findFirst({
-      where: { id: storeId, isActive: true },
-    });
-    if (!selectedStore) throw new AppError('Selected store not found', 404);
-
-    let storeProductRows: StoreProductRow[] = [];
-    try {
-      storeProductRows = await prisma.storeProduct.findMany({
+    const [
+      selectedStore,
+      storeProductRows,
+      batchMetaByProduct,
+      reservedByProduct,
+      frozenRows,
+      flagDeactivatedIds,
+    ] = await Promise.all([
+      prisma.store.findFirst({
+        where: { id: storeId, isActive: true },
+      }),
+      prisma.storeProduct.findMany({
         where: {
-          storeId: selectedStore.id,
-          productId: { in: products.map((p) => p.id) },
+          storeId,
+          productId: { in: productIds },
         },
         select: {
           storeId: true,
@@ -285,35 +312,24 @@ export async function getProducts(req: Request, res: Response, next: NextFunctio
           lowStockThreshold: true,
           onlineOutOfStockThreshold: true,
         },
-      });
-    } catch {
-      storeProductRows = [];
-    }
+      }).catch(() => [] as StoreProductRow[]),
+      loadBatchMetaByProduct(storeId, productIds),
+      getActiveReservedQuantityBatch(storeId, productIds).catch(() => new Map<string, number>()),
+      prisma.stockBatch.groupBy({
+        by: ['productId'],
+        where: { storeId, status: 'FROZEN' },
+      }),
+      getBranchDeactivatedProductIds(storeId, productIds),
+    ]);
+    if (!selectedStore) throw new AppError('Selected store not found', 404);
 
-    const rowByProductStore = new Map(storeProductRows.map((r) => [`${r.productId}:${r.storeId}`, r]));
-    const batchMetaByProduct = await loadBatchMetaByProduct(
-      selectedStore.id,
-      products.map((p) => p.id),
-    );
-    let reservedByProduct = new Map<string, number>();
-    try {
-      reservedByProduct = await getActiveReservedQuantityBatch(
-        selectedStore.id,
-        products.map((p) => p.id),
-      );
-    } catch {
-      reservedByProduct = new Map();
+    // Build the map with .set() — `new Map(rows.map(...))` fails tsc when
+    // Promise.all+.catch widens storeProductRows to any[] (tuple vs any[]).
+    const rowByProductStore = new Map<string, StoreProductRow>();
+    for (const r of storeProductRows as StoreProductRow[]) {
+      rowByProductStore.set(`${r.productId}:${r.storeId}`, r);
     }
-
-    const frozenRows = await prisma.stockBatch.groupBy({
-      by: ['productId'],
-      where: { storeId: selectedStore.id, status: 'FROZEN' },
-    });
     const branchDeactivatedIds = new Set(frozenRows.map((row) => row.productId));
-    const flagDeactivatedIds = await getBranchDeactivatedProductIds(
-      selectedStore.id,
-      products.map((p) => p.id),
-    );
     for (const productId of flagDeactivatedIds) {
       branchDeactivatedIds.add(productId);
     }
@@ -347,7 +363,29 @@ export async function getProducts(req: Request, res: Response, next: NextFunctio
       }), includeCost);
     });
 
-    return success(res, enriched);
+    return enriched;
+}
+
+export async function getProducts(req: Request, res: Response, next: NextFunction) {
+  try {
+    const query = productsQuerySchema.parse(req.query);
+    const includeCost = shouldIncludeProductCost(req);
+    const data = await withAnalyticsCache(
+      analyticsCacheKey([
+        'menu-products',
+        query.category,
+        query.search?.trim(),
+        query.tag,
+        query.available == null ? '' : String(query.available),
+        query.all == null ? '' : String(query.all),
+        query.storeId,
+        query.sort ?? 'name_asc',
+        includeCost ? 'cost' : 'public',
+      ]),
+      () => loadMenuProducts(query, includeCost),
+      MENU_CACHE_MS,
+    );
+    return success(res, data);
   } catch (err) { next(err); }
 }
 
@@ -578,6 +616,7 @@ export async function createProduct(req: Request, res: Response, next: NextFunct
       productName: product.name,
     }).catch(() => undefined);
 
+    invalidateMenuCatalogCache();
     return success(res, withProductImageUrl({ ...product, ...images }), 201);
   } catch (err) { next(err); }
 }
@@ -618,6 +657,7 @@ export async function updateProduct(req: Request, res: Response, next: NextFunct
       }).catch(() => undefined);
     }
 
+    invalidateMenuCatalogCache();
     return success(res, withProductImageUrl({ ...product, ...(images ?? {}) }));
   } catch (err) { next(err); }
 }
@@ -625,6 +665,7 @@ export async function updateProduct(req: Request, res: Response, next: NextFunct
 export async function deleteProduct(req: Request, res: Response, next: NextFunction) {
   try {
     await prisma.product.update({ where: { id: req.params.id as string }, data: { isAvailable: false } });
+    invalidateMenuCatalogCache();
     return success(res, { message: 'Product deactivated' });
   } catch (err) { next(err); }
 }
@@ -706,6 +747,7 @@ export async function bulkAssignToppings(req: Request, res: Response, next: Next
       }
     }
 
+    invalidateMenuCatalogCache();
     return success(res, { message: `Assigned addons to ${productIds.length} product(s)` });
   } catch (err) { next(err); }
 }
@@ -716,6 +758,7 @@ export async function createCategory(req: Request, res: Response, next: NextFunc
     const data = z.object({ name: z.string(), icon: z.string().optional(), sortOrder: z.number().int().optional() }).parse(req.body);
     const slug = data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const cat = await prisma.category.create({ data: { name: data.name, slug, icon: data.icon, sortOrder: data.sortOrder ?? 0 } });
+    invalidateMenuCatalogCache();
     return success(res, cat, 201);
   } catch (err) { next(err); }
 }
@@ -724,6 +767,7 @@ export async function updateCategory(req: Request, res: Response, next: NextFunc
   try {
     const data = z.object({ name: z.string().optional(), icon: z.string().optional(), sortOrder: z.number().int().optional(), isActive: z.boolean().optional() }).parse(req.body);
     const cat = await prisma.category.update({ where: { id: req.params.id as string }, data });
+    invalidateMenuCatalogCache();
     return success(res, cat);
   } catch (err) { next(err); }
 }

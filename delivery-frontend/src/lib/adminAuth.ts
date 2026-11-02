@@ -47,7 +47,8 @@ export function isBranchScoped(admin: AdminSession | null): boolean {
 /** Branch/cashier store can accept delivery orders. HQ roles always return true. */
 export function storeSupportsDelivery(admin: AdminSession | null): boolean {
   if (!isBranchScoped(admin)) return true;
-  return admin?.deliveryEnabled === true;
+  if (admin?.deliveryEnabled === false) return false;
+  return true;
 }
 
 /** Pickup-only branch portal — hide delivery nav, tabs, and KPIs. */

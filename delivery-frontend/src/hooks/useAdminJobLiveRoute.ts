@@ -1,10 +1,10 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
+import { adminApiFetch } from '@/lib/adminApi';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { getApiBaseUrl, getSocketUrl } from '@/lib/apiBase';
+import { getSocketUrl } from '@/lib/apiBase';
 import { getAdminSession } from '@/lib/adminAuth';
 
 export type AdminJobDriverPosition = {
@@ -66,14 +66,10 @@ function normalizeDriverPosition(
 }
 
 async function fetchLiveRoute(jobId: string, storeId: string): Promise<AdminJobLiveRouteData> {
-    const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  const res = await fetch(
-    `${getApiBaseUrl()}/admin/delivery-jobs/${encodeURIComponent(jobId)}/live-route${qs}`,
-    { headers: adminAuthHeaders(), credentials: 'include' },
+  const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
+  const data = await adminApiFetch<LiveRouteApiResponse>(
+    `/admin/delivery-jobs/${encodeURIComponent(jobId)}/live-route${qs}`,
   );
-  const json = await res.json();
-  if (!json.success) throw new Error(json.message || 'Failed to load live route');
-  const data = json.data as LiveRouteApiResponse;
   return {
     path: data.path ?? [],
     driverPosition: normalizeDriverPosition(data.driverPosition),
