@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="BingChun Driver USB Local" type="FlutterRunConfigurationType" factoryName="Flutter">
+    <option name="filePath" value="$PROJECT_DIR$/lib/main.dart" />
+    <option name="additionalArgs" value="-d 11220373CL038764" />
+    <option name="buildMode" value="debug" />
+    <method v="2" />
+  </configuration>
+</component>

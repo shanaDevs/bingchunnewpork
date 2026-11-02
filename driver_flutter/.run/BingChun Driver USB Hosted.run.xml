@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="BingChun Driver USB Hosted" type="FlutterRunConfigurationType" factoryName="Flutter">
+    <option name="filePath" value="$PROJECT_DIR$/lib/main.dart" />
+    <option name="additionalArgs" value="--dart-define=CORE_API_BASE_URL=https://bingchunsrilanka.com/api --dart-define=DELIVERY_API_BASE_URL=https://bing-chun-delivery.bc.dartcodes.com/delivery-api -d 11220373CL038764" />
+    <option name="buildMode" value="debug" />
+    <method v="2" />
+  </configuration>
+</component>
