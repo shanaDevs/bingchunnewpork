@@ -2,7 +2,6 @@ import crypto from 'crypto';
 import { prisma } from './prisma';
 import { AppError } from '../middleware/errorHandler';
 import {
-  getOrCreateWallet,
   getWalletSummary,
   type PeriodBreakdown,
 } from './walletService';
@@ -341,7 +340,13 @@ async function validatePayoutRequest(
   periodDays: PayoutPeriodDays,
   isAdvance: boolean,
   periodBounds?: PayoutPeriodBounds | null,
-): Promise<{ fromStr: string; toStr: string; breakdown: StoredWithdrawalBreakdown }> {
+): Promise<{
+  fromStr: string;
+  toStr: string;
+  breakdown: StoredWithdrawalBreakdown;
+  netTransferableEarnings: number;
+  totalWithdrawn: number;
+}> {
   if (amount <= 0) throw new AppError('Withdrawal amount must be greater than zero', 400);
 
   if (!isValidPayoutPeriodDays(periodDays)) {
@@ -378,6 +383,8 @@ async function validatePayoutRequest(
     breakdown: await buildStoredWithdrawalBreakdown(periodWithDiscountReport, channelPreview.breakdown, {
       branchRequestAmountCents: amount,
     }),
+    netTransferableEarnings: summary.netTransferableEarnings,
+    totalWithdrawn: summary.totalWithdrawn,
   };
 }
 
@@ -405,20 +412,18 @@ export async function initiateAndApproveWithdrawal(
   isAdvance = false,
   extras?: ApproveWithdrawalExtras,
 ): Promise<StoreWithdrawal> {
-  const { fromStr, toStr, breakdown } = await validatePayoutRequest(
-    storeId,
-    amount,
-    periodDays,
-    isAdvance,
-    extras?.periodBounds ?? null,
-  );
+  const { fromStr, toStr, breakdown, netTransferableEarnings, totalWithdrawn } =
+    await validatePayoutRequest(
+      storeId,
+      amount,
+      periodDays,
+      isAdvance,
+      extras?.periodBounds ?? null,
+    );
   const periodFrom = new Date(`${fromStr}T00:00:00.000Z`);
   const periodTo = new Date(`${toStr}T23:59:59.999Z`);
 
-  const wallet = await getOrCreateWallet(storeId);
-  const summary = await getWalletSummary(storeId);
-  const remainingNet = summary.netTransferableEarnings - summary.totalWithdrawn;
-
+  const remainingNet = netTransferableEarnings - totalWithdrawn;
   if (remainingNet < amount) {
     throw new AppError('Insufficient net transferable balance to approve this payout', 400);
   }
@@ -432,16 +437,18 @@ export async function initiateAndApproveWithdrawal(
   const withdrawalId = crypto.randomUUID();
   const txnId = crypto.randomUUID();
   const now = new Date();
-  void wallet;
   const { checkNumber: checkNum, checkDate: checkDt } = resolveCheckPaymentFields(paymentMethod, extras);
+  const precomputedNet = netTransferableEarnings;
 
   await ensurePlatformEarningsSchema();
 
+  // Do NOT call getWalletSummary inside the interactive txn — it uses the global
+  // prisma client, holds FOR UPDATE while recomputing lifetime nets, and routinely
+  // blows past the App Platform / Next proxy gateway (~60s → 504).
   const approvedWithdrawal = await prisma.$transaction(async (tx) => {
     const locked = await lockStoreWallet(tx, storeId);
-    const freshSummary = await getWalletSummary(storeId);
     const lockedWithdrawn = Number(locked.totalWithdrawn.toFixed(0));
-    if (freshSummary.netTransferableEarnings - lockedWithdrawn < amount) {
+    if (precomputedNet - lockedWithdrawn < amount) {
       throw new AppError('Insufficient net transferable balance to approve this payout', 400);
     }
     const afterDebit = walletDataAfterDebit(locked, amount);
@@ -610,7 +617,6 @@ export async function approveWithdrawal(
 
   await assertLivePeriodNetCoversWithdrawal(withdrawal);
 
-  const wallet = await getOrCreateWallet(withdrawal.storeId);
   const summary = await getWalletSummary(withdrawal.storeId);
   const remainingNet = summary.netTransferableEarnings - summary.totalWithdrawn;
 
@@ -623,13 +629,14 @@ export async function approveWithdrawal(
   const jasonNet = await computeJasonNetBalance();
   assertJasonBalanceCoversContribution(jasonNet, sppcJasonCents);
 
-  void wallet;
   const txnId = crypto.randomUUID();
   const now = new Date();
+  const precomputedNet = summary.netTransferableEarnings;
 
   await ensurePlatformEarningsSchema();
   await ensurePlatformPaybackSchema();
 
+  // Avoid getWalletSummary inside the lock (see initiateAndApproveWithdrawal).
   const approvedWithdrawal = await prisma.$transaction(async (tx) => {
     const lockedWithdrawal = await lockStoreWithdrawal(tx, withdrawalId);
     if (lockedWithdrawal.status !== 'PENDING') {
@@ -637,9 +644,8 @@ export async function approveWithdrawal(
     }
 
     const locked = await lockStoreWallet(tx, withdrawal.storeId);
-    const freshSummary = await getWalletSummary(withdrawal.storeId);
     const lockedWithdrawn = Number(locked.totalWithdrawn.toFixed(0));
-    if (freshSummary.netTransferableEarnings - lockedWithdrawn < withdrawalCents) {
+    if (precomputedNet - lockedWithdrawn < withdrawalCents) {
       throw new AppError('Insufficient net transferable balance to approve this withdrawal', 400);
     }
 

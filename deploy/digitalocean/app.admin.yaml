@@ -116,10 +116,13 @@ services:
         value: "https://bing-chun-ui2ow.ondigitalocean.app"
       - key: ADMIN_WEB_URL
         scope: RUN_TIME
-        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
+        value: "https://admin.bingchunsrilanka.com"
       - key: POS_WEB_URL
         scope: RUN_TIME
         value: "https://bingchun-pos-i8pq3.ondigitalocean.app"
+      - key: CORS_EXTRA_ORIGINS
+        scope: RUN_TIME
+        value: "https://admin.bingchunsrilanka.com,https://delivery.bingchunsrilanka.com,https://bingchunsrilanka.com,https://bingchun-admin-a4ndy.ondigitalocean.app,https://bingchun-delivery-6mgs2.ondigitalocean.app,https://bingchun-pos-i8pq3.ondigitalocean.app,https://bing-chun-ui2ow.ondigitalocean.app"
   - name: admin-web
     github:
       repo: Bing-Chung-Dart/bingchun
@@ -145,6 +148,16 @@ services:
       - key: NEXT_PUBLIC_API_URL
         scope: RUN_AND_BUILD_TIME
         value: /api
+      # Same-origin sockets via ingress /socket.io → admin-api (never the starter host — it 302s).
+      - key: NEXT_PUBLIC_SOCKET_URL
+        scope: RUN_AND_BUILD_TIME
+        value: "https://admin.bingchunsrilanka.com"
+      - key: NEXT_PUBLIC_SITE_URL
+        scope: RUN_AND_BUILD_TIME
+        value: "https://admin.bingchunsrilanka.com"
+      - key: ADMIN_WEB_URL
+        scope: RUN_TIME
+        value: "https://admin.bingchunsrilanka.com"
       - key: BACKEND_URL
         scope: RUN_TIME
         value: "${admin-api.PRIVATE_URL}"

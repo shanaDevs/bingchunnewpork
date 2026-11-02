@@ -117,21 +117,31 @@ export function getApiBaseUrl(): string {
   return normalizeUrlPath(configured);
 }
 
+/** Starter DO hosts 302 to the primary custom domain — Engine.IO polling cannot follow redirects. */
+function rewriteStarterAdminOrigin(url: string): string {
+  const cleaned = stripTrailingSlash(url);
+  try {
+    const host = new URL(cleaned).hostname.toLowerCase();
+    if (host === 'bingchun-admin-a4ndy.ondigitalocean.app') {
+      return 'https://admin.bingchunsrilanka.com';
+    }
+  } catch {
+    /* keep */
+  }
+  return cleaned;
+}
+
 /** Socket.io server origin (no /api suffix). Follows API override when set. */
 export function getSocketUrl(): string {
   if (getApiBaseOverride()) {
-    return getBackendOrigin();
+    return rewriteStarterAdminOrigin(getBackendOrigin());
   }
   const configuredSocket = (process.env.NEXT_PUBLIC_SOCKET_URL || '').trim();
   if (configuredSocket) {
-    return stripTrailingSlash(configuredSocket);
+    return rewriteStarterAdminOrigin(configuredSocket);
   }
-  const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
-  // Relative `/api` (local proxy): same-origin sockets. Absolute shop API: shop origin.
-  if (configured.startsWith('/') && typeof window !== 'undefined') {
-    return window.location.origin;
-  }
-  return getBackendOrigin();
+  // Delivery ops sockets live on admin-api (not delivery-web /socket.io).
+  return 'https://admin.bingchunsrilanka.com';
 }
 
 /** @deprecated Use getBackendOrigin() */

@@ -638,16 +638,17 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
     const proofUrl = await requireSettlementProofUpload(req.file, storeId);
     const checkDate = parseSettlementCheckDate(data.paymentMethod, data.checkDate);
 
-    const [wallet, store, netTransferableEarnings] = await Promise.all([
+    const [wallet, store, summary] = await Promise.all([
       getOrCreateWallet(storeId),
       prisma.store.findUnique({
         where: { id: storeId },
         select: { name: true },
       }),
-      computeNetTransferableEarnings(storeId),
+      getWalletSummary(storeId),
     ]);
     const balanceBefore = walletBalanceCents(wallet);
     const totalWithdrawnBefore = walletTotalWithdrawnCents(wallet);
+    const netTransferableEarnings = summary.netTransferableEarnings;
 
     const updated = await withUploadedProofCleanup(proofUrl, () =>
       initiateAndApproveWithdrawal(
@@ -669,6 +670,8 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
       ),
     );
 
+    // Respond first; invoice PDF/Spaces work must not hold the gateway open
+    // (previous path stacked invoice generation after the approve txn → 504).
     const final = await finalizeWithdrawalWithInvoice({
       storeId,
       storeName: store?.name ?? 'Branch',
