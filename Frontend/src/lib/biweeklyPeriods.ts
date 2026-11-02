@@ -76,7 +76,9 @@ export function parsePeriodValue(value: string): { from: string; to: string } | 
 
 export function buildRollingPeriod(from: string, days: number): { from: string; to: string } {
   const to = addDaysToDateStr(from, days - 1);
-  const cappedTo = to <= todayDateStr() ? to : todayDateStr();
+  const today = todayDateStr();
+  // Inclusive end stays open through `to`; only cap when the ideal end is still ahead.
+  const cappedTo = to < today ? to : today;
   return { from, to: cappedTo };
 }
 
