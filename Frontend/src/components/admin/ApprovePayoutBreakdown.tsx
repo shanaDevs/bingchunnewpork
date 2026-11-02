@@ -345,7 +345,12 @@ export default function ApprovePayoutBreakdown({
               <BreakdownRow
                 label="Shared promo platform contribution"
                 value={moneyAmount(sharedPromoPlatformLkr)}
-                valueTone="red"
+                valueTone={showPaybackDetails ? 'red' : 'default'}
+                hint={
+                  !showPaybackDetails
+                    ? 'Not deducted — Platform Discount Payback is not enabled for this branch.'
+                    : undefined
+                }
               />
             )}
             {hasPositiveLkr(loyaltyDeductionLkr) && (

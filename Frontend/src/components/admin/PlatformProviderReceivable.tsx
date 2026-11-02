@@ -25,6 +25,8 @@ type Props = {
   /** Combined refund convenience fallback when split values are unavailable. */
   refundConvenienceFeeLkr?: number;
   gatewayRatePct?: number;
+  /** When false, shared promo platform contribution is not deducted or shown. */
+  paybackEnabled?: boolean;
   className?: string;
 };
 
@@ -50,15 +52,18 @@ function BreakdownRow({
   bold = false,
   valueTone = 'default',
   operator,
+  hint,
 }: {
   label: string;
   value: string;
   bold?: boolean;
   valueTone?: BreakdownTone;
   operator?: '+' | '−';
+  hint?: string;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 text-[13px]">
+    <div className="flex flex-col gap-1">
+      <div className="flex items-start justify-between gap-3 text-[13px]">
       <span
         className={`min-w-0 flex-1 ${bold ? 'font-bold text-[#1e293b] dark:text-slate-100' : 'text-[#64748b] dark:text-slate-400'}`}
       >
@@ -76,6 +81,12 @@ function BreakdownRow({
       >
         {value}
       </span>
+      </div>
+      {hint ? (
+        <p className="text-[10px] font-medium leading-relaxed text-[#64748b] dark:text-slate-400">
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -107,6 +118,25 @@ function buildPreviewInput(props: Props): PlatformProviderReceivableLkrInput {
     rejectedRefundConvenienceFeeLkr: props.rejectedRefundConvenienceFeeLkr,
     refundConvenienceFeeLkr: props.refundConvenienceFeeLkr,
     gatewayRatePct: props.gatewayRatePct ?? 1.9,
+    paybackEnabled: props.paybackEnabled,
+  };
+}
+
+function lockedLkrToInput(
+  locked: PlatformProviderReceivableLkr,
+  paybackEnabled: boolean | undefined,
+  sharedPromoPlatformLkr?: number,
+): PlatformProviderReceivableLkrInput {
+  return {
+    commissionFeeLkr: locked.commissionFeeLkr,
+    platformPaybackLkr: locked.platformPaybackLkr,
+    loyaltyDiscountLkr: locked.loyaltyDiscountLkr,
+    sharedPromoPlatformLkr: sharedPromoPlatformLkr ?? locked.sharedPromoPlatformLkr,
+    normalConvenienceFeeLkr: locked.normalConvenienceFeeLkr,
+    completedRefundConvenienceFeeLkr: locked.completedRefundConvenienceFeeLkr,
+    rejectedRefundConvenienceFeeLkr: locked.rejectedRefundConvenienceFeeLkr,
+    gatewayRatePct: locked.gatewayRatePct,
+    paybackEnabled,
   };
 }
 
@@ -122,11 +152,23 @@ export default function PlatformProviderReceivable({
   rejectedRefundConvenienceFeeLkr,
   refundConvenienceFeeLkr,
   gatewayRatePct = 1.9,
+  paybackEnabled,
   className = 'mb-5',
 }: Props) {
-  const breakdown =
-    breakdownLkr ??
-    computePlatformProviderReceivableLkr(
+  const resolvedPaybackEnabled =
+    paybackEnabled ?? (breakdownLkr ? breakdownLkr.platformPaybackLkr > 0.001 : true);
+
+  let breakdown: PlatformProviderReceivableLkr;
+  if (breakdownLkr) {
+    if (paybackEnabled != null) {
+      breakdown = computePlatformProviderReceivableLkr(
+        lockedLkrToInput(breakdownLkr, paybackEnabled, sharedPromoPlatformLkr),
+      );
+    } else {
+      breakdown = breakdownLkr;
+    }
+  } else {
+    breakdown = computePlatformProviderReceivableLkr(
       buildPreviewInput({
         commissionFeeLkr,
         platformPaybackLkr,
@@ -138,9 +180,12 @@ export default function PlatformProviderReceivable({
         rejectedRefundConvenienceFeeLkr,
         refundConvenienceFeeLkr,
         gatewayRatePct,
+        paybackEnabled: resolvedPaybackEnabled,
       }),
     );
+  }
   const displayGatewayRatePct = breakdown.gatewayRatePct ?? gatewayRatePct;
+  const sppcNotDeducted = !resolvedPaybackEnabled && breakdown.sharedPromoPlatformLkr > 0.001;
 
   return (
     <div className={`platform-provider-receivable space-y-4 ${className}`}>
@@ -172,8 +217,13 @@ export default function PlatformProviderReceivable({
           <BreakdownRow
             label="Shared promo platform contribution"
             value={finalLkr(breakdown.sharedPromoPlatformLkr)}
-            valueTone="red"
-            operator="−"
+            valueTone={sppcNotDeducted ? 'default' : 'red'}
+            operator={sppcNotDeducted ? undefined : '−'}
+            hint={
+              sppcNotDeducted
+                ? 'Not deducted — Platform Discount Payback is disabled for this branch.'
+                : undefined
+            }
           />
           <div className="border-t border-[#e2e8f0] pt-3 dark:border-slate-700">
             <BreakdownRow

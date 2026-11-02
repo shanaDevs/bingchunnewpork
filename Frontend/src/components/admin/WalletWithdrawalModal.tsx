@@ -8,6 +8,7 @@ import { CalendarRange, Loader2, X, Settings, Check } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AdminPinGateModal from '@/components/admin/AdminPinGateModal';
 import ChannelSalesTable from '@/components/admin/ChannelSalesTable';
+import { resolveSlabRatePctFromPreview } from '@/components/admin/commissionUtils';
 import {
   resolveBranchPayoutDisplay,
   resolvePayableWalletLkrForPayout,
@@ -326,7 +327,7 @@ export default function WalletWithdrawalModal({
       }
 
       let cancelled = false;
-      setViewSnapshotLoading(true);
+      setViewSnapshotLoading(false);
       void fetchNetPreviewMergedSharedPromoBreakdown(
         apiBase,
         parsed,
@@ -353,7 +354,7 @@ export default function WalletWithdrawalModal({
       }
 
       let cancelled = false;
-      setViewSnapshotLoading(true);
+      setViewSnapshotLoading(parsed == null);
       const qs = new URLSearchParams({ from, to });
       const resolvedStoreId = viewWithdrawal.storeId ?? storeId;
       if (resolvedStoreId) qs.set('storeId', resolvedStoreId);
@@ -414,7 +415,7 @@ export default function WalletWithdrawalModal({
     }
 
     let cancelled = false;
-    setViewSnapshotLoading(true);
+    setViewSnapshotLoading(!hasFullSnapshot);
     const qs = viewWithdrawal.storeId
       ? `?storeId=${encodeURIComponent(viewWithdrawal.storeId)}`
       : '';
@@ -434,23 +435,26 @@ export default function WalletWithdrawalModal({
         const periodFrom = toDateInputValue(fresh.periodFrom);
         const periodTo = toDateInputValue(fresh.periodTo);
         if (parsedFresh && periodFrom && periodTo) {
-          const merged = await fetchNetPreviewMergedSharedPromoBreakdown(
-            apiBase,
-            parsedFresh,
-            periodFrom,
-            periodTo,
-            fresh.storeId ?? storeId,
-          );
-          if (!cancelled) setBreakdown(merged);
-          if (!cancelled && !parsedFresh.channelBreakdown) {
-            const preview = await fetchChannelPreviewFromNetPreview(
+          const needsChannelPreview = !parsedFresh.channelBreakdown;
+          const [merged, preview] = await Promise.all([
+            fetchNetPreviewMergedSharedPromoBreakdown(
               apiBase,
+              parsedFresh,
               periodFrom,
               periodTo,
               fresh.storeId ?? storeId,
-            );
-            if (!cancelled && preview) setChannelPreview(preview);
-          }
+            ),
+            needsChannelPreview
+              ? fetchChannelPreviewFromNetPreview(
+                  apiBase,
+                  periodFrom,
+                  periodTo,
+                  fresh.storeId ?? storeId,
+                )
+              : Promise.resolve(null),
+          ]);
+          if (!cancelled) setBreakdown(merged);
+          if (!cancelled && preview) setChannelPreview(preview);
         }
       })
       .catch(async () => {
@@ -657,10 +661,7 @@ export default function WalletWithdrawalModal({
     selectedPeriodOption && periodIncomplete
       ? addDaysToDateStr(selectedPeriodOption.from, selectedPeriodOption.days - 1)
       : null;
-  const slabRatePct =
-    channelPreview && channelPreview.slabInfo.effectiveRate > 0
-      ? Math.round(channelPreview.slabInfo.effectiveRate * 1000) / 10
-      : null;
+  const slabRatePct = resolveSlabRatePctFromPreview(channelPreview);
   const periodLabel = dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : null;
   const withdrawalAmountCents =
     isViewMode && activeViewWithdrawal
@@ -715,10 +716,13 @@ export default function WalletWithdrawalModal({
     channelPreview?.breakdown ?? breakdown?.channelBreakdown ?? null;
   const showChannelSalesTable =
     !netLoading &&
-    !viewSnapshotLoading &&
+    (!viewSnapshotLoading || channelTableBreakdown != null) &&
     rangeReady &&
     channelTableBreakdown != null &&
     channelBreakdownHasSalesActivity(channelTableBreakdown);
+  const showBreakdownLoadingPlaceholder =
+    (netLoading || viewSnapshotLoading) && !breakdownLkr;
+
   const payoutBreakdownPanelProps = breakdownLkr
     ? {
         preview: isViewMode ? null : channelPreview,
@@ -982,7 +986,7 @@ export default function WalletWithdrawalModal({
               </div>
               )}
 
-              {(netLoading || viewSnapshotLoading) && (
+              {showBreakdownLoadingPlaceholder && (
                 <div className="mb-6 flex items-center justify-center gap-2 py-8 text-sm text-[var(--color-text-muted)]">
                   <Loader2 size={20} className="animate-spin" />
                   Calculating breakdown…
@@ -993,10 +997,7 @@ export default function WalletWithdrawalModal({
                 <ChannelSalesTable breakdown={channelTableBreakdown} className="mb-4" />
               )}
 
-              {!netLoading &&
-                !viewSnapshotLoading &&
-                payoutBreakdownPanelProps &&
-                (isViewMode || rangeReady) && (
+              {payoutBreakdownPanelProps && (isViewMode || rangeReady) && (
                   <PayoutBreakdownPanel {...payoutBreakdownPanelProps} className="mb-4" />
                 )}
 

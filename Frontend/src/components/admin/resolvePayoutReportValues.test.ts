@@ -42,8 +42,8 @@ describe('resolvePayoutReportValues platform discount deduction', () => {
       },
     });
 
-    expect(values?.platformDiscountsReportLkr).toBe(257);
-    expect(values?.netPlatformAmountLkr).toBe(38.43);
+    expect(values?.platformDiscountsReportLkr).toBe(103);
+    expect(values?.netPlatformAmountLkr).toBe(192.43);
   });
 
   it('does not inflate branch net when snapshot already includes platform-owned adjustment', () => {
@@ -72,6 +72,6 @@ describe('resolvePayoutReportValues platform discount deduction', () => {
     });
 
     expect(values?.branchNetPayoutLkr).toBe(4270.22);
-    expect(values?.netPlatformAmountLkr).toBe(38.43);
+    expect(values?.netPlatformAmountLkr).toBe(192.43);
   });
 });

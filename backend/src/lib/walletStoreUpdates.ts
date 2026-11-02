@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { AppError } from '../middleware/errorHandler';
 import { centsToDecimal, parseDecimalFromDb } from './moneyDecimal';
 
 export type LockedStoreWallet = {
@@ -14,6 +15,22 @@ export function parseLockedStoreWallet(row: {
     balance: parseDecimalFromDb(row.balance),
     totalWithdrawn: parseDecimalFromDb(row.totalWithdrawn),
   };
+}
+
+/** Row-lock a branch wallet. Must run inside the caller's transaction. */
+export async function lockStoreWallet(
+  tx: Prisma.TransactionClient,
+  storeId: string,
+): Promise<LockedStoreWallet> {
+  const rows = await tx.$queryRaw<Array<{ balance: unknown; totalWithdrawn: unknown }>>`
+    SELECT "balance", "totalWithdrawn"
+    FROM "store_wallets"
+    WHERE "storeId" = ${storeId}
+    FOR UPDATE
+  `;
+  const row = rows[0];
+  if (!row) throw new AppError('Wallet not found', 404);
+  return parseLockedStoreWallet(row);
 }
 
 export function walletDataAfterDebit(

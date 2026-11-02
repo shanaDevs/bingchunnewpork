@@ -13,6 +13,7 @@ import {
   platformItemSalesLkr,
 } from './walletRevenue';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
+import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import {
   computeBreakdownForPeriod,
   computeNetTransferableEarnings,
@@ -608,9 +609,11 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
       select: { platformDiscountPaybackEnabled: true },
     });
 
-  const [breakdown, channelPreview, storeRow, sharedPromo, promoOwnership] = await Promise.all([
+  const [breakdown, channelPreview, orderAvailable, storeRow, sharedPromo, promoOwnership] =
+    await Promise.all([
     computeBreakdownForPeriod(storeId, from, to),
     buildPeriodChannelPreview(storeId, from, to),
+    computePeriodOrderAvailableCents(storeId, from, to),
     loadStorePaybackFlag().catch(async (err) => {
       const code = (err as { code?: string })?.code;
       if (code !== 'P2022') throw err;
@@ -653,6 +656,9 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
     rejectedRefundGatewayDeductionLkr: breakdown.rejectedRefundGatewayDeduction / 100,
     rejectedRefundNetAmountLkr: breakdown.rejectedRefundNetAmount / 100,
     channelPreview,
+    orderAvailableFromOrdersLkr: orderAvailable.fromOrdersCents / 100,
+    orderAvailableRemainingLkr: orderAvailable.remainingCents / 100,
+    orderPayoutReservedLkr: orderAvailable.priorPayoutCents / 100,
     ...finalPayoutFields,
   };
 }

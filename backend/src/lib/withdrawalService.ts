@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { prisma } from './prisma';
 import { AppError } from '../middleware/errorHandler';
 import {
+  getOrCreateWallet,
   getWalletSummary,
   type PeriodBreakdown,
 } from './walletService';
@@ -9,6 +10,7 @@ import { creditPlatformEarning } from './platformEarningsService';
 import { ensurePlatformEarningsSchema } from './platformEarningsSchema';
 import { ensurePlatformPaybackSchema } from './platformPaybackSchema';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
+import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import {
   computeFinalPayoutAmountCents,
   parseSharedPromoFromBreakdown,
@@ -29,9 +31,8 @@ import type {
 import { centsToDecimal } from './moneyDecimal';
 import { withdrawalAmountCents } from './walletApiMoney';
 import {
-  parseLockedStoreWallet,
+  lockStoreWallet,
   walletDataAfterDebit,
-  type LockedStoreWallet,
 } from './walletStoreUpdates';
 import { toUtcDateStr, todayUtcDateStr } from './utcDateString';
 import {
@@ -65,19 +66,6 @@ export {
   getPayoutPeriodEndDate,
   getNextPayoutStartDate,
 } from './withdrawalPayoutPeriod';
-
-/** Serialize payouts for one branch. Must run inside the caller's transaction. */
-async function lockStoreWallet(tx: Prisma.TransactionClient, storeId: string): Promise<LockedStoreWallet> {
-  const rows = await tx.$queryRaw<Array<{ balance: unknown; totalWithdrawn: unknown }>>`
-    SELECT "balance", "totalWithdrawn"
-    FROM "store_wallets"
-    WHERE "storeId" = ${storeId}
-    FOR UPDATE
-  `;
-  const row = rows[0];
-  if (!row) throw new AppError('Wallet not found', 404);
-  return parseLockedStoreWallet(row);
-}
 
 type LockedStoreWithdrawal = {
   id: string;
@@ -340,29 +328,22 @@ async function validatePayoutRequest(
   periodDays: PayoutPeriodDays,
   isAdvance: boolean,
   periodBounds?: PayoutPeriodBounds | null,
-): Promise<{
-  fromStr: string;
-  toStr: string;
-  breakdown: StoredWithdrawalBreakdown;
-  netTransferableEarnings: number;
-  totalWithdrawn: number;
-}> {
+): Promise<{ fromStr: string; toStr: string; breakdown: StoredWithdrawalBreakdown }> {
   if (amount <= 0) throw new AppError('Withdrawal amount must be greater than zero', 400);
 
   if (!isValidPayoutPeriodDays(periodDays)) {
     throw new AppError(`Invalid payout period. Choose one of: ${PAYOUT_PERIOD_DAYS.join(', ')} days`, 400);
   }
 
-  const summary = await getWalletSummary(storeId);
+  const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
 
-  if (amount > summary.availableBalance) {
+  const orderAvailable = await computePeriodOrderAvailableCents(storeId, fromStr, toStr);
+  if (amount > orderAvailable.remainingCents) {
     throw new AppError(
-      `Insufficient available balance. Available: LKR ${(summary.availableBalance / 100).toFixed(2)}`,
+      `Insufficient available balance. Available: LKR ${(orderAvailable.remainingCents / 100).toFixed(2)}`,
       400,
     );
   }
-
-  const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
 
   const [periodWithDiscountReport, channelPreview] = await Promise.all([
     computePeriodBreakdownForPayout(storeId, fromStr, toStr),
@@ -370,7 +351,8 @@ async function validatePayoutRequest(
   ]);
   const periodNet = periodWithDiscountReport.netAmount;
 
-  if (!isAdvance && amount > periodNet) {
+  const PAYOUT_AMOUNT_TOLERANCE_CENTS = 1;
+  if (!isAdvance && amount > periodNet + PAYOUT_AMOUNT_TOLERANCE_CENTS) {
     throw new AppError(
       `Amount exceeds net for the selected period (LKR ${(periodNet / 100).toFixed(2)}). Enable "custom amount" to request an advance.`,
       400,
@@ -383,8 +365,6 @@ async function validatePayoutRequest(
     breakdown: await buildStoredWithdrawalBreakdown(periodWithDiscountReport, channelPreview.breakdown, {
       branchRequestAmountCents: amount,
     }),
-    netTransferableEarnings: summary.netTransferableEarnings,
-    totalWithdrawn: summary.totalWithdrawn,
   };
 }
 
@@ -412,20 +392,24 @@ export async function initiateAndApproveWithdrawal(
   isAdvance = false,
   extras?: ApproveWithdrawalExtras,
 ): Promise<StoreWithdrawal> {
-  const { fromStr, toStr, breakdown, netTransferableEarnings, totalWithdrawn } =
-    await validatePayoutRequest(
-      storeId,
-      amount,
-      periodDays,
-      isAdvance,
-      extras?.periodBounds ?? null,
-    );
+  const { fromStr, toStr, breakdown } = await validatePayoutRequest(
+    storeId,
+    amount,
+    periodDays,
+    isAdvance,
+    extras?.periodBounds ?? null,
+  );
   const periodFrom = new Date(`${fromStr}T00:00:00.000Z`);
   const periodTo = new Date(`${toStr}T23:59:59.999Z`);
 
-  const remainingNet = netTransferableEarnings - totalWithdrawn;
-  if (remainingNet < amount) {
-    throw new AppError('Insufficient net transferable balance to approve this payout', 400);
+  const wallet = await getOrCreateWallet(storeId);
+
+  const orderAvailable = await computePeriodOrderAvailableCents(storeId, fromStr, toStr);
+  if (amount > orderAvailable.remainingCents) {
+    throw new AppError(
+      `Insufficient available balance. Available: LKR ${(orderAvailable.remainingCents / 100).toFixed(2)}`,
+      400,
+    );
   }
 
   const sppc = parseSharedPromoFromBreakdown(breakdown);
@@ -437,19 +421,21 @@ export async function initiateAndApproveWithdrawal(
   const withdrawalId = crypto.randomUUID();
   const txnId = crypto.randomUUID();
   const now = new Date();
+  void wallet;
   const { checkNumber: checkNum, checkDate: checkDt } = resolveCheckPaymentFields(paymentMethod, extras);
-  const precomputedNet = netTransferableEarnings;
 
   await ensurePlatformEarningsSchema();
 
-  // Do NOT call getWalletSummary inside the interactive txn — it uses the global
-  // prisma client, holds FOR UPDATE while recomputing lifetime nets, and routinely
-  // blows past the App Platform / Next proxy gateway (~60s → 504).
+  // Reuse the pre-txn availability check inside the lock — do not recompute
+  // period nets under FOR UPDATE (that path timed out the DO/Cloudflare gateway).
+  const availableCents = orderAvailable.remainingCents;
   const approvedWithdrawal = await prisma.$transaction(async (tx) => {
     const locked = await lockStoreWallet(tx, storeId);
-    const lockedWithdrawn = Number(locked.totalWithdrawn.toFixed(0));
-    if (precomputedNet - lockedWithdrawn < amount) {
-      throw new AppError('Insufficient net transferable balance to approve this payout', 400);
+    if (amount > availableCents) {
+      throw new AppError(
+        `Insufficient available balance. Available: LKR ${(availableCents / 100).toFixed(2)}`,
+        400,
+      );
     }
     const afterDebit = walletDataAfterDebit(locked, amount);
     const lockedBalance = Number(afterDebit.balance.toFixed(0));
@@ -617,6 +603,7 @@ export async function approveWithdrawal(
 
   await assertLivePeriodNetCoversWithdrawal(withdrawal);
 
+  const wallet = await getOrCreateWallet(withdrawal.storeId);
   const summary = await getWalletSummary(withdrawal.storeId);
   const remainingNet = summary.netTransferableEarnings - summary.totalWithdrawn;
 
@@ -629,6 +616,7 @@ export async function approveWithdrawal(
   const jasonNet = await computeJasonNetBalance();
   assertJasonBalanceCoversContribution(jasonNet, sppcJasonCents);
 
+  void wallet;
   const txnId = crypto.randomUUID();
   const now = new Date();
   const precomputedNet = summary.netTransferableEarnings;
@@ -636,7 +624,7 @@ export async function approveWithdrawal(
   await ensurePlatformEarningsSchema();
   await ensurePlatformPaybackSchema();
 
-  // Avoid getWalletSummary inside the lock (see initiateAndApproveWithdrawal).
+  // Avoid getWalletSummary inside the lock (gateway timeout risk).
   const approvedWithdrawal = await prisma.$transaction(async (tx) => {
     const lockedWithdrawal = await lockStoreWithdrawal(tx, withdrawalId);
     if (lockedWithdrawal.status !== 'PENDING') {
