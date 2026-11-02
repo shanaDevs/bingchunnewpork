@@ -46,7 +46,7 @@ import {
   driverPinLookup,
   hashDriverPin,
 } from '../lib/driverPin';
-import { uploadDriverAsset, viewableLicenseImageUrl } from '../lib/spaces';
+import { uploadDriverAsset, viewableLicenseImageUrl, viewableLicenseImageUrlWithTimeout } from '../lib/spaces';
 import { retryOnceOnDisconnect } from '../utils/prismaErrors';
 import { DriverDutyStatus, DeliveryDomainState, Prisma } from '@prisma/client';
 import { resolveCustomerDisplayName } from '../lib/customerName';
@@ -1130,7 +1130,7 @@ export async function createDeliveryDriver(req: Request, res: Response, next: Ne
       res,
       {
         ...driver,
-        licenseImageUrl: await viewableLicenseImageUrl(driver.licenseImageUrl),
+        licenseImageUrl: await viewableLicenseImageUrlWithTimeout(driver.licenseImageUrl),
         pin: body.pin,
       },
       201,

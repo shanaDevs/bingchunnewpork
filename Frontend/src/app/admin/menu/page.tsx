@@ -35,6 +35,19 @@ interface GalleryImage {
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
+/** Whole-LKR commerce fields — reject fractional input instead of truncating with parseInt. */
+function parseWholeLkr(raw: string, label: string): number {
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(`${label} must be a whole number (LKR)`);
+  }
+  const n = Number(trimmed);
+  if (!Number.isSafeInteger(n) || n < 0) {
+    throw new Error(`Invalid ${label}`);
+  }
+  return n;
+}
+
 function newGalleryId() {
   return `img-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -387,8 +400,8 @@ export default function AdminMenuPage() {
 
       await saveMutation.mutateAsync({
         ...form,
-        basePrice: parseInt(form.basePrice, 10),
-        cost: parseInt(form.cost, 10),
+        basePrice: parseWholeLkr(form.basePrice, 'Base price'),
+        cost: form.cost.trim() === '' ? 0 : parseWholeLkr(form.cost, 'Cost'),
         toppingIds: form.toppingIds,
         imageUrl: imageUrls[0] ?? null,
         imageUrls,
@@ -914,11 +927,15 @@ export default function AdminMenuPage() {
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    saveAddonMutation.mutate({
-                      name: addonForm.name,
-                      extraPrice: parseInt(addonForm.extraPrice),
-                      isAvailable: addonForm.isAvailable,
-                    });
+                    try {
+                      saveAddonMutation.mutate({
+                        name: addonForm.name,
+                        extraPrice: parseWholeLkr(addonForm.extraPrice, 'Extra price'),
+                        isAvailable: addonForm.isAvailable,
+                      });
+                    } catch (err: any) {
+                      toast.error(err.message || 'Invalid price');
+                    }
                   }}
                   className="grid sm:grid-cols-3 gap-4"
                 >

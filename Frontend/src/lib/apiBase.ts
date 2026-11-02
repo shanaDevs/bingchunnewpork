@@ -150,9 +150,9 @@ export function getSocketUrl(): string {
     if (
       host === 'bingchunsrilanka.com'
       || host === 'www.bingchunsrilanka.com'
-      || host === 'bing-chun.bc.dartcodes.com'
+      || host === 'bing-chun-ui2ow.ondigitalocean.app'
     ) {
-      return 'https://bing-chun-shop.bc.dartcodes.com';
+      return window.location.origin;
     }
     return window.location.origin;
   }

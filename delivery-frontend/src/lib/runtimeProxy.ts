@@ -64,15 +64,29 @@ export async function proxyTo(req: NextRequest, origin: string): Promise<Respons
   headers.delete('accept-encoding');
 
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+  const contentType = req.headers.get('content-type') ?? '';
+  // Streamed multipart through Node fetch often stalls upstream (504 on driver register / payout proof).
+  const bufferRequestBody =
+    hasBody &&
+    (contentType.includes('multipart/form-data') || contentType.includes('application/octet-stream'));
+
+  let requestBody: BodyInit | undefined;
+  if (hasBody) {
+    requestBody = bufferRequestBody ? Buffer.from(await req.arrayBuffer()) : req.body;
+  }
 
   let upstream: Response;
   try {
     upstream = await fetch(target, {
       method: req.method,
       headers,
-      body: hasBody ? req.body : undefined,
-      // @ts-expect-error `duplex` is required by Node fetch for streamed request bodies
-      duplex: hasBody ? 'half' : undefined,
+      body: requestBody,
+      ...(bufferRequestBody
+        ? {}
+        : {
+            // @ts-expect-error `duplex` is required by Node fetch for streamed request bodies
+            duplex: hasBody ? 'half' : undefined,
+          }),
       redirect: 'manual',
       cache: 'no-store',
     });
@@ -90,8 +104,14 @@ export async function proxyTo(req: NextRequest, origin: string): Promise<Respons
     if (HOP_BY_HOP.has(k) || k === 'content-encoding' || k === 'set-cookie') return;
     outHeaders.set(key, value);
   });
-  // Preserve every Set-Cookie header (auth cookies) individually.
-  for (const cookie of upstream.headers.getSetCookie()) outHeaders.append('set-cookie', cookie);
+  // Preserve Set-Cookie, but drop Domain so the browser binds cookies to this host
+  // (delivery console → /api proxy → shop). Cross-origin Domain=shop would 401 every call.
+  for (const cookie of upstream.headers.getSetCookie()) {
+    outHeaders.append(
+      'set-cookie',
+      cookie.replace(/;\s*Domain=[^;]*/gi, ''),
+    );
+  }
 
   return new Response(upstream.body, {
     status: upstream.status,

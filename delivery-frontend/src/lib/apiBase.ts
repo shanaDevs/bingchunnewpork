@@ -4,6 +4,41 @@ const LOCAL_API = `${LOCAL_BACKEND}/api`;
 /** localStorage key — set via 5-tap on Staff Login padlock. */
 export const API_BASE_OVERRIDE_KEY = 'bc_api_base_override';
 
+declare global {
+  interface Window {
+    /** Injected from delivery-web layout (ADMIN_WEB_URL) so uploads hit admin-api directly. */
+    __BC_ADMIN_API_BASE__?: string;
+  }
+}
+
+function runtimeInjectedAdminApiBase(): string | null {
+  if (typeof window === 'undefined') return null;
+  const injected = window.__BC_ADMIN_API_BASE__?.trim();
+  if (!injected || !/^https?:\/\//i.test(injected)) return null;
+  return normalizeUrlPath(ensureApiSuffix(injected));
+}
+
+/** True when the API base would same-origin proxy through delivery-web `/api` (bad for multipart). */
+export function usesSameOriginApiProxy(): boolean {
+  if (typeof window === 'undefined') return false;
+  const base = getApiBaseUrl();
+  return base.startsWith(`${window.location.origin}/`);
+}
+
+/**
+ * Drop a Staff Login override that forces same-origin `/api` on the delivery portal.
+ * Returns true when an override was removed.
+ */
+export function clearSameOriginApiOverrideIfNeeded(): boolean {
+  if (typeof window === 'undefined') return false;
+  const override = getApiBaseOverride();
+  if (!override) return false;
+  const normalized = ensureApiSuffix(override);
+  if (!normalized.startsWith(`${window.location.origin}/`)) return false;
+  clearApiBaseOverride();
+  return true;
+}
+
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '');
 }
@@ -96,23 +131,44 @@ export function getBackendOrigin(): string {
 
 /**
  * API base URL (includes /api suffix).
- * Set NEXT_PUBLIC_API_URL in .env — use `/api` in production (proxied via BACKEND_URL).
+ * Production delivery console uses absolute admin API URL
+ * (`https://bingchun-admin-a4ndy.ondigitalocean.app/api`). Local/dev may use `/api` (proxied).
  * Staff Login 5-tap override wins in the browser when set.
  */
 export function getApiBaseUrl(): string {
   const override = getApiBaseOverride();
-  if (override) return ensureApiSuffix(override);
+  if (override) {
+    const fromOverride = ensureApiSuffix(override);
+    const injected = runtimeInjectedAdminApiBase();
+    if (
+      injected &&
+      typeof window !== 'undefined' &&
+      fromOverride.startsWith(`${window.location.origin}/`)
+    ) {
+      return injected;
+    }
+    return fromOverride;
+  }
 
   const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
 
   if (configured.startsWith('/')) {
+    const injected = runtimeInjectedAdminApiBase();
     if (typeof window !== 'undefined') {
+      if (injected) return injected;
       return joinUrl(window.location.origin, configured);
     }
     return joinUrl(getBackendOrigin(), configured);
   }
 
-  return normalizeUrlPath(configured);
+  const absolute = normalizeUrlPath(configured);
+  if (typeof window !== 'undefined') {
+    const injected = runtimeInjectedAdminApiBase();
+    if (injected && absolute.startsWith(`${window.location.origin}/`)) {
+      return injected;
+    }
+  }
+  return absolute;
 }
 
 /** Socket.io server origin (no /api suffix). Follows API override when set. */
@@ -120,13 +176,14 @@ export function getSocketUrl(): string {
   if (getApiBaseOverride()) {
     return getBackendOrigin();
   }
-  if (process.env.NEXT_PUBLIC_SOCKET_URL) {
-    return stripTrailingSlash(process.env.NEXT_PUBLIC_SOCKET_URL);
+  const configuredSocket = (process.env.NEXT_PUBLIC_SOCKET_URL || '').trim();
+  if (configuredSocket) {
+    return stripTrailingSlash(configuredSocket);
   }
   const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
-  // Same-origin `/api` (delivery console on App Platform): admin Socket.IO runs on shop API.
+  // Relative `/api` (local proxy): same-origin sockets. Absolute shop API: shop origin.
   if (configured.startsWith('/') && typeof window !== 'undefined') {
-    return getBackendOrigin();
+    return window.location.origin;
   }
   return getBackendOrigin();
 }

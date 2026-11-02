@@ -108,11 +108,10 @@ Recommendations: expand coverage and add a CI test gate.
 
 1. SMS/email production providers unfinished  
 2. Interim web phone login without OTP  
-3. Admin MFA fields unused  
-4. Customer mobile API default points at a LAN IP unless overridden  
-5. Hardcoded CORS LAN origins in Socket config  
-6. Limited automated regression coverage for wallet/admin paths  
-7. Horizontal scaling of Socket.io requires additional work (Redis adapter Not Implemented)  
+3. Customer mobile API default points at a LAN IP unless overridden  
+4. Hardcoded CORS LAN origins in Socket config  
+5. Limited automated regression coverage for wallet/admin paths  
+6. Horizontal scaling of Socket.io requires additional work (Redis adapter Not Implemented)  
 
 Full list: [18_Known_Issues.md](18_Known_Issues.md).
 
@@ -126,7 +125,6 @@ Full list: [18_Known_Issues.md](18_Known_Issues.md).
 | High | Complete SMS/OTP path for production phone auth |
 | High | Add CI test stage for unit + critical E2E |
 | Medium | Formalize Prisma Migrate; reduce boot DDL |
-| Medium | Wire admin MFA or remove unused fields |
 | Medium | Centralize admin API client; add Next middleware for `/admin` |
 | Low | Clean dead Flutter routes; refresh README accuracy |
 

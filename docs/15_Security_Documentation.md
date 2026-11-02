@@ -8,7 +8,7 @@
 | bcrypt password hashing (cost 12) | Implemented |
 | Auth / OTP rate limiting | Implemented |
 | Soft-delete customers | Implemented |
-| Admin MFA enforcement | Not Implemented |
+| Admin MFA | Removed |
 | Password reset flow | Not Implemented |
 | HttpOnly cookie session primary | Not Implemented |
 | Token storage | localStorage / secure storage on mobile (XSS risk on web) |
@@ -166,7 +166,7 @@ Microservices (`services/payment`, `services/orders`, `services/notification`) m
 | A01 Broken access control | Mitigated by RBAC; verify every new admin route has permission gates; guest order access rules need careful review |
 | A02 Cryptographic failures | JWT defaults; ensure TLS; avoid secrets in frontend |
 | A03 Injection | Prisma parameterized queries; avoid raw SQL except controlled schema/FCM helpers |
-| A04 Insecure design | MFA Not Implemented; SMS/email mock may leak OTP codes in logs/dev responses |
+| A04 Insecure design | SMS/email mock may leak OTP codes in logs/dev responses |
 | A05 Security misconfiguration | Mis-set `FRONTEND_URL` / `LIVE_SHOP_URL`; CI path casing; admin CSP vs shop CSP |
 | A07 Identification failures | No password reset; phone login without OTP on web interim flow |
 | A08 Data integrity | PayHere notify: MD5 verify + `payhere_amount`/LKR must match `order.total`; WebXPay: encrypted charge locked at checkout (`onlineChargeAmount`); wallet credits guarded by `(orderId, type)` unique index; gateway `paymentRef` unique when set; branch payouts: Super Admin **direct initiate** (`POST /admin/wallet/:storeId/initiate-payout`) uses admin PIN + settlement proof + live period net validation + wallet `FOR UPDATE` (not branch-request → super-approve dual control); legacy PENDING branch requests (when `ENABLE_BRANCH_PAYOUT_REQUESTS=true`) use separate approve with requester ≠ approver + live net re-check |
@@ -180,15 +180,14 @@ Microservices (`services/payment`, `services/orders`, `services/notification`) m
 ## 8. Security improvements (recommendations)
 
 1. Rotate and remove hardcoded JWT defaults; fail boot if unset in production
-2. Implement admin MFA using existing schema fields
-3. Wire real SMS/email providers; never return OTP codes in API responses in production
-4. Replace phone-login-without-OTP with OTP-required flow for production
-5. Keep `CORS_EXTRA_ORIGINS` minimal; verify production env origins after each deploy
-6. Centralize admin API client; add Next.js middleware for `/admin` auth redirect
-7. Add CI security scans + automated tests for authz regressions
-8. Fix customer mobile API default to production URL; remove fake Visa seed data
-9. Remove/hide driver demo PIN prefills from release builds
-10. Optional: set `PAYHERE_NOTIFY_IP_ALLOWLIST` or CapRover/nginx IP allowlist for PayHere notify; monitor duplicate notifies
+2. Wire real SMS/email providers; never return OTP codes in API responses in production
+3. Replace phone-login-without-OTP with OTP-required flow for production
+4. Keep `CORS_EXTRA_ORIGINS` minimal; verify production env origins after each deploy
+5. Centralize admin API client; add Next.js middleware for `/admin` auth redirect
+6. Add CI security scans + automated tests for authz regressions
+7. Fix customer mobile API default to production URL; remove fake Visa seed data
+8. Remove/hide driver demo PIN prefills from release builds
+9. Optional: set `PAYHERE_NOTIFY_IP_ALLOWLIST` or CapRover/nginx IP allowlist for PayHere notify; monitor duplicate notifies
 
 ---
 

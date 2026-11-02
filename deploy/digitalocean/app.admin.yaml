@@ -24,9 +24,22 @@ databases:
     cluster_name: bingchun-valkey
 ingress:
   rules:
+    # API + health hit admin-api directly (delivery ops + admin-web avoid Next double-proxy).
     - match:
         path:
           prefix: /socket.io
+      component:
+        name: admin-api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /api
+      component:
+        name: admin-api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /health
       component:
         name: admin-api
         preserve_path_prefix: true
@@ -65,6 +78,10 @@ services:
       - key: RUN_BACKGROUND_JOBS
         scope: RUN_TIME
         value: "false"
+      # Delivery console calls this API cross-origin.
+      - key: ADMIN_COOKIE_SAMESITE
+        scope: RUN_TIME
+        value: "none"
       - key: PRISMA_CONNECTION_LIMIT
         scope: RUN_TIME
         value: "4"
@@ -96,13 +113,35 @@ services:
         type: SECRET
       - key: FRONTEND_URL
         scope: RUN_TIME
-        value: "https://bingchunsrilanka.com"
+        value: "https://bing-chun-ui2ow.ondigitalocean.app"
       - key: ADMIN_WEB_URL
         scope: RUN_TIME
-        value: "https://replace-admin-host.example"
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
       - key: POS_WEB_URL
         scope: RUN_TIME
-        value: "https://replace-cashier-host.example"
+        value: "https://bingchun-pos-i8pq3.ondigitalocean.app"
+      - key: DO_SPACES_KEY
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_SECRET
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_BUCKET
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_REGION
+        scope: RUN_TIME
+        value: "sgp1"
+      - key: DO_SPACES_ENDPOINT
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_PREFIX
+        scope: RUN_TIME
+        value: "bingchun"
   - name: admin-web
     github:
       repo: Bing-Chung-Dart/bingchun

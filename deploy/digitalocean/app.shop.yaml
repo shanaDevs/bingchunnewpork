@@ -24,9 +24,22 @@ databases:
     cluster_name: bingchun-valkey
 ingress:
   rules:
+    # API + health hit shop-api directly (avoids shop-web double-proxy timeouts from delivery).
     - match:
         path:
           prefix: /socket.io
+      component:
+        name: shop-api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /api
+      component:
+        name: shop-api
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /health
       component:
         name: shop-api
         preserve_path_prefix: true
@@ -96,16 +109,20 @@ services:
         type: SECRET
       - key: FRONTEND_URL
         scope: RUN_TIME
-        value: "https://bingchunsrilanka.com"
+        value: "https://bing-chun-ui2ow.ondigitalocean.app"
+      # Delivery ops console calls this API cross-origin; Lax cookies would 401 every request.
+      - key: ADMIN_COOKIE_SAMESITE
+        scope: RUN_TIME
+        value: "none"
       - key: DELIVERY_FRONTEND_URL
         scope: RUN_TIME
         value: "https://bingchun-delivery-6mgs2.ondigitalocean.app"
       - key: ADMIN_WEB_URL
         scope: RUN_TIME
-        value: "https://replace-admin-host.example"
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
       - key: POS_WEB_URL
         scope: RUN_TIME
-        value: "https://replace-cashier-host.example"
+        value: "https://bingchun-pos-i8pq3.ondigitalocean.app"
       - key: DELIVERY_SERVICE_URL
         scope: RUN_TIME
         value: "https://replace-delivery-host.example"
