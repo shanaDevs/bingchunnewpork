@@ -1,6 +1,8 @@
 import { AppError } from '../middleware/errorHandler';
 import { dateStringInColombo, formatDateTime } from './datetime';
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
 const COLOMBO_OFFSET_MS = 330 * 60 * 1000;
 export const MAX_REPORT_DATE_SPAN_DAYS = 92;
 
@@ -39,14 +41,34 @@ export function paidSalesWhere(base: Record<string, unknown>) {
   };
 }
 
+/** Preset dashboard periods use Colombo calendar days — same as the admin orders page date filters. */
 export function periodRange(period: 'today' | 'month' | 'year', now = new Date()) {
+  const todayStr = dateStringInColombo(now);
   if (period === 'today') {
-    return { gte: startOfDay(now), lte: endOfDay(now) };
+    return { gte: startOfDayColombo(todayStr), lte: endOfDayColombo(todayStr) };
   }
   if (period === 'month') {
-    return { gte: new Date(now.getFullYear(), now.getMonth(), 1), lte: now };
+    const [y, m] = todayStr.split('-').map(Number);
+    const startStr = `${y}-${String(m).padStart(2, '0')}-01`;
+    return { gte: startOfDayColombo(startStr), lte: endOfDayColombo(todayStr) };
   }
-  return { gte: new Date(now.getFullYear(), 0, 1), lte: now };
+  const y = todayStr.slice(0, 4);
+  return { gte: startOfDayColombo(`${y}-01-01`), lte: endOfDayColombo(todayStr) };
+}
+
+/** Parse YYYY-MM-DD query params the same way for orders lists and dashboard stats. */
+export function createdAtRangeFromDateStrings(startDate?: string, endDate?: string) {
+  const createdAt: { gte?: Date; lte?: Date } = {};
+  const start = startDate?.trim();
+  const end = endDate?.trim();
+  if (start && DATE_ONLY.test(start)) {
+    createdAt.gte = startOfDayColombo(start);
+  }
+  if (end && DATE_ONLY.test(end)) {
+    createdAt.lte = endOfDayColombo(end);
+  }
+  if (!createdAt.gte && !createdAt.lte) return undefined;
+  return createdAt;
 }
 
 export function monthKey(d: Date) {

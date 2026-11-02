@@ -26,6 +26,7 @@ import { assertOrderStoreAccess, requireBranchStoreId, isBranchScopedRole } from
 import { computeUnitPrice, batchResolveLinePricing } from '../lib/pricing';
 import { getOrderPaymentFailureReason, stampCancelWindowStart, getCancelWindowStartsAt, getCancelWindowStartsAtMap } from '../lib/orderSchema';
 import { resolveDeliveryValidation, DELIVERY_MIN_ORDER } from '../lib/deliveryFee';
+import { createdAtRangeFromDateStrings } from '../lib/dashboardStatsDateRange';
 import { upsertUserDeliveryAddress } from '../lib/userAddresses';
 import { normalizePhone, phoneLookupVariants } from '../utils/phone';
 import {
@@ -36,6 +37,7 @@ import {
   paymentStatusOnOrderStatus,
   fulfillmentQueuePaymentWhere,
   shouldDeductStockOnOrderCreate,
+  shouldCreditWalletOnOrderCreate,
   type FulfillmentQueueKind,
   canAdminEditOrder,
   canAdminAddOrderItems,
@@ -1366,6 +1368,15 @@ export async function placeOrder(req: Request, res: Response, next: NextFunction
         deductLines.push({ productId: giftProductId, quantity: 1 });
       }
       await deductOrderItemsOnce(fulfillingStoreId, deductLines, order.id);
+    }
+
+    if (shouldCreditWalletOnOrderCreate(data.paymentMethod as any)) {
+      creditWalletForOrder(
+        order.id,
+        fulfillingStoreId,
+        order.total,
+        data.paymentMethod,
+      ).catch(() => {});
     }
 
     let orderResponse = order;
@@ -2715,22 +2726,8 @@ export async function getAllOrders(req: Request, res: Response, next: NextFuncti
       }
     }
 
-    const createdAtFilter: { gte?: Date; lte?: Date } = {};
-    if (startDate) {
-      const from = new Date(startDate);
-      if (!Number.isNaN(from.getTime())) {
-        from.setHours(0, 0, 0, 0);
-        createdAtFilter.gte = from;
-      }
-    }
-    if (endDate) {
-      const to = new Date(endDate);
-      if (!Number.isNaN(to.getTime())) {
-        to.setHours(23, 59, 59, 999);
-        createdAtFilter.lte = to;
-      }
-    }
-    if (createdAtFilter.gte || createdAtFilter.lte) {
+    const createdAtFilter = createdAtRangeFromDateStrings(startDate, endDate);
+    if (createdAtFilter) {
       where.createdAt = createdAtFilter;
     }
 

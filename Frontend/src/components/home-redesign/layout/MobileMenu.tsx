@@ -3,9 +3,10 @@
 import { ArrowUpRight, ChevronRight, Clock, MapPin, Phone, UserRound } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { Container } from "@/components/home-redesign/ui/Container";
-import { contactInfo, mainNav } from "@/components/home-redesign/config/site";
+import { contactInfo, isCurrentNav, mainNav } from "@/components/home-redesign/config/site";
 import { usePrefersReducedMotion } from "@/components/home-redesign/hooks/usePrefersReducedMotion";
 import { cn } from "@/components/home-redesign/lib/cn";
 import { gsap, useGSAP } from "@/components/home-redesign/lib/gsap";
@@ -119,6 +120,7 @@ export function MobileMenu({ open, onClose, originRef, renderRow }: MobileMenuPr
   const timeline = useRef<gsap.core.Timeline | null>(null);
   const openRef = useRef(open);
   const reduceMotion = usePrefersReducedMotion();
+  const pathname = usePathname();
   const { accountHref, storeKicker, storeLabel } = useHeaderState();
 
   // The order setup opens once the menu has finished closing, so it isn't hidden behind the modal menu.
@@ -216,8 +218,8 @@ export function MobileMenu({ open, onClose, originRef, renderRow }: MobileMenuPr
 
         <Container as="nav" aria-label="Main" className="relative mt-2 sm:mt-6">
           <ul>
-            {mainNav.map((item, index) => {
-              const isCurrent = index === 0;
+            {mainNav.map((item) => {
+              const isCurrent = isCurrentNav(item.href, pathname);
               return (
                 <li key={item.label} className="overflow-hidden border-b border-white/15">
                   <Link

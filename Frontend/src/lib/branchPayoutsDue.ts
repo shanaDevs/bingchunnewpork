@@ -10,6 +10,25 @@ export type BranchPayoutCompletedMeta = {
 
 export const BRANCH_PAYOUTS_DUE_QUERY_KEY = ['branch-payouts-due'] as const;
 
+/** Match API rows (ISO timestamps) with form dates (YYYY-MM-DD). */
+export function normalizePayoutPeriodDate(value: string | null | undefined): string {
+  if (!value) return '';
+  const ymd = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd : value;
+}
+
+function payoutPeriodMatches(
+  rowFrom: string,
+  rowTo: string,
+  metaFrom: string,
+  metaTo: string,
+): boolean {
+  return (
+    normalizePayoutPeriodDate(rowFrom) === normalizePayoutPeriodDate(metaFrom) &&
+    normalizePayoutPeriodDate(rowTo) === normalizePayoutPeriodDate(metaTo)
+  );
+}
+
 /** @deprecated Month filter does not scope the due list; use BRANCH_PAYOUTS_DUE_QUERY_KEY. */
 export function branchPayoutsDueQueryKey(_from?: string, _to?: string) {
   return BRANCH_PAYOUTS_DUE_QUERY_KEY;
@@ -82,17 +101,15 @@ export function removePaidBranchFromPayoutsDueCache(
       (row) =>
         !(
           row.storeId === meta.storeId &&
-          row.periodFrom === meta.periodFrom &&
-          row.periodTo === meta.periodTo
+          payoutPeriodMatches(row.periodFrom, row.periodTo, meta.periodFrom, meta.periodTo)
         ),
     );
   });
 }
 
-export async function refreshBranchPayoutsDueQueries(queryClient: QueryClient): Promise<void> {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: ['branch-payouts-due'] }),
-    queryClient.invalidateQueries({ queryKey: ['payout-due-net-preview'] }),
-  ]);
-  await queryClient.refetchQueries({ queryKey: ['branch-payouts-due'], type: 'active' });
+/** Invalidate and refetch due lists in the background (optimistic cache update is immediate). */
+export function refreshBranchPayoutsDueQueries(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: ['branch-payouts-due'] });
+  void queryClient.invalidateQueries({ queryKey: ['payout-due-net-preview'] });
+  void queryClient.refetchQueries({ queryKey: ['branch-payouts-due'], type: 'active' });
 }

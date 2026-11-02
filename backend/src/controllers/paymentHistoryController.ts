@@ -58,10 +58,23 @@ import {
   orderCreatedAtFilter,
   summarizePlatformSalesLkr,
 } from '../lib/walletRevenue';
-import { getWalletSummary } from '../lib/walletService';
+import { getWalletSummary, getOrCreateWallet } from '../lib/walletService';
 import { getConvenienceFeeRates } from '../lib/appSchema';
 import { generateCommissionSettlementInvoice } from '../lib/withdrawalInvoice';
 import { dateStringInColombo, todayDateString } from '../lib/datetime';
+import {
+  calendarMonthFromPeriodFrom,
+  combinePlatformProviderReceivableLkr,
+  formatCalendarMonthLabel,
+  loadEnrichedApprovedUnsettledWithdrawals,
+  sumSharedPromoPlatformLkrFromBreakdowns,
+} from '../lib/readyToProcessSupport';
+import { loadSettlementPlatformReceivableDetail } from '../lib/settlementPlatformReceivable';
+import { platformProviderSettlementInvoiceApiPath } from '../lib/invoice/refs';
+import {
+  computeNetCommissionSettlementDebitCents,
+  debitStoreWalletForCommissionSettlement,
+} from '../lib/settlementWalletDebit';
 
 const PROMOTION_PAYBACK_SELECT = {
   platformPaybackEligible: true,
@@ -91,8 +104,6 @@ const submitBodySchema = z.object({
 });
 
 const bulkSettleBodySchema = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   paymentMethod: z.enum(SETTLEMENT_PAYMENT_METHODS),
   items: z
     .string()
@@ -109,12 +120,14 @@ const bulkSettleBodySchema = z.object({
         .array(
           z.object({
             storeId: z.string().min(1),
-            withdrawalId: z.string().uuid().optional(),
+            withdrawalId: z.string().uuid(),
           }),
         )
         .min(1),
     ),
 });
+
+const readyToProcessMonthSchema = z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM');
 
 const PAID_ORDER_SELECT = {
   id: true,
@@ -182,6 +195,11 @@ const SETTLEMENT_PAYOUT_SELECT = {
   periodTo: true,
   storeWithdrawalId: true,
   store: { select: { name: true } },
+} as const;
+
+const SETTLEMENT_PLATFORM_PAYOUT_SELECT = {
+  ...SETTLEMENT_PAYOUT_SELECT,
+  storeWithdrawal: { select: { breakdown: true } },
 } as const;
 
 function isCurrentMonthPeriod(from: string, to: string) {
@@ -256,29 +274,56 @@ async function resolveSingleStoreId(req: Request, explicitStoreId?: string): Pro
 const NO_PAYOUT_REQUEST_MESSAGE =
   'No branch payout request found. A payout request (PENDING or APPROVED) must exist before submitting a commission settlement.';
 
+type LinkedWithdrawalForSettlement = {
+  id: string;
+  periodFrom: string;
+  periodTo: string;
+};
+
+async function resolveLinkedWithdrawalRecord(
+  storeId: string,
+  withdrawalId: string,
+  options?: { requireApproved?: boolean },
+): Promise<LinkedWithdrawalForSettlement> {
+  const withdrawal = await prisma.storeWithdrawal.findUnique({
+    where: { id: withdrawalId },
+    select: {
+      id: true,
+      storeId: true,
+      status: true,
+      periodFrom: true,
+      periodTo: true,
+    },
+  });
+
+  if (!withdrawal) throw new AppError('Withdrawal request not found', 404);
+  if (withdrawal.storeId !== storeId) {
+    throw new AppError('Withdrawal request does not belong to this branch', 400);
+  }
+  const allowedStatuses: string[] = options?.requireApproved
+    ? ['APPROVED']
+    : ['PENDING', 'APPROVED'];
+  if (!allowedStatuses.includes(withdrawal.status)) {
+    throw new AppError('Withdrawal request cannot be linked to settlement', 400);
+  }
+  if (await withdrawalHasDartCodesSettlement(withdrawalId)) {
+    throw new AppError('This withdrawal request is already linked to a settlement', 400);
+  }
+  if (!withdrawal.periodFrom || !withdrawal.periodTo) {
+    throw new AppError('Withdrawal payout period is not set', 400);
+  }
+
+  return {
+    id: withdrawal.id,
+    periodFrom: toDateStr(withdrawal.periodFrom),
+    periodTo: toDateStr(withdrawal.periodTo),
+  };
+}
+
 async function resolveLinkedWithdrawal(storeId: string, withdrawalId?: string): Promise<string> {
   if (withdrawalId) {
-    const withdrawal = await prisma.storeWithdrawal.findUnique({
-      where: { id: withdrawalId },
-      select: {
-        id: true,
-        storeId: true,
-        status: true,
-      },
-    });
-
-    if (!withdrawal) throw new AppError('Withdrawal request not found', 404);
-    if (withdrawal.storeId !== storeId) {
-      throw new AppError('Withdrawal request does not belong to this branch', 400);
-    }
-    if (!['PENDING', 'APPROVED'].includes(withdrawal.status)) {
-      throw new AppError('Withdrawal request cannot be linked to settlement', 400);
-    }
-    if (await withdrawalHasDartCodesSettlement(withdrawalId)) {
-      throw new AppError('This withdrawal request is already linked to a settlement', 400);
-    }
-
-    return withdrawal.id;
+    const linked = await resolveLinkedWithdrawalRecord(storeId, withdrawalId);
+    return linked.id;
   }
 
   const eligible = await listWithdrawalsUnsettledForDartCodes(storeId);
@@ -516,26 +561,43 @@ async function createSettlementForStore(params: {
 
   const statementRef = await generateStatementRef();
   const now = new Date();
+  const netCommissionCents = computeNetCommissionSettlementDebitCents(
+    totalCommission,
+    platformPaybackAmountCents,
+  );
 
-  const settlement = await prisma.commissionSettlement.create({
-    data: {
-      statementRef,
+  await getOrCreateWallet(params.storeId);
+
+  const settlement = await prisma.$transaction(async (tx) => {
+    await debitStoreWalletForCommissionSettlement(tx, {
       storeId: params.storeId,
+      netCommissionCents,
+      statementRef,
+      submittedById: params.submittedById,
       periodFrom: fromDate,
       periodTo: toDate,
-      status: 'VERIFIED',
-      paymentMethod: params.paymentMethod,
-      receiptUrl: params.receiptUrl,
-      breakdown,
-      totalCommission: centsToDecimal(lkrToCents(totalCommission)),
-      totalProviderFee: centsToDecimal(lkrToCents(totalProviderFee)),
-      platformPaybackAmount: centsToDecimal(platformPaybackAmountCents),
-      storeWithdrawalId: params.storeWithdrawalId,
-      submittedById: params.submittedById,
-      verifiedById: params.submittedById,
-      verifiedAt: now,
-    },
-    include: { store: { select: { name: true } } },
+    });
+
+    return tx.commissionSettlement.create({
+      data: {
+        statementRef,
+        storeId: params.storeId,
+        periodFrom: fromDate,
+        periodTo: toDate,
+        status: 'VERIFIED',
+        paymentMethod: params.paymentMethod,
+        receiptUrl: params.receiptUrl,
+        breakdown,
+        totalCommission: centsToDecimal(lkrToCents(totalCommission)),
+        totalProviderFee: centsToDecimal(lkrToCents(totalProviderFee)),
+        platformPaybackAmount: centsToDecimal(platformPaybackAmountCents),
+        storeWithdrawalId: params.storeWithdrawalId,
+        submittedById: params.submittedById,
+        verifiedById: params.submittedById,
+        verifiedAt: now,
+      },
+      include: { store: { select: { name: true } } },
+    });
   });
 
   const invoice = await generateCommissionSettlementInvoice({
@@ -672,24 +734,26 @@ function serializeSettlementReceiptFields(
   return { hasReceipt: true, receiptUrl: resolved };
 }
 
+type SettlementPayoutRow = {
+  id: string;
+  storeId: string;
+  statementRef: string;
+  createdAt: Date;
+  totalCommission: Prisma.Decimal;
+  platformPaybackAmount?: Prisma.Decimal | null;
+  paymentMethod: string;
+  receiptUrl: string | null;
+  invoiceRef?: string | null;
+  invoiceUrl?: string | null;
+  status: string;
+  periodFrom: Date;
+  periodTo: Date;
+  storeWithdrawalId?: string | null;
+  store: { name: string };
+};
+
 function mapSettlementToPayout(
-  settlement: {
-    id: string;
-    storeId: string;
-    statementRef: string;
-    createdAt: Date;
-    totalCommission: Prisma.Decimal;
-    platformPaybackAmount?: Prisma.Decimal | null;
-    paymentMethod: string;
-    receiptUrl: string | null;
-    invoiceRef?: string | null;
-    invoiceUrl?: string | null;
-    status: string;
-    periodFrom: Date;
-    periodTo: Date;
-    storeWithdrawalId?: string | null;
-    store: { name: string };
-  },
+  settlement: SettlementPayoutRow,
   advanceByWithdrawalId?: Map<string, boolean>,
 ) {
   const methodLabel = settlementPaymentMethodLabel(settlement.paymentMethod);
@@ -722,6 +786,28 @@ function mapSettlementToPayout(
     storeWithdrawalId,
     isAdvance,
     storeName: settlement.store.name,
+  };
+}
+
+async function mapSettlementToPlatformPayout(
+  settlement: SettlementPayoutRow & {
+    storeWithdrawal?: { breakdown: unknown } | null;
+  },
+  advanceByWithdrawalId?: Map<string, boolean>,
+) {
+  if (!settlement.storeWithdrawalId || !settlement.storeWithdrawal) {
+    return null;
+  }
+  const receivable = await resolveStoredPlatformProviderReceivable(
+    settlement.storeWithdrawal.breakdown,
+  );
+  const platformReceivable = dartCodesReceivesLkrFromBreakdown(receivable);
+  const base = mapSettlementToPayout(settlement, advanceByWithdrawalId);
+  return {
+    ...base,
+    amount: platformReceivable,
+    platformReceivable,
+    platformInvoiceUrl: platformProviderSettlementInvoiceApiPath(settlement.id),
   };
 }
 
@@ -801,11 +887,13 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
           },
           period: { from, to, isCurrentMonth: viewingCurrentMonth },
           payouts: [],
+          platformPayouts: [],
         },
       });
     }
 
     const { fromDate, toDate } = periodQueryToUtcBounds(from, to);
+    const includePlatformPayoutHistory = req.user?.role === 'SYSTEM_ADMIN';
 
     const [paidOrders, periodSettlements, allTimeSettlementRows] = await Promise.all([
       prisma.order.findMany({
@@ -819,7 +907,9 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
           periodTo: { gte: fromDate },
         },
         orderBy: { createdAt: 'desc' },
-        select: SETTLEMENT_PAYOUT_SELECT,
+        select: includePlatformPayoutHistory
+          ? SETTLEMENT_PLATFORM_PAYOUT_SELECT
+          : SETTLEMENT_PAYOUT_SELECT,
       }),
       prisma.commissionSettlement.findMany({
         where: { storeId: { in: storeIds }, status: { not: 'REJECTED' } },
@@ -885,6 +975,14 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
 
     const payouts = settlements.map((s) => mapSettlementToPayout(s, advanceByWithdrawalId));
 
+    const platformPayouts = includePlatformPayoutHistory
+      ? (
+          await Promise.all(
+            settlements.map((s) => mapSettlementToPlatformPayout(s, advanceByWithdrawalId)),
+          )
+        ).filter((row): row is NonNullable<typeof row> => row != null)
+      : [];
+
     res.json({
       success: true,
       data: {
@@ -898,6 +996,7 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
         slabInfo,
         period: { from, to, isCurrentMonth: viewingCurrentMonth },
         payouts,
+        platformPayouts,
       },
     });
   } catch (err) {
@@ -1155,6 +1254,148 @@ export async function listPendingAllHandler(req: Request, res: Response, next: N
   }
 }
 
+export async function listReadyToProcessHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    await ensureCommissionSettlementTable();
+
+    const user = req.user;
+    if (user?.role !== 'SYSTEM_ADMIN') {
+      throw new AppError('Forbidden', 403);
+    }
+
+    const withdrawals = await loadEnrichedApprovedUnsettledWithdrawals();
+    const monthMap = new Map<
+      string,
+      { totalReceivable: number; branchIds: Set<string>; payoutCount: number }
+    >();
+
+    for (const w of withdrawals) {
+      const month = calendarMonthFromPeriodFrom(w.periodFrom);
+      if (!month) continue;
+      const entry = monthMap.get(month) ?? {
+        totalReceivable: 0,
+        branchIds: new Set<string>(),
+        payoutCount: 0,
+      };
+      entry.totalReceivable += w.dartCodesReceives;
+      entry.branchIds.add(w.storeId);
+      entry.payoutCount += 1;
+      monthMap.set(month, entry);
+    }
+
+    const months = [...monthMap.entries()]
+      .map(([month, stats]) => ({
+        month,
+        label: formatCalendarMonthLabel(month),
+        totalReceivable: Math.round(stats.totalReceivable * 100) / 100,
+        branchCount: stats.branchIds.size,
+        payoutCount: stats.payoutCount,
+      }))
+      .sort((a, b) => b.month.localeCompare(a.month));
+
+    res.json({ success: true, data: months });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getReadyToProcessMonthHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    await ensureCommissionSettlementTable();
+
+    const user = req.user;
+    if (user?.role !== 'SYSTEM_ADMIN') {
+      throw new AppError('Forbidden', 403);
+    }
+
+    const calendarMonth = readyToProcessMonthSchema.parse(req.params.month);
+    const withdrawals = await loadEnrichedApprovedUnsettledWithdrawals();
+    const inMonth = withdrawals.filter(
+      (w) => calendarMonthFromPeriodFrom(w.periodFrom) === calendarMonth,
+    );
+
+    const byBranch = new Map<
+      string,
+      {
+        storeId: string;
+        storeName: string;
+        periods: typeof inMonth;
+      }
+    >();
+
+    for (const w of inMonth) {
+      const existing = byBranch.get(w.storeId);
+      if (existing) {
+        existing.periods.push(w);
+      } else {
+        byBranch.set(w.storeId, {
+          storeId: w.storeId,
+          storeName: w.storeName,
+          periods: [w],
+        });
+      }
+    }
+
+    const storeIds = [...byBranch.keys()];
+    const paybackRows =
+      storeIds.length > 0
+        ? await prisma.store.findMany({
+            where: { id: { in: storeIds } },
+            select: { id: true, platformDiscountPaybackEnabled: true },
+          })
+        : [];
+    const paybackEnabledByStoreId = new Map(
+      paybackRows.map((s) => [s.id, s.platformDiscountPaybackEnabled]),
+    );
+
+    const branches = [...byBranch.values()]
+      .map((group) => {
+        const periodLkrs = group.periods.map((p) => p.platformProviderReceivable.lkr);
+        const breakdowns = group.periods.map((p) => p.breakdown);
+        const combinedLkr = combinePlatformProviderReceivableLkr(periodLkrs, breakdowns);
+        const totalReceivable = combinedLkr.totalPlatformProviderReceivableLkr;
+        const sharedPromoPlatformLkr = sumSharedPromoPlatformLkrFromBreakdowns(breakdowns);
+        const platformDiscountPaybackEnabled =
+          paybackEnabledByStoreId.get(group.storeId) ?? false;
+
+        return {
+          storeId: group.storeId,
+          storeName: group.storeName,
+          totalReceivable,
+          platformDiscountPaybackEnabled,
+          sharedPromoPlatformLkr,
+          platformProviderReceivable: { lkr: combinedLkr },
+          periods: group.periods.map((p) => ({
+            withdrawalId: p.id,
+            periodFrom: p.periodFrom,
+            periodTo: p.periodTo,
+            dartCodesReceives: p.dartCodesReceives,
+            platformProviderReceivable: { lkr: p.platformProviderReceivable.lkr },
+          })),
+        };
+      })
+      .sort((a, b) => a.storeName.localeCompare(b.storeName));
+
+    const totalReceivable = branches.reduce((sum, b) => sum + b.totalReceivable, 0);
+
+    res.json({
+      success: true,
+      data: {
+        month: calendarMonth,
+        label: formatCalendarMonthLabel(calendarMonth),
+        totalReceivable: Math.round(totalReceivable * 100) / 100,
+        branches,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function bulkSettleHandler(req: Request, res: Response, next: NextFunction) {
   try {
     await ensureCommissionSettlementTable();
@@ -1165,7 +1406,6 @@ export async function bulkSettleHandler(req: Request, res: Response, next: NextF
     }
 
     const data = bulkSettleBodySchema.parse(req.body);
-    parseSettlementRange(data.from, data.to);
 
     // One shared Spaces proof for the bulk payment (same document for all branches).
     const sharedReceiptUrl = await requireSettlementProofUpload(
@@ -1202,13 +1442,15 @@ export async function bulkSettleHandler(req: Request, res: Response, next: NextF
       }
 
       try {
-        const storeWithdrawalId = await resolveLinkedWithdrawal(store.id, item.withdrawalId);
+        const linked = await resolveLinkedWithdrawalRecord(store.id, item.withdrawalId, {
+          requireApproved: true,
+        });
         const settlement = await createSettlementForStore({
           storeId: store.id,
-          from: data.from,
-          to: data.to,
+          from: linked.periodFrom,
+          to: linked.periodTo,
           paymentMethod: data.paymentMethod,
-          storeWithdrawalId,
+          storeWithdrawalId: linked.id,
           receiptUrl: sharedReceiptUrl,
           submittedById: user.sub,
         });
@@ -1237,6 +1479,24 @@ export async function bulkSettleHandler(req: Request, res: Response, next: NextF
     }
 
     res.status(201).json({ success: true, data: { results } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getSettlementPlatformReceivable(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    await ensureCommissionSettlementTable();
+
+    const id = z.string().uuid().parse(req.params.id);
+    const storeIds = await resolveStoreIds(req);
+
+    const data = await loadSettlementPlatformReceivableDetail(id, storeIds);
+    res.json({ success: true, data });
   } catch (err) {
     next(err);
   }

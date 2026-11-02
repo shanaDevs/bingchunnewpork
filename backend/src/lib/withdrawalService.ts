@@ -10,6 +10,7 @@ import { creditPlatformEarning } from './platformEarningsService';
 import { ensurePlatformEarningsSchema } from './platformEarningsSchema';
 import { ensurePlatformPaybackSchema } from './platformPaybackSchema';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
+import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import {
   computeFinalPayoutAmountCents,
   parseSharedPromoFromBreakdown,
@@ -30,9 +31,8 @@ import type {
 import { centsToDecimal } from './moneyDecimal';
 import { withdrawalAmountCents } from './walletApiMoney';
 import {
-  parseLockedStoreWallet,
+  lockStoreWallet,
   walletDataAfterDebit,
-  type LockedStoreWallet,
 } from './walletStoreUpdates';
 import { toUtcDateStr, todayUtcDateStr } from './utcDateString';
 import {
@@ -66,19 +66,6 @@ export {
   getPayoutPeriodEndDate,
   getNextPayoutStartDate,
 } from './withdrawalPayoutPeriod';
-
-/** Serialize payouts for one branch. Must run inside the caller's transaction. */
-async function lockStoreWallet(tx: Prisma.TransactionClient, storeId: string): Promise<LockedStoreWallet> {
-  const rows = await tx.$queryRaw<Array<{ balance: unknown; totalWithdrawn: unknown }>>`
-    SELECT "balance", "totalWithdrawn"
-    FROM "store_wallets"
-    WHERE "storeId" = ${storeId}
-    FOR UPDATE
-  `;
-  const row = rows[0];
-  if (!row) throw new AppError('Wallet not found', 404);
-  return parseLockedStoreWallet(row);
-}
 
 type LockedStoreWithdrawal = {
   id: string;
@@ -348,16 +335,15 @@ async function validatePayoutRequest(
     throw new AppError(`Invalid payout period. Choose one of: ${PAYOUT_PERIOD_DAYS.join(', ')} days`, 400);
   }
 
-  const summary = await getWalletSummary(storeId);
+  const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
 
-  if (amount > summary.availableBalance) {
+  const orderAvailable = await computePeriodOrderAvailableCents(storeId, fromStr, toStr);
+  if (amount > orderAvailable.remainingCents) {
     throw new AppError(
-      `Insufficient available balance. Available: LKR ${(summary.availableBalance / 100).toFixed(2)}`,
+      `Insufficient available balance. Available: LKR ${(orderAvailable.remainingCents / 100).toFixed(2)}`,
       400,
     );
   }
-
-  const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
 
   const [periodWithDiscountReport, channelPreview] = await Promise.all([
     computePeriodBreakdownForPayout(storeId, fromStr, toStr),
@@ -365,7 +351,8 @@ async function validatePayoutRequest(
   ]);
   const periodNet = periodWithDiscountReport.netAmount;
 
-  if (!isAdvance && amount > periodNet) {
+  const PAYOUT_AMOUNT_TOLERANCE_CENTS = 1;
+  if (!isAdvance && amount > periodNet + PAYOUT_AMOUNT_TOLERANCE_CENTS) {
     throw new AppError(
       `Amount exceeds net for the selected period (LKR ${(periodNet / 100).toFixed(2)}). Enable "custom amount" to request an advance.`,
       400,
@@ -416,11 +403,13 @@ export async function initiateAndApproveWithdrawal(
   const periodTo = new Date(`${toStr}T23:59:59.999Z`);
 
   const wallet = await getOrCreateWallet(storeId);
-  const summary = await getWalletSummary(storeId);
-  const remainingNet = summary.netTransferableEarnings - summary.totalWithdrawn;
 
-  if (remainingNet < amount) {
-    throw new AppError('Insufficient net transferable balance to approve this payout', 400);
+  const orderAvailable = await computePeriodOrderAvailableCents(storeId, fromStr, toStr);
+  if (amount > orderAvailable.remainingCents) {
+    throw new AppError(
+      `Insufficient available balance. Available: LKR ${(orderAvailable.remainingCents / 100).toFixed(2)}`,
+      400,
+    );
   }
 
   const sppc = parseSharedPromoFromBreakdown(breakdown);
@@ -439,10 +428,12 @@ export async function initiateAndApproveWithdrawal(
 
   const approvedWithdrawal = await prisma.$transaction(async (tx) => {
     const locked = await lockStoreWallet(tx, storeId);
-    const freshSummary = await getWalletSummary(storeId);
-    const lockedWithdrawn = Number(locked.totalWithdrawn.toFixed(0));
-    if (freshSummary.netTransferableEarnings - lockedWithdrawn < amount) {
-      throw new AppError('Insufficient net transferable balance to approve this payout', 400);
+    const lockedOrderAvailable = await computePeriodOrderAvailableCents(storeId, fromStr, toStr);
+    if (amount > lockedOrderAvailable.remainingCents) {
+      throw new AppError(
+        `Insufficient available balance. Available: LKR ${(lockedOrderAvailable.remainingCents / 100).toFixed(2)}`,
+        400,
+      );
     }
     const afterDebit = walletDataAfterDebit(locked, amount);
     const lockedBalance = Number(afterDebit.balance.toFixed(0));

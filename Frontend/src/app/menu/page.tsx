@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import JsonLd from '@/components/seo/JsonLd';
 import { menuItemListSchema, type ProductForSchema } from '@/components/seo/schemas';
+import { MenuGate } from '@/components/menu-redesign/MenuGate';
+import { MenuRedesignShell } from '@/components/menu-redesign/MenuRedesignShell';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { absoluteUrl } from '@/lib/seo';
-import MenuClient from './MenuClient';
 
 export const metadata: Metadata = {
   title: 'Menu',
@@ -40,7 +41,9 @@ export default async function MenuPage() {
   return (
     <>
       {products.length > 0 ? <JsonLd data={menuItemListSchema(products)} /> : null}
-      <MenuClient />
+      <MenuRedesignShell>
+        <MenuGate />
+      </MenuRedesignShell>
     </>
   );
 }

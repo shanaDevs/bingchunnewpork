@@ -7,6 +7,8 @@ import { api } from '@/lib/api';
 import { getCurrentPosition, DEFAULT_LOCATION } from '@/lib/geolocation';
 import toast from 'react-hot-toast';
 import type { BranchMarker } from './DeliveryMap';
+import { OrderSetupSearchField } from '@/components/order-redesign/OrderSetupSearchField';
+import { orderSetupCopy } from '@/components/order-redesign/orderSetupCopy';
 
 const DeliveryMap = dynamic(() => import('./DeliveryMap'), {
   ssr: false,
@@ -52,6 +54,9 @@ interface AddressMapPickerProps {
   children?: ReactNode;
   /** Optional header above the search field in mapOverlay layout (title, badge, etc.). */
   overlayHeader?: ReactNode;
+  /** When false, only the search/location controls render (no map). */
+  showMap?: boolean;
+  searchAppearance?: 'legacy' | 'redesign';
 }
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
@@ -77,6 +82,8 @@ export function AddressMapPicker({
   layout = 'stacked',
   children,
   overlayHeader,
+  showMap = true,
+  searchAppearance = 'legacy',
 }: AddressMapPickerProps) {
   const [resolvedAddress, setResolvedAddress] = useState(value?.address ?? '');
   const [lat, setLat] = useState(value?.lat ?? DEFAULT_LOCATION.lat);
@@ -249,6 +256,19 @@ export function AddressMapPicker({
 
   const searchBlock = (
     <div ref={searchWrapRef} className="relative">
+      {searchAppearance === 'redesign' ? (
+        <OrderSetupSearchField
+          label="Delivery area"
+          placeholder={orderSetupCopy.deliveryAreaPlaceholder}
+          value={searchQuery}
+          onChange={(value) => {
+            userTypedRef.current = true;
+            setSearchQuery(value);
+            setShowSuggestions(true);
+          }}
+        />
+      ) : (
+        <>
       {!mapOverlay && (
         <p className="text-xs text-muted font-medium mb-2">Search your delivery location</p>
       )}
@@ -307,6 +327,8 @@ export function AddressMapPicker({
           </button>
         )}
       </div>
+        </>
+      )}
 
       {showSuggestions && suggestions.length > 0 && (
         <ul className="address-suggestions absolute z-40 left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl border border-navy-border bg-navy-card shadow-xl">
@@ -418,6 +440,17 @@ export function AddressMapPicker({
   );
 
   const addressSuggestionsOpen = showSuggestions && suggestions.length > 0;
+
+  if (!showMap) {
+    return (
+      <div className="space-y-3">
+        {searchBlock}
+        {locationErrorBlock}
+        {busyBlock}
+        {children}
+      </div>
+    );
+  }
 
   if (mapOverlay) {
     return (

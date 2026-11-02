@@ -11,11 +11,14 @@ const WAITING_RECEIVED_MS = 30 * 60 * 1000;
 
 type DateRange = { gte: Date; lte: Date };
 type StoreScope = { storeId?: string };
+export type DashboardQueueOptions = { pickupOnly?: boolean };
 
 /** Same payment visibility as the pickup and delivery queues on the orders page. */
-function queueVisibilityOr(): Prisma.OrderWhereInput[] {
+function queueVisibilityOr(options?: DashboardQueueOptions): Prisma.OrderWhereInput[] {
+  const pickup = { orderMode: 'TAKEAWAY' as const, ...fulfillmentQueuePaymentWhere('pickup') };
+  if (options?.pickupOnly) return [pickup];
   return [
-    { orderMode: 'TAKEAWAY', ...fulfillmentQueuePaymentWhere('pickup') },
+    pickup,
     { orderMode: 'DELIVERY', ...fulfillmentQueuePaymentWhere('delivery') },
   ];
 }
@@ -24,15 +27,13 @@ function queueVisibilityOr(): Prisma.OrderWhereInput[] {
 export function inProgressOrdersWhere(
   scope: StoreScope,
   selectedRange: DateRange,
-  options?: { pickupOnly?: boolean },
+  options?: DashboardQueueOptions,
 ): Prisma.OrderWhereInput {
   return {
     ...scope,
     createdAt: { gte: selectedRange.gte, lte: selectedRange.lte },
     status: { in: ORDER_QUEUE_STATUSES },
-    OR: options?.pickupOnly
-      ? [{ orderMode: 'TAKEAWAY', ...fulfillmentQueuePaymentWhere('pickup') }]
-      : queueVisibilityOr(),
+    OR: queueVisibilityOr(options),
   };
 }
 
@@ -59,6 +60,7 @@ export function waitingReceivedOrdersWhere(
   scope: StoreScope,
   selectedRange: DateRange,
   now: Date,
+  options?: DashboardQueueOptions,
 ): Prisma.OrderWhereInput | null {
   const createdAt = waitingReceivedCreatedAt(selectedRange, now);
   if (!createdAt) return null;
@@ -66,6 +68,6 @@ export function waitingReceivedOrdersWhere(
     ...scope,
     createdAt,
     status: 'RECEIVED',
-    OR: queueVisibilityOr(),
+    OR: queueVisibilityOr(options),
   };
 }

@@ -20,8 +20,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isCheckout = pathname?.startsWith('/checkout');
   const useSidebarLayout = !isAdminRoute && !isCheckout;
 
-  // The home page brings its own header and footer (components/home-redesign).
-  if (isAdminRoute || pathname === '/') {
+  // The home page and menu redesign bring their own header and footer.
+  const isRedesignShell =
+    pathname === '/' ||
+    pathname === '/menu' ||
+    pathname?.startsWith('/menu/') ||
+    pathname?.startsWith('/product/');
+
+  if (isAdminRoute || isRedesignShell) {
     return <>{children}</>;
   }
 

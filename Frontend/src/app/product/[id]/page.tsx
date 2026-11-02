@@ -4,6 +4,7 @@ import { productSchema } from '@/components/seo/schemas';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { absoluteUrl, DEFAULT_DESCRIPTION, DEFAULT_OG_IMAGE, SITE_NAME } from '@/lib/seo';
 import ProductClient from './ProductClient';
+import { MenuRedesignShell } from '@/components/menu-redesign/MenuRedesignShell';
 
 type ProductMeta = {
   id: string;
@@ -89,7 +90,9 @@ export default async function ProductPage({ params }: PageProps) {
           })}
         />
       ) : null}
-      <ProductClient />
+      <MenuRedesignShell>
+        <ProductClient />
+      </MenuRedesignShell>
     </>
   );
 }

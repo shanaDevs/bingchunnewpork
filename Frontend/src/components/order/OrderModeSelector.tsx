@@ -1,10 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import Image from 'next/image';
-import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Store, CheckCircle2, Loader2, ChevronLeft, MapPin, Search, Crosshair, Truck, ShoppingBag, Home, X } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useCartStore, type OrderMode } from '@/store/cartStore';
@@ -12,15 +10,38 @@ import { AddressMapPicker, type AddressSelection } from './AddressMapPicker';
 import type { Store as StoreType, DeliveryValidation, DeliveryBranchOption } from '@/types';
 import toast from 'react-hot-toast';
 import { confirmDialog } from '@/store/confirmStore';
-import { getCurrentPositionWithFallback, DEFAULT_LOCATION } from '@/lib/geolocation';
-import { MASCOT_IMAGES } from '@/lib/mascotImages';
+import { getCurrentPositionWithFallback } from '@/lib/geolocation';
 import { playModeSelectSound, playLocationPinSound, playConfirmClickSound } from '@/lib/uiSounds';
-import { toMapLatLng } from '@/lib/storeCoordinates';
 import { branchManuallyClosedMessage, isBranchManuallyClosed } from '@/lib/storeOrderingHours';
+import {
+  TAKEAWAY_MAX_KM,
+  buildDeliveryBranchRows,
+  buildPickupBranchRows,
+  branchRowsToLatLngMarkers,
+  branchRowsToMapBranches,
+  isDeliveryBranchOrderable,
+  orderingFieldsFromStore,
+  selectableBranchIds,
+  storeMatchesPickupSearch,
+} from '@/components/order-redesign/orderSetupBranches';
+import {
+  buildOrderSetupFooterState,
+  type OrderSetupFooterState,
+} from '@/components/order-redesign/orderSetupFooter';
+import { OrderModeChooseLegacy } from '@/components/order/OrderModeChooseLegacy';
+import { OrderSetupLegacyDeliverySheet } from '@/components/order/OrderSetupLegacyDeliverySheet';
+import { OrderSetupLegacyPickupStage } from '@/components/order/OrderSetupLegacyPickupStage';
 
-function isDeliveryBranchOrderable(branch: DeliveryBranchOption): boolean {
-  return branch.suggested && !branch.branchClosed;
-}
+export type { OrderSetupFooterState } from '@/components/order-redesign/orderSetupFooter';
+import { OrderTypeStep } from '@/components/order-redesign/OrderTypeStep';
+import { orderSetupCopy } from '@/components/order-redesign/orderSetupCopy';
+import { OrderSetupSearchField } from '@/components/order-redesign/OrderSetupSearchField';
+import { OrderSetupLocationStatus } from '@/components/order-redesign/OrderSetupLocationStatus';
+import { OrderSetupBranchList } from '@/components/order-redesign/OrderSetupBranchList';
+import { OrderSetupBranchStepShell } from '@/components/order-redesign/OrderSetupBranchStepShell';
+import { OrderSetupBranchCarousel } from '@/components/order-redesign/OrderSetupBranchCarousel';
+import { OrderSetupBranchMap } from '@/components/order-redesign/OrderSetupBranchMap';
+import { cn } from '@/components/home-redesign/lib/cn';
 
 interface OrderModeSelectorProps {
   onComplete?: () => void;
@@ -33,48 +54,11 @@ interface OrderModeSelectorProps {
   /** Skip step 1 and open setup for this mode (from navbar Delivery/Pickup buttons). */
   initialMode?: OrderMode;
   startAtSetup?: boolean;
-}
-
-const PickupMap = dynamic(() => import('./DeliveryMap'), {
-  ssr: false,
-  loading: () => (
-    <div className="h-full min-h-[220px] rounded-xl border border-navy-border bg-navy-light flex items-center justify-center text-muted text-sm">
-      Loading map...
-    </div>
-  ),
-});
-
-const TAKEAWAY_MAX_KM = 7;
-const DEFAULT_OPEN_TIME = '09:00';
-const DEFAULT_CLOSE_TIME = '23:00';
-
-function orderingFieldsFromStore(store: {
-  openTime?: string;
-  closeTime?: string;
-  onlineOrderStartTime?: string | null;
-  onlineOrderStopTime?: string | null;
-  pickupCutoffMinutes?: number | null;
-  branchClosedAt?: string | null;
-}) {
-  return {
-    openTime: store.openTime ?? DEFAULT_OPEN_TIME,
-    closeTime: store.closeTime ?? DEFAULT_CLOSE_TIME,
-    onlineOrderStartTime: store.onlineOrderStartTime,
-    onlineOrderStopTime: store.onlineOrderStopTime,
-    pickupCutoffMinutes: store.pickupCutoffMinutes ?? undefined,
-    branchClosedAt: store.branchClosedAt,
-  };
-}
-
-function storeMatchesPickupSearch(store: StoreType, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return (
-    store.name.toLowerCase().includes(q) ||
-    store.city.toLowerCase().includes(q) ||
-    store.district.toLowerCase().includes(q) ||
-    store.addressLine.toLowerCase().includes(q)
-  );
+  appearance?: 'legacy' | 'redesign';
+  onSetupFooterChange?: (footer: OrderSetupFooterState | null) => void;
+  onBackToType?: () => void;
+  /** When set (e.g. from OrderModeModal), step is driven by the parent — Back returns to order type. */
+  flowStep?: 'choose' | 'setup';
 }
 
 export function OrderModeSelector({
@@ -86,6 +70,10 @@ export function OrderModeSelector({
   modalOpen = true,
   initialMode,
   startAtSetup = false,
+  appearance = 'legacy',
+  onSetupFooterChange,
+  onBackToType,
+  flowStep,
 }: OrderModeSelectorProps) {
   const { orderMode, setOrderMode, setDeliveryInfo, setTakeawayInfo, deliveryInfo, takeawayInfo, items, clearCart, clearMode } =
     useCartStore();
@@ -97,6 +85,8 @@ export function OrderModeSelector({
     if (startAtSetup && initialMode) return 'setup';
     return hasSavedSetup ? 'setup' : 'choose';
   });
+  /** Parent-controlled step from OrderModeModal; avoids fighting local state on Back / pick mode. */
+  const viewStep = flowStep ?? step;
   const [mode, setMode] = useState<OrderMode>(() => {
     if (initialMode) return initialMode;
     if (orderMode === 'TAKEAWAY' || takeawayInfo) return 'TAKEAWAY';
@@ -106,12 +96,19 @@ export function OrderModeSelector({
   const [choiceHighlight, setChoiceHighlight] = useState<OrderMode | null>(null);
 
   useEffect(() => {
-    onStepChange?.(step);
-  }, [step, onStepChange]);
+    if (flowStep === 'choose') {
+      setValidation(null);
+    }
+  }, [flowStep]);
 
   useEffect(() => {
-    if (step === 'setup') onModeChange?.(mode);
-  }, [mode, step, onModeChange]);
+    if (flowStep !== undefined) return;
+    onStepChange?.(step);
+  }, [step, onStepChange, flowStep]);
+
+  useEffect(() => {
+    if (viewStep === 'setup') onModeChange?.(mode);
+  }, [mode, viewStep, onModeChange]);
 
   const [addressSelection, setAddressSelection] = useState<AddressSelection | null>(() => {
     if (deliveryInfo?.address && deliveryInfo.lat != null && deliveryInfo.lng != null) {
@@ -129,6 +126,10 @@ export function OrderModeSelector({
   const [detectingLocation, setDetectingLocation] = useState(false);
   const [branchSearch, setBranchSearch] = useState('');
   const [pickupAreaLabel, setPickupAreaLabel] = useState<string | null>(null);
+  const [hoveredBranchId, setHoveredBranchId] = useState<string | null>(null);
+  const [focusedBranchId, setFocusedBranchId] = useState<string | null>(null);
+  const [carouselHeight, setCarouselHeight] = useState(0);
+  const pickupListRef = useRef<HTMLUListElement>(null);
   const userPickedStore = useRef(false);
   const validateSeq = useRef(0);
   const nearestDetectSeq = useRef(0);
@@ -145,7 +146,7 @@ export function OrderModeSelector({
       const qs = params.toString();
       return api.get(`/stores${qs ? `?${qs}` : ''}`);
     },
-    enabled: mode === 'TAKEAWAY' && step === 'setup',
+    enabled: mode === 'TAKEAWAY' && viewStep === 'setup',
   });
 
   const sortedStores = useMemo(
@@ -160,15 +161,8 @@ export function OrderModeSelector({
   );
 
   const pickupBranchMarkers = useMemo(
-    () =>
-      pickupStoresList
-        .map((s) => {
-          const point = toMapLatLng(s.lat, s.lng);
-          if (!point) return null;
-          return { id: s.id, name: s.name, lat: point.lat, lng: point.lng };
-        })
-        .filter((marker): marker is { id: string; name: string; lat: number; lng: number } => marker != null),
-    [pickupStoresList],
+    () => branchRowsToLatLngMarkers(buildPickupBranchRows(pickupStoresList, branchSearchQuery, pickupCoords)),
+    [pickupStoresList, branchSearchQuery, pickupCoords],
   );
 
   const suggestedDeliveryBranches = useMemo(
@@ -176,16 +170,27 @@ export function OrderModeSelector({
     [validation],
   );
 
-  const deliveryBranchMarkers = useMemo(
-    () =>
-      suggestedDeliveryBranches
-        .map((b) => {
-          const point = toMapLatLng(b.lat, b.lng);
-          if (!point) return null;
-          return { id: b.id, name: b.name, lat: point.lat, lng: point.lng };
-        })
-        .filter((marker): marker is { id: string; name: string; lat: number; lng: number } => marker != null),
+  const pickupBranchRows = useMemo(
+    () => buildPickupBranchRows(pickupStoresList, branchSearchQuery, pickupCoords),
+    [pickupStoresList, branchSearchQuery, pickupCoords],
+  );
+
+  const pickupMapBranches = useMemo(() => branchRowsToMapBranches(pickupBranchRows), [pickupBranchRows]);
+
+  const pickupSelectableIds = useMemo(() => selectableBranchIds(pickupBranchRows), [pickupBranchRows]);
+
+  const deliveryBranchRows = useMemo(
+    () => buildDeliveryBranchRows(suggestedDeliveryBranches),
     [suggestedDeliveryBranches],
+  );
+
+  const deliveryMapBranches = useMemo(() => branchRowsToMapBranches(deliveryBranchRows), [deliveryBranchRows]);
+
+  const deliverySelectableIds = useMemo(() => selectableBranchIds(deliveryBranchRows), [deliveryBranchRows]);
+
+  const deliveryBranchMarkers = useMemo(
+    () => branchRowsToLatLngMarkers(deliveryBranchRows),
+    [deliveryBranchRows],
   );
 
   useEffect(() => {
@@ -240,12 +245,12 @@ export function OrderModeSelector({
 
   // Automatically fetch delivery branch suggestions when location updates (500ms typing/location debounce to save server load)
   useEffect(() => {
-    if (mode !== 'DELIVERY' || step !== 'setup' || !addressSelection?.address) return;
+    if (mode !== 'DELIVERY' || viewStep !== 'setup' || !addressSelection?.address) return;
     const timer = setTimeout(() => {
       void validateDeliveryAt(addressSelection, undefined, true);
     }, 500);
     return () => clearTimeout(timer);
-  }, [addressSelection, mode, step, validateDeliveryAt]);
+  }, [addressSelection, mode, viewStep, validateDeliveryAt]);
 
   function searchDeliveryBranches() {
     if (!addressSelection) {
@@ -352,12 +357,12 @@ export function OrderModeSelector({
   }, []);
 
   useEffect(() => {
-    if (mode !== 'TAKEAWAY' || step !== 'setup' || pickupCoords) return;
+    if (mode !== 'TAKEAWAY' || viewStep !== 'setup' || pickupCoords) return;
     if (pickupAutoDetectStarted.current) return;
     pickupAutoDetectStarted.current = true;
     setPickupAreaLabel('your location');
     void detectPickupLocation(false);
-  }, [mode, step, pickupCoords, detectPickupLocation]);
+  }, [mode, viewStep, pickupCoords, detectPickupLocation]);
 
   async function pickMode(next: OrderMode) {
     if (orderMode && orderMode !== next && items.length > 0) {
@@ -373,7 +378,11 @@ export function OrderModeSelector({
     }
     playModeSelectSound(next);
     setMode(next);
-    setStep('setup');
+    if (flowStep !== undefined) {
+      onStepChange?.('setup');
+    } else {
+      setStep('setup');
+    }
     setValidation(null);
     setSelectedStore(null);
     setSelectedDeliveryStoreId(null);
@@ -385,9 +394,43 @@ export function OrderModeSelector({
   }
 
   function goBackToChoose() {
-    setStep('choose');
     setValidation(null);
+    if (flowStep !== undefined) {
+      onBackToType?.();
+      return;
+    }
+    setStep('choose');
+    onBackToType?.();
   }
+
+  useEffect(() => {
+    if (appearance !== 'redesign' || viewStep !== 'setup') {
+      onSetupFooterChange?.(null);
+      return;
+    }
+    onSetupFooterChange?.(
+      buildOrderSetupFooterState({
+        mode,
+        validating,
+        selectedDeliveryStoreId,
+        addressSelection,
+        suggestedDeliveryBranches,
+        selectedStore,
+        onConfirmDelivery: () => void validateAndSaveDelivery(),
+        onConfirmTakeaway: confirmTakeaway,
+      }),
+    );
+  }, [
+    appearance,
+    viewStep,
+    mode,
+    validating,
+    selectedDeliveryStoreId,
+    addressSelection,
+    suggestedDeliveryBranches,
+    selectedStore,
+    onSetupFooterChange,
+  ]);
 
   function saveDeliveryFromValidation(result: DeliveryValidation, sel: AddressSelection) {
     if (!result.eligible || !result.store || !result.zone) return false;
@@ -483,142 +526,152 @@ export function OrderModeSelector({
     confirmTakeawayStore(selectedStore);
   }
 
+  const isRedesign = appearance === 'redesign';
+
   return (
-    <div className={`order-flow${step === 'setup' ? ' order-flow--map' : ''}`}>
+    <div
+      className={cn(
+        'order-flow',
+        viewStep === 'setup' && (isRedesign ? 'flex min-h-0 flex-1 flex-col' : 'order-flow--map'),
+      )}
+    >
       <AnimatePresence mode="wait">
-        {step === 'choose' ? (
-          <motion.div
-            key="choose"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -24 }}
-            transition={{ duration: 0.28 }}
-            className="order-flow-step"
-          >
-            <div className="order-flow-step__header flex flex-col sm:flex-row sm:items-start justify-between gap-3 text-center sm:text-left">
-              <div>
-                <span className="order-flow-step__badge">Step 1 of 2</span>
-                <h3 className="order-flow-step__title">How would you like to order?</h3>
-                {/* <p className="order-flow-step__sub">Choose delivery or pickup.</p> */}
-              </div>
-              {onBackToHome && (
-                <button
-                  type="button"
-                  onClick={onBackToHome}
-                  className="flex items-center justify-center gap-1.5 text-xs sm:text-sm font-medium text-muted hover:text-brand transition-colors py-2 px-3.5 rounded-xl border border-navy-border hover:border-brand/40 bg-navy-light/60 self-center sm:self-start shrink-0 shadow-sm"
-                >
-                  <Home size={15} />
-                  Back to Home
-                </button>
-              )}
-            </div>
-
-            <div className="order-mode-choices order-mode-choices--pizza">
-              <div
-                role="button"
-                tabIndex={0}
-                className={`order-mode-choice order-mode-choice--pizza${
-                  choiceHighlight === 'DELIVERY' ? ' order-mode-choice--selected' : ''
-                }`}
-                aria-pressed={choiceHighlight === 'DELIVERY'}
-                onClick={() => {
-                  if (choiceHighlight === 'DELIVERY') {
-                    void pickMode('DELIVERY');
-                    return;
-                  }
-                  setChoiceHighlight('DELIVERY');
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    if (choiceHighlight === 'DELIVERY') {
-                      void pickMode('DELIVERY');
-                      return;
-                    }
-                    setChoiceHighlight('DELIVERY');
-                  }
-                }}
-              >
-                <span className="order-mode-choice__mascot" aria-hidden>
-                  <Image src={MASCOT_IMAGES.delivery} alt="" width={88} height={88} className="object-contain" unoptimized />
-                </span>
-                <span className="order-mode-choice__title">Delivery</span>
-                <button
-                  type="button"
-                  className="order-mode-choice__action"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setChoiceHighlight('DELIVERY');
-                    void pickMode('DELIVERY');
-                  }}
-                >
-                  <Truck size={14} aria-hidden />
-                  Select Delivery
-                </button>
-              </div>
-
-              <div
-                role="button"
-                tabIndex={0}
-                className={`order-mode-choice order-mode-choice--pizza${
-                  choiceHighlight === 'TAKEAWAY' ? ' order-mode-choice--selected' : ''
-                }`}
-                aria-pressed={choiceHighlight === 'TAKEAWAY'}
-                onClick={() => {
-                  if (choiceHighlight === 'TAKEAWAY') {
-                    void pickMode('TAKEAWAY');
-                    return;
-                  }
-                  setChoiceHighlight('TAKEAWAY');
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    if (choiceHighlight === 'TAKEAWAY') {
-                      void pickMode('TAKEAWAY');
-                      return;
-                    }
-                    setChoiceHighlight('TAKEAWAY');
-                  }
-                }}
-              >
-                <span className="order-mode-choice__mascot" aria-hidden>
-                  <Image src={MASCOT_IMAGES.takeaway} alt="" width={88} height={88} className="object-contain" />
-                </span>
-                <span className="order-mode-choice__title">Takeaway</span>
-                <button
-                  type="button"
-                  className="order-mode-choice__action"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setChoiceHighlight('TAKEAWAY');
-                    void pickMode('TAKEAWAY');
-                  }}
-                >
-                  <ShoppingBag size={14} aria-hidden />
-                  Select Pickup
-                </button>
-              </div>
-            </div>
-          </motion.div>
+        {viewStep === 'choose' ? (
+          isRedesign ? (
+            <OrderTypeStep key="choose-redesign" onChoose={(m) => void pickMode(m)} />
+          ) : (
+            <OrderModeChooseLegacy
+              choiceHighlight={choiceHighlight}
+              onHighlight={setChoiceHighlight}
+              onChoose={(m) => void pickMode(m)}
+              onBackToHome={onBackToHome}
+            />
+          )
         ) : (
           <motion.div
             key={`setup-${mode}`}
-            initial={{ opacity: 0, x: 28 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 28 }}
+            initial={isRedesign ? false : { opacity: 0, x: 28 }}
+            animate={isRedesign ? undefined : { opacity: 1, x: 0 }}
+            exit={isRedesign ? undefined : { opacity: 0, x: 28 }}
             transition={{ duration: 0.28 }}
-            className={`order-flow-step ${step === 'setup' ? 'order-flow-step--map' : ''}`}
+            className={cn(
+              isRedesign ? 'flex min-h-0 flex-1 flex-col' : `order-flow-step ${viewStep === 'setup' ? 'order-flow-step--map' : ''}`,
+            )}
           >
             {mode === 'DELIVERY' ? (
-              <div className="order-delivery-stage">
+              <div className={cn('order-delivery-stage', isRedesign && 'flex min-h-0 flex-1 flex-col')}>
+                {!isRedesign && (
                 <div className="order-delivery-stage__chrome">
                   <button type="button" onClick={goBackToChoose} className="order-flow-back order-flow-back--overlay">
                     <ChevronLeft size={16} />
                     Change order type
                   </button>
                 </div>
+                )}
 
+                {isRedesign ? (
+                  <OrderSetupBranchStepShell
+                    sidebar={
+                      <>
+                        <AddressMapPicker
+                          value={addressSelection}
+                          variant="prominent"
+                          layout="stacked"
+                          showMap={false}
+                          searchAppearance="redesign"
+                          autoDetectOnMount={!addressSelection}
+                          branchMarkers={deliveryBranchMarkers}
+                          selectedBranchId={selectedDeliveryStoreId}
+                          onBranchSelect={selectDeliveryBranchFromMap}
+                          showRoute={false}
+                          routeAnimation="delivery"
+                          onLocationResolved={playLocationPinSound}
+                          onChange={(sel) => {
+                            setAddressSelection(sel);
+                            setValidation(null);
+                            setSelectedDeliveryStoreId(null);
+                          }}
+                        />
+                        <OrderSetupBranchList
+                          branches={deliveryBranchRows}
+                          selectedId={selectedDeliveryStoreId}
+                          from={
+                            addressSelection
+                              ? { lat: addressSelection.lat, lng: addressSelection.lng }
+                              : null
+                          }
+                          loading={validating && deliveryBranchRows.length === 0}
+                          onSelect={(id) => {
+                            const branch = suggestedDeliveryBranches.find((b) => b.id === id);
+                            if (branch) handleDeliveryBranchClick(branch);
+                          }}
+                          onHover={setHoveredBranchId}
+                          emptyMessage={
+                            addressSelection
+                              ? validating
+                                ? orderSetupCopy.findingBranches
+                                : 'Move the pin or search to find deliverable branches.'
+                              : 'Set your delivery location on the map.'
+                          }
+                        />
+                      </>
+                    }
+                    map={
+                      <>
+                        <OrderSetupBranchMap
+                          branches={deliveryMapBranches}
+                          selectableIds={deliverySelectableIds}
+                          selectedId={selectedDeliveryStoreId}
+                          highlightedId={hoveredBranchId ?? focusedBranchId}
+                          focusedId={focusedBranchId}
+                          insetBottom={carouselHeight}
+                          deliveryPin={
+                            addressSelection
+                              ? { lat: addressSelection.lat, lng: addressSelection.lng }
+                              : null
+                          }
+                          deliveryPinLabel="Deliver here"
+                          deliveryRadiusKm={7}
+                          onMoveDeliveryPin={(loc) => {
+                            setAddressSelection((prev) =>
+                              prev
+                                ? { ...prev, lat: loc.lat, lng: loc.lng }
+                                : { address: '', lat: loc.lat, lng: loc.lng },
+                            );
+                            setValidation(null);
+                            setSelectedDeliveryStoreId(null);
+                          }}
+                          userLocation={
+                            addressSelection
+                              ? { lat: addressSelection.lat, lng: addressSelection.lng }
+                              : null
+                          }
+                          compactWhenZoomedOut
+                          onSelect={(id) => selectDeliveryBranchFromMap(id)}
+                          onHover={setHoveredBranchId}
+                          className="h-full min-h-0 rounded-3xl ring-1 ring-brand-100 ring-inset"
+                        />
+                        {deliveryBranchRows.length > 0 ? (
+                          <OrderSetupBranchCarousel
+                            branches={deliveryBranchRows}
+                            selectedId={selectedDeliveryStoreId}
+                            from={
+                              addressSelection
+                                ? { lat: addressSelection.lat, lng: addressSelection.lng }
+                                : null
+                            }
+                            onSelect={(id) => {
+                              const branch = suggestedDeliveryBranches.find((b) => b.id === id);
+                              if (branch) handleDeliveryBranchClick(branch);
+                            }}
+                            onFocus={setFocusedBranchId}
+                            onHeightChange={setCarouselHeight}
+                          />
+                        ) : null}
+                      </>
+                    }
+                  />
+                ) : (
                 <AddressMapPicker
                   value={addressSelection}
                   variant="prominent"
@@ -631,9 +684,11 @@ export function OrderModeSelector({
                   routeAnimation="delivery"
                   onLocationResolved={playLocationPinSound}
                   overlayHeader={
+                    !isRedesign ? (
                     <div className="order-delivery-stage__heading">
                       <h3 className="order-flow-step__title">Where should we deliver?</h3>
                     </div>
+                    ) : undefined
                   }
                   onChange={(sel) => {
                     setAddressSelection(sel);
@@ -642,259 +697,111 @@ export function OrderModeSelector({
                   }}
                 >
                   <div className="order-delivery-sheet">
-                    {(validating || validation) && (
-                      <>
-                        {validating && !suggestedDeliveryBranches.length ? (
-                          <div className="order-branch-slide order-branch-slide--loading">
-                            <Loader2 size={16} className="animate-spin shrink-0 text-brand" />
-                            <span className="text-sm text-brand">Finding nearest branches...</span>
-                          </div>
-                        ) : suggestedDeliveryBranches.length > 0 ? (
-                          <>
-                            <p className="order-delivery-sheet__label">Suggested branches</p>
-                            <div className="order-branch-slider" role="list">
-                              {suggestedDeliveryBranches.map((branch, index) => {
-                                const closed = Boolean(branch.branchClosed);
-                                const orderable = isDeliveryBranchOrderable(branch);
-                                const selected = orderable && selectedDeliveryStoreId === branch.id;
-                                return (
-                                  <button
-                                    key={branch.id}
-                                    type="button"
-                                    role="listitem"
-                                    disabled={closed}
-                                    aria-disabled={closed}
-                                    onClick={() => handleDeliveryBranchClick(branch)}
-                                    className={`order-branch-slide ${
-                                      selected ? 'order-branch-slide--selected' : ''
-                                    }${closed ? ' order-branch-slide--disabled' : ''}`}
-                                  >
-                                    <span className="order-branch-slide__thumb" aria-hidden>
-                                      <Store size={20} className={closed ? 'text-muted' : 'text-brand'} />
-                                    </span>
-                                    <span className="min-w-0 flex-1">
-                                      <span className="flex items-center gap-1.5 flex-wrap">
-                                        <span className="font-semibold text-fg text-sm truncate block">
-                                          {branch.name}
-                                        </span>
-                                        {index === 0 && (
-                                          <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-brand/15 text-brand-dark shrink-0">
-                                            Nearest
-                                          </span>
-                                        )}
-                                        {closed && (
-                                          <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-red-500/12 text-red-500 shrink-0">
-                                            Closed
-                                          </span>
-                                        )}
-                                      </span>
-                                      <span className="text-xs text-muted mt-0.5 block">
-                                        {branch.distanceKm} km · Fee LKR {branch.fee}
-                                        {closed ? ' · Not accepting orders' : ''}
-                                      </span>
-                                    </span>
-                                    {selected ? (
-                                      <CheckCircle2 size={20} className="text-green-500 shrink-0" />
-                                    ) : (
-                                      <span className="order-branch-slide__ring" aria-hidden />
-                                    )}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            <p className="order-delivery-sheet__hint">
-                              Tap a branch to confirm
-                            </p>
-                          </>
-                        ) : (
-                          <div className="order-delivery-sheet__empty">
-                            <div className="flex items-start gap-2 text-sm text-red-400">
-                              <MapPin size={16} className="shrink-0 mt-0.5" />
-                              <span>
-                                {validation?.message ||
-                                  'Delivery not available here. Try takeaway or move the pin.'}
-                              </span>
-                            </div>
-                            {validation?.reason === 'out-of-range' && (
-                              <button
-                                type="button"
-                                onClick={() => void pickMode('TAKEAWAY')}
-                                className="text-sm text-brand hover:text-brand-light font-medium mt-2"
-                              >
-                                Switch to Pickup instead
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </>
-                    )}
+                    <OrderSetupLegacyDeliverySheet
+                      validating={validating}
+                      validation={validation}
+                      suggestedDeliveryBranches={suggestedDeliveryBranches}
+                      selectedDeliveryStoreId={selectedDeliveryStoreId}
+                      onBranchClick={handleDeliveryBranchClick}
+                      onSwitchToPickup={() => void pickMode('TAKEAWAY')}
+                    />
                   </div>
                 </AddressMapPicker>
+                )}
               </div>
-            ) : (
-              <div className="order-delivery-stage">
-                <div className="order-delivery-stage__chrome">
-                  <button type="button" onClick={goBackToChoose} className="order-flow-back order-flow-back--overlay">
-                    <ChevronLeft size={16} />
-                    Change order type
-                  </button>
-                </div>
-
-                <div className="address-map-overlay">
-                  <div className="address-map-overlay__map">
-                    <PickupMap
-                      lat={pickupCoords?.lat ?? DEFAULT_LOCATION.lat}
-                      lng={pickupCoords?.lng ?? DEFAULT_LOCATION.lng}
-                      onLocationChange={(la, ln) => {
-                        setPickupCoords({ lat: la, lng: ln });
-                        setPickupAreaLabel('pinned location');
-                      }}
-                      branchMarkers={pickupBranchMarkers}
-                      selectedBranchId={selectedStore?.id ?? null}
-                      onBranchSelect={(id) => {
+            ) : isRedesign ? (
+              <OrderSetupBranchStepShell
+                sidebar={
+                  <>
+                    <OrderSetupSearchField
+                      label={orderSetupCopy.searchBranches}
+                      placeholder={orderSetupCopy.searchBranchesPlaceholder}
+                      value={branchSearch}
+                      onChange={setBranchSearch}
+                    />
+                    <OrderSetupLocationStatus
+                      locating={detectingLocation || (storesLoading && Boolean(pickupCoords))}
+                      located={Boolean(pickupCoords)}
+                    />
+                    <OrderSetupBranchList
+                      listRef={pickupListRef}
+                      branches={pickupBranchRows}
+                      selectedId={selectedStore?.id ?? null}
+                      from={pickupCoords}
+                      loading={detectingLocation || (storesLoading && !pickupStoresList.length)}
+                      onSelect={(id) => {
                         const store = allStores.find((s) => s.id === id);
                         if (store) handleTakeawayStoreClick(store);
                       }}
-                      showRoute={Boolean(selectedStore && pickupCoords)}
-                      routeAnimation="pickup"
-                      className="h-full min-h-0 delivery-map-wrap--bleed"
+                      onHover={setHoveredBranchId}
+                      emptyMessage={
+                        branchSearchQuery
+                          ? `No branches match “${branchSearchQuery}”.`
+                          : undefined
+                      }
                     />
-                  </div>
-
-                  <div className="address-map-overlay__top">
-                    <div className="address-map-overlay__panel">
-                      <div className="order-delivery-stage__heading">
-                        <h3 className="order-flow-step__title">Choose your pickup store</h3>
-                      </div>
-                      <div className="input-icon-wrap input-icon-wrap--both address-map-overlay__branch-search relative">
-                        <Search size={16} className="input-icon" aria-hidden />
-                        <input
-                          type="search"
-                          value={branchSearch}
-                          onChange={(e) => setBranchSearch(e.target.value)}
-                          placeholder="Search all branches, e.g. Nugegoda..."
-                          className="input-field w-full"
-                          autoComplete="off"
-                          aria-label="Search all pickup branches by name or city"
-                        />
-                        <div className="address-map-overlay__search-actions">
-                          {branchSearchQuery ? (
-                            <button
-                              type="button"
-                              onClick={() => setBranchSearch('')}
-                              title="Clear search"
-                              aria-label="Clear branch search"
-                              className="input-action text-muted hover:text-fg"
-                            >
-                              <X size={16} strokeWidth={2} />
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPickupAreaLabel('your location');
-                              setBranchSearch('');
-                              void detectPickupLocation(true);
-                            }}
-                            disabled={detectingLocation}
-                            title="Use my current location"
-                            aria-label="Use my current location to find the nearest outlet"
-                            className="input-action text-brand hover:text-brand-dark disabled:opacity-50"
-                          >
-                            {detectingLocation ? (
-                              <Loader2 size={16} className="animate-spin" />
-                            ) : (
-                              <Crosshair size={18} strokeWidth={2} />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {(detectingLocation || (storesLoading && pickupCoords)) && (
-                      <div className="flex items-center gap-2 text-sm text-brand p-3 rounded-xl bg-white/95 border border-navy-border shadow-md">
-                        <Loader2 size={16} className="animate-spin shrink-0" />
-                        Finding the nearest outlet...
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="address-map-overlay__bottom">
-                    <div className="order-delivery-sheet">
-                      <p className="order-delivery-sheet__label">
-                        {branchSearchQuery
-                          ? `Matching branches · “${branchSearchQuery}”`
-                          : pickupCoords
-                            ? `Nearby branches${pickupAreaLabel ? ` · ${pickupAreaLabel}` : ''}`
-                            : 'All branches'}
-                      </p>
-                      {pickupStoresList.length === 0 && !storesLoading ? (
-                        <div className="order-delivery-sheet__empty">
-                          <p className="text-sm text-muted text-center py-2">
-                            {branchSearchQuery
-                              ? `No branches match “${branchSearchQuery}”. Try another name or city.`
-                              : 'No branches available.'}
-                          </p>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="order-branch-slider" role="list">
-                            {pickupStoresList.map((store, index) => {
-                              const selected = selectedStore?.id === store.id;
-                              return (
-                                <button
-                                  key={store.id}
-                                  type="button"
-                                  role="listitem"
-                                  onClick={() => handleTakeawayStoreClick(store)}
-                                  className={`order-branch-slide ${
-                                    selected ? 'order-branch-slide--selected' : ''
-                                  }`}
-                                >
-                                  <span className="order-branch-slide__thumb" aria-hidden>
-                                    <Store size={20} className="text-brand" />
-                                  </span>
-                                  <span className="min-w-0 flex-1">
-                                    <span className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="font-semibold text-fg text-sm truncate block">
-                                        {store.name}
-                                      </span>
-                                      {pickupCoords && !branchSearchQuery && index === 0 && store.distanceKm != null && (
-                                        <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-brand/15 text-brand-dark shrink-0">
-                                          Nearest
-                                        </span>
-                                      )}
-                                    </span>
-                                    <span className="text-xs text-muted mt-0.5 block truncate">
-                                      {store.distanceKm != null
-                                        ? `${store.distanceKm.toFixed(1)} km · `
-                                        : ''}
-                                      {store.city}
-                                      {isBranchManuallyClosed(store)
-                                        ? ' · Closed'
-                                        : store.isBusy
-                                          ? ' · Busy'
-                                          : ' · Open'}
-                                    </span>
-                                  </span>
-                                  {selected ? (
-                                    <CheckCircle2 size={20} className="text-green-500 shrink-0" />
-                                  ) : (
-                                    <span className="order-branch-slide__ring" aria-hidden />
-                                  )}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          <p className="order-delivery-sheet__hint">
-                            Tap a branch to confirm
-                          </p>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
+                  </>
+                }
+                map={
+                  <>
+                    <OrderSetupBranchMap
+                      branches={pickupMapBranches}
+                      selectableIds={pickupSelectableIds}
+                      selectedId={selectedStore?.id ?? null}
+                      highlightedId={hoveredBranchId ?? focusedBranchId}
+                      focusedId={focusedBranchId}
+                      insetBottom={carouselHeight}
+                      userLocation={pickupCoords}
+                      compactWhenZoomedOut
+                      onSelect={(id) => {
+                        const store = allStores.find((s) => s.id === id);
+                        if (store) handleTakeawayStoreClick(store);
+                      }}
+                      onHover={setHoveredBranchId}
+                      className="h-full min-h-0 rounded-3xl ring-1 ring-brand-100 ring-inset"
+                    />
+                    <OrderSetupBranchCarousel
+                      branches={pickupBranchRows}
+                      selectedId={selectedStore?.id ?? null}
+                      from={pickupCoords}
+                      onSelect={(id) => {
+                        const store = allStores.find((s) => s.id === id);
+                        if (store) handleTakeawayStoreClick(store);
+                      }}
+                      onFocus={setFocusedBranchId}
+                      onHeightChange={setCarouselHeight}
+                    />
+                  </>
+                }
+              />
+            ) : (
+              <OrderSetupLegacyPickupStage
+                pickupCoords={pickupCoords}
+                pickupAreaLabel={pickupAreaLabel}
+                branchSearch={branchSearch}
+                branchSearchQuery={branchSearchQuery}
+                detectingLocation={detectingLocation}
+                storesLoading={storesLoading}
+                pickupStoresList={pickupStoresList}
+                pickupBranchMarkers={pickupBranchMarkers}
+                selectedStore={selectedStore}
+                onBack={goBackToChoose}
+                onBranchSearchChange={setBranchSearch}
+                onDetectLocation={() => {
+                  setPickupAreaLabel('your location');
+                  setBranchSearch('');
+                  void detectPickupLocation(true);
+                }}
+                onPickupCoordsChange={(coords) => {
+                  setPickupCoords(coords);
+                  setPickupAreaLabel('pinned location');
+                }}
+                onStoreClick={handleTakeawayStoreClick}
+                onMapBranchSelect={(id) => {
+                  const store = allStores.find((s) => s.id === id);
+                  if (store) handleTakeawayStoreClick(store);
+                }}
+              />
             )}
           </motion.div>
         )}
