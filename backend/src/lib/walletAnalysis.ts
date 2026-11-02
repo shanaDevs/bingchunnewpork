@@ -13,6 +13,7 @@ import {
   type BreakdownOrderRow,
   type RefundPenaltyPrefetch,
   computeBreakdownForPeriodOrders,
+  computeBranchPayablesBreakdown,
   loadRefundPenaltyTotalsByChartBuckets,
   loadRefundPenaltyTotalsByStore,
 } from './walletService';
@@ -21,7 +22,7 @@ import { getGatewayFeeRate } from './appSchema';
 import { getDeliveryWalletNetByBucket, getDeliveryWalletSummary } from './deliveryWalletService';
 import { ensureJasonLedgerSchema } from './jasonLedgerSchema';
 import { decimalFieldToCentsNumber } from './moneyDecimal';
-import { txnAmountCents, walletBalanceCents } from './walletApiMoney';
+import { txnAmountCents } from './walletApiMoney';
 import { promiseAllLimited } from '../utils/promiseAllLimited';
 import { getPrismaFanOutLimit } from './prisma';
 
@@ -614,7 +615,17 @@ async function computeWalletAnalysis(params: {
   });
   const storeIds = wallets.map((w) => w.storeId);
 
-  const balanceCents = wallets.reduce((sum, w) => sum + walletBalanceCents(w), 0);
+  const payablesBreakdowns =
+    storeIds.length > 0
+      ? await promiseAllLimited(
+          getPrismaFanOutLimit(),
+          storeIds.map((id) => () => computeBranchPayablesBreakdown(id)),
+        )
+      : [];
+  const balanceCents = payablesBreakdowns.reduce(
+    (sum, breakdown) => sum + breakdown.allTimeAvailableBalanceCents,
+    0,
+  );
 
   if (storeIds.length === 0) {
     const emptyTrend = padDailyTrend(lastDay, new Map());

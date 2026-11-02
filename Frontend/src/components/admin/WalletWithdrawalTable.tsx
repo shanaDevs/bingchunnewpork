@@ -7,7 +7,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { formatMoneyAmount } from '@/lib/receipt';
 import { cn } from '@/lib/utils';
 import { openPayoutProof, openPayoutProofById, openWithdrawalInvoice } from '@/lib/adminProtectedFile';
-import { hasWithdrawalInvoice, parseWithdrawalBreakdown, withdrawalAmountParts, type WithdrawalBreakdown } from '@/components/admin/settlementTypes';
+import {
+  hasWithdrawalInvoice,
+  parseWithdrawalBreakdown,
+  resolveWithdrawalPaymentLkr,
+  withdrawalAmountParts,
+  type WithdrawalBreakdown,
+} from '@/components/admin/settlementTypes';
 import WithdrawalBreakdownDisplay from '@/components/admin/WithdrawalBreakdownDisplay';
 import WithdrawalPaymentCell from '@/components/admin/WithdrawalPaymentCell';
 
@@ -215,7 +221,7 @@ export default function WalletWithdrawalTable({
               <th className="px-5 py-3">Date</th>
               {showStore && <th className="px-5 py-3">Branch</th>}
               <th className="px-5 py-3">Period</th>
-              <th className="px-5 py-3 text-right">Requested</th>
+              <th className="px-5 py-3 text-right">Branch receives</th>
               {showAdvance && <th className="px-5 py-3 text-right">Advance</th>}
               <th className="px-5 py-3">Status</th>
               <th className="px-5 py-3">Payment</th>
@@ -263,7 +269,7 @@ export default function WalletWithdrawalTable({
                   {formatPeriod(row)}
                 </td>
                 <td className="px-5 py-3 text-right font-medium tabular-nums text-[var(--color-text)]">
-                  {formatMoneyAmount(amounts.requestedLkr)}
+                  {formatMoneyAmount(resolveWithdrawalPaymentLkr(row))}
                 </td>
                 {showAdvance && (
                   <td className="px-5 py-3 text-right tabular-nums">
