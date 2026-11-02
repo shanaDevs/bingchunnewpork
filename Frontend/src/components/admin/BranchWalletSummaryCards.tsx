@@ -136,7 +136,7 @@ export default function BranchWalletSummaryCards({
         <section className="branch-wallet-balance branch-wallet-payables__balance">
           <Wallet
             aria-hidden
-            size={118}
+            size={96}
             strokeWidth={1}
             className="branch-wallet-balance__art"
           />
