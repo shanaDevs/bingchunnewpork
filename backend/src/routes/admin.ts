@@ -274,7 +274,14 @@ router.post(
   '/wallet/:storeId/initiate-payout',
   requireSystemAdmin,
   walletController.attachStoreIdFromWalletParams,
-  settlementProofMemoryUpload.single('proof'),
+  // Multipart to this route was 504'ing at the App Platform edge; JSON base64 is preferred.
+  // Keep multer as a no-op fallback when Content-Type is still multipart.
+  (req, res, next) => {
+    if (req.is('multipart/form-data')) {
+      return settlementProofMemoryUpload.single('proof')(req, res, next);
+    }
+    return next();
+  },
   walletController.initiatePayoutHandler,
 );
 router.get('/wallet/:storeId/settle-info', requirePermission('WALLET', 'read'), walletController.getSettleInfo);

@@ -200,6 +200,13 @@ const initiatePayoutBodySchema = z
     checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     /** Admin password (PIN) — required to initiate a direct branch payout. */
     password: adminPinField,
+    /**
+     * Preferred proof transport: base64 JSON (multipart to App Platform was returning
+     * edge 504 before the handler ran).
+     */
+    proofBase64: z.string().min(8).max(6_000_000).optional(),
+    proofFileName: z.string().min(1).max(255).optional(),
+    proofMimeType: z.string().min(3).max(100).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.paymentMethod !== 'CHECK') return;
@@ -643,9 +650,21 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
       data.from && data.to ? { from: data.from, to: data.to } : null;
     const checkDate = parseSettlementCheckDate(data.paymentMethod, data.checkDate);
 
-    // Validate the proof file locally only — DO Spaces PutObject has been hanging long
-    // enough to trip the App Platform/Cloudflare gateway before the wallet debit commits.
-    const proofFile = assertSettlementProofFile(req.file);
+    // Prefer JSON base64 proof — multipart/form-data to this route was getting an edge
+    // 504 in <1s before the handler ran. Multer file is kept as a fallback.
+    let uploadedProof = req.file;
+    if (!uploadedProof && data.proofBase64) {
+      const buffer = Buffer.from(data.proofBase64, 'base64');
+      uploadedProof = {
+        fieldname: 'proof',
+        originalname: data.proofFileName?.trim() || 'proof.bin',
+        encoding: '7bit',
+        mimetype: data.proofMimeType?.trim() || 'application/octet-stream',
+        size: buffer.length,
+        buffer,
+      } as Express.Multer.File;
+    }
+    const proofFile = assertSettlementProofFile(uploadedProof);
 
     const [prevalidated, wallet, store] = await Promise.all([
       validatePayoutRequest(

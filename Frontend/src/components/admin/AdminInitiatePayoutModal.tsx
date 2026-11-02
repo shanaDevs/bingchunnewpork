@@ -564,26 +564,37 @@ export default function AdminInitiatePayoutModal({
     setSubmitting(true);
     setError('');
     try {
-      const form = new FormData();
-      form.append('amount', formatBranchWalletNetLkrForSubmit(periodNet, reportBranchWalletNetLkr));
-      form.append('periodDays', String(periodDays));
-      form.append('from', dateFrom);
-      form.append('to', dateTo);
-      form.append('paymentMethod', paymentMethod);
-      form.append('password', verifiedPin);
-      if (remarks.trim()) form.append('remarks', remarks.trim());
-      form.append('proof', proofFile);
+      // JSON + base64 proof — multipart/form-data to App Platform was returning edge 504
+      // before the API handler ran (confirmed with tiny PNG and PDF).
+      const bytes = new Uint8Array(await proofFile.arrayBuffer());
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!);
+      const proofBase64 = btoa(binary);
+
+      const payload: Record<string, string | number | boolean> = {
+        amount: formatBranchWalletNetLkrForSubmit(periodNet, reportBranchWalletNetLkr),
+        periodDays,
+        from: dateFrom,
+        to: dateTo,
+        paymentMethod,
+        password: verifiedPin,
+        proofBase64,
+        proofFileName: proofFile.name,
+        proofMimeType: proofFile.type || 'application/octet-stream',
+      };
+      if (remarks.trim()) payload.remarks = remarks.trim();
       if (isCheck) {
-        form.append('checkNumber', checkNumber.trim());
-        form.append('checkDate', checkDate);
+        payload.checkNumber = checkNumber.trim();
+        payload.checkDate = checkDate;
       }
 
       const res = await fetch(
         `${apiBase}/admin/wallet/${encodeURIComponent(storeId)}/initiate-payout`,
         {
           method: 'POST',
-          headers: adminAuthHeaders(), credentials: 'include',
-          body: form,
+          headers: { ...adminAuthHeaders(), 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(payload),
         },
       );
       const raw = await res.text();
