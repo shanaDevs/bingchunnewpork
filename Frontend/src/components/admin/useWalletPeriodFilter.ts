@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { currentMonthKey } from '@/components/admin/MonthPickerSelect';
+import { replaceAdminWalletQuery } from '@/components/admin/replaceAdminWalletQuery';
 
 export type WalletPeriodMode = 'month' | 'custom';
 
@@ -94,20 +95,22 @@ export function useWalletPeriodFilter() {
 
   const commitParams = useCallback(
     (from: string | null, to: string | null) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (from && to) {
-        params.set('from', from);
-        params.set('to', to);
-      } else {
-        params.delete('from');
-        params.delete('to');
-      }
-      const qs = params.toString();
-      router.replace(qs ? `/admin/wallet?${qs}` : '/admin/wallet', { scroll: false });
+      // Merge into the live query so concurrent tab changes are not wiped.
+      replaceAdminWalletQuery(router, (params) => {
+        if (from && to) {
+          params.set('from', from);
+          params.set('to', to);
+        } else {
+          params.delete('from');
+          params.delete('to');
+        }
+      });
     },
-    [router, searchParams],
+    [router],
   );
 
+  // Only re-run when the applied period changes — not when commitParams identity
+  // would churn from unrelated searchParams updates (e.g. ?tab=).
   useEffect(() => {
     if (!applied) {
       setDraftMode('month');
@@ -122,7 +125,8 @@ export function useWalletPeriodFilter() {
     setDraftMonth(applied.mode === 'month' ? (applied.monthKey ?? currentMonthKey()) : '');
     setDraftFrom(applied.mode === 'custom' ? applied.from : '');
     setDraftTo(applied.mode === 'custom' ? applied.to : '');
-  }, [applied, commitParams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- commitParams is stable on router; including it re-defaults on every URL key change
+  }, [applied]);
 
   const customRangeActive = draftMode === 'custom' && (!!draftFrom || !!draftTo);
   const monthDisabled = customRangeActive;
