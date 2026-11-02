@@ -4,7 +4,11 @@ import { createMockReq, createMockRes, createMockNext } from '../helpers/express
 vi.mock('../../src/lib/prisma', () => ({
   prisma: {
     store: { findMany: vi.fn() },
-    adminUser: { create: vi.fn(), findFirst: vi.fn() },
+    adminUser: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(async () => []),
+    },
     $disconnect: vi.fn(async () => undefined),
     $connect: vi.fn(async () => undefined),
   },
@@ -24,6 +28,9 @@ vi.mock('../../src/lib/socket', () => ({
 vi.mock('../../src/lib/spaces', () => ({
   uploadDriverAsset: vi.fn(async () => 'https://example.com/drivers/license/licence.png'),
   viewableLicenseImageUrl: vi.fn(async (url: string | null) =>
+    url ? `https://example.com/signed?src=${encodeURIComponent(url)}` : null,
+  ),
+  viewableLicenseImageUrlWithTimeout: vi.fn(async (url: string | null) =>
     url ? `https://example.com/signed?src=${encodeURIComponent(url)}` : null,
   ),
 }));

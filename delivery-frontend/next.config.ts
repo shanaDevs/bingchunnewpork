@@ -23,6 +23,10 @@ const backendOrigin = getBackendOrigin();
 const nextConfig: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: path.join(__dirname, '..'),
+  experimental: {
+    // Multipart /api proxy (driver register, wallet proof) can exceed the default ~30s cut-off.
+    proxyTimeout: 180_000,
+  },
   async rewrites() {
     return [{ source: '/socket.io/:path*', destination: `${backendOrigin}/socket.io/:path*` }];
   },
