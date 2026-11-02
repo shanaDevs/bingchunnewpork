@@ -1,6 +1,5 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectAclCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { randomBytes } from 'crypto';
 import path from 'path';
 import { config } from '../config';
@@ -39,10 +38,6 @@ export function createSpacesS3Client(input: {
     forcePathStyle: spacesRequestsUsePathStyle(input.bucket),
     requestChecksumCalculation: 'WHEN_REQUIRED',
     responseChecksumValidation: 'WHEN_REQUIRED',
-    requestHandler: new NodeHttpHandler({
-      connectionTimeout: 10_000,
-      requestTimeout: 60_000,
-    }),
   });
 }
 
@@ -401,36 +396,5 @@ export async function deleteFromSpaces(fileUrl: string): Promise<void> {
     logger.info(`Deleted from DO Spaces: ${key}`);
   } catch (err) {
     logger.warn('Failed to delete from DO Spaces (non-fatal)', err);
-  }
-}
-
-/** Lightweight connectivity check for ops (/health/spaces). */
-export async function probeSpacesReachability(timeoutMs = 5000): Promise<{
-  configured: boolean;
-  reachable: boolean;
-  error?: string;
-}> {
-  if (!isSpacesConfigured()) {
-    return { configured: false, reachable: false };
-  }
-  try {
-    await Promise.race([
-      s3.send(
-        new ListObjectsV2Command({
-          Bucket: config.doSpaces.bucket,
-          MaxKeys: 1,
-        }),
-      ),
-      new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Spaces probe timed out')), timeoutMs);
-      }),
-    ]);
-    return { configured: true, reachable: true };
-  } catch (err) {
-    return {
-      configured: true,
-      reachable: false,
-      error: err instanceof Error ? err.message : 'Spaces probe failed',
-    };
   }
 }

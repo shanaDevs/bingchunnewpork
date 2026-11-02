@@ -2,7 +2,6 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "../components/home-redesign/theme.css";
-@import "../components/order-redesign/orderSetupMap.css";
 
 @custom-variant dark (&:where([data-theme="dark"] *));
 
@@ -8726,7 +8725,6 @@
   .admin-report-pdf__stat--blue { background: #dbeafe; border-color: #bfdbfe; }
   .admin-report-pdf__stat--yellow { background: #fef9c3; border-color: #fde047; }
   .admin-report-pdf__stat--purple { background: #ede9fe; border-color: #ddd6fe; }
-  .admin-report-pdf__stat--orange { background: #ffedd5; border-color: #fed7aa; }
   .admin-report-pdf__stat--brand { background: #dbeafe; border-color: #93c5fd; }
 
   .admin-report-pdf__table-wrap {
@@ -9802,7 +9800,7 @@
   .branch-wallet-page .branch-wallet-payables {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 0.75rem;
   }
 
   .branch-wallet-page .branch-wallet-payables__balance-row {
@@ -9814,18 +9812,60 @@
   .branch-wallet-page .branch-wallet-payables__balance {
     width: 100%;
     max-width: 420px;
-    min-height: 160px;
+    min-height: 0;
   }
 
   .branch-wallet-page .branch-wallet-payables__row {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 1rem;
+    gap: 0.75rem;
     align-items: stretch;
   }
 
   .branch-wallet-page .branch-wallet-payables__metric {
-    min-height: 148px;
+    min-height: 0;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-balance,
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-metric-card {
+    min-height: 0;
+    padding: 0.75rem 0.9rem 0.65rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-balance {
+    padding: 0.85rem 1rem 0.75rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-metric-card__amount {
+    margin-top: 0.45rem;
+    font-size: 1.1rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-metric-card__hint {
+    margin: 0.2rem 0 0;
+    padding-top: 0;
+    padding-right: 0;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-balance__amount {
+    margin-top: 0.35rem;
+    font-size: 1.35rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-balance__hint {
+    margin-top: 0.2rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-balance__go {
+    bottom: 0.7rem;
+    right: 0.85rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-balance__art {
+    top: 0.45rem;
+    right: 0.15rem;
+    transform: scale(0.72);
+    transform-origin: top right;
   }
 
   .branch-wallet-page .branch-wallet-metric-card--primary {
@@ -10729,6 +10769,80 @@
     font-weight: 500;
     line-height: 1.4;
     color: var(--color-text-muted);
+  }
+
+  .process-payment-modal__tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding: 0.25rem;
+    border-radius: 0.625rem;
+    border: 1px solid color-mix(in srgb, var(--color-navy-border) 90%, #94a3b8);
+    background: #f8fafc;
+  }
+
+  [data-theme='dark'] .process-payment-modal__tabs {
+    background: var(--color-input-bg);
+  }
+
+  .process-payment-modal__tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1 1 auto;
+    justify-content: center;
+    min-height: 2.125rem;
+    padding: 0.375rem 0.75rem;
+    border-radius: 0.5rem;
+    border: 1px solid transparent;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    background: transparent;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .process-payment-modal__tab:hover:not(.process-payment-modal__tab--active) {
+    color: var(--color-text);
+    background: rgba(255, 255, 255, 0.7);
+  }
+
+  [data-theme='dark'] .process-payment-modal__tab:hover:not(.process-payment-modal__tab--active) {
+    background: rgba(15, 23, 42, 0.35);
+  }
+
+  .process-payment-modal__tab--active {
+    border-color: rgba(48, 126, 242, 0.45);
+    background: color-mix(in srgb, var(--color-brand) 12%, #fff);
+    color: var(--color-brand);
+    box-shadow: none;
+  }
+
+  [data-theme='dark'] .process-payment-modal__tab--active {
+    background: var(--color-brand-subtle);
+  }
+
+  .process-payment-modal__tab-badge {
+    display: inline-flex;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.375rem;
+    border-radius: 9999px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1;
+    background: rgba(15, 23, 42, 0.08);
+    color: var(--color-text-muted);
+  }
+
+  .process-payment-modal__tab--active .process-payment-modal__tab-badge {
+    background: rgba(48, 126, 242, 0.18);
+    color: var(--color-brand);
   }
 
   .process-payment-modal__request-table-wrap {

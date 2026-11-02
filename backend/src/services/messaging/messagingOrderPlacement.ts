@@ -1,4 +1,3 @@
-import type { PaymentMethod } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middleware/errorHandler';
 import { generateOrderNumber } from '../../utils/orderNumber';
@@ -17,8 +16,6 @@ import { validateOrderStock, deductOrderItemsOnce } from '../../lib/stockEngine'
 import { InsufficientStockError } from '../inventoryReservationService';
 import { mapNotifyOrderItems, notifyBranchNewOrder } from '../../lib/branchNotifications';
 import { INITIAL_ORDER_STATUS } from '../../lib/orderStatus';
-import { shouldCreditWalletOnOrderCreate } from '../../lib/orderPayment';
-import { creditWalletForOrder } from '../../controllers/walletController';
 import { logger } from '../../utils/logger';
 import type { ConversationCartItem, MessagingChannelKind } from './types';
 import { toOrderChannel } from './types';
@@ -294,10 +291,6 @@ export async function placeMessagingOrder(
       err instanceof Error ? err.message : 'Could not reserve stock for this order',
       409,
     );
-  }
-
-  if (shouldCreditWalletOnOrderCreate(paymentMethod as PaymentMethod)) {
-    creditWalletForOrder(order.id, store.id, total, paymentMethod).catch(() => {});
   }
 
   notifyBranchNewOrder({

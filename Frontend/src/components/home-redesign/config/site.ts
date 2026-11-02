@@ -16,15 +16,6 @@ export const mainNav: NavItem[] = [
   { label: "Locations", href: "/stores" },
 ];
 
-/** Whether a nav item is the current section: its page or a nested route (e.g. /menu/[id]). */
-export function isCurrentNav(href: string, pathname: string): boolean {
-  if (href === pathname) return true;
-  if (href === "/") return pathname === "/";
-  if (pathname.startsWith(`${href}/`)) return true;
-  if (href === "/menu" && pathname.startsWith("/product/")) return true;
-  return false;
-}
-
 export type FooterLinkGroup = {
   title: string;
   links: NavItem[];

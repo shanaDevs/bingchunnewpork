@@ -21,11 +21,6 @@
  * scale is derived from it. Swap for official brand values when available.
  */
 @theme {
-  /* Fixed header height (SiteHeader h-22); used by sticky menu toolbar (top-22). */
-  --spacing-22: 5.5rem;
-  /* Branch picker map column height (reference BranchSelectModal md:h-123). */
-  --spacing-123: 30.75rem;
-
   --color-brand-50: #eef5ff;
   --color-brand-100: #d9e8ff;
   --color-brand-200: #bcd7ff;
@@ -164,13 +159,4 @@
   color: #0f172a;
   font-family: var(--font-home-sans), system-ui, sans-serif;
   color-scheme: light;
-}
-
-/*
- * Menu category toolbar uses position:sticky top-22 in the design repo. Site-wide overflow-x:hidden on
- * html/body breaks sticky; on menu/home redesign routes use clip so sticky/fixed pinning still works.
- */
-html:has(.menu-redesign-shell),
-body:has(.menu-redesign-shell) {
-  overflow-x: clip;
 }

@@ -6,8 +6,6 @@ export type DashboardStatsTier = 'all' | 'summary' | 'charts' | 'charts-wallet' 
 
 export type DashboardStatsContext = {
   scope: { storeId?: string };
-  /** Pickup-only branches hide delivery queue tabs; dashboard queue counts match that view. */
-  pickupOnlyQueue: boolean;
   isBranchAdmin: boolean;
   period: DashboardPeriod;
   from?: string;

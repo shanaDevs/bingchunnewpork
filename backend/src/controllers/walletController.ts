@@ -638,13 +638,14 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
     const proofUrl = await requireSettlementProofUpload(req.file, storeId);
     const checkDate = parseSettlementCheckDate(data.paymentMethod, data.checkDate);
 
-    const [wallet, store, netTransferableEarnings] = await Promise.all([
+    // Do NOT await lifetime computeNetTransferableEarnings here — it rescans all
+    // paid orders for the branch and routinely pushes past the App Platform gateway.
+    const [wallet, store] = await Promise.all([
       getOrCreateWallet(storeId),
       prisma.store.findUnique({
         where: { id: storeId },
         select: { name: true },
       }),
-      computeNetTransferableEarnings(storeId),
     ]);
     const balanceBefore = walletBalanceCents(wallet);
     const totalWithdrawnBefore = walletTotalWithdrawnCents(wallet);
@@ -669,27 +670,40 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
       ),
     );
 
-    const final = await finalizeWithdrawalWithInvoice({
-      storeId,
-      storeName: store?.name ?? 'Branch',
-      updated,
-      paymentMethod: data.paymentMethod,
-      balanceBefore,
-      totalWithdrawnBefore,
-      netTransferableEarnings,
-    });
-
     logWalletSecurityEventFromRequest(req, user, {
       event: 'wallet.payout.initiate',
       storeId,
       amountCents,
-      withdrawalId: final.id,
+      withdrawalId: updated.id,
     });
 
     invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
     invalidateWalletPayoutsDueCache();
 
-    res.status(201).json({ success: true, data: serializeWithdrawal(final) });
+    // Respond as soon as the payout is committed. Invoice PDF + Spaces upload and
+    // lifetime net recompute must not hold the DO/Cloudflare gateway open (504).
+    res.status(201).json({ success: true, data: serializeWithdrawal(updated) });
+
+    void (async () => {
+      try {
+        const netTransferableEarnings = await computeNetTransferableEarnings(storeId);
+        await finalizeWithdrawalWithInvoice({
+          storeId,
+          storeName: store?.name ?? 'Branch',
+          updated,
+          paymentMethod: data.paymentMethod,
+          balanceBefore,
+          totalWithdrawnBefore,
+          netTransferableEarnings,
+        });
+      } catch (err) {
+        console.error('[initiate-payout] background invoice finalize failed', {
+          storeId,
+          withdrawalId: updated.id,
+          err,
+        });
+      }
+    })();
   } catch (err) {
     next(err);
   }

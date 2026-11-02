@@ -32,19 +32,10 @@
     "privatize:settlement-proofs": "ts-node --transpile-only src/scripts/privatize-settlement-proofs.ts",
     "seed:dummy": "ts-node --transpile-only prisma/seed-dummy-data.ts",
     "seed:dummy-users": "ts-node --transpile-only prisma/seed-dummy-users.ts",
-    "seed:admin-users": "ts-node --transpile-only prisma/seed-admin-users.ts",
-    "seed:nuge-sept1-delivery": "ts-node --transpile-only src/scripts/seed-nugegoda-sept1-delivery-order.ts",
-    "seed:nuge-sept2-pickup": "ts-node --transpile-only src/scripts/seed-nugegoda-sept2-pickup-order.ts",
-    "seed:nuge-sept3-cash-pickup": "ts-node --transpile-only src/scripts/seed-nugegoda-sept3-cash-pickup-order.ts",
-    "seed:nuge-sept4-card-pickup": "ts-node --transpile-only src/scripts/seed-nugegoda-sept4-card-pickup-order.ts",
-    "seed:nuge-sept5-15-delivery": "ts-node --transpile-only src/scripts/seed-nugegoda-sept5-15-delivery-promos.ts",
-    "seed:nuge-sept16-cash": "ts-node --transpile-only src/scripts/seed-nugegoda-sept16-cash-pickup-order.ts",
-    "seed:nuge-sept17-30": "ts-node --transpile-only src/scripts/seed-nugegoda-sept17-30-mixed-orders.ts",
     "inspect:catalog": "ts-node --transpile-only prisma/sync-catalog-from-test.ts inspect",
     "sync:catalog-from-test": "ts-node --transpile-only prisma/sync-catalog-from-test.ts sync",
     "seed:monthly-orders": "ts-node --transpile-only prisma/seed-monthly-orders.ts",
     "seed:nugegoda-app": "ts-node --transpile-only src/scripts/seed-nugegoda-app-orders.ts",
-    "seed:wallet-testing-sept": "ts-node --transpile-only src/scripts/seed-wallet-testing-sept-orders.ts",
     "seed:nugegoda-app:prod": "node dist/scripts/seed-nugegoda-app-orders.js",
     "audit:nugegoda-seed:prod": "node dist/scripts/audit-nugegoda-seed-readonly.js",
     "feed": "ts-node --transpile-only prisma/seed-dummy-data.ts",
@@ -107,7 +98,7 @@
     "prisma": "^5.22.0",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^6.0.3",
+    "typescript": "^5.9.3",
     "vitest": "^3.2.7"
   }
 }

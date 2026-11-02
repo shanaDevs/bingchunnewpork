@@ -42,17 +42,8 @@ coverage
 playwright-report/
 test-results/
 
-# Backend test files (local only — do not commit)
-backend/tests/constants/
-backend/tests/controllers/
-backend/tests/helpers/
-backend/tests/integration/
-backend/tests/integrations/
-backend/tests/lib/
-backend/tests/middleware/
-backend/tests/routes/
-backend/tests/services/
-backend/tests/utils/
+# Backend test files
+backend/tests/
 
 # Next.js build output
 .next/

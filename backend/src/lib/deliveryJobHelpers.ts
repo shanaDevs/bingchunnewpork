@@ -1,4 +1,12 @@
-import { DeliveryJobStatus, type Order, type OrderItem, type User, type Address, type OrderStatus } from '@prisma/client';
+import {
+  DeliveryJobStatus,
+  Prisma,
+  type Order,
+  type OrderItem,
+  type User,
+  type Address,
+  type OrderStatus,
+} from '@prisma/client';
 import { normalizeProductImageUrl } from './productImages';
 import { prisma } from './prisma';
 import { creditedDeliveredTotals } from '@bingchun/delivery-domain';
@@ -197,6 +205,52 @@ export function visibleJobOrderLinksForDeliveryJob<T extends { order: { status: 
 ): T[] {
   if (!isActiveDeliveryJobStatus(jobStatus)) return jobOrders;
   return jobOrders.filter((link) => link.order.status !== 'CANCELLED');
+}
+
+/**
+ * Delivery-schema rows can point at an order that no longer exists. Including that
+ * required relation makes Prisma throw "Field order is required to return data, got null"
+ * and the whole list fails. Loading by id leaves the missing order out.
+ */
+type OrderSelectWithId<S extends Prisma.OrderSelect> = S & { id: true };
+
+export async function findOrdersByIds<S extends Prisma.OrderSelect>(
+  ids: string[],
+  select: S,
+): Promise<Map<string, Prisma.OrderGetPayload<{ select: OrderSelectWithId<S> }>>> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return new Map();
+  const selectWithId: OrderSelectWithId<S> = { ...select, id: true };
+  type Row = Prisma.OrderGetPayload<{ select: OrderSelectWithId<S> }>;
+  const rows = await prisma.order.findMany({
+    where: { id: { in: unique } },
+    select: selectWithId,
+  });
+  const out = new Map<string, Row>();
+  for (const row of rows) {
+    const id = (row as { id: string }).id;
+    out.set(id, row as Row);
+  }
+  return out;
+}
+
+export async function findOrdersByIdsInclude<I extends Prisma.OrderInclude>(
+  ids: string[],
+  include: I,
+): Promise<Map<string, Prisma.OrderGetPayload<{ include: I }>>> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return new Map();
+  type Row = Prisma.OrderGetPayload<{ include: I }>;
+  const rows = await prisma.order.findMany({
+    where: { id: { in: unique } },
+    include,
+  });
+  const out = new Map<string, Row>();
+  for (const row of rows) {
+    const id = (row as { id: string }).id;
+    out.set(id, row as Row);
+  }
+  return out;
 }
 
 /**
@@ -807,43 +861,47 @@ export function deriveAdminOrderDeliveryState(
 }
 
 /** Admin detail include — events and attempts scoped to the current job. */
+export function adminOrderDetailInclude(jobId: string) {
+  return {
+    user: { select: { name: true, phone: true } },
+    address: {
+      select: { addressLine: true, city: true, district: true, lat: true, lng: true },
+    },
+    items: {
+      select: {
+        quantity: true,
+        productName: true,
+        totalPrice: true,
+        product: { select: { imageUrl: true } },
+      },
+    },
+    statusEvents: {
+      where: { status: { in: ['DELIVERED', 'CANCELLED'] as OrderStatus[] } },
+      orderBy: { createdAt: 'desc' as const },
+      take: 2,
+      select: { status: true, createdAt: true },
+    },
+    deliveryEvents: {
+      where: { jobId },
+      orderBy: { createdAt: 'desc' as const },
+      take: 5,
+      select: { state: true, createdAt: true, note: true },
+    },
+    deliveryAttempts: {
+      where: { jobId },
+      orderBy: { createdAt: 'desc' as const },
+      take: 3,
+      select: { outcome: true, note: true, createdAt: true, attemptNo: true },
+    },
+  };
+}
+
 export function adminJobOrdersInclude(jobId: string) {
   return {
     orderBy: { sequence: 'asc' as const },
     include: {
       order: {
-        include: {
-          user: { select: { name: true, phone: true } },
-          address: {
-            select: { addressLine: true, city: true, district: true, lat: true, lng: true },
-          },
-          items: {
-            select: {
-              quantity: true,
-              productName: true,
-              totalPrice: true,
-              product: { select: { imageUrl: true } },
-            },
-          },
-          statusEvents: {
-            where: { status: { in: ['DELIVERED', 'CANCELLED'] as OrderStatus[] } },
-            orderBy: { createdAt: 'desc' as const },
-            take: 2,
-            select: { status: true, createdAt: true },
-          },
-          deliveryEvents: {
-            where: { jobId },
-            orderBy: { createdAt: 'desc' as const },
-            take: 5,
-            select: { state: true, createdAt: true, note: true },
-          },
-          deliveryAttempts: {
-            where: { jobId },
-            orderBy: { createdAt: 'desc' as const },
-            take: 3,
-            select: { outcome: true, note: true, createdAt: true, attemptNo: true },
-          },
-        },
+        include: adminOrderDetailInclude(jobId),
       },
     },
   };

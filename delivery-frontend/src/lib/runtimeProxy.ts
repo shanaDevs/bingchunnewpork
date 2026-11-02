@@ -19,9 +19,23 @@ function usable(url: string): string {
   return url;
 }
 
+/** Map starter DO host → primary custom domain so proxy never hits a 302 that strips POST bodies. */
+function rewriteStarterAdminOrigin(origin: string): string {
+  if (!origin) return origin;
+  try {
+    const u = new URL(origin);
+    if (u.hostname.toLowerCase() === 'bingchun-admin-a4ndy.ondigitalocean.app') {
+      return 'https://admin.bingchunsrilanka.com';
+    }
+  } catch {
+    /* keep */
+  }
+  return origin;
+}
+
 export function resolveCoreOrigin(): string {
   const fromEnv = clean(process.env.BACKEND_URL) || clean(process.env.API_PROXY_URL);
-  const origin = usable(fromEnv);
+  const origin = rewriteStarterAdminOrigin(usable(fromEnv));
   if (origin) return origin;
   return process.env.NODE_ENV === 'production' ? '' : 'http://localhost:4000';
 }
@@ -64,29 +78,15 @@ export async function proxyTo(req: NextRequest, origin: string): Promise<Respons
   headers.delete('accept-encoding');
 
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
-  const contentType = req.headers.get('content-type') ?? '';
-  // Streamed multipart through Node fetch often stalls upstream (504 on driver register / payout proof).
-  const bufferRequestBody =
-    hasBody &&
-    (contentType.includes('multipart/form-data') || contentType.includes('application/octet-stream'));
-
-  let requestBody: BodyInit | undefined;
-  if (hasBody) {
-    requestBody = bufferRequestBody ? Buffer.from(await req.arrayBuffer()) : req.body;
-  }
 
   let upstream: Response;
   try {
     upstream = await fetch(target, {
       method: req.method,
       headers,
-      body: requestBody,
-      ...(bufferRequestBody
-        ? {}
-        : {
-            // @ts-expect-error `duplex` is required by Node fetch for streamed request bodies
-            duplex: hasBody ? 'half' : undefined,
-          }),
+      body: hasBody ? req.body : undefined,
+      // @ts-expect-error `duplex` is required by Node fetch for streamed request bodies
+      duplex: hasBody ? 'half' : undefined,
       redirect: 'manual',
       cache: 'no-store',
     });
