@@ -48,7 +48,7 @@ type Props = {
 const AMOUNT_COLUMNS = [
   'Branch payout',
   'Customer convenience fee',
-  'Platform commission',
+  'Net platform amount',
   'Delivery fee received',
 ] as const;
 
@@ -204,10 +204,11 @@ function PayoutPeriodAmountCells({
 
   const feeColumnsLoading = needsPreview && previewLoading;
 
+  const netPlatformLkr = row.status === 'PAID' ? amounts.commissionLkr : null;
   const values = [
     amounts.branchReceives,
     amounts.orderConvenienceFeeLkr,
-    amounts.commissionLkr,
+    netPlatformLkr,
     amounts.deliveryFee,
   ];
 
@@ -218,10 +219,12 @@ function PayoutPeriodAmountCells({
           key={AMOUNT_COLUMNS[index]}
           className="px-3 py-3 text-right font-semibold tabular-nums text-[var(--color-text)]"
         >
-          {feeColumnsLoading && index > 0 ? (
+          {index === 2 && row.status !== 'PAID' ? (
+            <span className="text-[var(--color-text-muted)]">—</span>
+          ) : feeColumnsLoading && index > 0 ? (
             <Skeleton className="ml-auto inline-block h-3.5 w-16 bg-[var(--color-navy-light)]/70" />
           ) : (
-            formatAmountCell(value)
+            formatAmountCell(value ?? 0)
           )}
         </td>
       ))}

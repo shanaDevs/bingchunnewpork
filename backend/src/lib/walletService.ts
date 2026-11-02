@@ -35,6 +35,7 @@ import {
   resolveFinalPayoutAmountFromBreakdown,
 } from './sharedPromoContribution';
 import { attachPromoOwnershipTotals, loadPromoOwnershipTotalsForPeriod } from './promoOwnershipTotals';
+import { resolveNetPlatformAmountCentsFromWithdrawalBreakdown } from './invoice/payoutStatement';
 import { Prisma } from '@prisma/client';
 import { centsToDecimal, parseDecimalFromDb } from './moneyDecimal';
 import {
@@ -96,6 +97,7 @@ export type BranchWalletPayablesBreakdown = {
     deliveryOnlineIn: number;
   };
   totalRevenueCents: number;
+  /** Sum of net platform amount from paid 15-day payout snapshots (cents). */
   platformCommissionCents: number;
   deliveryCommissionCents: number;
   gatewayFeeCents: number;
@@ -224,7 +226,7 @@ function buildBranchPayablesBreakdown(
     channels.deliveryOnlineIn;
   const deliveryCommissionCents = Math.round(toDeliveryLkr * 100);
   const totalExpensesCents =
-    platformCommissionCents + gatewayFeeCents + deliveryCommissionCents;
+    platformCommissionCents + gatewayFeeCents + branchReceivableCents;
 
   return {
     channelRevenueCents: { ...channels },
@@ -251,7 +253,6 @@ export async function getBranchWalletDashboard(
     toBranchAgg,
     toPlatformAgg,
     approvedDeliveryPayouts,
-    payablesToPlatformAgg,
     payablesDeliveryPayouts,
     paidPayoutWithdrawals,
     refundsLkr,
@@ -267,10 +268,6 @@ export async function getBranchWalletDashboard(
       where: { storeId, status: 'VERIFIED', ...dateFilter },
     }),
     fetchApprovedDeliveryPayoutBreakdowns(period),
-    prisma.commissionSettlement.aggregate({
-      _sum: { totalCommission: true },
-      where: { storeId, status: 'VERIFIED' },
-    }),
     fetchApprovedDeliveryPayoutBreakdowns(),
     prisma.storeWithdrawal.findMany({
       where: {
@@ -309,9 +306,14 @@ export async function getBranchWalletDashboard(
     0,
   );
 
+  const paidNetPlatformAmountCents = paidPayoutWithdrawals.reduce(
+    (sum, row) => sum + resolveNetPlatformAmountCentsFromWithdrawalBreakdown(row.breakdown),
+    0,
+  );
+
   const payablesBreakdown = buildBranchPayablesBreakdown(
     payablesRevenue,
-    decimalFieldToCentsNumber(payablesToPlatformAgg._sum.totalCommission),
+    paidNetPlatformAmountCents,
     payablesToDeliveryLkr,
     paidPayoutGatewayFeeCents,
     paidBranchReceivableCents,

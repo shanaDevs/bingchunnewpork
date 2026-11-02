@@ -3,6 +3,9 @@ import type {
   InvoicePayoutStatement,
   InvoicePeriodBreakdown,
 } from './types';
+import { resolveNetPlatformAmountCentsFromWithdrawalBreakdown } from './netPlatformAmountFromBreakdown';
+
+export { resolveNetPlatformAmountCentsFromWithdrawalBreakdown } from './netPlatformAmountFromBreakdown';
 
 function num(o: Record<string, unknown>, key: string): number {
   const value = o[key];
@@ -36,6 +39,13 @@ const EMPTY_STATEMENT: InvoicePayoutStatement = {
   jasonPayoutTopUpCents: 0,
   branchNetPayoutCents: 0,
 };
+
+function paybackEnabledFromWithdrawalBreakdown(o: Record<string, unknown>): boolean {
+  if (typeof o.platformDiscountPaybackEnabled === 'boolean') {
+    return o.platformDiscountPaybackEnabled;
+  }
+  return num(o, 'platformPaybackTotal') > 0;
+}
 
 /** Build page-2 payout figures from the stored withdrawal breakdown (cents). */
 export function buildPayoutStatementFromBreakdown(
@@ -76,9 +86,7 @@ export function buildPayoutStatementFromBreakdown(
 
   const platformPromoDeductCents = Math.max(paybackCents, platformOwned);
   const platformDiscountsReportCents = platformPromoDeductCents + sharedPlatform;
-  const netPlatformAmountCents = hasNumber(o, 'netPlatformEarning')
-    ? num(o, 'netPlatformEarning')
-    : commissionCents - platformPromoDeductCents - sharedPlatform - loyaltyDiscountCents;
+  const netPlatformAmountCents = resolveNetPlatformAmountCentsFromWithdrawalBreakdown(breakdown);
 
   const gatewayRateRaw = o.gatewayRatePct;
   const gatewayRatePct =
