@@ -7,10 +7,11 @@
 ///   * debug only     → the Server URLs dialog can override at runtime
 abstract final class Endpoints {
   /// Production core API (includes `/api`).
-  static const productionCore = 'https://bing-chun-core.bc.dartcodes.com/api';
+  static const productionCore = 'https://bingchunsrilanka.com/api';
 
   /// Production delivery service (includes `/delivery-api`).
-  static const productionDelivery = 'https://bing-chun-delivery.bc.dartcodes.com/delivery-api';
+  static const productionDelivery =
+      'https://delivery.bingchunsrilanka.com/delivery-api';
 
   /// Local core API on this PC (debug). Needs `adb reverse tcp:4000 tcp:4000`.
   static const localCore = 'http://127.0.0.1:4000/api';
