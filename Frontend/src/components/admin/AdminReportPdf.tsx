@@ -7,7 +7,7 @@ export type ReportStatCard = {
   label: string;
   value: string;
   sub?: string;
-  tone?: 'green' | 'teal' | 'blue' | 'yellow' | 'purple' | 'brand';
+  tone?: 'green' | 'teal' | 'blue' | 'yellow' | 'purple' | 'orange' | 'brand';
 };
 
 export type ReportPdfRow = {

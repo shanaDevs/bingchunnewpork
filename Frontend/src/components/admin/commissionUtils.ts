@@ -58,6 +58,29 @@ export function formatCommissionRate(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
+/** Decimal commission rate (e.g. 0.065) → one-decimal percent (6.5) for payout breakdown UI. */
+export function commissionRateToDisplayPct(rate: number): number {
+  return Math.round(rate * 1000) / 10;
+}
+
+/** First positive decimal rate wins (stored snapshot rate, then live preview slab rates). */
+export function resolveSlabRatePct(
+  ...rates: Array<number | null | undefined>
+): number | null {
+  for (const rate of rates) {
+    if (rate != null && rate > 0) {
+      return commissionRateToDisplayPct(rate);
+    }
+  }
+  return null;
+}
+
+export function resolveSlabRatePctFromPreview(
+  preview: { slabInfo: SlabInfo } | null | undefined,
+): number | null {
+  return resolveSlabRatePct(preview?.slabInfo.effectiveRate);
+}
+
 export function slabRangeLabel(index: number): string {
   return COMMISSION_SLABS[index]?.label ?? '';
 }

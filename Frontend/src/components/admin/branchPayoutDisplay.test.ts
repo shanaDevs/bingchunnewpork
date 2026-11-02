@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  branchPayoutDisplayFromReportValues,
   resolveBranchPayoutDisplay,
   resolvePayableWalletLkrForPayout,
 } from './branchPayoutDisplay';
+import type { PayoutReportValues } from './resolvePayoutReportValues';
 
 describe('resolveBranchPayoutDisplay', () => {
   it('adds Jason top-up to period net for total branch payout', () => {
@@ -62,6 +64,18 @@ describe('resolveBranchPayoutDisplay', () => {
     expect(display.periodWalletNetLkr).toBe(15_860);
     expect(display.jasonTopUpLkr).toBeCloseTo(181, 2);
     expect(display.totalBranchPayoutLkr).toBeCloseTo(16_041, 2);
+  });
+
+  it('matches net payout final pay from report values', () => {
+    const reportValues = {
+      branchNetPayoutLkr: 396_051.28,
+      sharedPromoJasonLkr: 1_944,
+    } as Pick<PayoutReportValues, 'branchNetPayoutLkr' | 'sharedPromoJasonLkr'> as PayoutReportValues;
+
+    const display = branchPayoutDisplayFromReportValues(reportValues);
+
+    expect(display.periodWalletNetLkr).toBe(396_051.28);
+    expect(display.totalBranchPayoutLkr).toBeCloseTo(397_995.28, 2);
   });
 
   it('caps payable wallet by request, available balance, and period net', () => {

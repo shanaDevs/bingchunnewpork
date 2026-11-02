@@ -4,7 +4,10 @@ import { type ReactNode } from 'react';
 import { Info } from 'lucide-react';
 import { formatMoneyAmount } from '@/lib/receipt';
 import { hasAnyPositiveLkr, hasPositiveLkr } from '@/components/admin/settlementTypes';
-import type { PayoutReportValues } from '@/components/admin/resolvePayoutReportValues';
+import {
+  resolveFinalNetPayoutPayLkr,
+  type PayoutReportValues,
+} from '@/components/admin/resolvePayoutReportValues';
 import {
   HoverCard,
   HoverCardContent,
@@ -430,10 +433,7 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
       )}
       <ReportTotalRow
         label="Net payout (final pay amount)"
-        value={finalLkr(
-          values.branchNetPayoutLkr +
-            (hasPositiveLkr(values.sharedPromoJasonLkr) ? values.sharedPromoJasonLkr : 0),
-        )}
+        value={finalLkr(resolveFinalNetPayoutPayLkr(values))}
       />
     </div>
   );

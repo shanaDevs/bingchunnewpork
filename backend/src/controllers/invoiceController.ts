@@ -11,6 +11,9 @@ import {
   withdrawalInvoiceRef,
   commissionSettlementInvoiceRef,
 } from '../lib/withdrawalInvoice';
+import { renderPlatformProviderSettlementInvoiceToBuffer } from '../lib/invoice/renderPlatformProviderSettlementInvoice';
+import { platformProviderSettlementInvoiceRef } from '../lib/invoice/refs';
+import { loadSettlementPlatformReceivableDetail } from '../lib/settlementPlatformReceivable';
 
 function sendPdf(res: Response, buffer: Buffer, filename: string): void {
   res.setHeader('Content-Type', 'application/pdf');
@@ -69,6 +72,45 @@ export async function getSettlementInvoiceHandler(
 
     const buffer = await renderCommissionSettlementInvoiceToBuffer(input);
     const ref = settlement.invoiceRef ?? commissionSettlementInvoiceRef(settlement.id);
+    sendPdf(res, buffer, `${ref}.pdf`);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** GET /admin/invoices/settlement/:settlementId/platform-provider — platform receivable PDF. */
+export async function getPlatformProviderSettlementInvoiceHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const settlementId = uuidParamSchema.parse(req.params.settlementId);
+    const settlement = await prisma.commissionSettlement.findUnique({
+      where: { id: settlementId },
+      select: { id: true, storeId: true },
+    });
+
+    if (!settlement) throw new AppError('Invoice not found', 404);
+    await assertOrderStoreAccess(req, settlement.storeId);
+
+    const detail = await loadSettlementPlatformReceivableDetail(settlementId, [
+      settlement.storeId,
+    ]);
+
+    const buffer = await renderPlatformProviderSettlementInvoiceToBuffer({
+      settlementId: detail.id,
+      statementRef: detail.statementRef,
+      storeName: detail.storeName,
+      periodFrom: new Date(`${detail.period.from}T00:00:00.000Z`),
+      periodTo: new Date(`${detail.period.to}T00:00:00.000Z`),
+      paymentMethod: detail.paymentMethod,
+      settledAt: new Date(detail.submittedAt),
+      receivableLkr: detail.platformProviderReceivable.lkr,
+      paybackEnabled: detail.platformDiscountPaybackEnabled,
+    });
+
+    const ref = platformProviderSettlementInvoiceRef(settlement.id);
     sendPdf(res, buffer, `${ref}.pdf`);
   } catch (err) {
     next(err);
