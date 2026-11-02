@@ -573,7 +573,7 @@ export default function AdminInitiatePayoutModal({
 
       const payload: Record<string, string | number | boolean> = {
         amount: formatBranchWalletNetLkrForSubmit(periodNet, reportBranchWalletNetLkr),
-        periodDays,
+        periodDays: periodDays ?? 15,
         from: dateFrom,
         to: dateTo,
         paymentMethod,
