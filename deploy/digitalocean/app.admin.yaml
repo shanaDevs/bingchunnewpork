@@ -120,6 +120,28 @@ services:
       - key: POS_WEB_URL
         scope: RUN_TIME
         value: "https://bingchun-pos-i8pq3.ondigitalocean.app"
+      - key: DO_SPACES_KEY
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_SECRET
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_BUCKET
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_REGION
+        scope: RUN_TIME
+        value: "sgp1"
+      - key: DO_SPACES_ENDPOINT
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_PREFIX
+        scope: RUN_TIME
+        value: "bingchun"
   - name: admin-web
     github:
       repo: Bing-Chung-Dart/bingchun

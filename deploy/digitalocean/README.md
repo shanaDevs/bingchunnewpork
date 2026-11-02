@@ -55,6 +55,17 @@ Until `/delivery-api` ingress is correct, **delivery-web** sets
 `/api` when the host is `*.ondigitalocean.app` (see `deliveryAdminViaCore` in
 `delivery-frontend/src/lib/deliveryApi.ts`).
 
+**Multipart uploads (driver photos, payout proof):** admin-api needs `DO_SPACES_*` on
+`bingchun-admin`. Merge and apply with:
+
+```powershell
+node deploy/digitalocean/apply-admin-app-spec.cjs
+doctl apps update <ADMIN_APP_ID> --spec deploy/digitalocean/.generated-app.admin.yaml
+node deploy/digitalocean/diagnose-upload-health.cjs
+```
+
+console.log('Check `GET /api/health/spaces` on the admin API host — `configured` and `reachable` should both be true.');
+
 The JWT-style secrets are generated and stored only in `secrets.env`, which
 git ignores. The YAML files keep `REPLACE_ME`. Uploading a YAML file from git
 onto a live app would wipe the real secrets. Change secrets in the DigitalOcean
