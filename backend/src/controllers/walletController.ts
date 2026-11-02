@@ -4,9 +4,11 @@ import { Prisma, prisma } from '../lib/prisma';
 import { config } from '../config';
 import { AppError } from '../middleware/errorHandler';
 import {
+  assertSettlementProofFile,
   requireSettlementProofUpload,
   withUploadedProofCleanup,
 } from '../lib/settlementProofUpload';
+import { uploadSettlementProof } from '../lib/spaces';
 import { buildProofAccessResponse } from '../lib/settlementProofAccess';
 import { logPinGatedDeniedIf401, logWalletSecurityEventFromRequest } from '../lib/walletSecurityAudit';
 import {
@@ -641,9 +643,11 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
       data.from && data.to ? { from: data.from, to: data.to } : null;
     const checkDate = parseSettlementCheckDate(data.paymentMethod, data.checkDate);
 
-    // Overlap Spaces proof upload with period validation (single order scan).
-    // Sequential Spaces → dual order scans was regularly exceeding the DO gateway.
-    const [prevalidated, proofUrl, wallet, store] = await Promise.all([
+    // Validate the proof file locally only — DO Spaces PutObject has been hanging long
+    // enough to trip the App Platform/Cloudflare gateway before the wallet debit commits.
+    const proofFile = assertSettlementProofFile(req.file);
+
+    const [prevalidated, wallet, store] = await Promise.all([
       validatePayoutRequest(
         storeId,
         amountCents,
@@ -651,7 +655,6 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
         data.isAdvance ?? false,
         periodBounds,
       ),
-      requireSettlementProofUpload(req.file, storeId),
       getOrCreateWallet(storeId),
       prisma.store.findUnique({
         where: { id: storeId },
@@ -661,23 +664,22 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
     const balanceBefore = walletBalanceCents(wallet);
     const totalWithdrawnBefore = walletTotalWithdrawnCents(wallet);
 
-    const updated = await withUploadedProofCleanup(proofUrl, () =>
-      initiateAndApproveWithdrawal(
-        storeId,
-        amountCents,
-        data.remarks,
-        user.sub!,
-        periodDays,
-        data.paymentMethod,
-        proofUrl,
-        data.isAdvance ?? false,
-        {
-          checkNumber: data.paymentMethod === 'CHECK' ? data.checkNumber?.trim() : null,
-          checkDate,
-          ...(periodBounds ? { periodBounds } : {}),
-          prevalidated,
-        },
-      ),
+    // Commit the payout first with proofUrl null; attach Spaces URL after the response.
+    const updated = await initiateAndApproveWithdrawal(
+      storeId,
+      amountCents,
+      data.remarks,
+      user.sub!,
+      periodDays,
+      data.paymentMethod,
+      null,
+      data.isAdvance ?? false,
+      {
+        checkNumber: data.paymentMethod === 'CHECK' ? data.checkNumber?.trim() : null,
+        checkDate,
+        ...(periodBounds ? { periodBounds } : {}),
+        prevalidated,
+      },
     );
 
     logWalletSecurityEventFromRequest(req, user, {
@@ -690,17 +692,37 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
     invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
     invalidateWalletPayoutsDueCache();
 
-    // Respond as soon as the payout is committed. Invoice PDF + Spaces upload and
-    // lifetime net recompute must not hold the DO/Cloudflare gateway open (504).
+    // Respond as soon as the payout is committed. Spaces proof + invoice PDF must not
+    // hold the DO/Cloudflare gateway open (504).
     res.status(201).json({ success: true, data: serializeWithdrawal(updated) });
 
     void (async () => {
+      let proofUrl: string | null = null;
+      try {
+        proofUrl = await uploadSettlementProof(
+          proofFile.buffer,
+          proofFile.originalname,
+          proofFile.mimetype,
+          storeId,
+        );
+        await prisma.storeWithdrawal.update({
+          where: { id: updated.id },
+          data: { proofUrl },
+        });
+      } catch (err) {
+        console.error('[initiate-payout] background proof upload failed', {
+          storeId,
+          withdrawalId: updated.id,
+          err,
+        });
+      }
+
       try {
         const netTransferableEarnings = await computeNetTransferableEarnings(storeId);
         await finalizeWithdrawalWithInvoice({
           storeId,
           storeName: store?.name ?? 'Branch',
-          updated,
+          updated: { ...updated, proofUrl: proofUrl ?? updated.proofUrl },
           paymentMethod: data.paymentMethod,
           balanceBefore,
           totalWithdrawnBefore,
