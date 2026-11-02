@@ -284,6 +284,25 @@ export async function viewableLicenseImageUrl(
   return signed?.url ?? stored;
 }
 
+/** Avoid blocking rider profile on slow Spaces presign (e.g. go-online refresh). */
+export async function viewableLicenseImageUrlWithTimeout(
+  stored: string | null | undefined,
+  timeoutMs = 2500,
+): Promise<string | null> {
+  if (!stored) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      viewableLicenseImageUrl(stored),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** Object key from a stored Spaces URL, or null when the URL is not in this bucket. */
 export function spacesObjectKeyFromUrl(fileUrl: string): string | null {
   if (!fileUrl.startsWith('http://') && !fileUrl.startsWith('https://')) return null;

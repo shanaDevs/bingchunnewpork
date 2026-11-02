@@ -65,9 +65,20 @@ class AuthRepository {
   Future<List<DriverShiftEntry>> getShiftHistory() =>
       _api.call(() => _api.core.get<dynamic>('delivery/me/shifts'), (d) => _list(d, DriverShiftEntry.fromJson));
 
-  Future<DriverProfile> setDuty(String dutyStatus) async {
-    await _api.call(() => _api.core.patch<dynamic>('delivery/me/duty', data: {'dutyStatus': dutyStatus}), (_) {});
-    return getMe();
+  Future<DriverProfile> setDuty(String dutyStatus, {DriverProfile? current}) async {
+    final patch = await _api.call(
+      () => _api.core.patch<dynamic>('delivery/me/duty', data: {'dutyStatus': dutyStatus}),
+      (d) => asJson(d),
+    );
+    final patchedStatus = str(patch, 'dutyStatus', dutyStatus);
+    try {
+      return await getMe();
+    } catch (_) {
+      if (current != null) {
+        return current.copyWith(dutyStatus: patchedStatus);
+      }
+      rethrow;
+    }
   }
 
   /// Restores a persisted session; returns the driver only when a token is present.
