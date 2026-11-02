@@ -64,14 +64,7 @@ doctl apps update <ADMIN_APP_ID> --spec deploy/digitalocean/.generated-app.admin
 node deploy/digitalocean/diagnose-upload-health.cjs
 ```
 
-Shop app (driver `/api/delivery/*` on `API_SURFACE=shop`, `DELIVERY_SERVICE_ENABLED=false`):
-
-```powershell
-node deploy/digitalocean/apply-shop-app-spec.cjs
-doctl apps update <SHOP_APP_ID> --spec deploy/digitalocean/.generated-app.shop.yaml
-```
-
-After admin apply, check `GET /api/health/spaces` on the admin API host — `configured` and `reachable` should both be true.
+console.log('Check `GET /api/health/spaces` on the admin API host — `configured` and `reachable` should both be true.');
 
 The JWT-style secrets are generated and stored only in `secrets.env`, which
 git ignores. The YAML files keep `REPLACE_ME`. Uploading a YAML file from git
@@ -98,9 +91,6 @@ After `/health` shows `socketAdapter` redis, point DNS here. Then set
 URL and the Flutter API base URL. `backgroundJobs` is true only on shop-worker.
 shop-api stays at 2 instances. Do not add a second shop-web, delivery, cashier,
 or admin instance.
-
-**Driver 504 on `/api/delivery/me`:** read [`DO-OPS-delivery-me-504.md`](DO-OPS-delivery-me-504.md) and run
-`node deploy/digitalocean/audit-delivery-me-live.cjs` (optional `BEARER` after device login).
 
 `BACKEND_URL` on shop-web, pos-web, and admin-web is the private API URL inside
 that app. Do not replace those with a public URL. Cross-app links use the
