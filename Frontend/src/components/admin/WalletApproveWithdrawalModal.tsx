@@ -189,16 +189,16 @@ export default function WalletApproveWithdrawalModal({
     periodBreakdownLkr?.refundDeliveryFee ?? 0;
   const snapshotRejectedRefundDeliveryFeeLkr =
     periodBreakdownLkr?.rejectedRefundDeliveryFee ?? 0;
-  const deliveryFeeForPeriodLkr = useSnapshotDisplay
-    ? resolveTotalDeliveryFeeForAllocationLkr({
-        periodDeliveryFeeLkr: storedBreakdownLkr!.deliveryFee,
-        refundDeliveryFeeLkr: snapshotRefundDeliveryFeeLkr,
-        rejectedRefundDeliveryFeeLkr: snapshotRejectedRefundDeliveryFeeLkr,
-      })
-    : resolvePeriodDeliveryFeeLkr({
-        channelBreakdown: channelBreakdown ?? previewForBreakdown?.breakdown,
-        periodDeliveryFeeLkr: deliveryFeeLkr,
-      });
+  const deliveryFeeForPeriodLkr = resolveTotalDeliveryFeeForAllocationLkr({
+    periodDeliveryFeeLkr: useSnapshotDisplay
+      ? storedBreakdownLkr!.deliveryFee
+      : resolvePeriodDeliveryFeeLkr({
+          channelBreakdown: channelBreakdown ?? previewForBreakdown?.breakdown,
+          periodDeliveryFeeLkr: deliveryFeeLkr,
+        }),
+    refundDeliveryFeeLkr: snapshotRefundDeliveryFeeLkr,
+    rejectedRefundDeliveryFeeLkr: snapshotRejectedRefundDeliveryFeeLkr,
+  });
   const slabRatePct = resolveSlabRatePct(
     storedCommissionRate,
     previewForBreakdown?.slabInfo.effectiveRate,
@@ -241,14 +241,7 @@ export default function WalletApproveWithdrawalModal({
   const payoutSplit = periodBreakdownLkr
     ? computePeriodPayoutSplitLkr({
         netAmount: lockedSnapshot.netAmountLkr ?? periodBreakdownLkr.netAmount,
-        deliveryFee:
-          useSnapshotDisplay && storedBreakdownLkr
-            ? resolveTotalDeliveryFeeForAllocationLkr({
-                periodDeliveryFeeLkr: storedBreakdownLkr.deliveryFee,
-                refundDeliveryFeeLkr: snapshotRefundDeliveryFeeLkr,
-                rejectedRefundDeliveryFeeLkr: snapshotRejectedRefundDeliveryFeeLkr,
-              })
-            : deliveryFeeForPeriodLkr,
+        deliveryFee: deliveryFeeForPeriodLkr,
         commissionFee:
           useSnapshotDisplay && storedBreakdownLkr
             ? storedBreakdownLkr.commissionFee

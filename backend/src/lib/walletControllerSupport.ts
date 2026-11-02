@@ -13,7 +13,7 @@ import {
   platformItemSalesLkr,
 } from './walletRevenue';
 import { buildPeriodChannelPreview, type PeriodChannelPreview } from './periodChannelPreview';
-import { periodOrderAvailableFromOnlineCollectedCents } from './periodOrderAvailable';
+import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import {
   computeBreakdownForPeriod,
   computeNetTransferableEarnings,
@@ -639,32 +639,27 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
       select: { platformDiscountPaybackEnabled: true },
     });
 
-  // One paid-order scan for the period — do not also call buildPeriodChannelPreview /
-  // computePeriodOrderAvailableCents (those re-fetch the same orders and blow the gateway).
-  const [breakdown, storeRow, sharedPromo, promoOwnership] = await Promise.all([
-    computeBreakdownForPeriod(storeId, from, to),
-    loadStorePaybackFlag().catch(async (err) => {
-      const code = (err as { code?: string })?.code;
-      if (code !== 'P2022') throw err;
-      await ensurePlatformPaybackSchema();
-      return loadStorePaybackFlag();
-    }),
-    computeSharedPromoContribution(storeId, from, to),
-    loadPromoOwnershipTotalsForPeriod(storeId, from, to),
-  ]);
+  // PR #27 calc path: channel preview + order-available match the Initiate Payout UI.
+  // Run all independent reads in parallel (same as wallet-issue-fix).
+  const [breakdown, channelPreview, orderAvailable, storeRow, sharedPromo, promoOwnership] =
+    await Promise.all([
+      computeBreakdownForPeriod(storeId, from, to),
+      buildPeriodChannelPreview(storeId, from, to),
+      computePeriodOrderAvailableCents(storeId, from, to),
+      loadStorePaybackFlag().catch(async (err) => {
+        const code = (err as { code?: string })?.code;
+        if (code !== 'P2022') throw err;
+        await ensurePlatformPaybackSchema();
+        return loadStorePaybackFlag();
+      }),
+      computeSharedPromoContribution(storeId, from, to),
+      loadPromoOwnershipTotalsForPeriod(storeId, from, to),
+    ]);
 
-  const [periodBreakdown, orderAvailable] = await Promise.all([
-    Promise.resolve(
-      attachPromoOwnershipTotals(mergeSharedPromoIntoBreakdown(breakdown, sharedPromo), promoOwnership),
-    ),
-    periodOrderAvailableFromOnlineCollectedCents(
-      storeId,
-      from,
-      to,
-      breakdown.onlinePaymentsCollected,
-    ),
-  ]);
-  const channelPreview = channelPreviewFromPeriodBreakdown(from, to, breakdown);
+  const periodBreakdown = attachPromoOwnershipTotals(
+    mergeSharedPromoIntoBreakdown(breakdown, sharedPromo),
+    promoOwnership,
+  );
   const finalPayoutFields = enrichSharedPromoForApi(sharedPromo, periodBreakdown.netAmount);
 
   const durationDays =

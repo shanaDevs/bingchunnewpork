@@ -178,7 +178,6 @@ export default function BranchWalletDetail({
     summaryStats: true,
     withdrawals: true,
   });
-
   // Filters (used for PDF export period)
   const [filterType, setFilterType] = useState('');
   const [filterDirection, setFilterDirection] = useState('');
@@ -505,7 +504,7 @@ export default function BranchWalletDetail({
       stat('Pickup Cash Revenue', pickupCash, 'purple'),
       stat('Pickup Card Revenue', pickupCard, 'purple'),
       stat('Total Expenses', totalExpenses, 'orange'),
-      stat('Platform Commission', payables?.platformCommissionCents ?? 0, 'yellow'),
+      stat('Net Platform Amount', payables?.platformCommissionCents ?? 0, 'yellow'),
       stat('Payment Gateway Fees', payables?.gatewayFeeCents ?? 0, 'yellow'),
       stat(
         'Branch Receivable',
@@ -624,6 +623,7 @@ export default function BranchWalletDetail({
             periodFrom={periodFrom}
             periodTo={periodTo}
             periodLabel={periodLabel}
+            storeId={embedded ? storeId : undefined}
           />
         </div>
       ) : (

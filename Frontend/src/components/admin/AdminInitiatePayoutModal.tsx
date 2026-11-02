@@ -31,6 +31,7 @@ import {
   hasPositiveLkr,
   parseWithdrawalBreakdownFromNetPreview,
   resolvePeriodDeliveryFeeLkr,
+  resolveTotalDeliveryFeeForAllocationLkr,
   resolvePlatformCommissionForPeriodLkr,
   resolvePeriodNetLkrFromBreakdown,
   resolvePreviewConvenienceFeeLkr,
@@ -459,9 +460,13 @@ export default function AdminInitiatePayoutModal({
   const convenienceFeeLkr =
     periodBreakdownLkr?.convenienceFee ?? resolvePreviewConvenienceFeeLkr(channelPreview);
   const deliveryFeeLkr = periodBreakdownLkr?.deliveryFee ?? 0;
-  const deliveryFeeForPeriodLkr = resolvePeriodDeliveryFeeLkr({
-    channelBreakdown: channelPreview?.breakdown,
-    periodDeliveryFeeLkr: deliveryFeeLkr,
+  const deliveryFeeForPeriodLkr = resolveTotalDeliveryFeeForAllocationLkr({
+    periodDeliveryFeeLkr: resolvePeriodDeliveryFeeLkr({
+      channelBreakdown: channelPreview?.breakdown,
+      periodDeliveryFeeLkr: deliveryFeeLkr,
+    }),
+    refundDeliveryFeeLkr: periodBreakdownLkr?.refundDeliveryFee ?? 0,
+    rejectedRefundDeliveryFeeLkr: periodBreakdownLkr?.rejectedRefundDeliveryFee ?? 0,
   });
   const slabRatePct = resolveSlabRatePctFromPreview(channelPreview);
   const periodLabel = dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : null;
