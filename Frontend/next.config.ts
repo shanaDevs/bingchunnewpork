@@ -143,6 +143,12 @@ const ADMIN_CSP = ADMIN_CSP_PARTS.join('; ');
 const ADMIN_ROUTE_HEADERS = [
   ...BASE_SECURITY_HEADERS,
   { key: 'Content-Security-Policy', value: ADMIN_CSP },
+  // Admin is auth-gated. Never let Cloudflare/CDN cache HTML or RSC flight
+  // for the same URL — CF ignores Vary: rsc and will serve text/x-component
+  // as the document (raw :HL[...] dump after login).
+  { key: 'Cache-Control', value: 'private, no-store, no-cache, max-age=0, must-revalidate' },
+  { key: 'CDN-Cache-Control', value: 'no-store' },
+  { key: 'Cloudflare-CDN-Cache-Control', value: 'no-store' },
 ];
 
 const SHOP_ROUTE_HEADERS = [
