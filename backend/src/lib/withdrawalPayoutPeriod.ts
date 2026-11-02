@@ -45,12 +45,13 @@ export async function resolvePayoutPeriod(
   const from = nextStart ?? earliestOrder ?? todayUtcDateStr();
   const today = todayUtcDateStr();
   const idealTo = addDaysToUtcDateStr(from, days - 1);
-  const to = idealTo <= today ? idealTo : today;
+  // Inclusive end date stays open through `idealTo`; elapses only once today is past it.
+  const to = idealTo < today ? idealTo : today;
   return {
     days,
     from,
     to,
-    capped: idealTo > today,
+    capped: idealTo >= today,
   };
 }
 
@@ -77,7 +78,8 @@ export async function resolveOpenRollingPayoutWindow(
   const today = todayUtcDateStr();
   for (let i = 0; i < 400; i++) {
     const idealTo = addDaysToUtcDateStr(from, days - 1);
-    if (idealTo > today) {
+    // Still open on the last day of the window (idealTo === today).
+    if (idealTo >= today) {
       return {
         days,
         from,
@@ -123,7 +125,8 @@ export function buildElapsedPayoutWindowsFromStart(
 
   while (windows.length < max) {
     const idealTo = addDaysToUtcDateStr(from, days - 1);
-    if (idealTo > today) break;
+    // Not elapsed until the calendar day after idealTo.
+    if (idealTo >= today) break;
     if (overlap && from > overlap.to) break;
 
     const overlaps =

@@ -64,14 +64,17 @@ function statusBadgeClass(status: PayoutPeriodStatus) {
 }
 
 function previewPeriodTo(row: PayoutPeriodRow) {
-  return row.summaryThrough ?? row.periodTo;
+  const through = row.summaryThrough ?? row.periodTo;
+  // Guard inverted ranges (e.g. last-day boundary bugs) so summaries never run from > to.
+  if (through < row.periodFrom) return row.periodFrom;
+  return through;
 }
 
 function formatPayoutPeriodCell(row: PayoutPeriodRow) {
   if (row.status !== 'IN_PROGRESS') {
     return formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo);
   }
-  const through = row.summaryThrough ?? row.periodTo;
+  const through = previewPeriodTo(row);
   return (
     <span className="flex flex-col gap-0.5">
       <span>{formatBiweeklyPeriodLabel(row.periodFrom, through)}</span>
@@ -204,11 +207,10 @@ function PayoutPeriodAmountCells({
 
   const feeColumnsLoading = needsPreview && previewLoading;
 
-  const netPlatformLkr = row.status === 'PAID' ? amounts.commissionLkr : null;
   const values = [
     amounts.branchReceives,
     amounts.orderConvenienceFeeLkr,
-    netPlatformLkr,
+    amounts.commissionLkr,
     amounts.deliveryFee,
   ];
 
@@ -219,9 +221,7 @@ function PayoutPeriodAmountCells({
           key={AMOUNT_COLUMNS[index]}
           className="px-3 py-3 text-right font-semibold tabular-nums text-[var(--color-text)]"
         >
-          {index === 2 && row.status !== 'PAID' ? (
-            <span className="text-[var(--color-text-muted)]">—</span>
-          ) : feeColumnsLoading && index > 0 ? (
+          {feeColumnsLoading && index > 0 ? (
             <Skeleton className="ml-auto inline-block h-3.5 w-16 bg-[var(--color-navy-light)]/70" />
           ) : (
             formatAmountCell(value ?? 0)

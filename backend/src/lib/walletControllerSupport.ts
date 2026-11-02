@@ -320,24 +320,26 @@ export async function loadPayoutPeriodItems(storeId: string) {
   items.push(...pendingWindows);
 
   const openWindow = await resolveOpenRollingPayoutWindow(storeId, FIXED_PAYOUT_PERIOD_DAYS);
-  if (openWindow?.capped) {
+  if (openWindow?.capped && openWindow.from <= openWindow.to) {
     const idealTo = addDaysToDateStr(openWindow.from, FIXED_PAYOUT_PERIOD_DAYS - 1);
     const inProgressKey = periodKey(openWindow.from, idealTo);
     const pendingKeys = new Set(
       pendingWindows.map((w) => periodKey(w.periodFrom, w.periodTo)),
     );
     if (!covered.has(inProgressKey) && !pendingKeys.has(inProgressKey)) {
+      const summaryThrough =
+        openWindow.to < openWindow.from ? openWindow.from : openWindow.to;
       const merged = await computeMergedPeriodSummary(
         storeId,
         openWindow.from,
-        openWindow.to,
+        summaryThrough,
       );
       // Visibility only — same summary helpers; show open cycle even when net is still zero.
       items.push({
         key: `period-in-progress-${openWindow.from}-${idealTo}`,
         periodFrom: openWindow.from,
         periodTo: idealTo,
-        summaryThrough: openWindow.to,
+        summaryThrough,
         status: 'IN_PROGRESS',
         amountCents: merged.netAmount,
         orderCount: merged.orderCount,
