@@ -240,34 +240,12 @@ function buildBranchPayablesBreakdown(
   };
 }
 
-export async function getBranchWalletDashboard(
+/** All-time payables breakdown (matches branch wallet detail “All-Time Available Balance”). */
+export async function computeBranchPayablesBreakdown(
   storeId: string,
-  period?: WalletDashboardPeriod,
-): Promise<BranchWalletDashboard> {
-  const wallet = await getOrCreateWallet(storeId);
-  const dateFilter = periodCreatedAtFilter(period);
-
-  const [
-    revenue,
-    payablesRevenue,
-    toBranchAgg,
-    toPlatformAgg,
-    approvedDeliveryPayouts,
-    payablesDeliveryPayouts,
-    paidPayoutWithdrawals,
-    refundsLkr,
-  ] = await Promise.all([
-    fetchSummarizedPaidOrderRevenue({ storeId, ...dateFilter }),
+): Promise<BranchWalletPayablesBreakdown> {
+  const [payablesRevenue, payablesDeliveryPayouts, paidPayoutWithdrawals] = await Promise.all([
     fetchSummarizedPaidOrderRevenue({ storeId }),
-    prisma.storeWithdrawal.aggregate({
-      _sum: { amount: true },
-      where: { storeId, status: 'APPROVED', ...dateFilter },
-    }),
-    prisma.commissionSettlement.aggregate({
-      _sum: { totalCommission: true },
-      where: { storeId, status: 'VERIFIED', ...dateFilter },
-    }),
-    fetchApprovedDeliveryPayoutBreakdowns(period),
     fetchApprovedDeliveryPayoutBreakdowns(),
     prisma.storeWithdrawal.findMany({
       where: {
@@ -278,16 +256,7 @@ export async function getBranchWalletDashboard(
       },
       select: { breakdown: true, amount: true },
     }),
-    computeBranchRefundsRetainedLkr(storeId),
   ]);
-
-  const pickupOnlineIn = revenue.pickupOnlineIn;
-  const deliveryOnlineIn = revenue.deliveryCardIn;
-
-  const toDeliveryLkr = approvedDeliveryPayouts.reduce(
-    (sum, row) => sum + branchNetForDeliveryFromPayoutBreakdown(row.breakdown, storeId),
-    0,
-  );
 
   const payablesToDeliveryLkr = payablesDeliveryPayouts.reduce(
     (sum, row) => sum + branchNetForDeliveryFromPayoutBreakdown(row.breakdown, storeId),
@@ -311,12 +280,44 @@ export async function getBranchWalletDashboard(
     0,
   );
 
-  const payablesBreakdown = buildBranchPayablesBreakdown(
+  return buildBranchPayablesBreakdown(
     payablesRevenue,
     paidNetPlatformAmountCents,
     payablesToDeliveryLkr,
     paidPayoutGatewayFeeCents,
     paidBranchReceivableCents,
+  );
+}
+
+export async function getBranchWalletDashboard(
+  storeId: string,
+  period?: WalletDashboardPeriod,
+): Promise<BranchWalletDashboard> {
+  const wallet = await getOrCreateWallet(storeId);
+  const dateFilter = periodCreatedAtFilter(period);
+
+  const [revenue, toBranchAgg, toPlatformAgg, approvedDeliveryPayouts, payablesBreakdown, refundsLkr] =
+    await Promise.all([
+      fetchSummarizedPaidOrderRevenue({ storeId, ...dateFilter }),
+      prisma.storeWithdrawal.aggregate({
+        _sum: { amount: true },
+        where: { storeId, status: 'APPROVED', ...dateFilter },
+      }),
+      prisma.commissionSettlement.aggregate({
+        _sum: { totalCommission: true },
+        where: { storeId, status: 'VERIFIED', ...dateFilter },
+      }),
+      fetchApprovedDeliveryPayoutBreakdowns(period),
+      computeBranchPayablesBreakdown(storeId),
+      computeBranchRefundsRetainedLkr(storeId),
+    ]);
+
+  const pickupOnlineIn = revenue.pickupOnlineIn;
+  const deliveryOnlineIn = revenue.deliveryCardIn;
+
+  const toDeliveryLkr = approvedDeliveryPayouts.reduce(
+    (sum, row) => sum + branchNetForDeliveryFromPayoutBreakdown(row.breakdown, storeId),
+    0,
   );
 
   return {

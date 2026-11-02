@@ -16,6 +16,7 @@ import { buildPeriodChannelPreview, type PeriodChannelPreview } from './periodCh
 import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import {
   computeBreakdownForPeriod,
+  computeBranchPayablesBreakdown,
   computeNetTransferableEarnings,
   enrichWalletRow,
   getBranchWalletDashboard,
@@ -1088,6 +1089,23 @@ export async function loadAdminWalletListPayload(
     );
   }
 
+  const allTimeAvailableByStore = new Map<string, number>();
+  if (isSuper && storeIds.length > 0) {
+    const rows: Array<{ storeId: string; cents: number }> = await promiseAllLimited(
+      getPrismaFanOutLimit(),
+      storeIds.map(
+        (id) => (): Promise<{ storeId: string; cents: number }> =>
+          computeBranchPayablesBreakdown(id).then((breakdown) => ({
+            storeId: id,
+            cents: breakdown.allTimeAvailableBalanceCents,
+          })),
+      ),
+    );
+    for (const row of rows) {
+      allTimeAvailableByStore.set(row.storeId, row.cents);
+    }
+  }
+
   const walletsWithCounts = wallets.map((w) => {
     const pendingTotal = pendingMap.get(w.storeId) ?? 0;
     const netTransferableEarnings = netEarningsMap.get(w.storeId);
@@ -1096,6 +1114,7 @@ export async function loadAdminWalletListPayload(
       netTransferableEarnings: enriched.netTransferableEarnings,
       currentBalance: enriched.currentBalance,
       availableBalance: enriched.availableBalance,
+      allTimeAvailableBalanceCents: allTimeAvailableByStore.get(w.storeId),
       _count: { transactions: txnCountMap.get(w.storeId) ?? 0 },
     });
   });

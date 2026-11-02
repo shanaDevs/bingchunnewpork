@@ -23,12 +23,72 @@ export function drawWhitePage(doc: PDFKit.PDFDocument, pageW: number, pageH: num
   doc.rect(0, 0, pageW, pageH).fill(C.bg);
 }
 
+const WD_INVOICE_FOOTER_COLS_H = 35;
+const WD_INVOICE_NOTES_FOOTER_GAP = 18;
+
 export function computeWithdrawalFooterLayout(pageH: number): WithdrawalFooterLayout {
   const colsStartY = pageH - 88;
   return {
     footerRuleY: colsStartY - 16,
     colsStartY,
   };
+}
+
+/** Place footer below notes when the default footer zone would overlap page-1 content. */
+export function layoutFooterBelowNotes(
+  pageH: number,
+  notesBottomY: number,
+): WithdrawalFooterLayout {
+  const defaultLayout = computeWithdrawalFooterLayout(pageH);
+  const minRuleY = notesBottomY + WD_INVOICE_NOTES_FOOTER_GAP;
+  if (minRuleY <= defaultLayout.footerRuleY) {
+    return defaultLayout;
+  }
+  return {
+    footerRuleY: minRuleY,
+    colsStartY: minRuleY + 16,
+  };
+}
+
+export function measureNotesBlockHeight(doc: PDFKit.PDFDocument, contentW: number): number {
+  const pad = 12;
+  const textW = contentW - pad * 2;
+  doc.font(WD_FONT.regular).fontSize(9);
+  const textH = doc.heightOfString(WD_INVOICE_FIXED_NOTES, { width: textW });
+  const boxH = textH + pad * 2;
+  return 18 + boxH;
+}
+
+export function page1ContentOverflows(
+  pageH: number,
+  yBeforeSummaryTitle: number,
+  summaryRows: WithdrawalTableRow[],
+  summaryRowH: number,
+  notesBlockH: number,
+): boolean {
+  const summaryTitleH = 18;
+  const summaryTableH = measureTableHeight(summaryRows, summaryRowH);
+  const notesStart =
+    yBeforeSummaryTitle + summaryTitleH + summaryTableH + WD_INVOICE_SECTION_GAP;
+  const notesEnd = notesStart + notesBlockH;
+  const footer = layoutFooterBelowNotes(pageH, notesEnd);
+  return footer.colsStartY + WD_INVOICE_FOOTER_COLS_H > pageH - 8;
+}
+
+export function resolvePage1SummaryRowH(
+  pageH: number,
+  yBeforeSummaryTitle: number,
+  summaryRows: WithdrawalTableRow[],
+  notesBlockH: number,
+): number {
+  const candidates = [WD_INVOICE_ROW_H, 28, WD_INVOICE_PAGE2_ROW_H];
+  let rowH = WD_INVOICE_PAGE2_ROW_H;
+  for (const candidate of candidates) {
+    if (!page1ContentOverflows(pageH, yBeforeSummaryTitle, summaryRows, candidate, notesBlockH)) {
+      rowH = candidate;
+    }
+  }
+  return rowH;
 }
 
 function hr(
