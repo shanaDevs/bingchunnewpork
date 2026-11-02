@@ -12,8 +12,8 @@ import {
   walletReportOrderSelect,
   platformItemSalesLkr,
 } from './walletRevenue';
-import { buildPeriodChannelPreview } from './periodChannelPreview';
-import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
+import { buildPeriodChannelPreview, type PeriodChannelPreview } from './periodChannelPreview';
+import { periodOrderAvailableFromOnlineCollectedCents } from './periodOrderAvailable';
 import {
   computeBreakdownForPeriod,
   computeNetTransferableEarnings,
@@ -22,7 +22,14 @@ import {
   getSuperAdminWalletDashboard,
   getOrCreateWallet,
   getWalletSummary,
+  type PeriodBreakdown,
 } from './walletService';
+import {
+  getSlabIndex,
+  sumBreakdownCommission,
+  sumBreakdownOrderCount,
+  sumBreakdownProviderFee,
+} from './commission';
 import {
   computeSharedPromoContribution,
   enrichSharedPromoForApi,
@@ -602,6 +609,29 @@ export async function resolveNetPreviewPeriodBounds(
   return { from, to };
 }
 
+/** Build the API channelPreview shape from a period breakdown's reused channel rows. */
+export function channelPreviewFromPeriodBreakdown(
+  from: string,
+  to: string,
+  period: PeriodBreakdown,
+): PeriodChannelPreview {
+  const breakdown = period.channelBreakdown;
+  const monthlyBaseLkr = period.windowBase / 100;
+  return {
+    period: { from, to },
+    breakdown,
+    totalCommission: sumBreakdownCommission(breakdown),
+    totalProviderFee: sumBreakdownProviderFee(breakdown),
+    orderCount: sumBreakdownOrderCount(breakdown),
+    storeDiscountsTotal: period.periodDiscountsTotal / 100,
+    slabInfo: {
+      monthlyBase: monthlyBaseLkr,
+      effectiveRate: period.commissionRate,
+      slabIndex: getSlabIndex(monthlyBaseLkr),
+    },
+  };
+}
+
 export async function buildNetPreviewResponseData(storeId: string, from: string, to: string) {
   const loadStorePaybackFlag = () =>
     prisma.store.findUnique({
@@ -609,11 +639,10 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
       select: { platformDiscountPaybackEnabled: true },
     });
 
-  const [breakdown, channelPreview, orderAvailable, storeRow, sharedPromo, promoOwnership] =
-    await Promise.all([
+  // One paid-order scan for the period — do not also call buildPeriodChannelPreview /
+  // computePeriodOrderAvailableCents (those re-fetch the same orders and blow the gateway).
+  const [breakdown, storeRow, sharedPromo, promoOwnership] = await Promise.all([
     computeBreakdownForPeriod(storeId, from, to),
-    buildPeriodChannelPreview(storeId, from, to),
-    computePeriodOrderAvailableCents(storeId, from, to),
     loadStorePaybackFlag().catch(async (err) => {
       const code = (err as { code?: string })?.code;
       if (code !== 'P2022') throw err;
@@ -624,10 +653,18 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
     loadPromoOwnershipTotalsForPeriod(storeId, from, to),
   ]);
 
-  const periodBreakdown = attachPromoOwnershipTotals(
-    mergeSharedPromoIntoBreakdown(breakdown, sharedPromo),
-    promoOwnership,
-  );
+  const [periodBreakdown, orderAvailable] = await Promise.all([
+    Promise.resolve(
+      attachPromoOwnershipTotals(mergeSharedPromoIntoBreakdown(breakdown, sharedPromo), promoOwnership),
+    ),
+    periodOrderAvailableFromOnlineCollectedCents(
+      storeId,
+      from,
+      to,
+      breakdown.onlinePaymentsCollected,
+    ),
+  ]);
+  const channelPreview = channelPreviewFromPeriodBreakdown(from, to, breakdown);
   const finalPayoutFields = enrichSharedPromoForApi(sharedPromo, periodBreakdown.netAmount);
 
   const durationDays =

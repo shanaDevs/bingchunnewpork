@@ -10,7 +10,7 @@ import { creditPlatformEarning } from './platformEarningsService';
 import { ensurePlatformEarningsSchema } from './platformEarningsSchema';
 import { ensurePlatformPaybackSchema } from './platformPaybackSchema';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
-import { periodOrderAvailableFromChannelPreview } from './periodOrderAvailable';
+import { periodOrderAvailableFromOnlineCollectedCents } from './periodOrderAvailable';
 import {
   computeFinalPayoutAmountCents,
   parseSharedPromoFromBreakdown,
@@ -266,8 +266,9 @@ export async function buildStoredWithdrawalBreakdown(
     period.sharedPromoJasonContributionAmount ?? 0,
   );
   const platformProviderReceivable = await resolvePlatformProviderReceivableFromBreakdown(period);
+  const { channelBreakdown: _ignoredChannelBreakdown, ...periodFields } = period;
   return {
-    ...period,
+    ...periodFields,
     periodNetAmount: period.netAmount,
     branchRequestNetAmount: branchRequestAmountCents,
     finalPayoutAmount,
@@ -322,7 +323,7 @@ async function resolveValidatedPayoutBounds(
   return { fromStr, toStr };
 }
 
-async function validatePayoutRequest(
+export async function validatePayoutRequest(
   storeId: string,
   amount: number,
   periodDays: PayoutPeriodDays,
@@ -342,16 +343,13 @@ async function validatePayoutRequest(
 
   const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
 
-  // One channel preview + one period breakdown — do not re-scan orders for availability.
-  const [periodWithDiscountReport, channelPreview] = await Promise.all([
-    computePeriodBreakdownForPayout(storeId, fromStr, toStr),
-    buildPeriodChannelPreview(storeId, fromStr, toStr),
-  ]);
-  const orderAvailable = await periodOrderAvailableFromChannelPreview(
+  // Single period order scan — channelBreakdown is produced by the same pass.
+  const periodWithDiscountReport = await computePeriodBreakdownForPayout(storeId, fromStr, toStr);
+  const orderAvailable = await periodOrderAvailableFromOnlineCollectedCents(
     storeId,
     fromStr,
     toStr,
-    channelPreview,
+    periodWithDiscountReport.onlinePaymentsCollected,
   );
   if (amount > orderAvailable.remainingCents) {
     throw new AppError(
@@ -374,11 +372,17 @@ async function validatePayoutRequest(
     fromStr,
     toStr,
     remainingAvailableCents: orderAvailable.remainingCents,
-    breakdown: await buildStoredWithdrawalBreakdown(periodWithDiscountReport, channelPreview.breakdown, {
-      branchRequestAmountCents: amount,
-    }),
+    breakdown: await buildStoredWithdrawalBreakdown(
+      periodWithDiscountReport,
+      periodWithDiscountReport.channelBreakdown,
+      {
+        branchRequestAmountCents: amount,
+      },
+    ),
   };
 }
+
+export type ValidatedPayoutRequest = Awaited<ReturnType<typeof validatePayoutRequest>>;
 
 function resolveCheckPaymentFields(
   paymentMethod: SettlementPaymentMethod,
@@ -402,15 +406,18 @@ export async function initiateAndApproveWithdrawal(
   paymentMethod: SettlementPaymentMethod,
   proofUrl: string | null,
   isAdvance = false,
-  extras?: ApproveWithdrawalExtras,
+  extras?: ApproveWithdrawalExtras & { prevalidated?: ValidatedPayoutRequest },
 ): Promise<StoreWithdrawal> {
-  const { fromStr, toStr, breakdown, remainingAvailableCents } = await validatePayoutRequest(
-    storeId,
-    amount,
-    periodDays,
-    isAdvance,
-    extras?.periodBounds ?? null,
-  );
+  // Prefer caller-supplied validation (allows Spaces upload to run in parallel).
+  const { fromStr, toStr, breakdown, remainingAvailableCents } =
+    extras?.prevalidated ??
+    (await validatePayoutRequest(
+      storeId,
+      amount,
+      periodDays,
+      isAdvance,
+      extras?.periodBounds ?? null,
+    ));
   const periodFrom = new Date(`${fromStr}T00:00:00.000Z`);
   const periodTo = new Date(`${toStr}T23:59:59.999Z`);
 

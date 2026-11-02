@@ -67,6 +67,7 @@ import {
   PAYOUT_PERIOD_DAYS,
   rejectWithdrawal,
   requestWithdrawal,
+  validatePayoutRequest,
 } from '../lib/withdrawalService';
 import { verifyAdminPin } from '../lib/verifyAdminPin';
 import { isBranchScopedRole, resolveBranchStoreId } from '../middleware/auth';
@@ -635,12 +636,22 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
     await verifyAdminPin(user.sub, data.password);
 
     const amountCents = data.amount;
-    const proofUrl = await requireSettlementProofUpload(req.file, storeId);
+    const periodDays = data.periodDays as (typeof PAYOUT_PERIOD_DAYS)[number];
+    const periodBounds =
+      data.from && data.to ? { from: data.from, to: data.to } : null;
     const checkDate = parseSettlementCheckDate(data.paymentMethod, data.checkDate);
 
-    // Do NOT await lifetime computeNetTransferableEarnings here — it rescans all
-    // paid orders for the branch and routinely pushes past the App Platform gateway.
-    const [wallet, store] = await Promise.all([
+    // Overlap Spaces proof upload with period validation (single order scan).
+    // Sequential Spaces → dual order scans was regularly exceeding the DO gateway.
+    const [prevalidated, proofUrl, wallet, store] = await Promise.all([
+      validatePayoutRequest(
+        storeId,
+        amountCents,
+        periodDays,
+        data.isAdvance ?? false,
+        periodBounds,
+      ),
+      requireSettlementProofUpload(req.file, storeId),
       getOrCreateWallet(storeId),
       prisma.store.findUnique({
         where: { id: storeId },
@@ -656,16 +667,15 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
         amountCents,
         data.remarks,
         user.sub!,
-        data.periodDays as (typeof PAYOUT_PERIOD_DAYS)[number],
+        periodDays,
         data.paymentMethod,
         proofUrl,
         data.isAdvance ?? false,
         {
           checkNumber: data.paymentMethod === 'CHECK' ? data.checkNumber?.trim() : null,
           checkDate,
-          ...(data.from && data.to
-            ? { periodBounds: { from: data.from, to: data.to } }
-            : {}),
+          ...(periodBounds ? { periodBounds } : {}),
+          prevalidated,
         },
       ),
     );

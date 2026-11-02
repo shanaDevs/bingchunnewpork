@@ -11,7 +11,10 @@ import {
   orderPlatformPayback,
   sumCommissionableBase,
   accumulateSettlementBreakdown,
+  emptySettlementBreakdown,
   sumOnlinePaymentsCollectedFromBreakdown,
+  type ChannelSettlementRow,
+  type CommissionChannel,
 } from './commission';
 import {
   fetchSummarizedPaidOrderRevenue,
@@ -485,6 +488,11 @@ export type PeriodBreakdown = {
   branchOwnedPromoDiscountTotal?: number;
   /** PLATFORM-ownership promotion discounts in period (cents). Display snapshot only. */
   platformOwnedPromoDiscountTotal?: number;
+  /**
+   * Channel settlement rows from the same order scan as this period breakdown.
+   * Reuse for payout validation / net-preview — do not re-scan orders.
+   */
+  channelBreakdown: Record<CommissionChannel, ChannelSettlementRow>;
 };
 
 const EMPTY_SHARED_PROMO_BREAKDOWN_FIELDS = {
@@ -1433,6 +1441,7 @@ export async function computeBreakdownForPeriodOrders(
       rejectedRefundNetAmount: rejectedRefundPayout.rejectedRefundNetAmount,
       rejectedRefundConvenienceFee: rejectedRefundPayout.rejectedRefundConvenienceFee,
       rejectedRefundDeliveryFee: rejectedRefundPayout.rejectedRefundDeliveryFee,
+      channelBreakdown: emptySettlementBreakdown(gatewayFeeRate),
       ...EMPTY_SHARED_PROMO_BREAKDOWN_FIELDS,
     };
   }
@@ -1489,14 +1498,14 @@ export async function computeBreakdownForPeriodOrders(
   const gatewayFee = Math.round(gatewayBase * gatewayFeeRate);
 
   const convenienceFeeRates = await getConvenienceFeeRates();
-  const settlementBreakdown = accumulateSettlementBreakdown(
+  const channelBreakdown = accumulateSettlementBreakdown(
     paidOrders,
     windowBase,
     convenienceFeeRates,
     gatewayFeeRate,
   );
   const onlinePaymentsCollected = Math.round(
-    sumOnlinePaymentsCollectedFromBreakdown(settlementBreakdown) * 100,
+    sumOnlinePaymentsCollectedFromBreakdown(channelBreakdown) * 100,
   );
 
   const netPlatformEarning = storePaybackEnabled
@@ -1549,6 +1558,7 @@ export async function computeBreakdownForPeriodOrders(
     rejectedRefundNetAmount: rejectedRefundPayout.rejectedRefundNetAmount,
     rejectedRefundConvenienceFee: rejectedRefundPayout.rejectedRefundConvenienceFee,
     rejectedRefundDeliveryFee: rejectedRefundPayout.rejectedRefundDeliveryFee,
+    channelBreakdown,
     ...EMPTY_SHARED_PROMO_BREAKDOWN_FIELDS,
   };
 }
