@@ -6,6 +6,8 @@ Run when `x-do-orig-status: 503` appears (Cloudflare **504** to the app).
 
 ## Console checks (manual — API token required for doctl/MCP)
 
+**Cursor DigitalOcean MCP:** If `apps/apps-list` returns `401 Unable to authenticate you`, regenerate the PAT in [DigitalOcean API tokens](https://cloud.digitalocean.com/account/api/tokens) with **read** scope for **Apps** (and **Databases** / Insights if you use log search), then update the token in Cursor → Settings → MCP → `user-digitalocean`.
+
 1. **Components → shop-api** (or component serving `/api` on bingchunsrilanka.com)
    - Deployment: **Active** / not crash-looping
    - CPU / memory not pegged

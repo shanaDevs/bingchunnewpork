@@ -52,7 +52,7 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
     if (!driver) throw new AppError('Driver not found', 404);
 
     const storeIds = accessibleStoreIdsFromDriver(driver);
-    const [stores, ratingAgg, heldJobs, licenseImageUrl] = await Promise.all([
+    const [stores, ratingAgg, heldJobs] = await Promise.all([
       storeIds.length === 0
         ? Promise.resolve([] as Array<{ id: string; name: string; city: string | null }>)
         : prisma.store.findMany({
@@ -69,8 +69,13 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
         where: { driverId, status: { in: [...DRIVER_HELD_JOB_STATUSES] } },
         select: { status: true },
       }),
-      viewableLicenseImageUrlWithTimeout(driver.licenseImageUrl),
     ]);
+    let licenseImageUrl: string | null = null;
+    try {
+      licenseImageUrl = await viewableLicenseImageUrlWithTimeout(driver.licenseImageUrl, 1500);
+    } catch {
+      licenseImageUrl = null;
+    }
 
     const points = driver.meritPoints ?? 100;
     const { alertEligible, activeRidePhase, canClaimMore } = deriveDriverJobFlags(heldJobs);
@@ -241,6 +246,7 @@ export async function updateDuty(req: Request, res: Response, next: NextFunction
     return success(res, {
       id: updated.id,
       dutyStatus: updated.dutyStatus,
+      branchPoolStoreIds: storeIds,
     });
   } catch (err) {
     next(err);

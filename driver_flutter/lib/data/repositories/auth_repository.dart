@@ -71,12 +71,32 @@ class AuthRepository {
       (d) => asJson(d),
     );
     final patchedStatus = str(patch, 'dutyStatus', dutyStatus);
+    final branchPoolStoreIds = DriverProfile.parseStringList(patch, 'branchPoolStoreIds');
+    // Duty is authoritative from PATCH. GET /delivery/me can 504 when licence presign
+    // stalls on Spaces — do not fail go-online after a successful duty update.
+    if (current != null) {
+      return current.copyWith(
+        dutyStatus: patchedStatus,
+        branchPoolStoreIds: branchPoolStoreIds.isNotEmpty ? branchPoolStoreIds : null,
+      );
+    }
+    final session = restore();
+    if (session != null) {
+      final storeId = session.storeId;
+      return DriverProfile(
+        id: session.id,
+        name: session.name,
+        dutyStatus: patchedStatus,
+        storeId: storeId,
+        store: storeId != null && (session.storeName?.isNotEmpty ?? false)
+            ? StoreRef(id: storeId, name: session.storeName!, city: session.storeCity)
+            : null,
+        branchPoolStoreIds: branchPoolStoreIds,
+      );
+    }
     try {
       return await getMe();
     } catch (_) {
-      if (current != null) {
-        return current.copyWith(dutyStatus: patchedStatus);
-      }
       rethrow;
     }
   }

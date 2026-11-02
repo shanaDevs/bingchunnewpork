@@ -130,45 +130,42 @@ export function getBackendOrigin(): string {
 }
 
 /**
+ * Direct admin-api URL (cross-origin). Use only when same-origin `/api` proxy cannot
+ * handle a request (rare — prefer runtimeProxy multipart buffering first).
+ */
+export function getDirectAdminApiBaseUrl(): string {
+  const injected = runtimeInjectedAdminApiBase();
+  if (injected) return injected;
+  const adminWeb = (process.env.NEXT_PUBLIC_ADMIN_WEB_URL || process.env.ADMIN_WEB_URL || '')
+    .trim()
+    .replace(/\/+$/, '');
+  if (adminWeb && /^https?:\/\//i.test(adminWeb)) {
+    return ensureApiSuffix(adminWeb);
+  }
+  return getApiBaseUrl();
+}
+
+/**
  * API base URL (includes /api suffix).
- * Production delivery console uses absolute admin API URL
- * (`https://bingchun-admin-a4ndy.ondigitalocean.app/api`). Local/dev may use `/api` (proxied).
- * Staff Login 5-tap override wins in the browser when set.
+ * Production delivery console uses same-origin `/api` (proxied to admin-api) so auth
+ * cookies are first-party on the delivery host. Staff Login 5-tap override wins when set.
  */
 export function getApiBaseUrl(): string {
   const override = getApiBaseOverride();
   if (override) {
-    const fromOverride = ensureApiSuffix(override);
-    const injected = runtimeInjectedAdminApiBase();
-    if (
-      injected &&
-      typeof window !== 'undefined' &&
-      fromOverride.startsWith(`${window.location.origin}/`)
-    ) {
-      return injected;
-    }
-    return fromOverride;
+    return ensureApiSuffix(override);
   }
 
   const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
 
   if (configured.startsWith('/')) {
-    const injected = runtimeInjectedAdminApiBase();
     if (typeof window !== 'undefined') {
-      if (injected) return injected;
       return joinUrl(window.location.origin, configured);
     }
     return joinUrl(getBackendOrigin(), configured);
   }
 
-  const absolute = normalizeUrlPath(configured);
-  if (typeof window !== 'undefined') {
-    const injected = runtimeInjectedAdminApiBase();
-    if (injected && absolute.startsWith(`${window.location.origin}/`)) {
-      return injected;
-    }
-  }
-  return absolute;
+  return normalizeUrlPath(configured);
 }
 
 /** Socket.io server origin (no /api suffix). Follows API override when set. */
