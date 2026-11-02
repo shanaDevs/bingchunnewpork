@@ -3,7 +3,7 @@ import type { ApiSurface } from '../lib/apiSurface';
 /** Prefixes a surface must never register. Shop must not expose staff admin writers. */
 const FORBIDDEN_PREFIXES: Record<ApiSurface, readonly string[]> = {
   core: [],
-  shop: ['/admin', '/refunds', '/internal', '/delivery'],
+  shop: ['/admin', '/refunds', '/internal'],
   pos: ['/payments', '/refunds', '/internal', '/delivery'],
   admin: ['/payments'],
 };
@@ -28,6 +28,7 @@ const ID = '[^/]+';
 
 export const SHOP_AUTH: RouteRule[] = [
   { methods: ['POST'], pattern: /^\/(register|login|phone\/login|phone\/check|google|facebook|otp\/request|otp\/verify|refresh|logout-all|password\/forgot|password\/reset|phone\/link\/request|phone\/link\/verify)$/ },
+  { methods: ['POST'], pattern: /^\/delivery\/(otp\/request|login)$/ },
   { methods: ['GET'], pattern: /^\/(facebook\/start|facebook\/callback|social-config|me)$/ },
   { methods: ['PUT'], pattern: /^\/me$/ },
   { methods: ['DELETE'], pattern: /^\/me$/ },
@@ -116,7 +117,7 @@ export function prefixesFor(surface: ApiSurface): string[] {
   if (surface === 'shop') {
     return [
       '/auth', '/menu', '/stores', '/cart', '/orders', '/addresses', '/promos', '/settings',
-      '/payments', '/notifications', '/loyalty', '/wishlist', '/inventory', '/spin', '/',
+      '/payments', '/notifications', '/delivery', '/loyalty', '/wishlist', '/inventory', '/spin', '/',
     ];
   }
   if (surface === 'pos') {
@@ -137,6 +138,7 @@ const RULES: Record<Exclude<ApiSurface, 'core'>, Record<string, readonly RouteRu
     '/settings': SHOP_SETTINGS,
     '/payments': 'all',
     '/notifications': 'all',
+    '/delivery': 'all',
     '/loyalty': SHOP_LOYALTY,
     '/wishlist': 'all',
     '/inventory': 'all',

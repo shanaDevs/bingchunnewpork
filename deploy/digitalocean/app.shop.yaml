@@ -123,9 +123,12 @@ services:
       - key: POS_WEB_URL
         scope: RUN_TIME
         value: "https://bingchun-pos-i8pq3.ondigitalocean.app"
+      - key: DELIVERY_SERVICE_ENABLED
+        scope: RUN_TIME
+        value: "false"
       - key: DELIVERY_SERVICE_URL
         scope: RUN_TIME
-        value: "https://replace-delivery-host.example"
+        value: "https://bingchun-delivery-6mgs2.ondigitalocean.app"
   - name: shop-web
     github:
       repo: Bing-Chung-Dart/bingchun
