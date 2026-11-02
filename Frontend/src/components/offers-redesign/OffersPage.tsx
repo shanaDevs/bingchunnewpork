@@ -11,9 +11,10 @@ import { api } from "@/lib/api";
 import { useCartStore } from "@/store/cartStore";
 import type { PromoCode } from "@/types";
 import { DealsExplorer } from "./DealsExplorer";
+import { FeelingLucky } from "./FeelingLucky";
 import { HowToSave } from "./HowToSave";
 import { OffersHero, OffersTicker } from "./OffersHero";
-import { OffersReveal } from "./OffersReveal";
+import { OffersReveal, useRemeasureOnResize } from "./OffersReveal";
 import { toPromotions } from "./promotion";
 import "./offers.css";
 
@@ -44,11 +45,12 @@ function useOffersPagePromos() {
 /**
  * The Offers page (/promotions), in the redesign's look with its own header and footer like the home page (the
  * app shell steps aside for it): the hero and its ticker ribbons, Discover Your Deals (the admin's live offers,
- * filterable) and How to Save.
+ * filterable), the Feeling Lucky banner for Spin & Win (while the admin has the wheel on) and How to Save.
  */
 export default function OffersPage() {
   const { data, status, refetch } = useOffersPagePromos();
   const promotions = useMemo(() => toPromotions(data ?? []), [data]);
+  useRemeasureOnResize();
 
   return (
     <div className={`home-redesign ${homeFontVariables} relative flex min-h-dvh flex-col antialiased`}>
@@ -58,6 +60,10 @@ export default function OffersPage() {
         <OffersTicker />
         <OffersReveal>
           <DealsExplorer promotions={promotions} status={status} onRetry={() => void refetch()} />
+        </OffersReveal>
+        {/* Outside the others' reveal: it arrives later, with the wheel's settings, and brings its own. */}
+        <FeelingLucky />
+        <OffersReveal>
           <HowToSave />
         </OffersReveal>
       </main>

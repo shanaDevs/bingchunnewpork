@@ -15,6 +15,23 @@
 }
 
 /*
+ * For pop-ups that must fit one screen without scrolling (the Spin & Win wheel). low: short screens, where spacing
+ * tightens; phones lose about 100px to browser bars, so their step is higher. short: phones turned sideways, too short
+ * to stack, so the layout goes side by side.
+ */
+@custom-variant low {
+  @media (height < 640px), (width < 48rem) and (height < 740px) {
+    @slot;
+  }
+}
+
+@custom-variant short {
+  @media (orientation: landscape) and (max-height: 500px) and (max-width: 1023px) {
+    @slot;
+  }
+}
+
+/*
  * Design tokens. Tailwind v4 generates utilities from these
  * (e.g. bg-brand-600, text-brand-900, max-w-site).
  * brand-500 is sampled from the Bing Chun mascot artwork (#3079EA); the rest of the
@@ -110,6 +127,52 @@
     }
     75% {
       rotate: -3deg;
+    }
+  }
+
+  /*
+   * The Spin & Win wheel's rim lights: a soft dim and back, each bulb a little behind the one before so the light
+   * chases round (quicker while the wheel spins). Starts and ends lit, so reduced motion leaves them on.
+   */
+  --animate-bulb: bulb 1.2s ease-in-out infinite;
+  @keyframes bulb {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.3;
+    }
+  }
+
+  /* Spin & Win's Spin Now: a soft blue ring swelling out from the button and fading, over and over. */
+  --animate-cta-pulse: cta-pulse 1.8s ease-out infinite;
+  @keyframes cta-pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgb(48 121 234 / 0.45);
+    }
+    70%,
+    100% {
+      box-shadow: 0 0 0 14px rgb(48 121 234 / 0);
+    }
+  }
+
+  /* The floating Spin & Win button: still most of the time, then a quick wiggle to catch the eye. */
+  --animate-fab-nudge: fab-nudge 6s ease-in-out infinite;
+  @keyframes fab-nudge {
+    0%,
+    82%,
+    100% {
+      rotate: 0deg;
+    }
+    86% {
+      rotate: -14deg;
+    }
+    90% {
+      rotate: 11deg;
+    }
+    94% {
+      rotate: -6deg;
     }
   }
 }

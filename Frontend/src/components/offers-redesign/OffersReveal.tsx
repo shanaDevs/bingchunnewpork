@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { revealSpeed } from "@/components/home-redesign/config/motion";
-import { gsap, useGSAP } from "./gsap";
+import { gsap, ScrollTrigger, useGSAP } from "./gsap";
 
 /** How far (px) a block floats up as it comes in. */
 const RISE = 48;
@@ -44,4 +44,25 @@ export function OffersReveal({ children }: { children: ReactNode }) {
   );
 
   return <div ref={scope}>{children}</div>;
+}
+
+/**
+ * Re-measures every scroll trigger on the page whenever its height changes. Things arrive after the triggers below
+ * them were placed (the deals swap their loading state for the cards or an empty message, the Feeling Lucky banner
+ * appears with the wheel's settings), and a stale trigger fires far too late: the block stays invisible while it's
+ * already on screen.
+ */
+export function useRemeasureOnResize() {
+  useEffect(() => {
+    let timer = 0;
+    const observer = new ResizeObserver(() => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => ScrollTrigger.refresh(), 100);
+    });
+    observer.observe(document.body);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(timer);
+    };
+  }, []);
 }

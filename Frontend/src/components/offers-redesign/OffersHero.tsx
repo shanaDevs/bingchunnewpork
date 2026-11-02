@@ -1,11 +1,14 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ShoppingBag, Sparkles, TicketPercent } from "lucide-react";
 import { Caveat_Brush } from "next/font/google";
 import { useRef, type CSSProperties } from "react";
 import { cn } from "@/components/home-redesign/lib/cn";
 import { heroBackdropImage } from "@/components/home-redesign/sections/hero/hero.config";
 import { Container } from "@/components/home-redesign/ui/Container";
+import { fetchSpinOffers, SPIN_LIVE_QUERY, SPIN_OFFERS_QUERY_KEY } from "@/lib/spinOffers";
+import { useCartStore } from "@/store/cartStore";
 import { DealMachine } from "./DealMachine";
 import { gsap, SplitText, useGSAP } from "./gsap";
 import { enters, focusRing, Sparkle } from "./parts";
@@ -101,9 +104,18 @@ export function OffersHero({ dealCount }: { dealCount: number | null }) {
     { scope: rootRef },
   );
 
+  const storeId = useCartStore((s) => s.getFulfillmentStoreId());
+  const { data: spinOffers } = useQuery({
+    queryKey: [...SPIN_OFFERS_QUERY_KEY, storeId ?? ""],
+    queryFn: () => fetchSpinOffers(storeId),
+    ...SPIN_LIVE_QUERY,
+  });
+  const spinOn = Boolean(spinOffers?.enabled);
+
   const facts = [
     { Icon: TicketPercent, kicker: "Live now", value: dealCount === null ? "…" : `${dealCount} ${dealCount === 1 ? "deal" : "deals"}` },
-    { Icon: Sparkles, kicker: "Spin & Win", value: "One free spin a visit" },
+    // Only while the admin has the wheel on.
+    ...(spinOn ? [{ Icon: Sparkles, kicker: "Spin & Win", value: "Spin for a free reward" }] : []),
     { Icon: ShoppingBag, kicker: "Good to know", value: "One deal per order", className: "max-[87.5rem]:hidden" },
   ];
 

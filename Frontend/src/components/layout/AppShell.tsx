@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import FloatingCart from '@/components/cart/FloatingCart';
+import { SpinFab } from '@/components/spin-redesign/SpinFab';
 import CustomerBottomNav from '@/components/layout/CustomerBottomNav';
 import CustomerSidebar from '@/components/layout/CustomerSidebar';
 import { useDeletedAccountGuard, isDeletedAccountUser } from '@/hooks/useDeletedAccountGuard';
@@ -20,9 +21,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isCheckout = pathname?.startsWith('/checkout');
   const useSidebarLayout = !isAdminRoute && !isCheckout;
 
-  // The home and offers pages bring their own header and footer (components/home-redesign).
-  if (isAdminRoute || pathname === '/' || pathname === '/promotions') {
+  if (isAdminRoute) {
     return <>{children}</>;
+  }
+
+  // The home and offers pages bring their own header and footer (components/home-redesign).
+  // The admin's floating spin button still shows there; elsewhere FloatingCart brings it.
+  if (pathname === '/' || pathname === '/promotions') {
+    return (
+      <>
+        {children}
+        {!isDeleted && <SpinFab />}
+      </>
+    );
   }
 
   return (
