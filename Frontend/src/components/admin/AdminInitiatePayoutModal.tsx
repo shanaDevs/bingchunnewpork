@@ -586,7 +586,17 @@ export default function AdminInitiatePayoutModal({
           body: form,
         },
       );
-      const json = await res.json();
+      const raw = await res.text();
+      let json: { message?: string; data?: { invoiceUrl?: string | null } } = {};
+      try {
+        json = raw ? (JSON.parse(raw) as typeof json) : {};
+      } catch {
+        throw new Error(
+          res.status === 504 || res.status === 503
+            ? 'Payout timed out at the gateway. Check Payment History — the payout may still have completed.'
+            : `Payout failed (HTTP ${res.status})`,
+        );
+      }
       if (!res.ok) throw new Error(json.message || 'Payout failed');
 
       if (json.data?.invoiceUrl) {

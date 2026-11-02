@@ -10,7 +10,7 @@ import { creditPlatformEarning } from './platformEarningsService';
 import { ensurePlatformEarningsSchema } from './platformEarningsSchema';
 import { ensurePlatformPaybackSchema } from './platformPaybackSchema';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
-import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
+import { periodOrderAvailableFromChannelPreview } from './periodOrderAvailable';
 import {
   computeFinalPayoutAmountCents,
   parseSharedPromoFromBreakdown,
@@ -328,7 +328,12 @@ async function validatePayoutRequest(
   periodDays: PayoutPeriodDays,
   isAdvance: boolean,
   periodBounds?: PayoutPeriodBounds | null,
-): Promise<{ fromStr: string; toStr: string; breakdown: StoredWithdrawalBreakdown }> {
+): Promise<{
+  fromStr: string;
+  toStr: string;
+  breakdown: StoredWithdrawalBreakdown;
+  remainingAvailableCents: number;
+}> {
   if (amount <= 0) throw new AppError('Withdrawal amount must be greater than zero', 400);
 
   if (!isValidPayoutPeriodDays(periodDays)) {
@@ -337,7 +342,17 @@ async function validatePayoutRequest(
 
   const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
 
-  const orderAvailable = await computePeriodOrderAvailableCents(storeId, fromStr, toStr);
+  // One channel preview + one period breakdown — do not re-scan orders for availability.
+  const [periodWithDiscountReport, channelPreview] = await Promise.all([
+    computePeriodBreakdownForPayout(storeId, fromStr, toStr),
+    buildPeriodChannelPreview(storeId, fromStr, toStr),
+  ]);
+  const orderAvailable = await periodOrderAvailableFromChannelPreview(
+    storeId,
+    fromStr,
+    toStr,
+    channelPreview,
+  );
   if (amount > orderAvailable.remainingCents) {
     throw new AppError(
       `Insufficient available balance. Available: LKR ${(orderAvailable.remainingCents / 100).toFixed(2)}`,
@@ -345,10 +360,6 @@ async function validatePayoutRequest(
     );
   }
 
-  const [periodWithDiscountReport, channelPreview] = await Promise.all([
-    computePeriodBreakdownForPayout(storeId, fromStr, toStr),
-    buildPeriodChannelPreview(storeId, fromStr, toStr),
-  ]);
   const periodNet = periodWithDiscountReport.netAmount;
 
   const PAYOUT_AMOUNT_TOLERANCE_CENTS = 1;
@@ -362,6 +373,7 @@ async function validatePayoutRequest(
   return {
     fromStr,
     toStr,
+    remainingAvailableCents: orderAvailable.remainingCents,
     breakdown: await buildStoredWithdrawalBreakdown(periodWithDiscountReport, channelPreview.breakdown, {
       branchRequestAmountCents: amount,
     }),
@@ -392,7 +404,7 @@ export async function initiateAndApproveWithdrawal(
   isAdvance = false,
   extras?: ApproveWithdrawalExtras,
 ): Promise<StoreWithdrawal> {
-  const { fromStr, toStr, breakdown } = await validatePayoutRequest(
+  const { fromStr, toStr, breakdown, remainingAvailableCents } = await validatePayoutRequest(
     storeId,
     amount,
     periodDays,
@@ -401,16 +413,6 @@ export async function initiateAndApproveWithdrawal(
   );
   const periodFrom = new Date(`${fromStr}T00:00:00.000Z`);
   const periodTo = new Date(`${toStr}T23:59:59.999Z`);
-
-  const wallet = await getOrCreateWallet(storeId);
-
-  const orderAvailable = await computePeriodOrderAvailableCents(storeId, fromStr, toStr);
-  if (amount > orderAvailable.remainingCents) {
-    throw new AppError(
-      `Insufficient available balance. Available: LKR ${(orderAvailable.remainingCents / 100).toFixed(2)}`,
-      400,
-    );
-  }
 
   const sppc = parseSharedPromoFromBreakdown(breakdown);
   const sppcJasonCents = sppc.sharedPromoJasonContributionAmount;
@@ -421,14 +423,13 @@ export async function initiateAndApproveWithdrawal(
   const withdrawalId = crypto.randomUUID();
   const txnId = crypto.randomUUID();
   const now = new Date();
-  void wallet;
   const { checkNumber: checkNum, checkDate: checkDt } = resolveCheckPaymentFields(paymentMethod, extras);
 
   await ensurePlatformEarningsSchema();
 
   // Reuse the pre-txn availability check inside the lock — do not recompute
   // period nets under FOR UPDATE (that path timed out the DO/Cloudflare gateway).
-  const availableCents = orderAvailable.remainingCents;
+  const availableCents = remainingAvailableCents;
   const approvedWithdrawal = await prisma.$transaction(async (tx) => {
     const locked = await lockStoreWallet(tx, storeId);
     if (amount > availableCents) {
