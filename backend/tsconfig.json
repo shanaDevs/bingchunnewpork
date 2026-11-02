@@ -15,7 +15,6 @@
     "declarationMap": true,
     "sourceMap": true,
     "moduleResolution": "node",
-    "ignoreDeprecations": "6.0",
     "paths": {
       "@/*": ["./src/*"]
     }
