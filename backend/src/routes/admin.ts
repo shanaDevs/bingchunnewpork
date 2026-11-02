@@ -231,6 +231,11 @@ router.get(
   requirePermission('WALLET', 'read'),
   walletController.getWithdrawalProofUrlHandler,
 );
+router.post(
+  '/wallet/withdrawals/:id/proof',
+  requireSystemAdmin,
+  walletController.attachWithdrawalProofHandler,
+);
 router.get('/wallet/withdrawals/:id', requirePermission('WALLET', 'read'), walletController.getWithdrawalByIdHandler);
 router.post(
   '/wallet/verify-pin',

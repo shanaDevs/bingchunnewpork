@@ -12,6 +12,7 @@ export type WalletSecurityAuditEvent = {
     | 'wallet.withdrawal.reject'
     | 'wallet.withdrawal.cancel'
     | 'wallet.withdrawal.request'
+    | 'wallet.withdrawal.attach_proof'
     | 'wallet.payout.initiate'
     | 'wallet.settle'
     | 'wallet.sync'

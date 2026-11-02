@@ -453,6 +453,67 @@ export async function getWithdrawalProofUrlHandler(req: Request, res: Response, 
   }
 }
 
+const attachWithdrawalProofBodySchema = z.object({
+  password: adminPinField,
+  proofBase64: z.string().min(8).max(6_000_000),
+  proofFileName: z.string().min(1).max(255).optional(),
+  proofMimeType: z.string().min(3).max(100).optional(),
+});
+
+/** Attach / replace settlement proof on an already-approved payout (JSON base64). */
+export async function attachWithdrawalProofHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    await ensureWithdrawalSchema();
+    const user = req.user!;
+    if (user.role !== 'SYSTEM_ADMIN') throw new AppError('Forbidden', 403);
+
+    const data = attachWithdrawalProofBodySchema.parse(req.body ?? {});
+    await verifyAdminPin(user.sub, data.password);
+
+    const withdrawal = await prisma.storeWithdrawal.findUnique({
+      where: { id: req.params.id as string },
+    });
+    if (!withdrawal) throw new AppError('Withdrawal not found', 404);
+    if (withdrawal.status !== 'APPROVED') {
+      throw new AppError('Proof can only be attached to an approved payout', 400);
+    }
+
+    const buffer = Buffer.from(data.proofBase64, 'base64');
+    const proofFile = assertSettlementProofFile({
+      fieldname: 'proof',
+      originalname: data.proofFileName?.trim() || 'proof.bin',
+      encoding: '7bit',
+      mimetype: data.proofMimeType?.trim() || 'application/octet-stream',
+      buffer,
+      size: buffer.length,
+    } as Express.Multer.File);
+
+    const proofUrl = await uploadSettlementProof(
+      proofFile.buffer,
+      proofFile.originalname,
+      proofFile.mimetype,
+      withdrawal.storeId,
+    );
+
+    const updated = await withUploadedProofCleanup(proofUrl, () =>
+      prisma.storeWithdrawal.update({
+        where: { id: withdrawal.id },
+        data: { proofUrl },
+      }),
+    );
+
+    logWalletSecurityEventFromRequest(req, user, {
+      event: 'wallet.withdrawal.attach_proof',
+      storeId: withdrawal.storeId,
+      withdrawalId: withdrawal.id,
+    });
+
+    res.json({ success: true, data: serializeWithdrawal(updated) });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /admin/wallet/verify-pin
 // Pre-check admin PIN before showing the payout confirmation dialog.
