@@ -46,7 +46,7 @@ type Props = {
 };
 
 const AMOUNT_COLUMNS = [
-  'Branch payout',
+  'Branch receives',
   'Customer convenience fee',
   'Net platform amount',
   'Delivery fee received',

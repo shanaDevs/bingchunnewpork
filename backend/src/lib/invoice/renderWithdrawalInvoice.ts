@@ -26,6 +26,9 @@ import {
   drawWhitePage,
   drawWithdrawalFooter,
   drawWithdrawalTable,
+  layoutFooterBelowNotes,
+  measureNotesBlockHeight,
+  resolvePage1SummaryRowH,
   WD_LAYOUT,
 } from './withdrawalPdfDrawing';
 
@@ -92,20 +95,24 @@ export async function renderWithdrawalInvoiceToBuffer(
   );
   y += WD_LAYOUT.sectionGap;
 
+  const summaryRows = buildInvoiceSummaryRows(input);
+  const notesBlockH = measureNotesBlockHeight(doc, contentW);
+  const summaryRowH = resolvePage1SummaryRowH(pageH, y, summaryRows, notesBlockH);
+
   y = drawSectionTitle(doc, marginX, y, contentW, 'Invoice summary');
   y = drawWithdrawalTable(
     doc,
     marginX,
     y,
     contentW,
-    buildInvoiceSummaryRows(input),
+    summaryRows,
     'amount',
-    WD_LAYOUT.rowH,
+    summaryRowH,
   );
   y += WD_LAYOUT.sectionGap;
 
-  drawNotesBlock(doc, layout, y);
-  drawWithdrawalFooter(doc, layout, footer, payLines);
+  y = drawNotesBlock(doc, layout, y);
+  drawWithdrawalFooter(doc, layout, layoutFooterBelowNotes(pageH, y), payLines);
 
   doc.addPage();
   drawWhitePage(doc, pageW, pageH);
