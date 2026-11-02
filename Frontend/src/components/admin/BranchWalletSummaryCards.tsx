@@ -292,9 +292,8 @@ export default function BranchWalletSummaryCards({
   const totalExpensesCents = usePayoutPeriodExpenses
     ? (resolvedPaidExpenses?.totalExpensesCents ?? 0)
     : (payables?.totalExpensesCents ?? 0);
-  const availableBalanceCents = hideDelivery
-    ? totalRevenueCents - totalExpensesCents
-    : (payables?.allTimeAvailableBalanceCents ?? 0);
+  /** Keep in sync with expense cards (paid 15-day payouts when storeId is set). */
+  const availableBalanceCents = totalRevenueCents - totalExpensesCents;
 
   const cardLoading = loading || periodLoading || payoutPeriodExpensesLoading;
 

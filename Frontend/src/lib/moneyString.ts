@@ -64,6 +64,7 @@ export function normalizeStoreWalletFromApi<T extends object>(row: T): T & {
   totalWithdrawn?: number;
   currentBalance?: number;
   availableBalance?: number;
+  allTimeAvailableBalanceCents?: number;
   netTransferableEarnings?: number;
 } {
   const r = row as T & Record<string, CentsField>;
@@ -74,6 +75,7 @@ export function normalizeStoreWalletFromApi<T extends object>(row: T): T & {
     totalWithdrawn: centsFieldToNumber(r.totalWithdrawn),
     currentBalance: centsFieldToNumber(r.currentBalance ?? r.balance),
     availableBalance: centsFieldToNumber(r.availableBalance),
+    allTimeAvailableBalanceCents: centsFieldToNumber(r.allTimeAvailableBalanceCents),
     netTransferableEarnings: centsFieldToNumber(r.netTransferableEarnings),
   };
 }

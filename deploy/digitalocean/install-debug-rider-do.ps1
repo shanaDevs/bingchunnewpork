@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $appDir = Join-Path $repoRoot 'driver_flutter'
 $pkg = 'com.bingchun.bing_chun_driver'
-$core = 'https://bing-chun-ui2ow.ondigitalocean.app/api'
+$core = 'https://bingchunsrilanka.com/api'
 $delivery = 'https://bingchun-delivery-6mgs2.ondigitalocean.app/delivery-api'
 $defines = @(
   "--dart-define=CORE_API_BASE_URL=$core",

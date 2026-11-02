@@ -8,8 +8,13 @@ if defined FLUTTER_ROOT (
   )
 )
 
-if exist "C:\flutter\bin\flutter.bat" (
-  "C:\flutter\bin\flutter.bat" %*
+if exist "C:\flutter-sdk\bin\flutter.bat" (
+  "C:\flutter-sdk\bin\flutter.bat" %*
+  exit /b %ERRORLEVEL%
+)
+
+if exist "%USERPROFILE%\flutter\bin\flutter.bat" (
+  "%USERPROFILE%\flutter\bin\flutter.bat" %*
   exit /b %ERRORLEVEL%
 )
 

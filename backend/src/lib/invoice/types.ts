@@ -114,6 +114,12 @@ export type InvoicePayoutStatement = {
   deliveryRefundsCents: number;
   totalRefundCents: number;
   platformDiscountsReportCents: number;
+  /** Platform-owned promo total before payback (cents). */
+  platformOwnedPromoCents: number;
+  /** Platform share of SHARED promotions — commission deduction when payback enabled (cents). */
+  sharedPlatformDiscountCents: number;
+  /** Credited platform-funded promo deduction (cents). */
+  platformPaybackCents: number;
   loyaltyDiscountCents: number;
   netPlatformAmountCents: number;
   gatewayFeeCents: number;

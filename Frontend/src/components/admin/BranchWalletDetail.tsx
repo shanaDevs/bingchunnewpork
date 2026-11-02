@@ -623,7 +623,7 @@ export default function BranchWalletDetail({
             periodFrom={periodFrom}
             periodTo={periodTo}
             periodLabel={periodLabel}
-            storeId={embedded ? storeId : undefined}
+            storeId={storeId}
           />
         </div>
       ) : (
