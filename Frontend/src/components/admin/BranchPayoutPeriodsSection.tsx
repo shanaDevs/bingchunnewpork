@@ -256,14 +256,20 @@ export default function BranchPayoutPeriodsSection({
   } | null>(null);
 
   const {
-    data: rows = [],
-    isLoading,
+    data: payoutPeriodsData,
+    isPending,
+    isFetching,
     refetch,
   } = useQuery({
     queryKey: payoutPeriodsQueryKey(storeId),
     queryFn: () => fetchPayoutPeriods(apiBase, storeId),
     enabled: Boolean(storeId),
   });
+
+  const rows = payoutPeriodsData ?? [];
+  /** Disabled query (no storeId) or first fetch — avoid empty state while wallet overview still loads. */
+  const periodsLoading =
+    !storeId || isPending || (isFetching && payoutPeriodsData === undefined);
 
   const rowsNeedingPreview = useMemo(
     () =>
@@ -326,17 +332,17 @@ export default function BranchPayoutPeriodsSection({
   }, [storeId]);
 
   useEffect(() => {
-    if (!focusOldestPending || isLoading || openedOldestPending.current || !oldestPending) return;
+    if (!focusOldestPending || periodsLoading || openedOldestPending.current || !oldestPending) return;
     openedOldestPending.current = true;
     setViewRow(periodToViewRow(oldestPending, storeId));
-  }, [focusOldestPending, isLoading, oldestPending, storeId]);
+  }, [focusOldestPending, periodsLoading, oldestPending, storeId]);
 
   useEffect(() => {
-    if (!activeHighlight || isLoading) return;
+    if (!activeHighlight || periodsLoading) return;
     const el = highlightRowRef.current;
     if (!el) return;
     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [activeHighlight?.periodFrom, activeHighlight?.periodTo, isLoading, displayRows.length]);
+  }, [activeHighlight?.periodFrom, activeHighlight?.periodTo, periodsLoading, displayRows.length]);
 
   return (
     <div className="mb-7 overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
@@ -347,9 +353,9 @@ export default function BranchPayoutPeriodsSection({
         </span>
       </div>
 
-      {isLoading && <PayoutPeriodsTableSkeleton />}
+      {periodsLoading && <PayoutPeriodsTableSkeleton />}
 
-      {!isLoading && rows.length === 0 && (
+      {!periodsLoading && rows.length === 0 && (
         <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-brand-subtle)] text-[var(--color-brand)]">
             <CalendarRange size={28} />
@@ -361,7 +367,7 @@ export default function BranchPayoutPeriodsSection({
         </div>
       )}
 
-      {!isLoading && displayRows.length > 0 && (
+      {!periodsLoading && displayRows.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[960px] text-left text-xs">
             <thead>

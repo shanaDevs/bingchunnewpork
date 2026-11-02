@@ -42,6 +42,37 @@ API component and **`/socket.io`** to **`delivery-web`** (Next rewrites sockets 
 Set **`DELIVERY_FRONTEND_URL`** on shop-api and delivery-service to the live
 delivery portal URL for CORS. Redeploy after changing [`app.delivery.yaml`](app.delivery.yaml).
 
+To merge secrets into the app spec and apply ingress with **doctl** (does not wipe UI-only
+settings if you edit ingress in the console instead):
+
+```powershell
+node deploy/digitalocean/apply-delivery-app-spec.cjs
+doctl apps update <APP_ID> --spec deploy/digitalocean/.generated-app.delivery.yaml
+```
+
+Until `/delivery-api` ingress is correct, **delivery-web** sets
+`NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE=true` and the frontend also routes admin APIs via shop
+`/api` when the host is `*.ondigitalocean.app` (see `deliveryAdminViaCore` in
+`delivery-frontend/src/lib/deliveryApi.ts`).
+
+**Multipart uploads (driver photos, payout proof):** admin-api needs `DO_SPACES_*` on
+`bingchun-admin`. Merge and apply with:
+
+```powershell
+node deploy/digitalocean/apply-admin-app-spec.cjs
+doctl apps update <ADMIN_APP_ID> --spec deploy/digitalocean/.generated-app.admin.yaml
+node deploy/digitalocean/diagnose-upload-health.cjs
+```
+
+Shop app (driver `/api/delivery/*` on `API_SURFACE=shop`, `DELIVERY_SERVICE_ENABLED=false`):
+
+```powershell
+node deploy/digitalocean/apply-shop-app-spec.cjs
+doctl apps update <SHOP_APP_ID> --spec deploy/digitalocean/.generated-app.shop.yaml
+```
+
+After admin apply, check `GET /api/health/spaces` on the admin API host — `configured` and `reachable` should both be true.
+
 The JWT-style secrets are generated and stored only in `secrets.env`, which
 git ignores. The YAML files keep `REPLACE_ME`. Uploading a YAML file from git
 onto a live app would wipe the real secrets. Change secrets in the DigitalOcean
@@ -67,6 +98,9 @@ After `/health` shows `socketAdapter` redis, point DNS here. Then set
 URL and the Flutter API base URL. `backgroundJobs` is true only on shop-worker.
 shop-api stays at 2 instances. Do not add a second shop-web, delivery, cashier,
 or admin instance.
+
+**Driver 504 on `/api/delivery/me`:** read [`DO-OPS-delivery-me-504.md`](DO-OPS-delivery-me-504.md) and run
+`node deploy/digitalocean/audit-delivery-me-live.cjs` (optional `BEARER` after device login).
 
 `BACKEND_URL` on shop-web, pos-web, and admin-web is the private API URL inside
 that app. Do not replace those with a public URL. Cross-app links use the

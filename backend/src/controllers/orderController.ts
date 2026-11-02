@@ -26,7 +26,6 @@ import { assertOrderStoreAccess, requireBranchStoreId, isBranchScopedRole } from
 import { computeUnitPrice, batchResolveLinePricing } from '../lib/pricing';
 import { getOrderPaymentFailureReason, stampCancelWindowStart, getCancelWindowStartsAt, getCancelWindowStartsAtMap } from '../lib/orderSchema';
 import { resolveDeliveryValidation, DELIVERY_MIN_ORDER } from '../lib/deliveryFee';
-import { createdAtRangeFromDateStrings } from '../lib/dashboardStatsDateRange';
 import { upsertUserDeliveryAddress } from '../lib/userAddresses';
 import { normalizePhone, phoneLookupVariants } from '../utils/phone';
 import {
@@ -2716,8 +2715,22 @@ export async function getAllOrders(req: Request, res: Response, next: NextFuncti
       }
     }
 
-    const createdAtFilter = createdAtRangeFromDateStrings(startDate, endDate);
-    if (createdAtFilter) {
+    const createdAtFilter: { gte?: Date; lte?: Date } = {};
+    if (startDate) {
+      const from = new Date(startDate);
+      if (!Number.isNaN(from.getTime())) {
+        from.setHours(0, 0, 0, 0);
+        createdAtFilter.gte = from;
+      }
+    }
+    if (endDate) {
+      const to = new Date(endDate);
+      if (!Number.isNaN(to.getTime())) {
+        to.setHours(23, 59, 59, 999);
+        createdAtFilter.lte = to;
+      }
+    }
+    if (createdAtFilter.gte || createdAtFilter.lte) {
       where.createdAt = createdAtFilter;
     }
 

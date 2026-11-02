@@ -3,7 +3,6 @@ import { getApiBaseUrl } from '@/lib/apiBase';
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Bell, Check } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { AdminSession } from '@/lib/adminAuth';
@@ -12,6 +11,7 @@ import {
   useAdminNotificationContext,
   type AdminNotificationPayload,
 } from '@/contexts/AdminNotificationProvider';
+import { mainAdminPage, openMainAdminPage } from '@/lib/mainAdminUrl';
 
 interface AdminNotification {
   id: string;
@@ -55,7 +55,6 @@ function toBellNotification(payload: AdminNotificationPayload): AdminNotificatio
 }
 
 export default function AdminNotificationBell({ adminUser }: { adminUser: AdminSession | null }) {
-  const router = useRouter();
   const { registerBell } = useAdminNotificationContext();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);
@@ -114,7 +113,7 @@ export default function AdminNotificationBell({ adminUser }: { adminUser: AdminS
     setOpen(false);
 
     if (n.type === 'NEW_PRODUCT' && n.productId) {
-      router.push(`/admin/stock?highlight=${encodeURIComponent(n.productId)}`);
+      openMainAdminPage(`/admin/stock?highlight=${encodeURIComponent(n.productId)}`);
       return;
     }
 
@@ -123,7 +122,7 @@ export default function AdminNotificationBell({ adminUser }: { adminUser: AdminS
       if (n.orderNumber) params.set('id', n.orderNumber);
       else if (n.orderId) params.set('id', n.orderId);
       params.set('open', '1');
-      router.push(`/admin/orders?${params.toString()}`);
+      openMainAdminPage(`/admin/orders?${params.toString()}`);
     }
   }
 
@@ -191,7 +190,7 @@ export default function AdminNotificationBell({ adminUser }: { adminUser: AdminS
               )}
             </ul>
             <div className="px-4 py-2 border-t border-navy-border">
-              <Link href="/admin/orders" onClick={() => setOpen(false)} className="text-xs text-brand hover:underline">
+              <Link href={mainAdminPage('/admin/orders')} onClick={() => setOpen(false)} className="text-xs text-brand hover:underline">
                 View all orders →
               </Link>
             </div>

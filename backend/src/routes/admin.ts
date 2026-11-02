@@ -42,6 +42,11 @@ router.get(
   requireAnyPermission(['PAYMENT_HISTORY', 'WALLET'], 'read'),
   invoiceController.getSettlementInvoiceHandler,
 );
+router.get(
+  '/invoices/settlement/:settlementId/platform-provider',
+  requireAnyPermission(['PAYMENT_HISTORY', 'WALLET'], 'read'),
+  invoiceController.getPlatformProviderSettlementInvoiceHandler,
+);
 
 router.get(
   '/spaces-proof',
@@ -66,6 +71,16 @@ router.get(
   requirePermission('PAYMENT_HISTORY', 'read'),
   paymentHistoryController.listPendingAllHandler,
 );
+router.get(
+  '/payment-history/ready-to-process',
+  requirePermission('PAYMENT_HISTORY', 'read'),
+  paymentHistoryController.listReadyToProcessHandler,
+);
+router.get(
+  '/payment-history/ready-to-process/:month',
+  requirePermission('PAYMENT_HISTORY', 'read'),
+  paymentHistoryController.getReadyToProcessMonthHandler,
+);
 router.get('/payment-history/settlement-preview', requirePermission('PAYMENT_HISTORY', 'read'), paymentHistoryController.getSettlementPreview);
 router.post(
   '/payment-history/settlement',
@@ -80,6 +95,11 @@ router.post(
   paymentHistoryController.bulkSettleHandler,
 );
 router.get('/payment-history/settlements/:id', requirePermission('PAYMENT_HISTORY', 'read'), paymentHistoryController.getSettlement);
+router.get(
+  '/payment-history/settlements/:id/platform-receivable',
+  requirePermission('PAYMENT_HISTORY', 'read'),
+  paymentHistoryController.getSettlementPlatformReceivable,
+);
 router.get(
   '/payment-history/settlements/:id/receipt-url',
   requirePermission('PAYMENT_HISTORY', 'read'),

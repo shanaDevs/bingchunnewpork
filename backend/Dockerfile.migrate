@@ -53,7 +53,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-RUN apk add --no-cache openssl netcat-openbsd
+RUN apk add --no-cache openssl netcat-openbsd postgresql-client
 
 # Only copy what prisma needs: CLI, schema, and generated client
 COPY --from=builder /app/node_modules ./node_modules

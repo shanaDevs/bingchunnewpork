@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { Prisma, prisma } from '../lib/prisma';
 import { config } from '../config';
 import { AppError } from '../middleware/errorHandler';
@@ -18,7 +19,7 @@ import {
 } from '../lib/walletSecurityAuditSchema';
 import { z } from 'zod';
 import { resolveBranchCancellationGatewayFeeLkr } from '../lib/refundPaymentStructure';
-import { isOnlinePaymentMethod } from '../lib/orderPayment';
+import { isWalletCreditPaymentMethod } from '../lib/orderPayment';
 import { ensureWalletSettlementColumns } from '../lib/walletSchema';
 import { ensureWithdrawalSchema } from '../lib/withdrawalSchema';
 import {
@@ -32,7 +33,9 @@ import {
   decimalFieldToCentsNumber,
   lkrToCents,
   parseDecimalFromDb,
+  zLkrToCentsInput,
 } from '../lib/moneyDecimal';
+import { insertWalletLedgerRow } from '../lib/walletTransactionInsert';
 import { parseLockedStoreWallet, walletDataAfterBalanceDelta, walletDataAfterDebit } from '../lib/walletStoreUpdates';
 import {
   serializeStoreWallet,
@@ -127,7 +130,7 @@ const walletPinSchema = z.object({
 });
 
 const withdrawalRequestSchema = z.object({
-  amount: z.number().positive(),
+  amount: zLkrToCentsInput(z).pipe(z.number().int().positive()),
   periodDays: z.coerce.number().refine((n) => (PAYOUT_PERIOD_DAYS as readonly number[]).includes(n), {
     message: `periodDays must be one of: ${PAYOUT_PERIOD_DAYS.join(', ')}`,
   }),
@@ -178,7 +181,7 @@ const approveWithdrawalBodySchema = z
 
 const initiatePayoutBodySchema = z
   .object({
-    amount: z.coerce.number().positive(),
+    amount: zLkrToCentsInput(z).pipe(z.number().int().positive()),
     periodDays: z.coerce.number().refine((n) => (PAYOUT_PERIOD_DAYS as readonly number[]).includes(n), {
       message: `periodDays must be one of: ${PAYOUT_PERIOD_DAYS.join(', ')}`,
     }),
@@ -486,7 +489,7 @@ export async function requestWithdrawalHandler(req: Request, res: Response, next
     // Independently verify PIN on every payout request (do not trust client pre-check alone).
     await verifyAdminPin(user.sub, data.password);
 
-    const amountCents = lkrToCents(data.amount);
+    const amountCents = data.amount;
 
     const withdrawal = await requestWithdrawal(
       storeId,
@@ -631,17 +634,18 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
 
     await verifyAdminPin(user.sub, data.password);
 
-    const amountCents = lkrToCents(data.amount);
+    const amountCents = data.amount;
     const proofUrl = await requireSettlementProofUpload(req.file, storeId);
     const checkDate = parseSettlementCheckDate(data.paymentMethod, data.checkDate);
 
-    const [wallet, store, netTransferableEarnings] = await Promise.all([
+    // Do NOT await lifetime computeNetTransferableEarnings here — it rescans all
+    // paid orders for the branch and routinely pushes past the App Platform gateway.
+    const [wallet, store] = await Promise.all([
       getOrCreateWallet(storeId),
       prisma.store.findUnique({
         where: { id: storeId },
         select: { name: true },
       }),
-      computeNetTransferableEarnings(storeId),
     ]);
     const balanceBefore = walletBalanceCents(wallet);
     const totalWithdrawnBefore = walletTotalWithdrawnCents(wallet);
@@ -666,27 +670,40 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
       ),
     );
 
-    const final = await finalizeWithdrawalWithInvoice({
-      storeId,
-      storeName: store?.name ?? 'Branch',
-      updated,
-      paymentMethod: data.paymentMethod,
-      balanceBefore,
-      totalWithdrawnBefore,
-      netTransferableEarnings,
-    });
-
     logWalletSecurityEventFromRequest(req, user, {
       event: 'wallet.payout.initiate',
       storeId,
       amountCents,
-      withdrawalId: final.id,
+      withdrawalId: updated.id,
     });
 
     invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
     invalidateWalletPayoutsDueCache();
 
-    res.status(201).json({ success: true, data: serializeWithdrawal(final) });
+    // Respond as soon as the payout is committed. Invoice PDF + Spaces upload and
+    // lifetime net recompute must not hold the DO/Cloudflare gateway open (504).
+    res.status(201).json({ success: true, data: serializeWithdrawal(updated) });
+
+    void (async () => {
+      try {
+        const netTransferableEarnings = await computeNetTransferableEarnings(storeId);
+        await finalizeWithdrawalWithInvoice({
+          storeId,
+          storeName: store?.name ?? 'Branch',
+          updated,
+          paymentMethod: data.paymentMethod,
+          balanceBefore,
+          totalWithdrawnBefore,
+          netTransferableEarnings,
+        });
+      } catch (err) {
+        console.error('[initiate-payout] background invoice finalize failed', {
+          storeId,
+          withdrawalId: updated.id,
+          err,
+        });
+      }
+    })();
   } catch (err) {
     next(err);
   }
@@ -918,6 +935,9 @@ export async function adjustWallet(req: Request, res: Response, next: NextFuncti
       totalEarnings: currentEarnings,
       totalWithdrawn: currentWithdrawn,
     });
+    if (next.balance.lt(0)) {
+      throw new AppError('Insufficient wallet balance for debit', 400);
+    }
     const balanceAfter = Number(next.balance.toFixed(0));
     const updatedWallet = await tx.storeWallet.update({
       where: { storeId: storeId as string },
@@ -1189,7 +1209,7 @@ export async function creditWalletForOrder(
   amount: number,
   paymentMethod: string,
 ): Promise<void> {
-  if (!isOnlinePaymentMethod(paymentMethod as any)) {
+  if (!isWalletCreditPaymentMethod(paymentMethod as any)) {
     return;
   }
 
@@ -1214,9 +1234,7 @@ export async function creditWalletForOrder(
   });
 
   const centsAmount = lkrToCents(amount);
-  const wallet = await getOrCreateWallet(storeId);
-  const newBalance =
-    Number(parseDecimalFromDb(wallet.balance).toFixed(0)) + centsAmount;
+  await getOrCreateWallet(storeId);
 
   const descParts = [
     `Order #${order?.orderNumber ?? orderId}`,
@@ -1235,26 +1253,26 @@ export async function creditWalletForOrder(
       if (!lockedRows[0]) throw new AppError('Wallet not found', 404);
       const bal = parseDecimalFromDb(lockedRows[0].balance);
       const earnings = parseDecimalFromDb(lockedRows[0].totalEarnings);
+      const balanceAfter = bal.plus(centsToDecimal(centsAmount));
       await tx.storeWallet.update({
         where: { storeId },
         data: {
-          balance: bal.plus(centsToDecimal(centsAmount)),
+          balance: balanceAfter,
           totalEarnings: earnings.plus(centsToDecimal(centsAmount)),
         },
       });
-      await tx.walletTransaction.create({
-        data: {
-          id: require('crypto').randomUUID(),
-          storeId,
-          orderId,
-          type: 'ORDER_PAYMENT',
-          amount: centsToDecimal(centsAmount),
-          balanceAfter: centsToDecimal(newBalance),
-          paymentMethod: paymentMethod as any,
-          paymentRef: order?.paymentRef ?? null,
-          description: descParts,
-          reference: order?.orderNumber ?? null,
-        },
+      const ledgerId = crypto.randomUUID();
+      await insertWalletLedgerRow(tx, {
+        id: ledgerId,
+        storeId,
+        orderId,
+        type: 'ORDER_PAYMENT',
+        amountCents: centsAmount,
+        balanceAfterCents: Number(balanceAfter.toFixed(0)),
+        paymentMethod,
+        paymentRef: order?.paymentRef ?? null,
+        description: descParts,
+        reference: order?.orderNumber ?? null,
       });
     });
   } catch (err) {
@@ -1286,9 +1304,7 @@ export async function creditWalletAddonPayment(
   });
 
   const centsAmount = lkrToCents(amountLkr);
-  const wallet = await getOrCreateWallet(storeId);
-  const newBalance =
-    Number(parseDecimalFromDb(wallet.balance).toFixed(0)) + centsAmount;
+  await getOrCreateWallet(storeId);
   const methodLabel = paymentMethod === 'CARD' ? 'card at counter' : 'cash at counter';
 
   try {
@@ -1299,10 +1315,11 @@ export async function creditWalletAddonPayment(
       if (!lockedRows[0]) throw new AppError('Wallet not found', 404);
       const bal = parseDecimalFromDb(lockedRows[0].balance);
       const earnings = parseDecimalFromDb(lockedRows[0].totalEarnings);
+      const balanceAfter = bal.plus(centsToDecimal(centsAmount));
       await tx.storeWallet.update({
         where: { storeId },
         data: {
-          balance: bal.plus(centsToDecimal(centsAmount)),
+          balance: balanceAfter,
           totalEarnings: earnings.plus(centsToDecimal(centsAmount)),
         },
       });
@@ -1313,7 +1330,7 @@ export async function creditWalletAddonPayment(
           orderId,
           type: 'ORDER_ADDON_PAYMENT',
           amount: centsToDecimal(centsAmount),
-          balanceAfter: centsToDecimal(newBalance),
+          balanceAfter,
           paymentMethod: paymentMethod as any,
           description: `Order #${order?.orderNumber ?? orderId} · add-on items (${methodLabel})`,
           reference: order?.orderNumber ?? null,

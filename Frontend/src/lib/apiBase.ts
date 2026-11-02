@@ -123,13 +123,41 @@ export function getApiBaseUrl(): string {
  * WebSockets reliably, which surfaces as "WebSocket is closed before the
  * connection is established".
  */
+/** Starter *.ondigitalocean.app hosts 302 to the primary custom domain — Socket.IO cannot follow that. */
+function rewriteStarterSocketOrigin(url: string): string {
+  const cleaned = stripTrailingSlash(url);
+  try {
+    const host = new URL(cleaned).hostname.toLowerCase();
+    if (host === 'bingchun-admin-a4ndy.ondigitalocean.app') {
+      return 'https://admin.bingchunsrilanka.com';
+    }
+    if (host === 'bingchun-delivery-6mgs2.ondigitalocean.app') {
+      return 'https://delivery.bingchunsrilanka.com';
+    }
+    if (host === 'bing-chun-ui2ow.ondigitalocean.app') {
+      return 'https://bingchunsrilanka.com';
+    }
+  } catch {
+    /* keep */
+  }
+  return cleaned;
+}
+
 export function getSocketUrl(): string {
   if (getApiBaseOverride()) {
     return getBackendOrigin();
   }
+  // Prefer same-origin when the page is already on the custom admin host —
+  // ingress routes /socket.io → admin-api. Avoid baked starter-domain URLs that 302.
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname.toLowerCase();
+    if (host === 'admin.bingchunsrilanka.com') {
+      return window.location.origin;
+    }
+  }
   const explicit = process.env.NEXT_PUBLIC_SOCKET_URL?.trim();
   if (explicit) {
-    return stripTrailingSlash(explicit);
+    return rewriteStarterSocketOrigin(explicit);
   }
   // Absolute API URL → same host as REST.
   const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
@@ -150,9 +178,9 @@ export function getSocketUrl(): string {
     if (
       host === 'bingchunsrilanka.com'
       || host === 'www.bingchunsrilanka.com'
-      || host === 'bing-chun.bc.dartcodes.com'
+      || host === 'bing-chun-ui2ow.ondigitalocean.app'
     ) {
-      return 'https://bing-chun-shop.bc.dartcodes.com';
+      return window.location.origin;
     }
     return window.location.origin;
   }

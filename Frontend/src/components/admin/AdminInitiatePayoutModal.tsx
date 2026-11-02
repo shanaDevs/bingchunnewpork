@@ -16,11 +16,16 @@ import {
 import toast from 'react-hot-toast';
 import AdminPinGateModal from '@/components/admin/AdminPinGateModal';
 import ChannelSalesTable from '@/components/admin/ChannelSalesTable';
-import { resolveBranchPayoutDisplay } from '@/components/admin/branchPayoutDisplay';
+import { branchPayoutDisplayFromReportValues } from '@/components/admin/branchPayoutDisplay';
+import { resolveSlabRatePctFromPreview } from '@/components/admin/commissionUtils';
+import {
+  buildPayoutBreakdownDisplayInput,
+  resolvePayoutBreakdownBundle,
+} from '@/components/admin/resolvePayoutReportValues';
 import PayoutBreakdownPanel from '@/components/admin/PayoutBreakdownPanel';
 import {
   channelBreakdownHasSalesActivity,
-  computeFinalPayoutLkr,
+  computeAvailableToWithdrawFromChannelBreakdown,
   computePeriodPayoutSplitLkr,
   extractSharedPromoLkrFromBreakdown,
   hasPositiveLkr,
@@ -49,7 +54,10 @@ import {
   type RollingPeriodOption,
 } from '@/lib/biweeklyPeriods';
 import { confirmDialog } from '@/store/confirmStore';
-import type { BranchPayoutCompletedMeta } from '@/lib/branchPayoutsDue';
+import {
+  normalizePayoutPeriodDate,
+  type BranchPayoutCompletedMeta,
+} from '@/lib/branchPayoutsDue';
 
 type PaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CHECK' | '';
 
@@ -103,14 +111,45 @@ function isValidRange(from: string, to: string): boolean {
   return isValidPayoutRange(from, to);
 }
 
-function cappedPeriodPayoutLkr(periodNetLkr: number | null, availableLkr: number): number | null {
-  if (periodNetLkr == null || periodNetLkr <= 0) return null;
-  return Math.min(periodNetLkr, availableLkr);
+const PAYOUT_COMPARE_EPSILON = 0.005;
+
+/** Branch wallet debit for API (LKR string) — use preview cents to avoid float drift vs backend periodNet. */
+function resolveBranchWalletNetLkrForPayout(
+  periodNet: WithdrawalBreakdown | null,
+  reportBranchWalletNetLkr: number,
+): number {
+  if (periodNet?.netAmount != null && periodNet.netAmount > 0) {
+    return periodNet.netAmount / 100;
+  }
+  return reportBranchWalletNetLkr;
 }
 
-function formatDefaultAmount(periodNetLkr: number | null, availableLkr: number): string {
-  const capped = cappedPeriodPayoutLkr(periodNetLkr, availableLkr);
-  return capped != null && capped > 0 ? capped.toFixed(2) : '';
+function formatBranchWalletNetLkrForSubmit(
+  periodNet: WithdrawalBreakdown | null,
+  branchWalletNetLkr: number,
+): string {
+  return resolveBranchWalletNetLkrForPayout(periodNet, branchWalletNetLkr).toFixed(2);
+}
+
+function availableCoversFinalPayout(availableLkr: number, finalPayLkr: number): boolean {
+  return availableLkr + PAYOUT_COMPARE_EPSILON >= finalPayLkr;
+}
+
+function resolveInitiatePayoutPayDisabledNote(params: {
+  previewLoading: boolean;
+  finalPayLkr: number;
+  availableLkr: number;
+  paymentMethod: PaymentMethod;
+  reviewed: boolean;
+}): string | null {
+  if (params.previewLoading) return 'Loading payout calculation…';
+  if (params.finalPayLkr <= 0) return 'Waiting for payout calculation for this period.';
+  if (!availableCoversFinalPayout(params.availableLkr, params.finalPayLkr)) {
+    return `Available to withdraw (LKR ${formatMoneyAmount(params.availableLkr)}) must cover net payout (LKR ${formatMoneyAmount(params.finalPayLkr)}).`;
+  }
+  if (!params.paymentMethod) return 'Select a payment method to continue.';
+  if (!params.reviewed) return 'Check the box to confirm you have reviewed the payout calculation.';
+  return null;
 }
 
 const INITIATE_PAYOUT_METHODS = SETTLEMENT_PAYMENT_METHOD_OPTIONS.filter(
@@ -131,7 +170,6 @@ export default function AdminInitiatePayoutModal({
   presetPeriodDays = null,
 }: Props) {
   const [portalReady, setPortalReady] = useState(false);
-  const [amount, setAmount] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [remarks, setRemarks] = useState('');
@@ -140,6 +178,9 @@ export default function AdminInitiatePayoutModal({
   const [periodInfoLoading, setPeriodInfoLoading] = useState(false);
   const [periodNet, setPeriodNet] = useState<WithdrawalBreakdown | null>(null);
   const [channelPreview, setChannelPreview] = useState<SettlementPreview | null>(null);
+  const [orderAvailableRemainingLkr, setOrderAvailableRemainingLkr] = useState<number | null>(
+    null,
+  );
   const [periodDays, setPeriodDays] = useState<number | null>(null);
   const [periodOptions, setPeriodOptions] = useState<RollingPeriodOption[]>([]);
   const [tierPreview, setTierPreview] = useState<{
@@ -192,7 +233,6 @@ export default function AdminInitiatePayoutModal({
 
   useEffect(() => {
     if (!open) {
-      setAmount('');
       setDateFrom('');
       setDateTo('');
       setRemarks('');
@@ -201,6 +241,7 @@ export default function AdminInitiatePayoutModal({
       setPeriodInfoLoading(false);
       setPeriodNet(null);
       setChannelPreview(null);
+      setOrderAvailableRemainingLkr(null);
       setPeriodDays(null);
       setPeriodOptions([]);
       setTierPreview(null);
@@ -300,8 +341,8 @@ export default function AdminInitiatePayoutModal({
     if (periodDays == null || !isValidRange(dateFrom, dateTo)) {
       setPeriodNet(null);
       setChannelPreview(null);
+      setOrderAvailableRemainingLkr(null);
       setTierPreview(null);
-      setAmount('');
       return;
     }
 
@@ -324,11 +365,13 @@ export default function AdminInitiatePayoutModal({
         const json = await res.json();
         if (!res.ok) throw new Error(json.message || 'Failed to calculate net amount');
 
-        const netLkr = json.data?.netAmountLkr ?? 0;
+        const gatewayRate =
+          typeof json.data?.gatewayRatePct === 'number' ? json.data.gatewayRatePct : 1.9;
         if (typeof json.data?.gatewayRatePct === 'number') {
           setGatewayRatePct(json.data.gatewayRatePct);
         }
-        setPaybackEnabled(Boolean(json.data?.platformDiscountPaybackEnabled));
+        const payback = Boolean(json.data?.platformDiscountPaybackEnabled);
+        setPaybackEnabled(payback);
         setTierPreview({
           totalSalesLkr: json.data?.totalSalesLkr ?? 0,
           commissionRatePct: json.data?.commissionRatePct ?? 0,
@@ -336,39 +379,49 @@ export default function AdminInitiatePayoutModal({
           commissionAmountLkr: json.data?.commissionAmountLkr ?? 0,
           durationDays: json.data?.durationDays ?? 0,
         });
-        setAmount(formatDefaultAmount(netLkr, availableBalance / 100));
+        const preview = json.data?.channelPreview;
+        const nextChannelPreview =
+          preview?.breakdown
+            ? {
+                period: preview.period ?? { from: dateFrom, to: dateTo },
+                breakdown: preview.breakdown,
+                totalCommission: preview.totalCommission ?? 0,
+                totalProviderFee: preview.totalProviderFee ?? 0,
+                totalOwed: preview.totalCommission ?? 0,
+                orderCount: preview.orderCount ?? 0,
+                slabInfo: preview.slabInfo ?? {
+                  monthlyBase: 0,
+                  effectiveRate: 0,
+                  slabIndex: 0,
+                  slabs: [],
+                },
+              }
+            : null;
 
+        let parsedPeriodNet: WithdrawalBreakdown | null = null;
         if (json.data && typeof json.data.grossAmount === 'number') {
-          setPeriodNet(parseWithdrawalBreakdownFromNetPreview(json.data));
+          parsedPeriodNet = parseWithdrawalBreakdownFromNetPreview(json.data);
+          setPeriodNet(parsedPeriodNet);
         } else {
           setPeriodNet(null);
         }
 
-        const preview = json.data?.channelPreview;
-        if (preview?.breakdown) {
-          setChannelPreview({
-            period: preview.period ?? { from: dateFrom, to: dateTo },
-            breakdown: preview.breakdown,
-            totalCommission: preview.totalCommission ?? 0,
-            totalProviderFee: preview.totalProviderFee ?? 0,
-            totalOwed: preview.totalCommission ?? 0,
-            orderCount: preview.orderCount ?? 0,
-            slabInfo: preview.slabInfo ?? {
-              monthlyBase: 0,
-              effectiveRate: 0,
-              slabIndex: 0,
-              slabs: [],
-            },
-          });
+        setChannelPreview(nextChannelPreview);
+        if (typeof json.data?.orderAvailableRemainingLkr === 'number') {
+          setOrderAvailableRemainingLkr(json.data.orderAvailableRemainingLkr);
+        } else if (nextChannelPreview?.breakdown) {
+          setOrderAvailableRemainingLkr(
+            computeAvailableToWithdrawFromChannelBreakdown(nextChannelPreview.breakdown),
+          );
         } else {
-          setChannelPreview(null);
+          setOrderAvailableRemainingLkr(null);
         }
       } catch (err) {
         setPeriodNet(null);
         setChannelPreview(null);
+        setOrderAvailableRemainingLkr(null);
         setTierPreview(null);
         setPaybackEnabled(false);
-        setAmount('');
         setError(err instanceof Error ? err.message : 'Could not calculate net amount');
         toast.error(err instanceof Error ? err.message : 'Could not calculate net amount');
       } finally {
@@ -383,17 +436,12 @@ export default function AdminInitiatePayoutModal({
 
   if (!portalReady || !open) return null;
 
-  const availableLkr = centsToLkr(availableBalance);
+  const availableLkr =
+    orderAvailableRemainingLkr ??
+    (channelPreview?.breakdown != null
+      ? computeAvailableToWithdrawFromChannelBreakdown(channelPreview.breakdown)
+      : centsToLkr(availableBalance));
   const periodBreakdownLkr = periodNet ? withdrawalBreakdownToLkr(periodNet) : null;
-  const periodNetLkr =
-    (periodNet ? resolvePeriodNetLkrFromBreakdown(periodNet) : null) ??
-    (periodNet ? periodNet.netAmount / 100 : null);
-  const cappedPeriodNetLkr = cappedPeriodPayoutLkr(periodNetLkr, availableLkr);
-  const maxAmountLkr =
-    cappedPeriodNetLkr ?? (periodNetLkr != null ? Math.min(availableLkr, periodNetLkr) : availableLkr);
-  const parsed = parseFloat(amount);
-  const validAmount =
-    !Number.isNaN(parsed) && parsed > 0 && parsed <= maxAmountLkr + 0.001;
   const rangeReady = isValidRange(dateFrom, dateTo);
   const periodInFuture = !!dateTo && dateTo > todayDateStr();
   const selectedPeriodOption =
@@ -405,17 +453,8 @@ export default function AdminInitiatePayoutModal({
       : null;
   const sharedPromo = extractSharedPromoLkrFromBreakdown(
     periodNet,
-    Math.round((parsed || 0) * 100),
+    periodNet?.netAmount ?? 0,
   );
-  const branchPayout = resolveBranchPayoutDisplay({
-    breakdown: periodNet,
-    amountCents: Math.round((parsed || 0) * 100),
-    scope: 'thisPayment',
-    paymentWalletRequestLkr: parsed > 0 ? parsed : null,
-  });
-  const payTotalLkr = branchPayout.totalBranchPayoutLkr;
-  const showJasonTopUp = hasPositiveLkr(sharedPromo.jasonContributionLkr);
-  const showPlatformContributionBanner = hasPositiveLkr(sharedPromo.platformContributionLkr);
   const onlineOrderSubtotalLkr = channelPreview ? sumAllRevenueSubtotal(channelPreview) : null;
   const convenienceFeeLkr =
     periodBreakdownLkr?.convenienceFee ?? resolvePreviewConvenienceFeeLkr(channelPreview);
@@ -424,10 +463,7 @@ export default function AdminInitiatePayoutModal({
     channelBreakdown: channelPreview?.breakdown,
     periodDeliveryFeeLkr: deliveryFeeLkr,
   });
-  const slabRatePct =
-    channelPreview && channelPreview.slabInfo.effectiveRate > 0
-      ? Math.round(channelPreview.slabInfo.effectiveRate * 1000) / 10
-      : null;
+  const slabRatePct = resolveSlabRatePctFromPreview(channelPreview);
   const periodLabel = dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : null;
   const payoutSplit = periodBreakdownLkr
     ? computePeriodPayoutSplitLkr({
@@ -445,8 +481,8 @@ export default function AdminInitiatePayoutModal({
     paybackEnabled,
     sharedPromoPlatformLkr: sharedPromo.platformContributionLkr,
   });
-  const payoutBreakdownPanelProps = periodBreakdownLkr
-    ? {
+  const payoutBreakdownDisplayInput = periodBreakdownLkr
+    ? buildPayoutBreakdownDisplayInput({
         preview: channelPreview,
         periodBreakdownLkr,
         onlineOrderSubtotalLkr,
@@ -457,31 +493,50 @@ export default function AdminInitiatePayoutModal({
         paybackEnabled,
         gatewayRatePct,
         sharedPromo,
-        loyaltyDiscountLkr: periodBreakdownLkr.periodLoyaltyDiscountTotal ?? 0,
-        payoutSplit,
-        branchReceivesLkr: branchPayout.totalBranchPayoutLkr,
-        platformCommissionLkr,
-        periodNetLkr: branchPayout.periodWalletNetLkr,
-        dateFrom,
-        dateTo,
-        showAdvance: false,
-        advanceAmountLkr: 0,
-        branchPayout,
-      }
+      })
     : null;
+  const payoutReportBundle = payoutBreakdownDisplayInput
+    ? resolvePayoutBreakdownBundle(payoutBreakdownDisplayInput)
+    : null;
+  const branchPayout = payoutReportBundle
+    ? branchPayoutDisplayFromReportValues(payoutReportBundle.reportValues)
+    : null;
+  const periodNetLkr =
+    branchPayout?.periodWalletNetLkr ??
+    (periodNet ? resolvePeriodNetLkrFromBreakdown(periodNet) : null) ??
+    (periodNet ? periodNet.netAmount / 100 : null);
+  const payTotalLkr = branchPayout?.totalBranchPayoutLkr ?? 0;
+  const reportBranchWalletNetLkr = branchPayout?.periodWalletNetLkr ?? periodNetLkr ?? 0;
+  const branchWalletNetLkr = resolveBranchWalletNetLkrForPayout(periodNet, reportBranchWalletNetLkr);
+  const availableAfterPayoutLkr =
+    branchWalletNetLkr > 0 ? Math.max(0, availableLkr - branchWalletNetLkr) : null;
+  const payDisabledNote = resolveInitiatePayoutPayDisabledNote({
+    previewLoading,
+    finalPayLkr: branchWalletNetLkr,
+    availableLkr,
+    paymentMethod,
+    reviewed,
+  });
+  const canSubmitPay = payDisabledNote == null && !submitting && rangeReady && periodDays != null;
+  const showJasonTopUp = hasPositiveLkr(sharedPromo.jasonContributionLkr);
+  const showPlatformContributionBanner = hasPositiveLkr(sharedPromo.platformContributionLkr);
+  const payoutBreakdownPanelProps =
+    payoutBreakdownDisplayInput && branchPayout
+      ? {
+          ...payoutBreakdownDisplayInput,
+          payoutSplit,
+          branchReceivesLkr: branchPayout.totalBranchPayoutLkr,
+          platformCommissionLkr,
+          periodNetLkr: branchPayout.periodWalletNetLkr,
+          dateFrom,
+          dateTo,
+          showAdvance: false,
+          advanceAmountLkr: 0,
+          branchPayout,
+        }
+      : null;
   const isCheck = paymentMethod === 'CHECK';
   const checkValid = !isCheck || (checkNumber.trim().length > 0 && !!checkDate);
-  const canSubmit =
-    validAmount &&
-    rangeReady &&
-    periodDays != null &&
-    !!paymentMethod &&
-    checkValid &&
-    !!proofFile &&
-    !submitting &&
-    !previewLoading &&
-    !periodInfoLoading &&
-    !periodInFuture;
 
   const handlePaymentMethodChange = (value: PaymentMethod) => {
     setPaymentMethod(value);
@@ -510,7 +565,7 @@ export default function AdminInitiatePayoutModal({
     setError('');
     try {
       const form = new FormData();
-      form.append('amount', String(parsed));
+      form.append('amount', formatBranchWalletNetLkrForSubmit(periodNet, reportBranchWalletNetLkr));
       form.append('periodDays', String(periodDays));
       form.append('from', dateFrom);
       form.append('to', dateTo);
@@ -531,7 +586,17 @@ export default function AdminInitiatePayoutModal({
           body: form,
         },
       );
-      const json = await res.json();
+      const raw = await res.text();
+      let json: { message?: string; data?: { invoiceUrl?: string | null } } = {};
+      try {
+        json = raw ? (JSON.parse(raw) as typeof json) : {};
+      } catch {
+        throw new Error(
+          res.status === 504 || res.status === 503
+            ? 'Payout timed out at the gateway. Check Payment History — the payout may still have completed.'
+            : `Payout failed (HTTP ${res.status})`,
+        );
+      }
       if (!res.ok) throw new Error(json.message || 'Payout failed');
 
       if (json.data?.invoiceUrl) {
@@ -543,8 +608,8 @@ export default function AdminInitiatePayoutModal({
       toast.success(`Branch payout successful — ${branchName}`);
       onCompleted({
         storeId,
-        periodFrom: dateFrom,
-        periodTo: dateTo,
+        periodFrom: normalizePayoutPeriodDate(dateFrom),
+        periodTo: normalizePayoutPeriodDate(dateTo),
       });
       onClose();
     } catch (err) {
@@ -575,8 +640,16 @@ export default function AdminInitiatePayoutModal({
       toast.error('Payment proof is required');
       return;
     }
-    if (!validAmount) {
-      toast.error('Enter a valid amount within the net amount for this period');
+    if (payDisabledNote) {
+      toast.error(payDisabledNote);
+      return;
+    }
+    if (!availableCoversFinalPayout(availableLkr, branchWalletNetLkr)) {
+      toast.error('Available to withdraw must cover the branch net payout for this period');
+      return;
+    }
+    if (!checkValid) {
+      toast.error('Enter check number and check date');
       return;
     }
     if (!rangeReady) {
@@ -620,6 +693,15 @@ export default function AdminInitiatePayoutModal({
                 <span className="font-bold text-[#2563eb]">
                   LKR {formatMoneyAmount(availableLkr)}
                 </span>
+                {availableAfterPayoutLkr != null && branchWalletNetLkr > 0 && (
+                  <>
+                    {' '}
+                    · After net payout:{' '}
+                    <span className="font-bold text-[#475569] dark:text-slate-300">
+                      LKR {formatMoneyAmount(availableAfterPayoutLkr)}
+                    </span>
+                  </>
+                )}
               </p>
               {rangeReady && (
                 <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] font-medium text-[#475569] dark:text-slate-300">
@@ -692,7 +774,7 @@ export default function AdminInitiatePayoutModal({
                 <ChannelSalesTable breakdown={channelPreview.breakdown} className="mb-4" />
               )}
 
-              {!previewLoading && payoutBreakdownPanelProps && parsed > 0 && (
+              {!previewLoading && payoutBreakdownPanelProps && payTotalLkr > 0 && (
                 <PayoutBreakdownPanel {...payoutBreakdownPanelProps} className="mb-4" />
               )}
 
@@ -850,6 +932,11 @@ export default function AdminInitiatePayoutModal({
                   <ShieldCheck size={14} className="text-[#64748b] dark:text-slate-400" />
                   <span>Payout will be recorded immediately in the branch wallet history.</span>
                 </div>
+                {payDisabledNote && (
+                  <p className="pl-8 text-[12px] font-medium text-amber-700 dark:text-amber-400">
+                    {payDisabledNote}
+                  </p>
+                )}
               </div>
 
               <div className="flex items-center gap-3">
@@ -863,7 +950,7 @@ export default function AdminInitiatePayoutModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={!canSubmit || !reviewed}
+                  disabled={!canSubmitPay}
                   className="rounded-lg bg-[#2563eb] px-6 py-2.5 text-[14px] font-bold text-white hover:bg-[#1d4ed8] disabled:opacity-50"
                 >
                   {submitting ? (

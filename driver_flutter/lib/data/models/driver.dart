@@ -101,6 +101,40 @@ class DriverProfile {
 
   bool get isOnline => dutyStatus == 'ONLINE' || dutyStatus == 'ON_DELIVERY';
 
+  DriverProfile copyWith({
+    String? dutyStatus,
+    bool? alertEligible,
+    String? activeRidePhase,
+    bool? canClaimMore,
+  }) {
+    return DriverProfile(
+      id: id,
+      name: name,
+      phone: phone,
+      nicNumber: nicNumber,
+      vehicleNumber: vehicleNumber,
+      profilePhotoUrl: profilePhotoUrl,
+      licenseImageUrl: licenseImageUrl,
+      dutyStatus: dutyStatus ?? this.dutyStatus,
+      storeId: storeId,
+      store: store,
+      accessibleStores: accessibleStores,
+      meritPoints: meritPoints,
+      meritStatus: meritStatus,
+      avgRating: avgRating,
+      ratingCount: ratingCount,
+      vehicleType: vehicleType,
+      vehicleColor: vehicleColor,
+      address: address,
+      disabilities: disabilities,
+      licenseNumber: licenseNumber,
+      consecutiveSuccessfulDeliveries: consecutiveSuccessfulDeliveries,
+      alertEligible: alertEligible ?? this.alertEligible,
+      activeRidePhase: activeRidePhase ?? this.activeRidePhase,
+      canClaimMore: canClaimMore ?? this.canClaimMore,
+    );
+  }
+
   /// Every branch pool this rider should be joined to.
   List<String> get poolStoreIds => {
     if (storeId != null) storeId!,

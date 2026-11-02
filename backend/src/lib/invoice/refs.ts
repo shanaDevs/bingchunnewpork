@@ -17,3 +17,11 @@ export function withdrawalInvoiceApiPath(withdrawalId: string): string {
 export function commissionSettlementInvoiceApiPath(settlementId: string): string {
   return `/api/admin/invoices/settlement/${settlementId}`;
 }
+
+export function platformProviderSettlementInvoiceRef(settlementId: string): string {
+  return `PP-INV-${settlementId.slice(0, 8).toUpperCase()}`;
+}
+
+export function platformProviderSettlementInvoiceApiPath(settlementId: string): string {
+  return `/api/admin/invoices/settlement/${settlementId}/platform-provider`;
+}

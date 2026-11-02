@@ -221,7 +221,10 @@ class JobsController extends ChangeNotifier {
     error = null;
     _emit();
     try {
-      final p = await _c.authRepository.setDuty(online ? 'ONLINE' : 'OFF_DUTY');
+      final p = await _c.authRepository.setDuty(
+        online ? 'ONLINE' : 'OFF_DUTY',
+        current: profile,
+      );
       dutyLoading = false;
       profile = p;
       banner = p.isOnline ? null : tr('Go online to receive jobs');

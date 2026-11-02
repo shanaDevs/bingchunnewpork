@@ -8,6 +8,7 @@ import { getDeliveryApiBaseUrl } from './deliveryApi';
 export const ADMIN_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 export const ADMIN_ACCESS_REFRESH_BUFFER_MS = 2 * 60 * 1000;
 const ADMIN_ACCESS_EXP_KEY = 'bc_admin_access_exp';
+const ADMIN_CSRF_STORAGE_KEY = 'bc_admin_csrf';
 const ADMIN_REFRESH_LOCK = 'bc-admin-refresh';
 
 export class AdminRefreshError extends Error {
@@ -65,9 +66,17 @@ export function adminAuthHeaders(extra?: Record<string, string>): Record<string,
   return { ...extra };
 }
 
-/** Visible CSRF cookie — HttpOnly `bc_admin_at` is not readable from JS. */
+/** CSRF available via same-origin cookie or stored token (cross-origin shop API). */
 export function hasAdminCsrfCookie(): boolean {
-  return readCsrfCookie() != null;
+  return readCsrfToken() != null;
+}
+
+/** Persist CSRF from login/refresh body when the shop cookie is not readable cross-origin. */
+export function saveAdminCsrfToken(csrfToken: string | null | undefined): void {
+  if (typeof window === 'undefined') return;
+  const value = csrfToken?.trim();
+  if (!value) return;
+  localStorage.setItem(ADMIN_CSRF_STORAGE_KEY, value);
 }
 
 /** Merge optional fetch init with cookie credentials and admin header defaults. */
@@ -77,7 +86,7 @@ export function withAdminCredentials(init: RequestInit = {}): RequestInit {
     if (!headers.has(key)) headers.set(key, value);
   }
   const method = (init.method ?? 'GET').toUpperCase();
-  const csrf = readCsrfCookie();
+  const csrf = readCsrfToken();
   if (csrf && method !== 'GET' && method !== 'HEAD' && !headers.has('X-CSRF-Token')) {
     headers.set('X-CSRF-Token', csrf);
   }
@@ -124,6 +133,19 @@ function readCsrfCookie(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function readStoredCsrfToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(ADMIN_CSRF_STORAGE_KEY)?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function readCsrfToken(): string | null {
+  return readCsrfCookie() || readStoredCsrfToken();
+}
+
 function isApiUrl(url: string): boolean {
   const api = getApiBaseUrl();
   const deliveryApi = getDeliveryApiBaseUrl();
@@ -134,7 +156,7 @@ function isApiUrl(url: string): boolean {
 }
 
 function isAdminAuthRoute(url: string): boolean {
-  return /\/auth\/admin\/(login|refresh|logout|mfa\/|password\/)/.test(url);
+  return /\/auth\/admin\/(login|refresh|logout|password\/)/.test(url);
 }
 
 function hasValidBearerJwt(headers: Headers): boolean {
@@ -216,7 +238,7 @@ export function installAdminFetch(): void {
     if (auth && raw.split('.').length !== 3) baseHeaders.delete('Authorization');
 
     const method = (init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
-    const csrf = readCsrfCookie();
+    const csrf = readCsrfToken();
     if (csrf && method !== 'GET' && method !== 'HEAD') baseHeaders.set('X-CSRF-Token', csrf);
 
     const retried = (init as RequestInit & { _bcAdminRetried?: boolean })?._bcAdminRetried === true;
@@ -276,23 +298,26 @@ export function clearAdminAuth() {
   localStorage.removeItem('bc_admin');
   localStorage.removeItem('bc_admin_last_activity');
   localStorage.removeItem(ADMIN_ACCESS_EXP_KEY);
+  localStorage.removeItem(ADMIN_CSRF_STORAGE_KEY);
   if (typeof window !== 'undefined') {
+    const csrf = readCsrfToken();
     void fetch(`${getApiBaseUrl()}/auth/admin/logout`, {
       method: 'POST',
       credentials: 'include',
-      headers: readCsrfCookie() ? { 'X-CSRF-Token': readCsrfCookie()! } : {},
+      headers: csrf ? { 'X-CSRF-Token': csrf } : {},
     }).catch(() => undefined);
   }
 }
 
 export async function refreshAdminAuth(): Promise<AdminSession> {
   const refreshToken = getAdminRefreshToken();
+  const csrf = readCsrfToken();
 
   const res = await fetch(`${getApiBaseUrl()}/auth/admin/refresh`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(readCsrfCookie() ? { 'X-CSRF-Token': readCsrfCookie()! } : {}),
+      ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
     },
     credentials: 'include',
     body: JSON.stringify(refreshToken ? { refreshToken } : {}),
@@ -306,6 +331,7 @@ export async function refreshAdminAuth(): Promise<AdminSession> {
   const payload = json.data as {
     admin?: AdminSession;
     accessExpiresAt?: number;
+    csrfToken?: string;
   } | undefined;
 
   if (!payload?.admin?.role) {
@@ -313,6 +339,7 @@ export async function refreshAdminAuth(): Promise<AdminSession> {
   }
 
   saveAdminAuth(payload.admin, payload.accessExpiresAt ?? null);
+  saveAdminCsrfToken(payload.csrfToken);
   return payload.admin;
 }
 

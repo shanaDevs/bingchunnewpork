@@ -1,4 +1,12 @@
-import { DeliveryJobStatus, type Order, type OrderItem, type User, type Address, type OrderStatus } from '@prisma/client';
+import {
+  DeliveryJobStatus,
+  Prisma,
+  type Order,
+  type OrderItem,
+  type User,
+  type Address,
+  type OrderStatus,
+} from '@prisma/client';
 import { normalizeProductImageUrl } from './productImages';
 import { prisma } from './prisma';
 import { creditedDeliveredTotals } from '@bingchun/delivery-domain';
@@ -42,6 +50,28 @@ export function prismaKnowsDeliveryJobStatus(status: string): boolean {
  */
 export const ALERT_MUTE_JOB_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'QUEUED'] as const;
 
+export type ActiveRidePhase = 'NONE' | 'ASSIGNED' | 'IN_PROGRESS' | 'RETURNING' | 'QUEUED';
+
+/** Single-pass flags from held job rows (same rules as the async helpers). */
+export function deriveDriverJobFlags(
+  heldJobs: ReadonlyArray<{ status: string }>,
+): { alertEligible: boolean; activeRidePhase: ActiveRidePhase; canClaimMore: boolean } {
+  const statuses = heldJobs.map((j) => j.status);
+  const alertEligible = !statuses.some((s) =>
+    (ALERT_MUTE_JOB_STATUSES as readonly string[]).includes(s),
+  );
+  let activeRidePhase: ActiveRidePhase = 'NONE';
+  if (statuses.includes('IN_PROGRESS')) activeRidePhase = 'IN_PROGRESS';
+  else if (statuses.includes('ASSIGNED')) activeRidePhase = 'ASSIGNED';
+  else if (statuses.includes('RETURNING')) activeRidePhase = 'RETURNING';
+  else if (statuses.includes('QUEUED')) activeRidePhase = 'QUEUED';
+
+  const hasCurrentRun = statuses.some((s) => s === 'IN_PROGRESS' || s === 'ASSIGNED');
+  const hasQueued = statuses.some((s) => s === 'QUEUED');
+  const canClaimMore = !(hasCurrentRun && hasQueued);
+  return { alertEligible, activeRidePhase, canClaimMore };
+}
+
 /**
  * Cap: one active run (ASSIGNED / IN_PROGRESS) plus at most one QUEUED next job.
  * RETURNING does not count as a current run, so a driver heading back to the
@@ -53,10 +83,7 @@ export async function canDriverClaimMore(driverId: string): Promise<boolean> {
     where: { driverId, status: { in: [...DRIVER_HELD_JOB_STATUSES] } },
     select: { status: true },
   });
-  const hasCurrentRun = runs.some((j) => j.status === 'IN_PROGRESS' || j.status === 'ASSIGNED');
-  const hasQueued = runs.some((j) => j.status === 'QUEUED');
-  // Block only when both slots are full (active run + queued next).
-  return !(hasCurrentRun && hasQueued);
+  return deriveDriverJobFlags(runs).canClaimMore;
 }
 
 export type JobPreviewStop = { customerName: string; addressLine: string; city: string; district: string };
@@ -178,6 +205,52 @@ export function visibleJobOrderLinksForDeliveryJob<T extends { order: { status: 
 ): T[] {
   if (!isActiveDeliveryJobStatus(jobStatus)) return jobOrders;
   return jobOrders.filter((link) => link.order.status !== 'CANCELLED');
+}
+
+/**
+ * Delivery-schema rows can point at an order that no longer exists. Including that
+ * required relation makes Prisma throw "Field order is required to return data, got null"
+ * and the whole list fails. Loading by id leaves the missing order out.
+ */
+type OrderSelectWithId<S extends Prisma.OrderSelect> = S & { id: true };
+
+export async function findOrdersByIds<S extends Prisma.OrderSelect>(
+  ids: string[],
+  select: S,
+): Promise<Map<string, Prisma.OrderGetPayload<{ select: OrderSelectWithId<S> }>>> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return new Map();
+  const selectWithId: OrderSelectWithId<S> = { ...select, id: true };
+  type Row = Prisma.OrderGetPayload<{ select: OrderSelectWithId<S> }>;
+  const rows = await prisma.order.findMany({
+    where: { id: { in: unique } },
+    select: selectWithId,
+  });
+  const out = new Map<string, Row>();
+  for (const row of rows) {
+    const id = (row as { id: string }).id;
+    out.set(id, row as Row);
+  }
+  return out;
+}
+
+export async function findOrdersByIdsInclude<I extends Prisma.OrderInclude>(
+  ids: string[],
+  include: I,
+): Promise<Map<string, Prisma.OrderGetPayload<{ include: I }>>> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return new Map();
+  type Row = Prisma.OrderGetPayload<{ include: I }>;
+  const rows = await prisma.order.findMany({
+    where: { id: { in: unique } },
+    include,
+  });
+  const out = new Map<string, Row>();
+  for (const row of rows) {
+    const id = (row as { id: string }).id;
+    out.set(id, row as Row);
+  }
+  return out;
 }
 
 /**
@@ -478,27 +551,19 @@ export async function syncJobDeliveryEventForOrderStatus(
  * QUEUED ride (idle ONLINE, or only RETURNING with no extra claim taken yet).
  */
 export async function isDriverAlertEligible(driverId: string): Promise<boolean> {
-  const muted = await prisma.deliveryJob.count({
-    where: {
-      driverId,
-      status: { in: [...ALERT_MUTE_JOB_STATUSES] },
-    },
+  const jobs = await prisma.deliveryJob.findMany({
+    where: { driverId, status: { in: [...DRIVER_HELD_JOB_STATUSES] } },
+    select: { status: true },
   });
-  return muted === 0;
+  return deriveDriverJobFlags(jobs).alertEligible;
 }
-
-export type ActiveRidePhase = 'NONE' | 'ASSIGNED' | 'IN_PROGRESS' | 'RETURNING' | 'QUEUED';
 
 export async function getDriverActiveRidePhase(driverId: string): Promise<ActiveRidePhase> {
   const jobs = await prisma.deliveryJob.findMany({
     where: { driverId, status: { in: [...DRIVER_HELD_JOB_STATUSES] } },
     select: { status: true },
   });
-  if (jobs.some((j) => j.status === 'IN_PROGRESS')) return 'IN_PROGRESS';
-  if (jobs.some((j) => j.status === 'ASSIGNED')) return 'ASSIGNED';
-  if (jobs.some((j) => j.status === 'RETURNING')) return 'RETURNING';
-  if (jobs.some((j) => j.status === 'QUEUED')) return 'QUEUED';
-  return 'NONE';
+  return deriveDriverJobFlags(jobs).activeRidePhase;
 }
 
 /** Allocate the next human-readable ride code (RIDE-1024, …). */
@@ -796,43 +861,47 @@ export function deriveAdminOrderDeliveryState(
 }
 
 /** Admin detail include — events and attempts scoped to the current job. */
+export function adminOrderDetailInclude(jobId: string) {
+  return {
+    user: { select: { name: true, phone: true } },
+    address: {
+      select: { addressLine: true, city: true, district: true, lat: true, lng: true },
+    },
+    items: {
+      select: {
+        quantity: true,
+        productName: true,
+        totalPrice: true,
+        product: { select: { imageUrl: true } },
+      },
+    },
+    statusEvents: {
+      where: { status: { in: ['DELIVERED', 'CANCELLED'] as OrderStatus[] } },
+      orderBy: { createdAt: 'desc' as const },
+      take: 2,
+      select: { status: true, createdAt: true },
+    },
+    deliveryEvents: {
+      where: { jobId },
+      orderBy: { createdAt: 'desc' as const },
+      take: 5,
+      select: { state: true, createdAt: true, note: true },
+    },
+    deliveryAttempts: {
+      where: { jobId },
+      orderBy: { createdAt: 'desc' as const },
+      take: 3,
+      select: { outcome: true, note: true, createdAt: true, attemptNo: true },
+    },
+  };
+}
+
 export function adminJobOrdersInclude(jobId: string) {
   return {
     orderBy: { sequence: 'asc' as const },
     include: {
       order: {
-        include: {
-          user: { select: { name: true, phone: true } },
-          address: {
-            select: { addressLine: true, city: true, district: true, lat: true, lng: true },
-          },
-          items: {
-            select: {
-              quantity: true,
-              productName: true,
-              totalPrice: true,
-              product: { select: { imageUrl: true } },
-            },
-          },
-          statusEvents: {
-            where: { status: { in: ['DELIVERED', 'CANCELLED'] as OrderStatus[] } },
-            orderBy: { createdAt: 'desc' as const },
-            take: 2,
-            select: { status: true, createdAt: true },
-          },
-          deliveryEvents: {
-            where: { jobId },
-            orderBy: { createdAt: 'desc' as const },
-            take: 5,
-            select: { state: true, createdAt: true, note: true },
-          },
-          deliveryAttempts: {
-            where: { jobId },
-            orderBy: { createdAt: 'desc' as const },
-            take: 3,
-            select: { outcome: true, note: true, createdAt: true, attemptNo: true },
-          },
-        },
+        include: adminOrderDetailInclude(jobId),
       },
     },
   };

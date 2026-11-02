@@ -233,8 +233,13 @@ export function computePlatformCommission(base: number, monthlyBase: number): nu
   return base * getEffectiveRate(monthlyBase);
 }
 
+/** Per-order commission in cents (half-up to nearest cent when stored). */
+export function computePlatformCommissionCents(base: number, monthlyBase: number): number {
+  return Math.round(computePlatformCommission(base, monthlyBase) * 100);
+}
+
 export function computeProviderFee(orderSubtotal: number, rate = GATEWAY_FEE_RATE): number {
-  return orderSubtotal * rate;
+  return Math.round(orderSubtotal * rate);
 }
 
 /** PayHere gateway fee applies to full transaction total on PayHere pickup online & delivery online orders. */

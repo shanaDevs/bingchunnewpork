@@ -13,6 +13,7 @@ import {
   platformItemSalesLkr,
 } from './walletRevenue';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
+import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import {
   computeBreakdownForPeriod,
   computeNetTransferableEarnings,
@@ -608,9 +609,11 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
       select: { platformDiscountPaybackEnabled: true },
     });
 
-  const [breakdown, channelPreview, storeRow, sharedPromo, promoOwnership] = await Promise.all([
+  const [breakdown, channelPreview, orderAvailable, storeRow, sharedPromo, promoOwnership] =
+    await Promise.all([
     computeBreakdownForPeriod(storeId, from, to),
     buildPeriodChannelPreview(storeId, from, to),
+    computePeriodOrderAvailableCents(storeId, from, to),
     loadStorePaybackFlag().catch(async (err) => {
       const code = (err as { code?: string })?.code;
       if (code !== 'P2022') throw err;
@@ -653,6 +656,9 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
     rejectedRefundGatewayDeductionLkr: breakdown.rejectedRefundGatewayDeduction / 100,
     rejectedRefundNetAmountLkr: breakdown.rejectedRefundNetAmount / 100,
     channelPreview,
+    orderAvailableFromOrdersLkr: orderAvailable.fromOrdersCents / 100,
+    orderAvailableRemainingLkr: orderAvailable.remainingCents / 100,
+    orderPayoutReservedLkr: orderAvailable.priorPayoutCents / 100,
     ...finalPayoutFields,
   };
 }
@@ -1146,9 +1152,44 @@ export async function loadWithdrawalInvoicePeriodContext(
     const computed = await computeBreakdownForPeriod(storeId, fromStr, toStr);
     periodBreakdown = parseInvoicePeriodBreakdown(computed);
   }
-  const channelPreview = await buildPeriodChannelPreview(storeId, fromStr, toStr);
-  const channelSummary = buildInvoiceChannelSummary(channelPreview.breakdown);
-  const storeDiscountsCents = Math.round(channelPreview.storeDiscountsTotal * 100);
+
+  // Prefer channel snapshot locked on the withdrawal — avoid a third order scan
+  // just to render the invoice after initiate-payout already computed it.
+  const storedChannel =
+    storedBreakdown &&
+    typeof storedBreakdown === 'object' &&
+    (storedBreakdown as { channelBreakdown?: Parameters<typeof buildInvoiceChannelSummary>[0] })
+      .channelBreakdown;
+
+  let channelSummary;
+  let storeDiscountsCents = 0;
+  if (storedChannel) {
+    channelSummary = buildInvoiceChannelSummary(storedChannel);
+    const storedDiscounts =
+      storedBreakdown &&
+      typeof storedBreakdown === 'object' &&
+      typeof (storedBreakdown as { storeDiscountsTotal?: unknown }).storeDiscountsTotal === 'number'
+        ? (storedBreakdown as { storeDiscountsTotal: number }).storeDiscountsTotal
+        : null;
+    storeDiscountsCents =
+      storedDiscounts != null
+        ? Math.round(storedDiscounts * 100)
+        : Math.round(
+            (
+              ((storedBreakdown as { branchOwnedPromoDiscountTotal?: number })
+                .branchOwnedPromoDiscountTotal ?? 0) +
+              ((storedBreakdown as { platformOwnedPromoDiscountTotal?: number })
+                .platformOwnedPromoDiscountTotal ?? 0) +
+              ((storedBreakdown as { periodLoyaltyDiscountTotal?: number })
+                .periodLoyaltyDiscountTotal ?? 0)
+            ),
+          );
+  } else {
+    const channelPreview = await buildPeriodChannelPreview(storeId, fromStr, toStr);
+    channelSummary = buildInvoiceChannelSummary(channelPreview.breakdown);
+    storeDiscountsCents = Math.round(channelPreview.storeDiscountsTotal * 100);
+  }
+
   const promoData = await loadInvoicePromoSummary(storeId, fromStr, toStr);
 
   return {

@@ -6,8 +6,8 @@ export type FulfillmentQueueKind = 'pickup' | 'delivery';
 
 const ONLINE_METHODS: PaymentMethod[] = ['PAYHERE', 'CARD'];
 
-/** Payment methods that receive ORDER_PAYMENT wallet credits during sync/recovery. */
-export const WALLET_CREDIT_METHODS = ['PAYHERE', 'CARD', 'LOYALTY_POINTS'] as const;
+/** Payment methods that receive ORDER_PAYMENT wallet credits (live + sync/recovery). */
+export const WALLET_CREDIT_METHODS = ['PAYHERE', 'CARD', 'LOYALTY_POINTS', 'CASH_AT_COUNTER'] as const;
 
 export type WalletCreditPaymentMethod = (typeof WALLET_CREDIT_METHODS)[number];
 
@@ -15,10 +15,16 @@ export function isOnlinePaymentMethod(method: PaymentMethod): boolean {
   return ONLINE_METHODS.includes(method);
 }
 
+/** Methods that create branch wallet ORDER_PAYMENT credits (live + sync must match). */
 export function isWalletCreditPaymentMethod(
   method: PaymentMethod,
 ): method is WalletCreditPaymentMethod {
   return (WALLET_CREDIT_METHODS as readonly PaymentMethod[]).includes(method);
+}
+
+/** Counter-cash pickup: ledger credit when the order is placed (cash collected at pickup). */
+export function shouldCreditWalletOnOrderCreate(method: PaymentMethod): boolean {
+  return method === 'CASH_AT_COUNTER';
 }
 
 /** Branch pickup queue: hide unpaid PayHere/card checkout; keep cash-at-counter unpaid. */

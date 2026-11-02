@@ -55,10 +55,12 @@ export function resolvePlatformDiscountsReportLkr(params: {
   platformOwnedPromoDiscountLkr?: number;
   commissionPaybackLkr: number;
   sharedPromoPlatformLkr: number;
+  paybackEnabled: boolean;
 }): number {
   const owned = params.platformOwnedPromoDiscountLkr ?? 0;
   const platformDeduct = Math.max(params.commissionPaybackLkr, owned);
-  return roundLkr(platformDeduct + params.sharedPromoPlatformLkr);
+  const sppc = params.paybackEnabled ? params.sharedPromoPlatformLkr : 0;
+  return roundLkr(platformDeduct + sppc);
 }
 
 /** Max(platform-owned, payback) deducted from commission before shared promo & loyalty. */
@@ -102,9 +104,14 @@ export function resolveNetPlatformCommissionLkr(params: {
     platformOwnedPromoDiscountLkr: params.platformOwnedPromoDiscountLkr,
     commissionPaybackLkr,
   });
+  const sharedPromoDeductLkr = params.paybackEnabled ? (params.sharedPromoPlatformLkr ?? 0) : 0;
 
   if (params.netPlatformEarningLkr != null) {
-    return roundLkr(params.netPlatformEarningLkr - extraOwned);
+    const snapshotNet = params.netPlatformEarningLkr - extraOwned;
+    if (!params.paybackEnabled && (params.sharedPromoPlatformLkr ?? 0) > 0) {
+      return roundLkr(snapshotNet + (params.sharedPromoPlatformLkr ?? 0));
+    }
+    return roundLkr(snapshotNet);
   }
 
   const platformPromoDeduct = resolvePlatformPromoCommissionDeductionLkr({
@@ -115,7 +122,7 @@ export function resolveNetPlatformCommissionLkr(params: {
   return roundLkr(
     params.commissionLkr -
       platformPromoDeduct -
-      (params.sharedPromoPlatformLkr ?? 0) -
+      sharedPromoDeductLkr -
       (params.loyaltyDiscountLkr ?? 0),
   );
 }

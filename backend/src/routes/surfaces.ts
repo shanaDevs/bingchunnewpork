@@ -118,6 +118,7 @@ export function createApiRouter(surface: ApiSurface = resolveApiSurface()): Rout
     mount(router, '/settings', settingsRoutes, SHOP_SETTINGS);
     mount(router, '/payments', paymentsRoutes);
     mount(router, '/notifications', notificationsRoutes);
+    mount(router, '/delivery', deliveryRoutes);
     mount(router, '/loyalty', loyaltyRoutes, SHOP_LOYALTY);
     mount(router, '/wishlist', wishlistRoutes);
     mount(router, '/inventory', inventoryRoutes);

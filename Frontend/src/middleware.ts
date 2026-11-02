@@ -17,6 +17,14 @@ function isAsset(pathname: string): boolean {
   );
 }
 
+function withNoStore(res: NextResponse): NextResponse {
+  // Prevent CDN from caching RSC flight (text/x-component) as the document.
+  res.headers.set('Cache-Control', 'private, no-store, no-cache, max-age=0, must-revalidate');
+  res.headers.set('CDN-Cache-Control', 'no-store');
+  res.headers.set('Cloudflare-CDN-Cache-Control', 'no-store');
+  return res;
+}
+
 export function middleware(request: NextRequest) {
   const current = surface();
   const { pathname } = request.nextUrl;
@@ -40,14 +48,19 @@ export function middleware(request: NextRequest) {
     if (!allowed) {
       const url = request.nextUrl.clone();
       url.pathname = '/admin/login';
-      return NextResponse.redirect(url);
+      return withNoStore(NextResponse.redirect(url));
     }
   }
 
   if (current === 'admin' && !pathname.startsWith('/admin')) {
     const url = request.nextUrl.clone();
     url.pathname = '/admin';
-    return NextResponse.redirect(url);
+    return withNoStore(NextResponse.redirect(url));
+  }
+
+  // Always no-store on admin/pos HTML + RSC so Cloudflare cannot poison /admin.
+  if (current === 'admin' || current === 'pos') {
+    return withNoStore(NextResponse.next());
   }
 
   return NextResponse.next();

@@ -7,7 +7,7 @@
 ///   * debug only     → the Server URLs dialog can override at runtime
 abstract final class Endpoints {
   /// Production core API (includes `/api`).
-  static const productionCore = 'https://bing-chun-core.bc.dartcodes.com/api';
+  static const productionCore = 'https://bingchunsrilanka.com/api';
 
   /// Production delivery service (includes `/delivery-api`).
   static const productionDelivery = 'https://bing-chun-delivery.bc.dartcodes.com/delivery-api';
