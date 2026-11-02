@@ -10,7 +10,7 @@ import { creditPlatformEarning } from './platformEarningsService';
 import { ensurePlatformEarningsSchema } from './platformEarningsSchema';
 import { ensurePlatformPaybackSchema } from './platformPaybackSchema';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
-import { periodOrderAvailableFromOnlineCollectedCents } from './periodOrderAvailable';
+import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import {
   computeFinalPayoutAmountCents,
   parseSharedPromoFromBreakdown,
@@ -343,14 +343,13 @@ export async function validatePayoutRequest(
 
   const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
 
-  // Single period order scan — channelBreakdown is produced by the same pass.
-  const periodWithDiscountReport = await computePeriodBreakdownForPayout(storeId, fromStr, toStr);
-  const orderAvailable = await periodOrderAvailableFromOnlineCollectedCents(
-    storeId,
-    fromStr,
-    toStr,
-    periodWithDiscountReport.onlinePaymentsCollected,
-  );
+  // PR #27 calc path: available + channel rows come from channel preview (matches Initiate UI).
+  // Period net still comes from computePeriodBreakdownForPayout. Keep both in parallel.
+  const [orderAvailable, periodWithDiscountReport, channelPreview] = await Promise.all([
+    computePeriodOrderAvailableCents(storeId, fromStr, toStr),
+    computePeriodBreakdownForPayout(storeId, fromStr, toStr),
+    buildPeriodChannelPreview(storeId, fromStr, toStr),
+  ]);
   if (amount > orderAvailable.remainingCents) {
     throw new AppError(
       `Insufficient available balance. Available: LKR ${(orderAvailable.remainingCents / 100).toFixed(2)}`,
@@ -374,7 +373,7 @@ export async function validatePayoutRequest(
     remainingAvailableCents: orderAvailable.remainingCents,
     breakdown: await buildStoredWithdrawalBreakdown(
       periodWithDiscountReport,
-      periodWithDiscountReport.channelBreakdown,
+      channelPreview.breakdown,
       {
         branchRequestAmountCents: amount,
       },
