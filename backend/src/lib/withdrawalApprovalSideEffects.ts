@@ -38,5 +38,13 @@ export async function runWithdrawalApprovalSideEffects(opts: {
     });
   }
 
-  await refreshWalletCaches(storeId);
+  // Ledger recompute can take tens of seconds on large branches — never block
+  // the initiate-payout HTTP response waiting for it (DO/Cloudflare gateway → 504).
+  void refreshWalletCaches(storeId).catch((err) => {
+    console.error('[withdrawal] refreshWalletCaches failed after approval', {
+      storeId,
+      withdrawalId: approvedWithdrawal.id,
+      err,
+    });
+  });
 }

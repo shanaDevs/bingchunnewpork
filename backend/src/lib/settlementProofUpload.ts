@@ -2,6 +2,21 @@ import { AppError } from '../middleware/errorHandler';
 import { assertAllowedSettlementProof } from '../middleware/upload';
 import { deleteFromSpaces, isSpacesConfigured, uploadSettlementProof } from './spaces';
 
+/** Validate proof file + Spaces config without uploading (for fast request paths). */
+export function assertSettlementProofFile(
+  file: Express.Multer.File | undefined,
+  missingMessage = 'Payment proof (slip/receipt) is required',
+): Express.Multer.File {
+  if (!file) {
+    throw new AppError(missingMessage, 400);
+  }
+  if (!isSpacesConfigured()) {
+    throw new AppError('Payment proof storage is not configured', 503);
+  }
+  assertAllowedSettlementProof(file);
+  return file;
+}
+
 /**
  * Validate + upload a multer memory file as a settlement/payout proof to Spaces.
  * Callers should pass the returned URL into `withUploadedProofCleanup` around DB work.
@@ -11,18 +26,12 @@ export async function requireSettlementProofUpload(
   storeId: string,
   missingMessage = 'Payment proof (slip/receipt) is required',
 ): Promise<string> {
-  if (!file) {
-    throw new AppError(missingMessage, 400);
-  }
-  if (!isSpacesConfigured()) {
-    throw new AppError('Payment proof storage is not configured', 503);
-  }
-  assertAllowedSettlementProof(file);
+  const proof = assertSettlementProofFile(file, missingMessage);
   try {
     return await uploadSettlementProof(
-      file.buffer,
-      file.originalname,
-      file.mimetype,
+      proof.buffer,
+      proof.originalname,
+      proof.mimetype,
       storeId,
     );
   } catch (err) {

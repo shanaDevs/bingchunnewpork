@@ -15,8 +15,18 @@ export function getCoreApiBaseUrl(): string {
 }
 
 /**
- * Delivery ops console: delivery admin APIs go to `/delivery-api/admin/...`.
- * Set `NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE=true` to force core `/api/admin/...` (e.g. debugging).
+ * Route delivery admin APIs through shop/core `/api/admin/*` instead of `/delivery-api`.
+ * Default is core (shop). Opt out only with NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE=false
+ * for local dual-backend CapRover-style setups.
+ */
+export function deliveryAdminViaCore(): boolean {
+  if (process.env.NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE === 'false') return false;
+  if (process.env.DELIVERY_ADMIN_VIA_CORE === 'false') return false;
+  return true;
+}
+
+/**
+ * Delivery ops console: always prefer shop/core `/api/admin/...` unless via-core is opted out.
  */
 export function resolveAdminRequestUrl(endpoint: string): string {
   const qIndex = endpoint.indexOf('?');
@@ -24,8 +34,7 @@ export function resolveAdminRequestUrl(endpoint: string): string {
   const qs = qIndex >= 0 ? endpoint.slice(qIndex) : '';
   const normalized = path.startsWith('/') ? path : `/${path}`;
 
-  const viaCore =
-    typeof process !== 'undefined' && process.env.NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE === 'true';
+  const viaCore = deliveryAdminViaCore();
 
   if (!viaCore && isDeliveryAdminEndpoint(normalized)) {
     return `${getDeliveryApiBaseUrl()}${normalized}${qs}`;

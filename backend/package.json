@@ -35,6 +35,9 @@
     "inspect:catalog": "ts-node --transpile-only prisma/sync-catalog-from-test.ts inspect",
     "sync:catalog-from-test": "ts-node --transpile-only prisma/sync-catalog-from-test.ts sync",
     "seed:monthly-orders": "ts-node --transpile-only prisma/seed-monthly-orders.ts",
+    "seed:nugegoda-app": "ts-node --transpile-only src/scripts/seed-nugegoda-app-orders.ts",
+    "seed:nugegoda-app:prod": "node dist/scripts/seed-nugegoda-app-orders.js",
+    "audit:nugegoda-seed:prod": "node dist/scripts/audit-nugegoda-seed-readonly.js",
     "feed": "ts-node --transpile-only prisma/seed-dummy-data.ts",
     "db:seed:sql:generate": "ts-node --transpile-only prisma/generate-seed-sql.ts",
     "pretest": "npm run build -w @bingchun/cors && npm run build -w @bingchun/delivery-domain",
@@ -95,7 +98,7 @@
     "prisma": "^5.22.0",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^6.0.3",
+    "typescript": "^5.9.3",
     "vitest": "^3.2.7"
   }
 }

@@ -96,39 +96,52 @@ export function getBackendOrigin(): string {
 
 /**
  * API base URL (includes /api suffix).
- * Set NEXT_PUBLIC_API_URL in .env — use `/api` in production (proxied via BACKEND_URL).
+ * The browser always uses same-origin `/api`. The delivery console proxies that
+ * to the admin API and keeps the session cookie on this host. Calling the admin
+ * host directly is cross-site, so the browser does not send the cookie and every
+ * admin call returns 401 Unauthorised.
  * Staff Login 5-tap override wins in the browser when set.
  */
 export function getApiBaseUrl(): string {
   const override = getApiBaseOverride();
   if (override) return ensureApiSuffix(override);
 
-  const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
-
-  if (configured.startsWith('/')) {
-    if (typeof window !== 'undefined') {
-      return joinUrl(window.location.origin, configured);
-    }
-    return joinUrl(getBackendOrigin(), configured);
+  if (typeof window !== 'undefined') {
+    return joinUrl(window.location.origin, '/api');
   }
 
+  const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
+  if (configured.startsWith('/')) {
+    return joinUrl(getBackendOrigin(), configured);
+  }
   return normalizeUrlPath(configured);
+}
+
+/** Starter DO hosts 302 to the primary custom domain — Engine.IO polling cannot follow redirects. */
+function rewriteStarterAdminOrigin(url: string): string {
+  const cleaned = stripTrailingSlash(url);
+  try {
+    const host = new URL(cleaned).hostname.toLowerCase();
+    if (host === 'bingchun-admin-a4ndy.ondigitalocean.app') {
+      return 'https://admin.bingchunsrilanka.com';
+    }
+  } catch {
+    /* keep */
+  }
+  return cleaned;
 }
 
 /** Socket.io server origin (no /api suffix). Follows API override when set. */
 export function getSocketUrl(): string {
   if (getApiBaseOverride()) {
-    return getBackendOrigin();
+    return rewriteStarterAdminOrigin(getBackendOrigin());
   }
-  if (process.env.NEXT_PUBLIC_SOCKET_URL) {
-    return stripTrailingSlash(process.env.NEXT_PUBLIC_SOCKET_URL);
+  const configuredSocket = (process.env.NEXT_PUBLIC_SOCKET_URL || '').trim();
+  if (configuredSocket) {
+    return rewriteStarterAdminOrigin(configuredSocket);
   }
-  const configured = process.env.NEXT_PUBLIC_API_URL || LOCAL_API;
-  // Same-origin `/api` (delivery console on App Platform): admin Socket.IO runs on shop API.
-  if (configured.startsWith('/') && typeof window !== 'undefined') {
-    return getBackendOrigin();
-  }
-  return getBackendOrigin();
+  // Delivery ops sockets live on admin-api (not delivery-web /socket.io).
+  return 'https://admin.bingchunsrilanka.com';
 }
 
 /** @deprecated Use getBackendOrigin() */

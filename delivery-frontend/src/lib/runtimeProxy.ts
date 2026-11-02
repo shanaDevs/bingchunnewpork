@@ -19,9 +19,23 @@ function usable(url: string): string {
   return url;
 }
 
+/** Map starter DO host → primary custom domain so proxy never hits a 302 that strips POST bodies. */
+function rewriteStarterAdminOrigin(origin: string): string {
+  if (!origin) return origin;
+  try {
+    const u = new URL(origin);
+    if (u.hostname.toLowerCase() === 'bingchun-admin-a4ndy.ondigitalocean.app') {
+      return 'https://admin.bingchunsrilanka.com';
+    }
+  } catch {
+    /* keep */
+  }
+  return origin;
+}
+
 export function resolveCoreOrigin(): string {
   const fromEnv = clean(process.env.BACKEND_URL) || clean(process.env.API_PROXY_URL);
-  const origin = usable(fromEnv);
+  const origin = rewriteStarterAdminOrigin(usable(fromEnv));
   if (origin) return origin;
   return process.env.NODE_ENV === 'production' ? '' : 'http://localhost:4000';
 }
@@ -90,8 +104,14 @@ export async function proxyTo(req: NextRequest, origin: string): Promise<Respons
     if (HOP_BY_HOP.has(k) || k === 'content-encoding' || k === 'set-cookie') return;
     outHeaders.set(key, value);
   });
-  // Preserve every Set-Cookie header (auth cookies) individually.
-  for (const cookie of upstream.headers.getSetCookie()) outHeaders.append('set-cookie', cookie);
+  // Preserve Set-Cookie, but drop Domain so the browser binds cookies to this host
+  // (delivery console → /api proxy → shop). Cross-origin Domain=shop would 401 every call.
+  for (const cookie of upstream.headers.getSetCookie()) {
+    outHeaders.append(
+      'set-cookie',
+      cookie.replace(/;\s*Domain=[^;]*/gi, ''),
+    );
+  }
 
   return new Response(upstream.body, {
     status: upstream.status,

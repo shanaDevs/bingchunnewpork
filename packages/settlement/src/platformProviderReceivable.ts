@@ -11,6 +11,8 @@ export type PlatformProviderReceivableInput = {
   /** Combined refund convenience fallback when split values are unavailable. */
   refundConvenienceFeeCents?: number;
   gatewayRatePct: number;
+  /** When false, shared promo platform contribution is not deducted from commission. */
+  paybackEnabled?: boolean;
 };
 
 export type PlatformProviderReceivableBreakdown = {
@@ -58,6 +60,8 @@ export type PlatformProviderReceivableLkrInput = {
   rejectedRefundConvenienceFeeLkr?: number;
   refundConvenienceFeeLkr?: number;
   gatewayRatePct: number;
+  /** When false, shared promo platform contribution is not deducted from commission. */
+  paybackEnabled?: boolean;
 };
 
 function resolveRefundConvenienceFees(params: {
@@ -91,7 +95,9 @@ export function computePlatformProviderReceivable(
 ): PlatformProviderReceivableBreakdown {
   const platformPaybackCents = params.platformPaybackCents ?? 0;
   const loyaltyDiscountCents = params.loyaltyDiscountCents ?? 0;
+  const paybackEnabled = params.paybackEnabled !== false;
   const sharedPromoPlatformCents = params.sharedPromoPlatformCents ?? 0;
+  const sharedPromoDeductionCents = paybackEnabled ? sharedPromoPlatformCents : 0;
   const normalConvenienceFeeCents = params.normalConvenienceFeeCents ?? 0;
   const { completed: completedRefundConvenienceFeeCents, rejected: rejectedRefundConvenienceFeeCents } =
     resolveRefundConvenienceFees({
@@ -104,7 +110,7 @@ export function computePlatformProviderReceivable(
     params.commissionFeeCents -
     platformPaybackCents -
     loyaltyDiscountCents -
-    sharedPromoPlatformCents;
+    sharedPromoDeductionCents;
 
   const netPlatformEarningsCents =
     netPlatformCommissionCents +
@@ -190,6 +196,7 @@ export function platformProviderReceivableInputFromLkr(
     refundConvenienceFeeCents:
       input.refundConvenienceFeeLkr != null ? lkrToCents(input.refundConvenienceFeeLkr) : undefined,
     gatewayRatePct: input.gatewayRatePct,
+    paybackEnabled: input.paybackEnabled,
   };
 }
 
@@ -206,6 +213,7 @@ export function platformProviderReceivableInputFromBreakdownCents(
     commissionFee?: number;
     platformPaybackTotal?: number;
     platformOwnedPromoDiscountTotal?: number;
+    platformDiscountPaybackEnabled?: boolean;
     periodLoyaltyDiscountTotal?: number;
     sharedPromoPlatformContributionAmount?: number;
     convenienceFee?: number;
@@ -216,14 +224,19 @@ export function platformProviderReceivableInputFromBreakdownCents(
 ): PlatformProviderReceivableInput {
   const payback = breakdown.platformPaybackTotal ?? 0;
   const owned = breakdown.platformOwnedPromoDiscountTotal ?? 0;
+  const paybackEnabled =
+    breakdown.platformDiscountPaybackEnabled ??
+    (payback > 0);
+  const sppcCents = breakdown.sharedPromoPlatformContributionAmount ?? 0;
   return {
     commissionFeeCents: breakdown.commissionFee ?? 0,
     platformPaybackCents: Math.max(payback, owned),
     loyaltyDiscountCents: breakdown.periodLoyaltyDiscountTotal ?? 0,
-    sharedPromoPlatformCents: breakdown.sharedPromoPlatformContributionAmount ?? 0,
+    sharedPromoPlatformCents: sppcCents,
     normalConvenienceFeeCents: breakdown.convenienceFee ?? 0,
     completedRefundConvenienceFeeCents: breakdown.refundConvenienceFee ?? 0,
     rejectedRefundConvenienceFeeCents: breakdown.rejectedRefundConvenienceFee ?? 0,
     gatewayRatePct: breakdown.gatewayRatePct ?? 1.9,
+    paybackEnabled,
   };
 }

@@ -3,7 +3,7 @@ import { prisma } from './prisma';
 import type { StoreWallet } from '@prisma/client';
 import {
   commissionableSubtotal,
-  computePlatformCommission,
+  computePlatformCommissionCents,
   getEffectiveRate,
   getSlabIndex,
   COMMISSION_SLABS,
@@ -11,7 +11,10 @@ import {
   orderPlatformPayback,
   sumCommissionableBase,
   accumulateSettlementBreakdown,
+  emptySettlementBreakdown,
   sumOnlinePaymentsCollectedFromBreakdown,
+  type ChannelSettlementRow,
+  type CommissionChannel,
 } from './commission';
 import {
   fetchSummarizedPaidOrderRevenue,
@@ -28,6 +31,7 @@ import { resolveBranchCancellationGatewayFeeLkr } from './refundPaymentStructure
 import {
   computeSharedPromoContribution,
   mergeSharedPromoIntoBreakdown,
+  branchPayoutCentsFromWithdrawalBreakdown,
   resolveFinalPayoutAmountFromBreakdown,
 } from './sharedPromoContribution';
 import { attachPromoOwnershipTotals, loadPromoOwnershipTotalsForPeriod } from './promoOwnershipTotals';
@@ -84,6 +88,23 @@ export type WalletSummary = {
   availableBalance: number;
 };
 
+export type BranchWalletPayablesBreakdown = {
+  channelRevenueCents: {
+    pickupCashIn: number;
+    pickupOnlineIn: number;
+    pickupCardIn: number;
+    deliveryOnlineIn: number;
+  };
+  totalRevenueCents: number;
+  platformCommissionCents: number;
+  deliveryCommissionCents: number;
+  gatewayFeeCents: number;
+  /** Sum of branch payout amounts from paid 15-day cycles (cents). */
+  branchReceivableCents: number;
+  totalExpensesCents: number;
+  allTimeAvailableBalanceCents: number;
+};
+
 export type BranchWalletDashboard = {
   allTimeEarnings: {
     pickupOnlineIn: number;
@@ -97,6 +118,7 @@ export type BranchWalletDashboard = {
   };
   liveEarningsCents: number;
   refundsLkr: number;
+  payablesBreakdown?: BranchWalletPayablesBreakdown;
 };
 
 type DeliveryPayoutBreakdownBranch = {
@@ -115,6 +137,15 @@ function branchNetForDeliveryFromPayoutBreakdown(
     if (row.storeId !== storeId) return sum;
     return sum + Math.max(0, row.netForDelivery ?? 0);
   }, 0);
+}
+
+/** Gateway fee locked on an approved 15-day payout withdrawal (cents). */
+export function gatewayFeeCentsFromWithdrawalBreakdown(breakdown: unknown): number {
+  if (!breakdown || typeof breakdown !== 'object') return 0;
+  const gatewayFee = (breakdown as Record<string, unknown>).gatewayFee;
+  return typeof gatewayFee === 'number' && Number.isFinite(gatewayFee)
+    ? Math.round(gatewayFee)
+    : 0;
 }
 
 export type WalletDashboardPeriod = { from: string; to: string };
@@ -159,6 +190,54 @@ async function computeGlobalRefundsRetainedLkr(period?: WalletDashboardPeriod): 
   return agg._sum.notReturningSubtotal ?? 0;
 }
 
+async function fetchApprovedDeliveryPayoutBreakdowns(
+  period?: WalletDashboardPeriod,
+): Promise<Array<{ breakdown: unknown }>> {
+  await ensureDeliveryPayoutSchema();
+  if (period) {
+    return prisma.$queryRawUnsafe<Array<{ breakdown: unknown }>>(
+      `SELECT "breakdown" FROM ${getDeliveryPayoutsSqlRef()}
+       WHERE status = 'APPROVED'
+         AND "createdAt" >= $1::timestamp
+         AND "createdAt" <= $2::timestamp`,
+      new Date(`${period.from}T00:00:00.000Z`),
+      new Date(`${period.to}T23:59:59.999Z`),
+    );
+  }
+  return prisma.$queryRawUnsafe<Array<{ breakdown: unknown }>>(
+    `SELECT "breakdown" FROM ${getDeliveryPayoutsSqlRef()} WHERE status = 'APPROVED'`,
+  );
+}
+
+function buildBranchPayablesBreakdown(
+  payablesRevenue: Awaited<ReturnType<typeof fetchSummarizedPaidOrderRevenue>>,
+  platformCommissionCents: number,
+  toDeliveryLkr: number,
+  gatewayFeeCents: number,
+  branchReceivableCents: number,
+): BranchWalletPayablesBreakdown {
+  const channels = payablesRevenue.commissionChannelRevenue.channelRevenueCents;
+  const totalRevenueCents =
+    channels.pickupCashIn +
+    channels.pickupOnlineIn +
+    channels.pickupCardIn +
+    channels.deliveryOnlineIn;
+  const deliveryCommissionCents = Math.round(toDeliveryLkr * 100);
+  const totalExpensesCents =
+    platformCommissionCents + gatewayFeeCents + deliveryCommissionCents;
+
+  return {
+    channelRevenueCents: { ...channels },
+    totalRevenueCents,
+    platformCommissionCents,
+    deliveryCommissionCents,
+    gatewayFeeCents,
+    branchReceivableCents,
+    totalExpensesCents,
+    allTimeAvailableBalanceCents: totalRevenueCents - totalExpensesCents,
+  };
+}
+
 export async function getBranchWalletDashboard(
   storeId: string,
   period?: WalletDashboardPeriod,
@@ -168,12 +247,17 @@ export async function getBranchWalletDashboard(
 
   const [
     revenue,
+    payablesRevenue,
     toBranchAgg,
     toPlatformAgg,
     approvedDeliveryPayouts,
+    payablesToPlatformAgg,
+    payablesDeliveryPayouts,
+    paidPayoutWithdrawals,
     refundsLkr,
   ] = await Promise.all([
     fetchSummarizedPaidOrderRevenue({ storeId, ...dateFilter }),
+    fetchSummarizedPaidOrderRevenue({ storeId }),
     prisma.storeWithdrawal.aggregate({
       _sum: { amount: true },
       where: { storeId, status: 'APPROVED', ...dateFilter },
@@ -182,22 +266,21 @@ export async function getBranchWalletDashboard(
       _sum: { totalCommission: true },
       where: { storeId, status: 'VERIFIED', ...dateFilter },
     }),
-    (async () => {
-      await ensureDeliveryPayoutSchema();
-      if (period) {
-        return prisma.$queryRawUnsafe<Array<{ breakdown: unknown }>>(
-          `SELECT "breakdown" FROM ${getDeliveryPayoutsSqlRef()}
-           WHERE status = 'APPROVED'
-             AND "createdAt" >= $1::timestamp
-             AND "createdAt" <= $2::timestamp`,
-          new Date(`${period.from}T00:00:00.000Z`),
-          new Date(`${period.to}T23:59:59.999Z`),
-        );
-      }
-      return prisma.$queryRawUnsafe<Array<{ breakdown: unknown }>>(
-        `SELECT "breakdown" FROM ${getDeliveryPayoutsSqlRef()} WHERE status = 'APPROVED'`,
-      );
-    })(),
+    fetchApprovedDeliveryPayoutBreakdowns(period),
+    prisma.commissionSettlement.aggregate({
+      _sum: { totalCommission: true },
+      where: { storeId, status: 'VERIFIED' },
+    }),
+    fetchApprovedDeliveryPayoutBreakdowns(),
+    prisma.storeWithdrawal.findMany({
+      where: {
+        storeId,
+        status: 'APPROVED',
+        periodFrom: { not: null },
+        periodTo: { not: null },
+      },
+      select: { breakdown: true, amount: true },
+    }),
     computeBranchRefundsRetainedLkr(storeId),
   ]);
 
@@ -207,6 +290,31 @@ export async function getBranchWalletDashboard(
   const toDeliveryLkr = approvedDeliveryPayouts.reduce(
     (sum, row) => sum + branchNetForDeliveryFromPayoutBreakdown(row.breakdown, storeId),
     0,
+  );
+
+  const payablesToDeliveryLkr = payablesDeliveryPayouts.reduce(
+    (sum, row) => sum + branchNetForDeliveryFromPayoutBreakdown(row.breakdown, storeId),
+    0,
+  );
+
+  const paidPayoutGatewayFeeCents = paidPayoutWithdrawals.reduce(
+    (sum, row) => sum + gatewayFeeCentsFromWithdrawalBreakdown(row.breakdown),
+    0,
+  );
+
+  const paidBranchReceivableCents = paidPayoutWithdrawals.reduce(
+    (sum, row) =>
+      sum +
+      branchPayoutCentsFromWithdrawalBreakdown(row.breakdown, withdrawalAmountCents(row)),
+    0,
+  );
+
+  const payablesBreakdown = buildBranchPayablesBreakdown(
+    payablesRevenue,
+    decimalFieldToCentsNumber(payablesToPlatformAgg._sum.totalCommission),
+    payablesToDeliveryLkr,
+    paidPayoutGatewayFeeCents,
+    paidBranchReceivableCents,
   );
 
   return {
@@ -222,6 +330,7 @@ export async function getBranchWalletDashboard(
     },
     liveEarningsCents: walletBalanceCents(wallet),
     refundsLkr,
+    payablesBreakdown,
   };
 }
 
@@ -379,6 +488,11 @@ export type PeriodBreakdown = {
   branchOwnedPromoDiscountTotal?: number;
   /** PLATFORM-ownership promotion discounts in period (cents). Display snapshot only. */
   platformOwnedPromoDiscountTotal?: number;
+  /**
+   * Channel settlement rows from the same order scan as this period breakdown.
+   * Reuse for payout validation / net-preview — do not re-scan orders.
+   */
+  channelBreakdown: Record<CommissionChannel, ChannelSettlementRow>;
 };
 
 const EMPTY_SHARED_PROMO_BREAKDOWN_FIELDS = {
@@ -1327,6 +1441,7 @@ export async function computeBreakdownForPeriodOrders(
       rejectedRefundNetAmount: rejectedRefundPayout.rejectedRefundNetAmount,
       rejectedRefundConvenienceFee: rejectedRefundPayout.rejectedRefundConvenienceFee,
       rejectedRefundDeliveryFee: rejectedRefundPayout.rejectedRefundDeliveryFee,
+      channelBreakdown: emptySettlementBreakdown(gatewayFeeRate),
       ...EMPTY_SHARED_PROMO_BREAKDOWN_FIELDS,
     };
   }
@@ -1354,8 +1469,7 @@ export async function computeBreakdownForPeriodOrders(
     periodLoyaltyDiscountTotal += Math.round((order.loyaltyDiscount ?? 0) * 100);
 
     const base = commissionableSubtotal(order);
-    const commissionLkr = computePlatformCommission(base, windowBase);
-    const commissionCents = commissionLkr * 100;
+    const commissionCents = computePlatformCommissionCents(base, windowBase);
     const paybackLkr = storePaybackEnabled
       ? orderPlatformPayback(order, { storePaybackEnabled: true })
       : 0;
@@ -1384,14 +1498,14 @@ export async function computeBreakdownForPeriodOrders(
   const gatewayFee = Math.round(gatewayBase * gatewayFeeRate);
 
   const convenienceFeeRates = await getConvenienceFeeRates();
-  const settlementBreakdown = accumulateSettlementBreakdown(
+  const channelBreakdown = accumulateSettlementBreakdown(
     paidOrders,
     windowBase,
     convenienceFeeRates,
     gatewayFeeRate,
   );
   const onlinePaymentsCollected = Math.round(
-    sumOnlinePaymentsCollectedFromBreakdown(settlementBreakdown) * 100,
+    sumOnlinePaymentsCollectedFromBreakdown(channelBreakdown) * 100,
   );
 
   const netPlatformEarning = storePaybackEnabled
@@ -1444,6 +1558,7 @@ export async function computeBreakdownForPeriodOrders(
     rejectedRefundNetAmount: rejectedRefundPayout.rejectedRefundNetAmount,
     rejectedRefundConvenienceFee: rejectedRefundPayout.rejectedRefundConvenienceFee,
     rejectedRefundDeliveryFee: rejectedRefundPayout.rejectedRefundDeliveryFee,
+    channelBreakdown,
     ...EMPTY_SHARED_PROMO_BREAKDOWN_FIELDS,
   };
 }

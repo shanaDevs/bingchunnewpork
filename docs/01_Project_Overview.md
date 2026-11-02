@@ -87,7 +87,7 @@ Customer accounts use `users` (not `admin_users`) with JWT `type: 'user'`.
 ### Partial
 
 - SMS provider Dialog and Email SendGrid: config exists; production adapters stubbed (default `mock`)
-- Admin MFA fields on `AdminUser`: **login challenge Not Implemented**
+- Admin MFA: **removed** (email + password only; no MFA columns)
 - Admin POS page exists; sidebar entry **hidden**
 - Customer mobile: referral, help tickets, saved cards, many settings toggles: **client stubs**
 - Prisma schema evolution: `db push` + runtime `ensure*Schema` SQL patches (not full Migrate history)

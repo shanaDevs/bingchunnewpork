@@ -91,3 +91,9 @@ graphify-out/cache
 # Database dumps (contain customer data)
 backupdb/*
 !backupdb/.gitkeep
+
+# DigitalOcean merged app spec (contains secrets from secrets.env)
+deploy/digitalocean/.generated-app.delivery.yaml
+deploy/digitalocean/.generated-app.shop.yaml
+deploy/digitalocean/.generated-app.admin.yaml
+deploy/digitalocean/.live-delivery-me-audit.json

@@ -25,37 +25,34 @@ describe('isCorsAllowedOrigin production matrix', () => {
     expect(isCorsAllowedOrigin('https://evil.example.com')).toBe(false);
   });
 
-  it('allows the delivery admin host without treating it as the shop', async () => {
+  it('allows the delivery ops host without treating it as the shop', async () => {
     process.env.NODE_ENV = 'production';
-    process.env.LIVE_SHOP_URL = 'https://bing-chun.bc.dartcodes.com';
-    process.env.FRONTEND_URL = 'https://bing-chun.bc.dartcodes.com';
-    process.env.ADMIN_URL = 'https://bing-chun.bc.dartcodes.com/admin';
-    process.env.API_BASE_URL = 'https://bing-chun-core.bc.dartcodes.com';
+    process.env.LIVE_SHOP_URL = 'https://bing-chun-ui2ow.ondigitalocean.app';
+    process.env.FRONTEND_URL = 'https://bing-chun-ui2ow.ondigitalocean.app';
+    process.env.ADMIN_URL = 'https://bingchun-admin-a4ndy.ondigitalocean.app/admin';
+    process.env.API_BASE_URL = 'https://bing-chun-ui2ow.ondigitalocean.app';
     delete process.env.CORS_EXTRA_ORIGINS;
     delete process.env.DELIVERY_FRONTEND_URL;
 
     const { isCorsAllowedOrigin, getConfiguredCorsOrigins } = await import('../../src/lib/resolveFrontendUrl');
-    expect(getConfiguredCorsOrigins()).toContain('https://bing-chun-delivery-frontend.bc.dartcodes.com');
-    expect(isCorsAllowedOrigin('https://bing-chun-delivery-frontend.bc.dartcodes.com')).toBe(true);
-    expect(isCorsAllowedOrigin('https://bing-chun.bc.dartcodes.com')).toBe(true);
+    expect(getConfiguredCorsOrigins()).toContain('https://bingchun-delivery-6mgs2.ondigitalocean.app');
+    expect(isCorsAllowedOrigin('https://bingchun-delivery-6mgs2.ondigitalocean.app')).toBe(true);
+    expect(isCorsAllowedOrigin('https://bing-chun-ui2ow.ondigitalocean.app')).toBe(true);
   });
 
-  it('allows CapRover admin-web and pos-web surface hosts', async () => {
+  it('allows DO admin and pos surface hosts', async () => {
     process.env.NODE_ENV = 'production';
-    process.env.LIVE_SHOP_URL = 'https://bing-chun.bc.dartcodes.com';
-    process.env.FRONTEND_URL = 'https://bing-chun.bc.dartcodes.com';
-    process.env.ADMIN_URL = 'https://bing-chun.bc.dartcodes.com/admin';
-    process.env.API_BASE_URL = 'https://bing-chun-admin.bc.dartcodes.com';
+    process.env.LIVE_SHOP_URL = 'https://bing-chun-ui2ow.ondigitalocean.app';
+    process.env.FRONTEND_URL = 'https://bing-chun-ui2ow.ondigitalocean.app';
+    process.env.ADMIN_URL = 'https://bingchun-admin-a4ndy.ondigitalocean.app/admin';
+    process.env.API_BASE_URL = 'https://bingchun-admin-a4ndy.ondigitalocean.app';
     delete process.env.CORS_EXTRA_ORIGINS;
 
     const { isCorsAllowedOrigin, getConfiguredCorsOrigins } = await import('../../src/lib/resolveFrontendUrl');
-    expect(getConfiguredCorsOrigins()).toContain('https://bing-chun-admin-web.bc.dartcodes.com');
-    expect(getConfiguredCorsOrigins()).toContain('https://bing-chun-pos-web.bc.dartcodes.com');
-    expect(isCorsAllowedOrigin('https://bing-chun-admin-web.bc.dartcodes.com')).toBe(true);
-    expect(isCorsAllowedOrigin('https://bing-chun-pos-web.bc.dartcodes.com')).toBe(true);
-    // API hosts must stay off the browser allowlist
-    expect(isCorsAllowedOrigin('https://bing-chun-admin.bc.dartcodes.com')).toBe(false);
-    expect(isCorsAllowedOrigin('https://bing-chun-pos.bc.dartcodes.com')).toBe(false);
+    expect(getConfiguredCorsOrigins()).toContain('https://bingchun-admin-a4ndy.ondigitalocean.app');
+    expect(getConfiguredCorsOrigins()).toContain('https://bingchun-pos-i8pq3.ondigitalocean.app');
+    expect(isCorsAllowedOrigin('https://bingchun-admin-a4ndy.ondigitalocean.app')).toBe(true);
+    expect(isCorsAllowedOrigin('https://bingchun-pos-i8pq3.ondigitalocean.app')).toBe(true);
   });
 
   it('allows LAN origins only outside production deployment', async () => {
@@ -69,18 +66,18 @@ describe('isCorsAllowedOrigin production matrix', () => {
 
   it('allows dedicated admin-web and pos-web hosts when ADMIN_WEB_URL / POS_WEB_URL are set', async () => {
     process.env.NODE_ENV = 'production';
-    process.env.LIVE_SHOP_URL = 'https://bing-chun.bc.dartcodes.com';
-    process.env.FRONTEND_URL = 'https://bing-chun.bc.dartcodes.com';
-    process.env.ADMIN_URL = 'https://bing-chun.bc.dartcodes.com/admin';
-    process.env.ADMIN_WEB_URL = 'https://bing-chun-admin-web.bc.dartcodes.com';
-    process.env.POS_WEB_URL = 'https://bing-chun-pos-web.bc.dartcodes.com';
-    process.env.API_BASE_URL = 'https://bing-chun-admin.bc.dartcodes.com';
+    process.env.LIVE_SHOP_URL = 'https://bing-chun-ui2ow.ondigitalocean.app';
+    process.env.FRONTEND_URL = 'https://bing-chun-ui2ow.ondigitalocean.app';
+    process.env.ADMIN_URL = 'https://bingchun-admin-a4ndy.ondigitalocean.app/admin';
+    process.env.ADMIN_WEB_URL = 'https://bingchun-admin-a4ndy.ondigitalocean.app';
+    process.env.POS_WEB_URL = 'https://bingchun-pos-i8pq3.ondigitalocean.app';
+    process.env.API_BASE_URL = 'https://bingchun-admin-a4ndy.ondigitalocean.app';
     delete process.env.CORS_EXTRA_ORIGINS;
 
     const { isCorsAllowedOrigin, getConfiguredCorsOrigins } = await import('../../src/lib/resolveFrontendUrl');
-    expect(getConfiguredCorsOrigins()).toContain('https://bing-chun-admin-web.bc.dartcodes.com');
-    expect(getConfiguredCorsOrigins()).toContain('https://bing-chun-pos-web.bc.dartcodes.com');
-    expect(isCorsAllowedOrigin('https://bing-chun-admin-web.bc.dartcodes.com')).toBe(true);
-    expect(isCorsAllowedOrigin('https://bing-chun-pos-web.bc.dartcodes.com')).toBe(true);
+    expect(getConfiguredCorsOrigins()).toContain('https://bingchun-admin-a4ndy.ondigitalocean.app');
+    expect(getConfiguredCorsOrigins()).toContain('https://bingchun-pos-i8pq3.ondigitalocean.app');
+    expect(isCorsAllowedOrigin('https://bingchun-admin-a4ndy.ondigitalocean.app')).toBe(true);
+    expect(isCorsAllowedOrigin('https://bingchun-pos-i8pq3.ondigitalocean.app')).toBe(true);
   });
 });

@@ -9,6 +9,7 @@ import { AlertCircle, CalendarRange, Image as ImageIcon, Loader2, ShieldCheck, U
 import toast from 'react-hot-toast';
 import AdminPinGateModal from '@/components/admin/AdminPinGateModal';
 import ChannelSalesTable from '@/components/admin/ChannelSalesTable';
+import { resolveSlabRatePct } from '@/components/admin/commissionUtils';
 import { resolveBranchPayoutDisplay } from '@/components/admin/branchPayoutDisplay';
 import PayoutBreakdownPanel from '@/components/admin/PayoutBreakdownPanel';
 import {
@@ -198,14 +199,11 @@ export default function WalletApproveWithdrawalModal({
         channelBreakdown: channelBreakdown ?? previewForBreakdown?.breakdown,
         periodDeliveryFeeLkr: deliveryFeeLkr,
       });
-  const slabRatePct =
-    storedCommissionRate != null && storedCommissionRate > 0
-      ? Math.round(storedCommissionRate * 1000) / 10
-      : previewForBreakdown && previewForBreakdown.slabInfo.effectiveRate > 0
-        ? Math.round(previewForBreakdown.slabInfo.effectiveRate * 1000) / 10
-        : preview && preview.slabInfo.effectiveRate > 0
-          ? Math.round(preview.slabInfo.effectiveRate * 1000) / 10
-          : null;
+  const slabRatePct = resolveSlabRatePct(
+    storedCommissionRate,
+    previewForBreakdown?.slabInfo.effectiveRate,
+    preview?.slabInfo.effectiveRate,
+  );
   const periodLabel = periodFrom && periodTo ? `${periodFrom} → ${periodTo}` : null;
   const resolvedGatewayRatePct =
     breakdown?.gatewayRatePct ??

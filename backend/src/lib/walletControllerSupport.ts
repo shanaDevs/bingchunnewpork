@@ -12,7 +12,8 @@ import {
   walletReportOrderSelect,
   platformItemSalesLkr,
 } from './walletRevenue';
-import { buildPeriodChannelPreview } from './periodChannelPreview';
+import { buildPeriodChannelPreview, type PeriodChannelPreview } from './periodChannelPreview';
+import { periodOrderAvailableFromOnlineCollectedCents } from './periodOrderAvailable';
 import {
   computeBreakdownForPeriod,
   computeNetTransferableEarnings,
@@ -21,7 +22,14 @@ import {
   getSuperAdminWalletDashboard,
   getOrCreateWallet,
   getWalletSummary,
+  type PeriodBreakdown,
 } from './walletService';
+import {
+  getSlabIndex,
+  sumBreakdownCommission,
+  sumBreakdownOrderCount,
+  sumBreakdownProviderFee,
+} from './commission';
 import {
   computeSharedPromoContribution,
   enrichSharedPromoForApi,
@@ -601,6 +609,29 @@ export async function resolveNetPreviewPeriodBounds(
   return { from, to };
 }
 
+/** Build the API channelPreview shape from a period breakdown's reused channel rows. */
+export function channelPreviewFromPeriodBreakdown(
+  from: string,
+  to: string,
+  period: PeriodBreakdown,
+): PeriodChannelPreview {
+  const breakdown = period.channelBreakdown;
+  const monthlyBaseLkr = period.windowBase / 100;
+  return {
+    period: { from, to },
+    breakdown,
+    totalCommission: sumBreakdownCommission(breakdown),
+    totalProviderFee: sumBreakdownProviderFee(breakdown),
+    orderCount: sumBreakdownOrderCount(breakdown),
+    storeDiscountsTotal: period.periodDiscountsTotal / 100,
+    slabInfo: {
+      monthlyBase: monthlyBaseLkr,
+      effectiveRate: period.commissionRate,
+      slabIndex: getSlabIndex(monthlyBaseLkr),
+    },
+  };
+}
+
 export async function buildNetPreviewResponseData(storeId: string, from: string, to: string) {
   const loadStorePaybackFlag = () =>
     prisma.store.findUnique({
@@ -608,9 +639,10 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
       select: { platformDiscountPaybackEnabled: true },
     });
 
-  const [breakdown, channelPreview, storeRow, sharedPromo, promoOwnership] = await Promise.all([
+  // One paid-order scan for the period — do not also call buildPeriodChannelPreview /
+  // computePeriodOrderAvailableCents (those re-fetch the same orders and blow the gateway).
+  const [breakdown, storeRow, sharedPromo, promoOwnership] = await Promise.all([
     computeBreakdownForPeriod(storeId, from, to),
-    buildPeriodChannelPreview(storeId, from, to),
     loadStorePaybackFlag().catch(async (err) => {
       const code = (err as { code?: string })?.code;
       if (code !== 'P2022') throw err;
@@ -621,10 +653,18 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
     loadPromoOwnershipTotalsForPeriod(storeId, from, to),
   ]);
 
-  const periodBreakdown = attachPromoOwnershipTotals(
-    mergeSharedPromoIntoBreakdown(breakdown, sharedPromo),
-    promoOwnership,
-  );
+  const [periodBreakdown, orderAvailable] = await Promise.all([
+    Promise.resolve(
+      attachPromoOwnershipTotals(mergeSharedPromoIntoBreakdown(breakdown, sharedPromo), promoOwnership),
+    ),
+    periodOrderAvailableFromOnlineCollectedCents(
+      storeId,
+      from,
+      to,
+      breakdown.onlinePaymentsCollected,
+    ),
+  ]);
+  const channelPreview = channelPreviewFromPeriodBreakdown(from, to, breakdown);
   const finalPayoutFields = enrichSharedPromoForApi(sharedPromo, periodBreakdown.netAmount);
 
   const durationDays =
@@ -653,6 +693,9 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
     rejectedRefundGatewayDeductionLkr: breakdown.rejectedRefundGatewayDeduction / 100,
     rejectedRefundNetAmountLkr: breakdown.rejectedRefundNetAmount / 100,
     channelPreview,
+    orderAvailableFromOrdersLkr: orderAvailable.fromOrdersCents / 100,
+    orderAvailableRemainingLkr: orderAvailable.remainingCents / 100,
+    orderPayoutReservedLkr: orderAvailable.priorPayoutCents / 100,
     ...finalPayoutFields,
   };
 }
@@ -1146,9 +1189,44 @@ export async function loadWithdrawalInvoicePeriodContext(
     const computed = await computeBreakdownForPeriod(storeId, fromStr, toStr);
     periodBreakdown = parseInvoicePeriodBreakdown(computed);
   }
-  const channelPreview = await buildPeriodChannelPreview(storeId, fromStr, toStr);
-  const channelSummary = buildInvoiceChannelSummary(channelPreview.breakdown);
-  const storeDiscountsCents = Math.round(channelPreview.storeDiscountsTotal * 100);
+
+  // Prefer channel snapshot locked on the withdrawal — avoid a third order scan
+  // just to render the invoice after initiate-payout already computed it.
+  const storedChannel =
+    storedBreakdown &&
+    typeof storedBreakdown === 'object' &&
+    (storedBreakdown as { channelBreakdown?: Parameters<typeof buildInvoiceChannelSummary>[0] })
+      .channelBreakdown;
+
+  let channelSummary;
+  let storeDiscountsCents = 0;
+  if (storedChannel) {
+    channelSummary = buildInvoiceChannelSummary(storedChannel);
+    const storedDiscounts =
+      storedBreakdown &&
+      typeof storedBreakdown === 'object' &&
+      typeof (storedBreakdown as { storeDiscountsTotal?: unknown }).storeDiscountsTotal === 'number'
+        ? (storedBreakdown as { storeDiscountsTotal: number }).storeDiscountsTotal
+        : null;
+    storeDiscountsCents =
+      storedDiscounts != null
+        ? Math.round(storedDiscounts * 100)
+        : Math.round(
+            (
+              ((storedBreakdown as { branchOwnedPromoDiscountTotal?: number })
+                .branchOwnedPromoDiscountTotal ?? 0) +
+              ((storedBreakdown as { platformOwnedPromoDiscountTotal?: number })
+                .platformOwnedPromoDiscountTotal ?? 0) +
+              ((storedBreakdown as { periodLoyaltyDiscountTotal?: number })
+                .periodLoyaltyDiscountTotal ?? 0)
+            ),
+          );
+  } else {
+    const channelPreview = await buildPeriodChannelPreview(storeId, fromStr, toStr);
+    channelSummary = buildInvoiceChannelSummary(channelPreview.breakdown);
+    storeDiscountsCents = Math.round(channelPreview.storeDiscountsTotal * 100);
+  }
+
   const promoData = await loadInvoicePromoSummary(storeId, fromStr, toStr);
 
   return {

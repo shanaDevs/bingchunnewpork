@@ -112,13 +112,13 @@ export default function SuperAdminSystemWalletTab({
             </p>
           </div>
           {loading ? (
-            <div className="flex flex-wrap items-center gap-1.5" aria-hidden>
-              <DashSkel className="h-8 w-[220px] rounded-[12px]" />
-              <DashSkel className="h-8 w-[8rem] rounded-[12px]" />
+            <div className="flex shrink-0 flex-nowrap items-center gap-1.5 overflow-visible" aria-hidden>
+              <DashSkel className="h-8 w-[220px] shrink-0 rounded-[12px]" />
+              <DashSkel className="h-8 w-[9.5rem] shrink-0 rounded-[12px]" />
             </div>
           ) : wallets.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <div className="relative w-full max-w-[220px]">
+            <div className="flex shrink-0 flex-nowrap items-center gap-1.5 overflow-visible">
+              <div className="relative w-[220px] shrink-0">
                 <Search
                   size={13}
                   className="pointer-events-none absolute top-1/2 left-2.5 z-[2] -translate-y-1/2 text-muted"
@@ -129,14 +129,14 @@ export default function SuperAdminSystemWalletTab({
                   placeholder="Search branches..."
                   value={searchQuery}
                   onChange={(e) => onSearchQueryChange(e.target.value)}
-                  className="input-field h-8 w-full rounded-[12px] py-0 pr-3 text-xs"
+                  className="input-field h-8 w-full rounded-[12px] py-0 pr-3 pl-9 text-xs"
                 />
               </div>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
                 aria-label="Filter by status"
-                className="input-field h-8 min-w-[8rem] rounded-[12px] py-0 text-xs"
+                className="filter-select h-8 !w-[9.5rem] min-w-[9.5rem] shrink-0 rounded-[12px] text-xs"
               >
                 <option value="all">All Status</option>
                 <option value="active">Active</option>

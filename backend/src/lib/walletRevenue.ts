@@ -267,7 +267,80 @@ export function summarizeOrderRevenueFromGroups(
   );
 }
 
-export async function fetchSummarizedPaidOrderRevenue(where: Prisma.OrderWhereInput) {
+export type CommissionChannelRevenueCents = {
+  pickupCashIn: number;
+  pickupOnlineIn: number;
+  pickupCardIn: number;
+  deliveryOnlineIn: number;
+};
+
+export type CommissionChannelRevenueSummary = {
+  /** Per channel: sum of (order subtotal − promo discount), in cents. */
+  channelRevenueCents: CommissionChannelRevenueCents;
+  /** Post-discount order totals on online channels — gateway fee basis. */
+  netCents: { pickupOnlineIn: number; deliveryOnlineIn: number };
+};
+
+/** Mirrors orderCommissionChannel without payment hints (groupBy has no gateway metadata). */
+function commissionChannelForPaidOrderGroup(
+  orderMode: string,
+  paymentMethod: string,
+): keyof CommissionChannelRevenueCents | null {
+  if (orderMode === 'TAKEAWAY') {
+    if (isCounterCashPaymentMethod(paymentMethod)) return 'pickupCashIn';
+    if (paymentMethod === 'PAYHERE') return 'pickupOnlineIn';
+    if (paymentMethod === 'CARD' || paymentMethod === 'LOYALTY_POINTS') return 'pickupCardIn';
+    return null;
+  }
+  if (orderMode === 'DELIVERY' && isCardPaymentMethod(paymentMethod)) {
+    return 'deliveryOnlineIn';
+  }
+  return null;
+}
+
+export function summarizeCommissionChannelRevenueFromGroups(
+  groups: {
+    orderMode: string;
+    paymentMethod: string;
+    totalSum: number;
+    subtotalSum: number;
+    discountSum: number;
+    loyaltyDiscountSum: number;
+  }[],
+): CommissionChannelRevenueSummary {
+  const channelRevenueCents: CommissionChannelRevenueCents = {
+    pickupCashIn: 0,
+    pickupOnlineIn: 0,
+    pickupCardIn: 0,
+    deliveryOnlineIn: 0,
+  };
+  const netCents = { pickupOnlineIn: 0, deliveryOnlineIn: 0 };
+
+  for (const g of groups) {
+    const channelKey = commissionChannelForPaidOrderGroup(g.orderMode, g.paymentMethod);
+    if (!channelKey) continue;
+    const netAmountCents = Math.round(g.totalSum * 100);
+    const subtotalMinusDiscountCents = Math.round(
+      Math.max(0, g.subtotalSum - g.discountSum) * 100,
+    );
+    channelRevenueCents[channelKey] += subtotalMinusDiscountCents;
+    if (channelKey === 'pickupOnlineIn') {
+      netCents.pickupOnlineIn += netAmountCents;
+    } else if (channelKey === 'deliveryOnlineIn') {
+      netCents.deliveryOnlineIn += netAmountCents;
+    }
+  }
+
+  return { channelRevenueCents, netCents };
+}
+
+export type SummarizedPaidOrderRevenue = ReturnType<typeof summarizeOrderRevenueFromGroups> & {
+  commissionChannelRevenue: CommissionChannelRevenueSummary;
+};
+
+export async function fetchSummarizedPaidOrderRevenue(
+  where: Prisma.OrderWhereInput,
+): Promise<SummarizedPaidOrderRevenue> {
   const groups = await prisma.order.groupBy({
     by: ['orderMode', 'paymentMethod'],
     where: {
@@ -275,15 +348,26 @@ export async function fetchSummarizedPaidOrderRevenue(where: Prisma.OrderWhereIn
       paymentStatus: 'PAID',
       status: { not: 'CANCELLED' },
     },
-    _sum: { total: true },
+    _sum: { total: true, subtotal: true, discount: true, loyaltyDiscount: true },
   });
-  return summarizeOrderRevenueFromGroups(
-    groups.map((g) => ({
-      orderMode: g.orderMode,
-      paymentMethod: g.paymentMethod,
-      totalSum: g._sum.total ?? 0,
-    })),
-  );
+  const mapped = groups.map((g) => ({
+    orderMode: g.orderMode,
+    paymentMethod: g.paymentMethod,
+    totalSum: g._sum.total ?? 0,
+    subtotalSum: g._sum.subtotal ?? 0,
+    discountSum: g._sum.discount ?? 0,
+    loyaltyDiscountSum: g._sum.loyaltyDiscount ?? 0,
+  }));
+  return {
+    ...summarizeOrderRevenueFromGroups(
+      mapped.map(({ orderMode, paymentMethod, totalSum }) => ({
+        orderMode,
+        paymentMethod,
+        totalSum,
+      })),
+    ),
+    commissionChannelRevenue: summarizeCommissionChannelRevenueFromGroups(mapped),
+  };
 }
 
 const walletReportOrderSelect = {

@@ -109,7 +109,7 @@ export default function AdminSettingsPage() {
   const [whatsappConfigured, setWhatsappConfigured] = useState(false);
   const [whatsappWebhookPath, setWhatsappWebhookPath] = useState('/api/whatsapp/webhook');
   const [whatsappWebhookUrl, setWhatsappWebhookUrl] = useState(
-    'https://bing-chung-b.mp.dartcodes.com/api/whatsapp/webhook',
+    'https://bing-chun-ui2ow.ondigitalocean.app/api/whatsapp/webhook',
   );
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [smsProvider, setSmsProvider] = useState<'smslenz' | 'mock'>('smslenz');
@@ -213,7 +213,7 @@ export default function AdminSettingsPage() {
       setWhatsappWebhookPath(wa.webhookPath || '/api/whatsapp/webhook');
       setWhatsappWebhookUrl(
         wa.webhookUrl ||
-          'https://bing-chung-b.mp.dartcodes.com/api/whatsapp/webhook',
+          'https://bing-chun-ui2ow.ondigitalocean.app/api/whatsapp/webhook',
       );
     }
     const sms = messagingSettings?.sms;
@@ -1235,7 +1235,7 @@ export default function AdminSettingsPage() {
                 <label className="text-xs text-muted block mb-1">Webhook callback URL (Meta)</label>
                 <input
                   className="input-field font-mono text-sm"
-                  placeholder="https://bing-chung-b.mp.dartcodes.com/api/whatsapp/webhook"
+                  placeholder="https://bing-chun-ui2ow.ondigitalocean.app/api/whatsapp/webhook"
                   value={whatsappWebhookUrl}
                   onChange={(e) => setWhatsappWebhookUrl(e.target.value)}
                 />

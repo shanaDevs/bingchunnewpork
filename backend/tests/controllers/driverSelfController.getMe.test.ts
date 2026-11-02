@@ -6,6 +6,7 @@ vi.mock('../../src/lib/prisma', () => ({
     adminUser: { findFirst: vi.fn() },
     store: { findMany: vi.fn() },
     riderRating: { aggregate: vi.fn() },
+    deliveryJob: { findMany: vi.fn() },
   },
 }));
 
@@ -34,14 +35,8 @@ vi.mock('@bingchun/delivery-domain', () => ({
   isRiderStatsPeriod: vi.fn(),
 }));
 
-vi.mock('../../src/lib/deliveryJobHelpers', () => ({
-  canDriverClaimMore: vi.fn(async () => true),
-  getDriverActiveRidePhase: vi.fn(async () => 'NONE'),
-  isDriverAlertEligible: vi.fn(async () => true),
-}));
-
 vi.mock('../../src/lib/spaces', () => ({
-  viewableLicenseImageUrl: vi.fn(async (url: string | null | undefined) => {
+  viewableLicenseImageUrlWithTimeout: vi.fn(async (url: string | null | undefined) => {
     if (!url) return null;
     if (url.includes('/drivers/license/')) return 'https://signed.example/license?X-Amz-Signature=abc';
     return url;
@@ -56,6 +51,7 @@ describe('driverSelfController.getMe', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(prisma.deliveryJob.findMany).mockResolvedValue([] as never);
     vi.mocked(prisma.store.findMany).mockResolvedValue([
       { id: 'store-1', name: 'Bing Chun - Test', city: 'Colombo' },
     ] as never);

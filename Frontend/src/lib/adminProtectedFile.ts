@@ -206,6 +206,12 @@ export function resolveWithdrawalInvoiceApiPath(invoiceUrl: string | null | unde
  * - Public absolute http(s) URLs open directly
  * - API-generated and legacy static invoice paths use the authenticated admin API
  */
+export async function openPlatformProviderSettlementInvoice(settlementId: string): Promise<void> {
+  await openProtectedApiPath(
+    `/admin/invoices/settlement/${encodeURIComponent(settlementId)}/platform-provider`,
+  );
+}
+
 export async function openWithdrawalInvoice(invoiceUrl: string | null | undefined): Promise<void> {
   if (!invoiceUrl) throw new Error('No invoice available');
 

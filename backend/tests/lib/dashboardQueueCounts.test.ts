@@ -11,6 +11,22 @@ const range = {
 };
 
 describe('inProgressOrdersWhere', () => {
+  it('counts only pickup queue tabs for pickup-only branches', () => {
+    expect(
+      inProgressOrdersWhere({ storeId: 'store-nugegoda' }, range, { pickupOnly: true }),
+    ).toEqual({
+      storeId: 'store-nugegoda',
+      createdAt: { gte: range.gte, lte: range.lte },
+      status: { in: ['RECEIVED', 'PREPARING', 'READY'] },
+      OR: [
+        {
+          orderMode: 'TAKEAWAY',
+          OR: [{ paymentStatus: 'PAID' }, { paymentMethod: 'CASH_AT_COUNTER' }],
+        },
+      ],
+    });
+  });
+
   it('counts the orders-page queue for the selected period', () => {
     expect(inProgressOrdersWhere({ storeId: 'store-nugegoda' }, range)).toEqual({
       storeId: 'store-nugegoda',

@@ -9,12 +9,18 @@ import path from 'path';
  *
  * Only socket.io stays a rewrite (route handlers cannot proxy websocket upgrades).
  */
-const PRODUCTION_CORE_ORIGIN = 'https://bing-chun-core.bc.dartcodes.com';
+const PRODUCTION_CORE_ORIGIN = 'https://admin.bingchunsrilanka.com';
 
 function getBackendOrigin(): string {
   const fromEnv = (process.env.BACKEND_URL || process.env.API_PROXY_URL || '').replace(/\/$/, '');
   const isLocal = /localhost|127\.0\.0\.1/i.test(fromEnv);
-  if (fromEnv && !(process.env.NODE_ENV === 'production' && isLocal)) return fromEnv;
+  if (fromEnv && !(process.env.NODE_ENV === 'production' && isLocal)) {
+    // Starter admin host permanently 302s → custom domain; Socket.IO rewrites must not use it.
+    if (/bingchun-admin-a4ndy\.ondigitalocean\.app$/i.test(fromEnv)) {
+      return PRODUCTION_CORE_ORIGIN;
+    }
+    return fromEnv;
+  }
   return process.env.NODE_ENV === 'production' ? PRODUCTION_CORE_ORIGIN : 'http://localhost:4000';
 }
 
