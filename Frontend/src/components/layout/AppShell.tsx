@@ -25,9 +25,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // The home and offers pages bring their own header and footer (components/home-redesign).
+  // The home, offers and stores pages bring their own header and footer (components/home-redesign).
   // The admin's floating spin button still shows there; elsewhere FloatingCart brings it.
-  if (pathname === '/' || pathname === '/promotions') {
+  if (pathname === '/' || pathname === '/promotions' || pathname === '/stores') {
     return (
       <>
         {children}

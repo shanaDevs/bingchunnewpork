@@ -3,7 +3,7 @@ import JsonLd from '@/components/seo/JsonLd';
 import { storesItemListSchema, type StoreForSchema } from '@/components/seo/schemas';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { absoluteUrl, BUSINESS_PHONE_DISPLAY } from '@/lib/seo';
-import StoresClient from './StoresClient';
+import LocationsPage from '@/components/locations-redesign/LocationsPage';
 
 export const metadata: Metadata = {
   title: 'Store Locations',
@@ -38,7 +38,7 @@ export default async function StoresPage() {
   return (
     <>
       {stores.length > 0 ? <JsonLd data={storesItemListSchema(stores)} /> : null}
-      <StoresClient />
+      <LocationsPage />
     </>
   );
 }
