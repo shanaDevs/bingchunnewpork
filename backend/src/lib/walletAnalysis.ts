@@ -52,13 +52,24 @@ export type WalletAnalysisHealthSlice = {
   amount: number;
 };
 
+export type WalletAnalysisExcludedFees = {
+  /** All-time customer delivery fees (excluded from available balance). */
+  deliveryFee: number;
+  /** All-time customer convenience fees (excluded from available balance). */
+  convenienceFee: number;
+};
+
 export type WalletAnalysisResult = {
   month: string;
   storeId: string | null;
   from: string;
   to: string;
   tank: { balance: number; capacity: number };
+  /** Pickup online + delivery online + all-time retained refunds (LKR). */
+  onlineAvailableBalance: number;
   health: { percent: number; slices: WalletAnalysisHealthSlice[] };
+  /** All-time fee totals for scoped branches (LKR). */
+  excludedFees: WalletAnalysisExcludedFees;
   trend: WalletAnalysisTrendPoint[];
   branchContribution: WalletAnalysisBranchContribution[];
   incoming: WalletAnalysisFlowPoint[];
@@ -164,6 +175,29 @@ function branchDisplayName(name: string): string {
 
 function nonZeroFlows(rows: WalletAnalysisFlowPoint[]): WalletAnalysisFlowPoint[] {
   return rows.filter((r) => r.amount > 0);
+}
+
+async function sumAllTimeRefundsRetainedLkr(storeId: string | null): Promise<number> {
+  const agg = await prisma.refund.aggregate({
+    where: {
+      status: { in: ['COMPLETE', 'REJECTED'] },
+      ...(storeId ? { order: { is: { storeId } } } : {}),
+    },
+    _sum: { notReturningSubtotal: true },
+  });
+  return agg._sum.notReturningSubtotal ?? 0;
+}
+
+function sumOnlineChannelCentsFromPayables(
+  breakdowns: Awaited<ReturnType<typeof computeBranchPayablesBreakdown>>[],
+): number {
+  return breakdowns.reduce(
+    (sum, breakdown) =>
+      sum +
+      breakdown.channelRevenueCents.pickupOnlineIn +
+      breakdown.channelRevenueCents.deliveryOnlineIn,
+    0,
+  );
 }
 
 function roundLkr(amount: number): number {
@@ -615,13 +649,37 @@ async function computeWalletAnalysis(params: {
   });
   const storeIds = wallets.map((w) => w.storeId);
 
-  const payablesBreakdowns =
+  const paidOrdersFeeWhere = {
+    storeId: { in: storeIds },
+    paymentStatus: 'PAID' as const,
+    status: { not: 'CANCELLED' as const },
+  };
+
+  const [payablesBreakdowns, allTimeFeeAgg, refundsRetainedLkr] = await Promise.all([
     storeIds.length > 0
-      ? await promiseAllLimited(
+      ? promiseAllLimited(
           getPrismaFanOutLimit(),
           storeIds.map((id) => () => computeBranchPayablesBreakdown(id)),
         )
-      : [];
+      : Promise.resolve([]),
+    storeIds.length > 0
+      ? prisma.order.aggregate({
+          where: paidOrdersFeeWhere,
+          _sum: { deliveryFee: true, convenientFee: true },
+        })
+      : Promise.resolve({ _sum: { deliveryFee: null, convenientFee: null } }),
+    sumAllTimeRefundsRetainedLkr(storeId),
+  ]);
+
+  const onlineAvailableBalance = roundLkr(
+    centsToLkr(sumOnlineChannelCentsFromPayables(payablesBreakdowns)) + refundsRetainedLkr,
+  );
+
+  const excludedFees: WalletAnalysisExcludedFees = {
+    deliveryFee: roundLkr(allTimeFeeAgg._sum.deliveryFee ?? 0),
+    convenienceFee: roundLkr(allTimeFeeAgg._sum.convenientFee ?? 0),
+  };
+
   const balanceCents = payablesBreakdowns.reduce(
     (sum, breakdown) => sum + breakdown.allTimeAvailableBalanceCents,
     0,
@@ -635,6 +693,7 @@ async function computeWalletAnalysis(params: {
       from,
       to,
       tank: { balance: 0, capacity: 0 },
+      onlineAvailableBalance: 0,
       health: {
         percent: 100,
         slices: [
@@ -642,6 +701,7 @@ async function computeWalletAnalysis(params: {
           { key: 'outflow', label: 'Outflow', amount: 0 },
         ],
       },
+      excludedFees,
       trend: emptyTrend,
       branchContribution: [],
       incoming: [],
@@ -771,6 +831,7 @@ async function computeWalletAnalysis(params: {
     from,
     to,
     tank: { balance: balanceLkr, capacity: capacityLkr },
+    onlineAvailableBalance,
     health: {
       percent: healthPercent,
       slices: [
@@ -778,6 +839,7 @@ async function computeWalletAnalysis(params: {
         { key: 'outflow', label: 'Outflow', amount: outgoingTotalLkr },
       ],
     },
+    excludedFees,
     trend,
     branchContribution,
     incoming,
