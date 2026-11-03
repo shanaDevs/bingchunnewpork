@@ -88,7 +88,7 @@ const focusBase = "focus-visible:outline-2 focus-visible:outline-offset-2";
 
 /** Shared with the mobile menu's top row, which must line up with it exactly. */
 const headerRowClass =
-  "relative grid h-22 grid-cols-[1fr_auto] items-center gap-3 sm:gap-6 lg:grid-cols-[1fr_auto_1fr]";
+  "relative grid h-22 grid-cols-[1fr_auto] items-center gap-2 min-[400px]:gap-3 sm:gap-6 lg:grid-cols-[1fr_auto_1fr]";
 
 /** Past the hero the action buttons turn solid blue, mirroring the blue nav pill (white stays the highlight). */
 const solidBlue = "bg-brand-600 text-snow shadow-lg shadow-brand-600/25 hover:bg-brand-700";
@@ -100,7 +100,8 @@ const solidBlue = "bg-brand-600 text-snow shadow-lg shadow-brand-600/25 hover:bg
  * is built from what is behind it, it reads as the page itself rather than as a coloured bar.
  * Scrim strength and the blue-to-white tint follow the scroll position frame by frame (CSS variables
  * written directly, no re-render); only the item colours switch, with a short transition.
- * Below lg the nav links move into MobileMenu, opened from a menu button beside the cart.
+ * Below lg the nav links move: on tablets (md to lg) into MobileMenu, opened from a menu button beside
+ * the cart; on phones (below md) into BottomNav, a tab bar at the bottom of the screen.
  */
 export function SiteHeader() {
   const pathname = usePathname();
@@ -225,10 +226,11 @@ type HeaderActionsProps = {
 };
 
 /**
- * Language, Spin & Win (when the customer may spin), account, cart, pickup and (below lg) the menu button. Rendered in
+ * Language, Spin & Win (when the customer may spin), account, cart, pickup and (on tablets) the menu button. Rendered in
  * the header and again in the open mobile menu's top row, so opening the menu reads as the same row with the icon
- * turning into a cross. On the narrowest phones (below 360px) the language, account and spin buttons move out to make
- * room. Account and cart link to their pages; the store control opens the app's order setup (delivery or pickup).
+ * turning into a cross. Below 400px the buttons and gaps tighten a little (the wordmark shrinks too), so the row fits
+ * with the Spin & Win button; on the narrowest phones (below 360px) the language, account and spin buttons move out to
+ * make room. Account and cart link to their pages; the store control opens the app's order setup (delivery or pickup).
  * The language pill is only in place for now: the site is English only, so it doesn't open anything yet.
  */
 function HeaderActions({ onLight, menuOpen = false, inMenu = false, onMenuClick, menuButtonRef }: HeaderActionsProps) {
@@ -250,21 +252,21 @@ function HeaderActions({ onLight, menuOpen = false, inMenu = false, onMenuClick,
 
   const focusRing = cn(focusBase, onLight ? "focus-visible:outline-brand-600" : "focus-visible:outline-white");
   const roundButton = cn(
-    "grid size-11 place-items-center rounded-full",
+    "grid size-11 place-items-center rounded-full max-[400px]:size-10",
     fade,
     focusRing,
     onLight ? solidBlue : "bg-white text-brand-700 shadow-md shadow-brand-950/20 hover:bg-brand-50",
   );
 
   return (
-    <div className="flex items-center justify-self-end gap-1.5 sm:gap-2">
+    <div className="flex items-center justify-self-end gap-1 min-[400px]:gap-1.5 sm:gap-2">
       {/* Placeholder for the language choice (English / 中文), as in the design: no menu behind it yet. */}
       <button
         type="button"
         aria-label="Language: English"
         title="Language"
         className={cn(
-          "flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold ring-1 ring-inset max-[359px]:hidden",
+          "flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold ring-1 ring-inset max-[400px]:px-2.5 max-[359px]:hidden",
           fade,
           focusRing,
           onLight ? "text-brand-700 ring-brand-200 hover:bg-brand-50" : "text-snow ring-white/30 hover:bg-white/10",
@@ -343,7 +345,7 @@ function HeaderActions({ onLight, menuOpen = false, inMenu = false, onMenuClick,
               "aria-controls": MOBILE_MENU_ID,
             })}
         onClick={onMenuClick}
-        className={cn(roundButton, "lg:hidden")}
+        className={cn(roundButton, "max-md:hidden lg:hidden")}
       >
         <MenuIcon cross={inMenu} />
       </button>

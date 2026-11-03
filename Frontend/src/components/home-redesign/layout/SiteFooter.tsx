@@ -80,7 +80,8 @@ export function SiteFooter() {
         />
       </svg>
 
-      <Container className="pt-20 pb-6 max-sm:pt-14 max-sm:pb-5 sm:pt-24">
+      {/* Phones: the bottom padding also clears the bottom nav (--bottom-nav-space is 0 from md up). */}
+      <Container className="pt-20 pb-[calc(var(--bottom-nav-space)+1.5rem)] max-sm:pt-14 max-sm:pb-[calc(var(--bottom-nav-space)+1.25rem)] sm:pt-24">
         <div className="grid grid-cols-2 gap-x-8 gap-y-12 max-sm:gap-y-8 sm:grid-cols-3 lg:grid-cols-[1.6fr_1fr_1fr_1fr]">
           <div data-footer-col className="col-span-2 sm:col-span-3 lg:col-span-1">
             <div data-footer-item>
