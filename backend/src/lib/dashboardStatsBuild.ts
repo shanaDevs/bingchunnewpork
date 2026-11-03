@@ -1,8 +1,10 @@
 import { Request } from 'express';
 import { resolveBranchStoreId, isBranchScopedRole } from '../middleware/auth';
 import { prisma } from './prisma';
-import { decimalFieldToCentsNumber } from './moneyDecimal';
-import { computeBranchPayablesSummary } from './walletService';
+import {
+  branchPayablesFromDashboardWalletKpi,
+  computeDashboardWalletAvailableCents,
+} from './walletService';
 import { aggregateTopRefundBranches } from './refundAnalytics';
 import { getOutgoingFlowsForDashboard, sumJasonInvestedLkrForRange } from './walletAnalysis';
 import { dateStringInColombo } from './datetime';
@@ -105,7 +107,7 @@ export async function buildDashboardSuperSummary(ctx: DashboardStatsContext) {
     takeawayAgg,
     pickupOnlineAgg,
     pickupStoreAgg,
-    onlineWalletBalanceAgg,
+    dashboardWalletKpi,
     periodRefundAgg,
     revenueChannels,
   ] = await promiseAllLimited(4, [
@@ -153,10 +155,9 @@ export async function buildDashboardSuperSummary(ctx: DashboardStatsContext) {
         _count: { id: true },
       }),
     () =>
-      prisma.storeWallet.aggregate({
-        where: isBranchAdmin && scope.storeId ? { storeId: scope.storeId } : undefined,
-        _sum: { balance: true },
-      }),
+      computeDashboardWalletAvailableCents(
+        isBranchAdmin && scope.storeId ? scope.storeId : undefined,
+      ),
     () =>
       isBranchAdmin && !scope.storeId
         ? Promise.resolve({ _sum: { refundAmount: null } })
@@ -177,11 +178,8 @@ export async function buildDashboardSuperSummary(ctx: DashboardStatsContext) {
   const periodRevenue = periodRevenueAgg._sum.total || 0;
   const periodPaidCount = periodRevenueAgg._count.id || 0;
   const periodRefundAmount = periodRefundAgg._sum.refundAmount || 0;
-  const onlineWalletBalance = decimalFieldToCentsNumber(onlineWalletBalanceAgg._sum.balance);
-
-  const branchPayables = await computeBranchPayablesSummary(
-    isBranchAdmin && scope.storeId ? scope.storeId : undefined,
-  );
+  const onlineWalletBalance = dashboardWalletKpi.totalCents;
+  const branchPayables = branchPayablesFromDashboardWalletKpi(dashboardWalletKpi);
   const totalPayable = branchPayables.totalRemaining;
 
   const deliveryRevenue = deliveryAgg._sum.total || 0;

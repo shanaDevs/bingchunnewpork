@@ -24,13 +24,21 @@ export type WalletAnalysisHealthSlice = {
   amount: number;
 };
 
+export type WalletAnalysisExcludedFees = {
+  deliveryFee: number;
+  convenienceFee: number;
+};
+
 export type WalletAnalysisSnapshot = {
   month: string;
   storeId: string | null;
   from: string;
   to: string;
   tank: { balance: number; capacity: number };
+  /** Pickup online + delivery online + all-time retained refunds (LKR). */
+  onlineAvailableBalance?: number;
   health: { percent: number; slices: WalletAnalysisHealthSlice[] };
+  excludedFees?: WalletAnalysisExcludedFees;
   trend: WalletAnalysisTrendPoint[];
   branchContribution: WalletAnalysisBranchContribution[];
   incoming: WalletAnalysisFlowPoint[];

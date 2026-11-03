@@ -1,3 +1,7 @@
+import {
+  commissionRateToDisplayPct,
+  getEffectiveRate,
+} from '@/components/admin/commissionUtils';
 import { formatMoneyAmount } from '@/lib/receipt';
 import {
   computePayoutNetLkr,
@@ -12,14 +16,18 @@ import {
   sumAllDiscounts,
   sumAllRevenueSubtotal,
   sumAllSubtotalBeforeDiscount,
+  resolveOnlinePaymentsCollectedComponents,
   sumOnlineRevenueSubtotals,
   type PayoutFormulaBreakdownLkr,
+  type SettlementBreakdown,
   type SettlementPreview,
   type SharedPromoBreakdownLkr,
 } from '@/components/admin/settlementTypes';
 
 export type ResolvePayoutReportValuesInput = {
   preview: SettlementPreview | null;
+  /** Channel table for report display (e.g. online wallet split); does not change payout totals. */
+  channelBreakdown?: SettlementBreakdown | null;
   periodBreakdownLkr: PayoutFormulaBreakdownLkr | null;
   onlineOrderSubtotalLkr: number | null;
   convenienceFeeLkr: number;
@@ -44,6 +52,8 @@ export type ResolvePayoutReportValuesInput = {
   snapshotNetAmountLkr?: number | null;
   sharedPromo?: SharedPromoBreakdownLkr | null;
   loyaltyDiscountLkr?: number | null;
+  /** Active slab commission rate (%) — report display only. */
+  slabRatePct?: number | null;
 };
 
 export type PayoutReportValues = {
@@ -58,7 +68,16 @@ export type PayoutReportValues = {
   totalPromotionDiscountsLkr: number;
   untrackedDiscountsLkr: number;
   onlinePaymentsCollectedLkr: number;
+  /** Pickup online net amount (revenue subtotal) for Online Wallet info display. */
+  onlinePickupNetLkr: number;
+  /** Delivery online net amount (revenue subtotal) for Online Wallet info display. */
+  onlineDeliveryNetLkr: number;
   commissionLkr: number;
+  slabRatePct: number | null;
+  /** Slab tier rate (%) from rolling monthly sales — Financial Report commission popover only. */
+  applicableSlabCommissionRatePct: number | null;
+  /** Rolling monthly sales base (LKR) used to pick the slab tier — display only. */
+  slabMonthlyBaseLkr: number | null;
   platformPaybackLkr: number;
   commissionPaybackLkr: number;
   platformDiscountsReportLkr: number;
@@ -410,6 +429,53 @@ function resolveGatewayFigures(params: {
   return { gatewayBaseLkr, gatewayRatePct, gatewayLkr, gatewayHint };
 }
 
+function resolveApplicableSlabCommissionRateDisplay(params: {
+  preview: SettlementPreview | null;
+  slabRatePct: number | null;
+  periodBreakdownLkr: PayoutFormulaBreakdownLkr;
+}): { applicableSlabCommissionRatePct: number | null; slabMonthlyBaseLkr: number | null } {
+  const monthlyBase = params.preview?.slabInfo.monthlyBase;
+  if (monthlyBase != null && monthlyBase >= 0) {
+    return {
+      applicableSlabCommissionRatePct: commissionRateToDisplayPct(getEffectiveRate(monthlyBase)),
+      slabMonthlyBaseLkr: monthlyBase,
+    };
+  }
+  const previewRate = params.preview?.slabInfo.effectiveRate;
+  if (previewRate != null && previewRate > 0) {
+    return {
+      applicableSlabCommissionRatePct: commissionRateToDisplayPct(previewRate),
+      slabMonthlyBaseLkr: params.preview?.slabInfo.monthlyBase ?? null,
+    };
+  }
+  if (params.slabRatePct != null) {
+    return { applicableSlabCommissionRatePct: params.slabRatePct, slabMonthlyBaseLkr: null };
+  }
+  const storedRate = params.periodBreakdownLkr.commissionRate;
+  if (storedRate != null && storedRate > 0) {
+    return {
+      applicableSlabCommissionRatePct: commissionRateToDisplayPct(storedRate),
+      slabMonthlyBaseLkr: null,
+    };
+  }
+  return { applicableSlabCommissionRatePct: null, slabMonthlyBaseLkr: null };
+}
+
+function resolveOnlineWalletChannelNets(params: {
+  preview: SettlementPreview | null;
+  channelBreakdown: SettlementBreakdown | null | undefined;
+}): { onlinePickupNetLkr: number; onlineDeliveryNetLkr: number } {
+  const breakdown = params.preview?.breakdown ?? params.channelBreakdown ?? null;
+  if (!breakdown) {
+    return { onlinePickupNetLkr: 0, onlineDeliveryNetLkr: 0 };
+  }
+  const components = resolveOnlinePaymentsCollectedComponents(breakdown);
+  return {
+    onlinePickupNetLkr: components.pickupRevenueLkr,
+    onlineDeliveryNetLkr: components.deliveryRevenueLkr,
+  };
+}
+
 export function resolvePayoutBreakdownBundle(
   input: PayoutBreakdownDisplayInput,
 ): PayoutBreakdownBundle | null {
@@ -439,6 +505,8 @@ export function resolvePayoutReportValues(
     snapshotNetAmountLkr = null,
     sharedPromo = null,
     loyaltyDiscountLkr: loyaltyOverride = null,
+    channelBreakdown = null,
+    slabRatePct = null,
   } = input;
 
   if (!periodBreakdownLkr || periodBreakdownLkr.orderCount <= 0) return null;
@@ -536,10 +604,20 @@ export function resolvePayoutReportValues(
         : gateway.gatewayBaseLkr > 0.001
           ? recalculatedNetLkr
           : (periodBreakdownLkr.netAmount ?? recalculatedNetLkr);
+  const onlineWalletChannelNets = resolveOnlineWalletChannelNets({
+    preview,
+    channelBreakdown,
+  });
+  const applicableSlabCommission = resolveApplicableSlabCommissionRateDisplay({
+    preview,
+    slabRatePct,
+    periodBreakdownLkr,
+  });
 
   return {
     hasPeriodData: true,
     ...sales,
+    ...onlineWalletChannelNets,
     ...discounts,
     ...refunds,
     ...gateway,
@@ -559,6 +637,8 @@ export function resolvePayoutReportValues(
     totalBranchPayoutLkr: sales.onlinePaymentsCollectedLkr + discounts.sharedPromoJasonLkr,
     branchNetPayoutLkr,
     showPaybackDetails,
+    slabRatePct,
+    ...applicableSlabCommission,
   };
 }
 
