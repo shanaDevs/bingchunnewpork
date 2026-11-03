@@ -136,24 +136,34 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
         appBar: AppBar(
           leading: IconButton(onPressed: _close, icon: const Icon(Icons.arrow_back_rounded)),
           titleSpacing: 0,
+          // The title stacks label + number + badges, which overflows the default
+          // 56px toolbar and gets clipped — give it room when badges are shown.
+          toolbarHeight: o != null ? 96 : 64,
           title: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(tr('Order details').toUpperCase(), style: PosType.label.copyWith(color: c.textMuted)),
               Text(
                 o?.orderNumber ?? ctrl.orderKey,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: PosType.heading.copyWith(color: c.text, fontFeatures: PosType.tabular),
               ),
               if (o != null) ...[
                 const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    PaymentMethodBadge(method: o.paymentMethod),
-                    PaymentStateBadge(order: o, long: true),
-                    ChannelBadge(channel: o.channel),
-                  ],
+                // Single scrollable row so narrow screens never wrap past the toolbar.
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      PaymentMethodBadge(method: o.paymentMethod),
+                      const SizedBox(width: 6),
+                      PaymentStateBadge(order: o, long: true),
+                      const SizedBox(width: 6),
+                      ChannelBadge(channel: o.channel),
+                    ],
+                  ),
                 ),
               ],
             ],
