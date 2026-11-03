@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { homeFontVariables } from "@/components/home-redesign/fonts";
+import { BottomNav } from "@/components/home-redesign/layout/BottomNav";
 import { SiteFooter } from "@/components/home-redesign/layout/SiteFooter";
 import { SiteHeader } from "@/components/home-redesign/layout/SiteHeader";
 import { useCartHydrated } from "@/hooks/useCartHydrated";
@@ -68,6 +69,7 @@ export default function OffersPage() {
         </OffersReveal>
       </main>
       <SiteFooter />
+      <BottomNav />
     </div>
   );
 }

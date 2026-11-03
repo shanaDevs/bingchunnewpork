@@ -214,6 +214,26 @@
 }
 
 /*
+ * The phones' bottom navigation (layout/BottomNav), as room it takes at the bottom of the screen. Both
+ * are 0 from md up and on pages without the bar, so adding them changes nothing there.
+ * --bottom-nav-offset: from the screen's bottom edge to the pill (clear of the iPhone home indicator).
+ * --bottom-nav-space: from the screen's bottom edge to the top of the raised Order Now button.
+ */
+:root {
+  --bottom-nav-offset: 0px;
+  --bottom-nav-space: 0px;
+}
+
+@media (width < 48rem) {
+  :root:has([data-bottom-nav]) {
+    --bottom-nav-offset: max(0.75rem, env(safe-area-inset-bottom));
+    --bottom-nav-space: calc(var(--bottom-nav-offset) + 5.125rem);
+    /* Whatever keyboard focus or an anchor scrolls to stops above the bar, never behind it. */
+    scroll-padding-bottom: calc(var(--bottom-nav-space) + 0.75rem);
+  }
+}
+
+/*
  * The home page's own surface: always light, in its own body face, whatever the app theme. It is
  * rendered outside the app shell, so the page background and type come from here.
  */
