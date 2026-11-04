@@ -105,6 +105,9 @@ class JobHistoryItem {
   final int complaintCount;
   final String? rideCode;
 
+  /// Why the rider cancelled — set only on runs they accepted then rejected.
+  final String? cancelReason;
+
   const JobHistoryItem({
     required this.id,
     required this.title,
@@ -119,6 +122,7 @@ class JobHistoryItem {
     this.deliveredTotal = 0,
     this.complaintCount = 0,
     this.rideCode,
+    this.cancelReason,
   });
 
   factory JobHistoryItem.fromJson(Json j) => JobHistoryItem(
@@ -135,6 +139,7 @@ class JobHistoryItem {
     deliveredTotal: intOf(j, 'deliveredTotal'),
     complaintCount: intOf(j, 'complaintCount'),
     rideCode: strOrNull(j, 'rideCode'),
+    cancelReason: strOrNull(j, 'cancelReason'),
   );
 
   bool get isIncomplete =>

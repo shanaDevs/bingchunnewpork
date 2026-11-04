@@ -297,7 +297,6 @@ class _DashboardBodyState extends State<_DashboardBody> with WidgetsBindingObser
                     ),
                   ),
                   onGoogleMaps: () => _googleMaps(job.pickupNavLat, job.pickupNavLng, job.pickupPlaceName),
-                  onConfirm: _confirmPickup,
                   onReject: _reject,
                 )
               else if (job.canStart)
@@ -314,13 +313,6 @@ class _DashboardBodyState extends State<_DashboardBody> with WidgetsBindingObser
                           {'name': job.store.name},
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      RunPrimaryButton(
-                        label: tr('Start delivery'),
-                        icon: Icons.play_arrow_rounded,
-                        loading: vm.acting,
-                        onPressed: _start,
-                      ),
                     ],
                   ),
                 )
@@ -330,7 +322,6 @@ class _DashboardBodyState extends State<_DashboardBody> with WidgetsBindingObser
                   distanceM: geo.distanceM?.toInt(),
                   within: geo.within,
                   radiusM: job.store.completionRadiusM,
-                  acting: vm.acting,
                   onNavigate: () => _openNav(
                     NavTarget(
                       lat: job.store.lat,
@@ -340,7 +331,6 @@ class _DashboardBodyState extends State<_DashboardBody> with WidgetsBindingObser
                     ),
                   ),
                   onGoogleMaps: () => _googleMaps(job.store.lat, job.store.lng, job.store.name),
-                  onComplete: _complete,
                 ),
               // Orders / stops — visible after accept; Call / Navigate stay locked until pickup.
               if (stops.isNotEmpty) ...[
@@ -672,7 +662,6 @@ class _OutletPickupCard extends StatelessWidget {
     required this.isOverride,
     required this.onNavigate,
     required this.onGoogleMaps,
-    required this.onConfirm,
     required this.onReject,
   });
 
@@ -685,7 +674,6 @@ class _OutletPickupCard extends StatelessWidget {
   final bool isOverride;
   final VoidCallback onNavigate;
   final VoidCallback onGoogleMaps;
-  final VoidCallback onConfirm;
   final VoidCallback onReject;
 
   @override
@@ -734,15 +722,7 @@ class _OutletPickupCard extends StatelessWidget {
               GoogleMapsIconButton(onTap: onGoogleMaps),
             ],
           ),
-          const SizedBox(height: 10),
-          RunPrimaryButton(
-            label: tr('Confirm pickup'),
-            icon: Icons.check_circle_rounded,
-            enabled: within,
-            locked: !within,
-            loading: acting,
-            onPressed: onConfirm,
-          ),
+          // Confirm pickup lives only in the bottom action bar.
           const SizedBox(height: 6),
           TextButton.icon(
             onPressed: acting
@@ -767,20 +747,16 @@ class _ReturnToBranchCard extends StatelessWidget {
     required this.distanceM,
     required this.within,
     required this.radiusM,
-    required this.acting,
     required this.onNavigate,
     required this.onGoogleMaps,
-    required this.onComplete,
   });
 
   final String storeName;
   final int? distanceM;
   final bool within;
   final int radiusM;
-  final bool acting;
   final VoidCallback onNavigate;
   final VoidCallback onGoogleMaps;
-  final VoidCallback onComplete;
 
   @override
   Widget build(BuildContext context) {
@@ -832,15 +808,7 @@ class _ReturnToBranchCard extends StatelessWidget {
               GoogleMapsIconButton(onTap: onGoogleMaps),
             ],
           ),
-          const SizedBox(height: 10),
-          RunPrimaryButton(
-            label: tr('Complete Ride'),
-            icon: Icons.flag_circle_rounded,
-            enabled: within,
-            locked: !within,
-            loading: acting,
-            onPressed: onComplete,
-          ),
+          // Complete Ride lives only in the bottom action bar.
         ],
       ),
     );
@@ -989,19 +957,12 @@ class _ActiveRunBottomBar extends StatelessWidget {
           ),
         ],
       ),
-      padding: EdgeInsets.fromLTRB(16, 10, 16, 14 + MediaQuery.paddingOf(context).bottom),
+      // Fixed action bar, not a draggable sheet — so no grab handle.
+      padding: EdgeInsets.fromLTRB(16, 16, 16, 14 + MediaQuery.paddingOf(context).bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(color: c.border, borderRadius: BorderRadius.circular(99)),
-            ),
-          ),
           for (var i = 0; i < children.length; i++) ...[if (i > 0) const SizedBox(height: 12), children[i]],
         ],
       ),
