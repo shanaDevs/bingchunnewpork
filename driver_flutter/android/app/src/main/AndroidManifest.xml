@@ -59,6 +59,12 @@
             android:foregroundServiceType="dataSync|location"
             android:exported="false" />
 
+        <!-- Receives notification buttons that don't open the app (ride "Decline"). The plugin
+             doesn't declare it; without it Android drops the tap and nothing happens. -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
+            android:exported="false" />
+
         <!-- Small icon for the on-duty notification (white delivery truck). -->
         <meta-data
             android:name="lk.bingchun.delivery.DUTY_ICON"
