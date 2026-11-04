@@ -329,6 +329,8 @@ class _ShellViewState extends State<_ShellView> {
     return Scaffold(
       appBar: _appBar(showLogo: true),
       body: _stack(bar, _more(overflow: pages.skip(bar.length).toList())),
+      // Canvas shows around the floating dock.
+      backgroundColor: context.pos.canvas,
       bottomNavigationBar: _BottomNav(
         items: [
           for (final p in bar) (pageBarLabel(p, _session), pageIcon(p), pageActiveIcon(p), p),
@@ -510,7 +512,9 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
-/// Phone bottom bar styled like the web sidebar: indigo gradient, white active pill.
+/// Phone bottom bar: a floating indigo dock (web sidebar gradient) inset from the
+/// screen edges. The active tab gets a white indicator pill behind its icon and a
+/// bold label; the pill slides in with a short animation.
 class _BottomNav extends StatelessWidget {
   const _BottomNav({required this.items, required this.current, required this.onSelect});
 
@@ -522,61 +526,86 @@ class _BottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selected = items.indexWhere((x) => x.$4 == current);
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: PosColors.sidebarGradient,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(PosRadius.sheet)),
-      ),
-      padding: EdgeInsets.fromLTRB(10, 8, 10, 8 + MediaQuery.paddingOf(context).bottom),
-      child: Row(
-        children: [
-          for (final (i, (label, icon, activeIcon, page)) in items.indexed)
-            Expanded(
-              child: Semantics(
-                button: true,
-                selected: i == selected,
-                label: label,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(12, 0, 12, bottomInset > 0 ? bottomInset : 12),
+      child: Container(
+        height: 68,
+        decoration: BoxDecoration(
+          gradient: PosColors.sidebarGradient,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: const [
+            BoxShadow(color: Color(0x401A1953), blurRadius: 24, offset: Offset(0, 8)),
+            BoxShadow(color: Color(0x1A0F172A), blurRadius: 6, offset: Offset(0, 2)),
+          ],
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Row(
+          children: [
+            for (final (i, (label, icon, activeIcon, page)) in items.indexed)
+              Expanded(
+                child: _DockItem(
+                  label: label,
+                  icon: i == selected ? activeIcon : icon,
+                  selected: i == selected,
                   onTap: () => onSelect(page),
-                  child: AnimatedContainer(
-                    duration: PosMotion.standard,
-                    curve: Curves.easeOut,
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    decoration: BoxDecoration(
-                      color: i == selected ? Colors.white : Colors.transparent,
-                      borderRadius: BorderRadius.circular(PosRadius.card),
-                      boxShadow: i == selected
-                          ? const [BoxShadow(color: Color(0x1F0F172A), blurRadius: 10, offset: Offset(0, 2))]
-                          : null,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          i == selected ? activeIcon : icon,
-                          size: 22,
-                          color: i == selected ? PosColors.sidebarActiveText : Colors.white70,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: PosType.caption.copyWith(
-                            fontSize: 11,
-                            fontWeight: i == selected ? FontWeight.w700 : FontWeight.w500,
-                            color: i == selected ? PosColors.sidebarActiveText : Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DockItem extends StatelessWidget {
+  const _DockItem({required this.label, required this.icon, required this.selected, required this.onTap});
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: InkResponse(
+        onTap: onTap,
+        radius: 36,
+        highlightColor: Colors.transparent,
+        splashColor: Colors.white24,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedContainer(
+              duration: PosMotion.standard,
+              curve: Curves.easeOutCubic,
+              width: selected ? 52 : 36,
+              height: 30,
+              decoration: BoxDecoration(
+                color: selected ? Colors.white : Colors.transparent,
+                borderRadius: BorderRadius.circular(PosRadius.pill),
+                boxShadow: selected
+                    ? const [BoxShadow(color: Color(0x33000000), blurRadius: 8, offset: Offset(0, 2))]
+                    : null,
+              ),
+              child: Icon(icon, size: 21, color: selected ? PosColors.sidebarActiveText : Colors.white70),
             ),
-        ],
+            const SizedBox(height: 4),
+            AnimatedDefaultTextStyle(
+              duration: PosMotion.standard,
+              style: PosType.caption.copyWith(
+                fontSize: 10.5,
+                height: 1.1,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? Colors.white : Colors.white60,
+              ),
+              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+          ],
+        ),
       ),
     );
   }
