@@ -5,9 +5,9 @@
   "main": "index.js",
   "scripts": {
     "predev": "npm run build -w @bingchun/db --ignore-scripts && npm run build -w @bingchun/cors && npm run build -w @bingchun/delivery-domain && npm run build -w @bingchun/settlement",
-    "dev": "ts-node-dev --respawn --transpile-only --exit-child src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
+    "dev": "node init && ts-node-dev --respawn --transpile-only --exit-child src/index.ts",
+    "build": "node init && tsc",
+    "start": "node init && node dist/index.js",
     "prisma:generate": "npm run prisma:generate -w @bingchun/db",
     "prisma:push": "npm run prisma:push -w @bingchun/db",
     "prisma:migrate": "npm run prisma:migrate -w @bingchun/db",
