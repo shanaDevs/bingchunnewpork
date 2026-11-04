@@ -724,6 +724,7 @@ export default function WalletWithdrawalModal({
   const payoutBreakdownPanelProps = breakdownLkr
     ? {
         preview: isViewMode ? null : channelPreview,
+        channelBreakdown: channelTableBreakdown,
         periodBreakdownLkr: breakdownLkr,
         onlineOrderSubtotalLkr,
         convenienceFeeLkr,

@@ -32,6 +32,8 @@
     "privatize:settlement-proofs": "ts-node --transpile-only src/scripts/privatize-settlement-proofs.ts",
     "seed:dummy": "ts-node --transpile-only prisma/seed-dummy-data.ts",
     "seed:dummy-users": "ts-node --transpile-only prisma/seed-dummy-users.ts",
+    "seed:nuge-sept1-delivery-shared": "ts-node --transpile-only src/scripts/seed-nugegoda-sept1-delivery-shared-promo-order.ts",
+    "seed:nuge-sept2-delivery-platform": "ts-node --transpile-only src/scripts/seed-nugegoda-sept2-delivery-platform-promo-order.ts",
     "seed:nuge-sept2-delivery-refund": "ts-node --transpile-only src/scripts/seed-nugegoda-sept2-delivery-refund-order.ts",
     "seed:nuge-sept3-cash-pickup": "ts-node --transpile-only src/scripts/seed-nugegoda-sept3-cash-pickup-order.ts",
     "seed:nuge-sept4-card-pickup": "ts-node --transpile-only src/scripts/seed-nugegoda-sept4-card-pickup-order.ts",
@@ -84,6 +86,7 @@
     "rate-limit-redis": "^4.2.0",
     "redis": "^4.7.0",
     "socket.io": "^4.8.3",
+    "swagger-ui-express": "^5.0.1",
     "uuid": "^14.0.0",
     "zod": "^4.4.3"
   },
