@@ -79,7 +79,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final c = context.pos;
     return AdminPageList(
-      maxWidth: 900,
       onRefresh: () => Future.wait([_hours.load(silent: true), _app.load(silent: true), _status.load(silent: true)]),
       children: [
         PageHeader(title: tr('Settings'), subtitle: widget.session.branchLabel),

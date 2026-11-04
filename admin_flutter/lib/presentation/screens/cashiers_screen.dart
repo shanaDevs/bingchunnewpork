@@ -109,7 +109,6 @@ class _CashiersScreenState extends State<CashiersScreen> {
         final rows = _rows.data;
         final act = _activity.data ?? const {};
         return AdminPageList(
-          maxWidth: 1100,
           onRefresh: _refresh,
           children: [
             PageHeader(

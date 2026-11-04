@@ -42,7 +42,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final reports = reportsFor(superAdmin: session.isSuperAdmin).where((r) => r.groupFor(session.isSuperAdmin) == _group);
     final c = context.pos;
     return ListView(
-      padding: centeredPadding(context, maxWidth: 1100),
+      padding: centeredPadding(context, maxWidth: 1400),
       children: [
         PageHeader(
           title: tr('Reports'),

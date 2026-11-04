@@ -528,7 +528,7 @@ class _BranchLedgerScreenState extends State<BranchLedgerScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: Text(shortBranch(widget.storeName)), toolbarHeight: 52),
     body: ListView(
-      padding: centeredPadding(context, maxWidth: 1000),
+      padding: centeredPadding(context, maxWidth: 1400),
       children: [
         Align(
           alignment: Alignment.centerLeft,

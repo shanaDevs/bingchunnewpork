@@ -57,7 +57,6 @@ class _JasonScreenState extends State<JasonScreen> {
       builder: (context, _) {
         final l = _ledger.data;
         return AdminPageList(
-          maxWidth: 1100,
           onRefresh: () => _ledger.load(silent: true),
           children: [
             PageHeader(
