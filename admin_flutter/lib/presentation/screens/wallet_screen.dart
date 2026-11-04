@@ -407,105 +407,177 @@ class _LedgerSectionState extends State<_LedgerSection> {
     return SectionCard(
       title: tr('Transactions'),
       subtitle: tr('Wallet ledger'),
-      trailing: PillTabs<String?>(
-        items: [(null, tr('All'), null, null), ('IN', tr('In'), null, null), ('OUT', tr('Out'), null, null)],
-        selected: _direction,
-        onSelect: (v) {
-          setState(() => _direction = v);
-          _page = 1;
-          _rows.load();
-        },
-      ),
-      child: LoadableBuilder(
-        value: _rows,
-        builder: (context, page) {
-          final s = page.summary;
-          return Column(
-            children: [
-              if (s != null) ...[
-                Wrap(
-                  spacing: PosSpacing.sm,
-                  runSpacing: PosSpacing.sm,
-                  children: [
-                    _chip(tr('Total in'), moneyFromCents(s.totalIn), c.successText),
-                    _chip(tr('Delivery in'), moneyFromCents(s.deliveryIn), c.text),
-                    _chip(tr('Pickup online in'), moneyFromCents(s.pickupOnlineIn), c.text),
-                    _chip(tr('Total out'), moneyFromCents(s.totalOut), c.dangerText),
-                  ],
-                ),
-                const SizedBox(height: PosSpacing.md),
-              ],
-              if (page.items.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(PosSpacing.lg),
-                  child: Text(tr('No transactions'), style: PosType.caption.copyWith(color: c.textMuted)),
-                )
-              else
-                for (final t in page.items)
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.border.withValues(alpha: 0.5)))),
-                    child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Full-width segmented filter in the indigo capsule style used on Orders.
+          CapsuleTabs<String?>(
+            items: [
+              CapsuleTabItem(value: null, label: tr('All'), icon: Icons.swap_vert_rounded),
+              CapsuleTabItem(value: 'IN', label: tr('In'), icon: Icons.south_west_rounded),
+              CapsuleTabItem(value: 'OUT', label: tr('Out'), icon: Icons.north_east_rounded),
+            ],
+            selected: _direction,
+            onSelect: (v) {
+              setState(() => _direction = v);
+              _page = 1;
+              _rows.load();
+            },
+          ),
+          const SizedBox(height: PosSpacing.md),
+          LoadableBuilder(
+            value: _rows,
+            builder: (context, page) {
+              final s = page.summary;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (s != null) ...[
+                    // Equal tiles: 2 per row on phones, 4 on wide screens.
+                    KpiGrid(
+                      minTile: 150,
                       children: [
-                        Icon(
-                          t.isIn ? Icons.south_west_rounded : Icons.north_east_rounded,
-                          size: 18,
-                          color: t.isIn ? c.successText : c.dangerText,
-                        ),
-                        const SizedBox(width: PosSpacing.sm),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                t.description ?? t.type.replaceAll('_', ' '),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: PosType.body.copyWith(color: c.text, fontSize: 13),
-                              ),
-                              Text(
-                                [formatShortDateTime(t.createdAt), t.type.replaceAll('_', ' '), ?t.reference].join(' · '),
-                                style: PosType.caption.copyWith(color: c.textMuted, fontSize: 11),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Text(
-                          '${t.isIn ? '+' : '−'}${moneyFromCents(t.amountCents)}',
-                          style: PosType.bodyStrong.copyWith(
-                            color: t.isIn ? c.successText : c.dangerText,
-                            fontSize: 12.5,
-                            fontFeatures: PosType.tabular,
-                          ),
-                        ),
+                        _SummaryTile(label: tr('Total in'), value: moneyFromCents(s.totalIn), icon: Icons.south_west_rounded, color: c.successText),
+                        _SummaryTile(label: tr('Delivery in'), value: moneyFromCents(s.deliveryIn), icon: Icons.delivery_dining_rounded, color: c.brand),
+                        _SummaryTile(label: tr('Pickup online in'), value: moneyFromCents(s.pickupOnlineIn), icon: Icons.shopping_bag_outlined, color: PosColors.channelPickupCash),
+                        _SummaryTile(label: tr('Total out'), value: moneyFromCents(s.totalOut), icon: Icons.north_east_rounded, color: c.dangerText),
                       ],
                     ),
+                    const SizedBox(height: PosSpacing.md),
+                  ],
+                  if (page.items.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: PosSpacing.xl),
+                      child: Column(
+                        children: [
+                          Icon(Icons.receipt_long_outlined, size: 28, color: c.textSoft),
+                          const SizedBox(height: 6),
+                          Text(tr('No transactions'), style: PosType.caption.copyWith(color: c.textMuted)),
+                        ],
+                      ),
+                    )
+                  else
+                    for (final (i, t) in page.items.indexed) _TxnRow(txn: t, divider: i > 0),
+                  Pager(
+                    page: _page,
+                    pages: page.pages,
+                    onPage: (p) {
+                      _page = p;
+                      _rows.load();
+                    },
                   ),
-              Pager(
-                page: _page,
-                pages: page.pages,
-                onPage: (p) {
-                  _page = p;
-                  _rows.load();
-                },
-              ),
-            ],
-          );
-        },
+                ],
+              );
+            },
+          ),
+        ],
       ),
     );
   }
+}
 
-  Widget _chip(String label, String value, Color color) {
+/// Wallet total: tinted icon chip, muted label, amount in the tile colour.
+class _SummaryTile extends StatelessWidget {
+  const _SummaryTile({required this.label, required this.value, required this.icon, required this.color});
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
     final c = context.pos;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(PosRadius.sm)),
+      padding: const EdgeInsets.all(PosSpacing.md),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(PosRadius.button + 2),
+        border: Border.all(color: c.border.withValues(alpha: 0.6)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: PosType.caption.copyWith(color: c.textMuted, fontSize: 10.5)),
-          Text(value, style: PosType.bodyStrong.copyWith(color: color, fontSize: 12.5)),
+          Row(
+            children: [
+              Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
+                child: Icon(icon, size: 15, color: color),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: PosType.caption.copyWith(color: c.textMuted, fontSize: 11.5, height: 1.2),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: PosSpacing.sm),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(value, style: PosType.amount.copyWith(color: color, fontSize: 16)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One ledger line: direction chip, description, meta line, signed amount.
+class _TxnRow extends StatelessWidget {
+  const _TxnRow({required this.txn, required this.divider});
+  final WalletTxn txn;
+  final bool divider;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.pos;
+    final t = txn;
+    final color = t.isIn ? c.successText : c.dangerText;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        border: divider ? Border(top: BorderSide(color: c.border.withValues(alpha: 0.5))) : null,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
+            child: Icon(t.isIn ? Icons.south_west_rounded : Icons.north_east_rounded, size: 18, color: color),
+          ),
+          const SizedBox(width: PosSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  t.description ?? t.type.replaceAll('_', ' '),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: PosType.bodyStrong.copyWith(color: c.text, fontSize: 13),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  [formatShortDateTime(t.createdAt), t.type.replaceAll('_', ' '), ?t.reference].join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: PosType.caption.copyWith(color: c.textMuted, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: PosSpacing.sm),
+          Text(
+            '${t.isIn ? '+' : '−'}${moneyFromCents(t.amountCents)}',
+            style: PosType.bodyStrong.copyWith(color: color, fontSize: 13, fontFeatures: PosType.tabular),
+          ),
         ],
       ),
     );

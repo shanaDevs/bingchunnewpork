@@ -4,6 +4,9 @@ import '../../l10n/l10n.dart';
 import '../theme/pos_theme.dart';
 import 'buttons.dart';
 
+/// Loading state used on every page: the brand mascot in a white disc, ringed by
+/// a brand spinner on a soft track, with an optional centred message. In tight
+/// spaces (cards, list rows) it drops to the ring alone.
 class LoadingView extends StatelessWidget {
   const LoadingView({super.key, this.message});
   final String? message;
@@ -11,20 +14,71 @@ class LoadingView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.pos;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(PosSpacing.xxl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    return LayoutBuilder(
+      builder: (context, box) {
+        final compact = box.maxHeight < 150 && message == null;
+        final ring = compact ? 34.0 : 64.0;
+        final mark = Stack(
+          alignment: Alignment.center,
           children: [
-            SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 3, color: c.brand)),
-            if (message != null) ...[
-              const SizedBox(height: PosSpacing.md),
-              Text(message!, style: PosType.body.copyWith(color: c.textMuted)),
-            ],
+            Container(
+              width: ring,
+              height: ring,
+              decoration: BoxDecoration(
+                color: c.card,
+                shape: BoxShape.circle,
+                boxShadow: compact || c.cardShadow.a == 0
+                    ? null
+                    : [BoxShadow(color: c.brand.withValues(alpha: 0.18), blurRadius: 18, offset: const Offset(0, 6))],
+              ),
+            ),
+            SizedBox(
+              width: ring,
+              height: ring,
+              child: CircularProgressIndicator(
+                strokeWidth: compact ? 3 : 3.5,
+                strokeCap: StrokeCap.round,
+                color: c.brand,
+                backgroundColor: c.brandSubtle,
+              ),
+            ),
+            if (!compact)
+              SizedBox(
+                width: ring - 24,
+                height: ring - 24,
+                child: Image.asset('assets/images/logo.png', fit: BoxFit.contain),
+              ),
           ],
-        ),
-      ),
+        );
+        return Center(
+          child: Padding(
+            padding: EdgeInsets.all(compact ? PosSpacing.sm : PosSpacing.xl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                mark,
+                if (message != null) ...[
+                  const SizedBox(height: PosSpacing.lg),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 300),
+                    child: Text(
+                      message!,
+                      textAlign: TextAlign.center,
+                      style: PosType.bodyStrong.copyWith(color: c.text, fontSize: 13.5),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    tr('Please wait'),
+                    textAlign: TextAlign.center,
+                    style: PosType.caption.copyWith(color: c.textMuted),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
