@@ -32,8 +32,8 @@ export function ensureWithdrawalSchema(): Promise<void> {
 }
 
 async function runEnsureWithdrawalSchema(): Promise<void> {
-  await addColumnIfMissing('store_wallets', 'totalEarnings', 'INT NOT NULL DEFAULT 0');
-  await addColumnIfMissing('store_wallets', 'totalWithdrawn', 'INT NOT NULL DEFAULT 0');
+  await addColumnIfMissing('store_wallets', 'totalEarnings', 'DECIMAL(20,4) NOT NULL DEFAULT 0');
+  await addColumnIfMissing('store_wallets', 'totalWithdrawn', 'DECIMAL(20,4) NOT NULL DEFAULT 0');
   await addColumnIfMissing('store_withdrawals', 'paymentMethod', "ENUM('BANK_TRANSFER', 'CASH') NULL");
   await addColumnIfMissing('store_withdrawals', 'proofUrl', 'TEXT NULL');
   await addColumnIfMissing('store_withdrawals', 'invoiceRef', 'VARCHAR(191) NULL');

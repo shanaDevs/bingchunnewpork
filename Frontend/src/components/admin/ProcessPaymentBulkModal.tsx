@@ -15,53 +15,33 @@ import {
   ChevronUp,
   ClipboardList,
   Loader2,
-  Lock,
   Upload,
-  Wallet,
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import PlatformProviderReceivable from '@/components/admin/PlatformProviderReceivable';
-import type { PlatformProviderReceivableLkr } from '@bingchun/settlement';
 import SettlementStatementView from '@/components/admin/SettlementStatementView';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   SETTLEMENT_PAYMENT_METHOD_OPTIONS,
-  parseWithdrawalBreakdown,
-  withdrawalBreakdownToLkr,
   type SettlementPaymentMethodKey,
   type SettlementStatement,
 } from '@/components/admin/settlementTypes';
 import { formatMoney } from '@/lib/receipt';
-import {
-  formatBiweeklyPeriodLabel,
-  generateMonthlyPeriods,
-  parsePeriodValue,
-  periodValueKey,
-} from '@/lib/biweeklyPeriods';
+import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
 import { formatBranchName } from '@/lib/deliveryDisplay';
 import {
-  fetchPaymentHistoryPendingAll,
-  paymentHistoryPendingAllQueryKey,
-  type PendingAllBranchRow as PendingBranchRow,
-  type PendingAllUnsettledWithdrawal as UnsettledWithdrawalItem,
-} from '@/lib/paymentHistoryPendingAll';
+  fetchReadyToProcessMonthDetail,
+  fetchReadyToProcessMonths,
+  readyToProcessMonthDetailQueryKey,
+  readyToProcessMonthsQueryKey,
+  type ReadyToProcessBranchRow,
+  type ReadyToProcessMonthRow,
+} from '@/lib/readyToProcess';
 import { confirmDialog } from '@/store/confirmStore';
 import { hasWithdrawalInvoice } from '@/components/admin/settlementTypes';
 import { openWithdrawalInvoice } from '@/lib/adminProtectedFile';
-
-type PayoutRequestRow = {
-  withdrawal: UnsettledWithdrawalItem;
-  storeId: string;
-  storeName: string;
-  hasOverlap: boolean;
-  dartCodesReceives: number;
-  netCommissionReceivable: number;
-  netConvenienceFeeReceivable: number;
-  netRefundConvenienceFeeReceivable: number;
-  orderCount: number;
-  selectable: boolean;
-};
+import PlatformProviderReceivable from '@/components/admin/PlatformProviderReceivable';
+import type { PlatformProviderReceivableLkr } from '@bingchun/settlement';
 
 type BulkResult = {
   storeId: string;
@@ -76,139 +56,28 @@ type BulkResult = {
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** Initial range when the modal opens (from payment history page). */
   periodFrom: string;
   periodTo: string;
   onCompleted: () => void;
 };
-
-type PayoutTab = 'ready' | 'pending' | 'payout-required';
-
-function formatPeriodLabel(from: string, to: string) {
-  return formatBiweeklyPeriodLabel(from, to);
-}
 
 function formatWithdrawalPeriod(from: string | null, to: string | null): string {
   if (!from || !to) return 'Period not set';
   return formatBiweeklyPeriodLabel(from, to);
 }
 
-function branchReceivableExpandKey(storeId: string) {
-  return `branch:${storeId}`;
-}
-
-function extractPlatformProviderReceivableLkr(
-  withdrawal: UnsettledWithdrawalItem,
-): PlatformProviderReceivableLkr | null {
-  if (withdrawal.platformProviderReceivable?.lkr) {
-    return withdrawal.platformProviderReceivable.lkr;
-  }
-  const raw = withdrawal.breakdown as {
-    platformProviderReceivable?: { lkr?: PlatformProviderReceivableLkr };
-  } | null;
-  return raw?.platformProviderReceivable?.lkr ?? null;
-}
-
-function computeRequestAmounts(withdrawal: UnsettledWithdrawalItem): {
-  dartCodesReceives: number;
-  netCommissionReceivable: number;
-  netConvenienceFeeReceivable: number;
-  netRefundConvenienceFeeReceivable: number;
-  orderCount: number;
-} {
-  const receivableLkr = extractPlatformProviderReceivableLkr(withdrawal);
-  if (receivableLkr) {
-    const breakdown = parseWithdrawalBreakdown(withdrawal.breakdown);
-    return {
-      dartCodesReceives:
-        withdrawal.dartCodesReceives ?? receivableLkr.totalPlatformProviderReceivableLkr,
-      netCommissionReceivable: receivableLkr.netPlatformCommissionLkr,
-      netConvenienceFeeReceivable: receivableLkr.normalConvenienceFeeLkr,
-      netRefundConvenienceFeeReceivable:
-        receivableLkr.completedRefundConvenienceFeeLkr +
-        receivableLkr.rejectedRefundConvenienceFeeLkr,
-      orderCount: breakdown ? withdrawalBreakdownToLkr(breakdown).orderCount : 0,
-    };
-  }
-
-  const breakdown = parseWithdrawalBreakdown(withdrawal.breakdown);
-  if (!breakdown) {
-    return {
-      dartCodesReceives: withdrawal.dartCodesReceives ?? withdrawal.amountLkr,
-      netCommissionReceivable: withdrawal.amountLkr,
-      netConvenienceFeeReceivable: 0,
-      netRefundConvenienceFeeReceivable: 0,
-      orderCount: 0,
-    };
-  }
-
-  const lkr = withdrawalBreakdownToLkr(breakdown);
-  return {
-    dartCodesReceives: withdrawal.dartCodesReceives ?? withdrawal.amountLkr,
-    netCommissionReceivable: lkr.commissionFee,
-    netConvenienceFeeReceivable: lkr.convenienceFee ?? 0,
-    netRefundConvenienceFeeReceivable: (lkr.refundConvenienceFee ?? 0) + (lkr.rejectedRefundConvenienceFee ?? 0),
-    orderCount: lkr.orderCount,
-  };
-}
-
-function buildPayoutRequestRows(rows: PendingBranchRow[]): PayoutRequestRow[] {
-  const result: PayoutRequestRow[] = [];
-
-  for (const row of rows) {
-    if (row.hasOverlap) continue;
-
-    for (const withdrawal of row.unsettledWithdrawals) {
-      const amounts = computeRequestAmounts(withdrawal);
-      result.push({
-        withdrawal,
-        storeId: row.storeId,
-        storeName: row.storeName,
-        hasOverlap: row.hasOverlap,
-        dartCodesReceives: amounts.dartCodesReceives,
-        netCommissionReceivable: amounts.netCommissionReceivable,
-        netConvenienceFeeReceivable: amounts.netConvenienceFeeReceivable,
-        netRefundConvenienceFeeReceivable: amounts.netRefundConvenienceFeeReceivable,
-        orderCount: amounts.orderCount,
-        selectable: withdrawal.status === 'APPROVED',
-      });
-    }
-  }
-
-  return result;
-}
-
-function WithdrawalBreakdownPanel({ withdrawal }: { withdrawal: UnsettledWithdrawalItem }) {
-  const breakdown = parseWithdrawalBreakdown(withdrawal.breakdown);
-  const receivableLkr = extractPlatformProviderReceivableLkr(withdrawal);
-
-  if (!breakdown && !receivableLkr) {
-    return (
-      <p className="py-3 text-sm text-[var(--color-text-muted)]">
-        No payout breakdown snapshot was stored for this request.
-      </p>
-    );
-  }
-
-  if (receivableLkr) {
-    return (
-      <div>
-        <PlatformProviderReceivable breakdownLkr={receivableLkr} className="mb-0" />
-      </div>
-    );
-  }
-
-  return (
-    <p className="py-3 text-sm text-[var(--color-text-muted)]">
-      Platform provider receivable is not available for this legacy payout snapshot.
-    </p>
-  );
+function branchExpandKey(month: string, storeId: string) {
+  return `${month}:${storeId}`;
 }
 
 function PeriodReceivablePanel({
   receivableLkr,
+  paybackEnabled,
+  sharedPromoPlatformLkr,
 }: {
   receivableLkr: PlatformProviderReceivableLkr | null | undefined;
+  paybackEnabled: boolean;
+  sharedPromoPlatformLkr: number;
 }) {
   if (!receivableLkr) {
     return (
@@ -220,7 +89,12 @@ function PeriodReceivablePanel({
 
   return (
     <div>
-      <PlatformProviderReceivable breakdownLkr={receivableLkr} className="mb-0" />
+      <PlatformProviderReceivable
+        breakdownLkr={receivableLkr}
+        paybackEnabled={paybackEnabled}
+        sharedPromoPlatformLkr={sharedPromoPlatformLkr}
+        className="mb-0"
+      />
     </div>
   );
 }
@@ -232,13 +106,8 @@ type ProcessPaymentRequestTableRowProps = {
   remarks?: string | null;
   isExpanded?: boolean;
   onToggleReceivable?: () => void;
-  selection?: {
-    checked: boolean;
-    disabled?: boolean;
-    onChange: () => void;
-    ariaLabel: string;
-  };
   expandedContent?: ReactNode;
+  nested?: boolean;
 };
 
 function ProcessPaymentRequestTableRow({
@@ -248,14 +117,16 @@ function ProcessPaymentRequestTableRow({
   remarks,
   isExpanded = false,
   onToggleReceivable,
-  selection,
   expandedContent,
+  nested = false,
 }: ProcessPaymentRequestTableRowProps) {
   const isNegative = totalReceivableLkr < 0;
 
   return (
     <>
-      <tr className="process-payment-modal__request-tr">
+      <tr
+        className={`process-payment-modal__request-tr${nested ? ' process-payment-modal__request-tr--nested' : ''}`}
+      >
         <td className="process-payment-modal__request-td process-payment-modal__request-td--date">
           <span className="process-payment-modal__request-date">
             <CalendarRange size={13} className="shrink-0" aria-hidden />
@@ -279,16 +150,6 @@ function ProcessPaymentRequestTableRow({
         </td>
         <td className="process-payment-modal__request-td process-payment-modal__request-td--action">
           <div className="process-payment-modal__request-actions">
-            {selection && (
-              <input
-                type="checkbox"
-                checked={selection.checked}
-                disabled={selection.disabled}
-                onChange={selection.onChange}
-                className="process-payment-modal__request-checkbox"
-                aria-label={selection.ariaLabel}
-              />
-            )}
             {onToggleReceivable && (
               <button
                 type="button"
@@ -332,39 +193,74 @@ function ProcessPaymentRequestTable({ children }: { children: ReactNode }) {
   );
 }
 
+function MonthBranchBreakdown({
+  month,
+  branches,
+  expandedBranch,
+  setExpandedBranch,
+}: {
+  month: string;
+  branches: ReadyToProcessBranchRow[];
+  expandedBranch: Record<string, boolean>;
+  setExpandedBranch: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+}) {
+  return (
+    <div className="process-payment-modal__month-detail border-t border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/20 px-2 py-3">
+      <ProcessPaymentRequestTable>
+        {branches.map((branch) => {
+          const expandKey = branchExpandKey(month, branch.storeId);
+          const isExpanded = !!expandedBranch[expandKey];
+          const periodLabel =
+            branch.periods.length === 1
+              ? formatWithdrawalPeriod(branch.periods[0]!.periodFrom, branch.periods[0]!.periodTo)
+              : `${branch.periods.length} payout periods`;
+
+          return (
+            <ProcessPaymentRequestTableRow
+              key={branch.storeId}
+              nested
+              dateRangeText={periodLabel}
+              branchName={branch.storeName}
+              totalReceivableLkr={branch.totalReceivable}
+              isExpanded={isExpanded}
+              onToggleReceivable={() =>
+                setExpandedBranch((prev) => ({
+                  ...prev,
+                  [expandKey]: !prev[expandKey],
+                }))
+              }
+              expandedContent={
+                <PeriodReceivablePanel
+                  receivableLkr={branch.platformProviderReceivable.lkr}
+                  paybackEnabled={branch.platformDiscountPaybackEnabled}
+                  sharedPromoPlatformLkr={branch.sharedPromoPlatformLkr}
+                />
+              }
+            />
+          );
+        })}
+      </ProcessPaymentRequestTable>
+    </div>
+  );
+}
+
 function ProcessPaymentModalBodySkeleton() {
   return (
     <div aria-busy="true" aria-live="polite">
       <div className="process-payment-modal__summary-grid mb-5">
-        {[0, 1, 2].map((i) => (
+        {[0, 1].map((i) => (
           <div key={i} className="process-payment-modal__summary-card">
             <Skeleton className="size-10 shrink-0 rounded-xl bg-[var(--color-navy-light)]/50" />
             <div className="min-w-0 flex-1 space-y-2">
               <Skeleton className="h-3 w-24 bg-[var(--color-navy-light)]/50" />
               <Skeleton className="h-7 w-32 bg-[var(--color-navy-light)]/50" />
-              <Skeleton className="h-3 w-40 bg-[var(--color-navy-light)]/40" />
             </div>
           </div>
         ))}
       </div>
-
-      <div className="process-payment-modal__section-head">
-        <Skeleton className="h-4 w-36 bg-[var(--color-navy-light)]/50" />
-        <Skeleton className="mt-2 h-3 w-64 max-w-full bg-[var(--color-navy-light)]/40" />
-      </div>
-
-      <div className="process-payment-modal__tabs mb-4" aria-hidden>
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="process-payment-modal__tab pointer-events-none">
-            <Skeleton className="h-4 w-28 bg-[var(--color-navy-light)]/50" />
-            <Skeleton className="ml-2 h-5 w-6 rounded-full bg-[var(--color-navy-light)]/40" />
-          </div>
-        ))}
-      </div>
-
       <div className="process-payment-modal__request-table-wrap">
         <div className="space-y-0 p-3">
-          {[0, 1, 2, 3].map((i) => (
+          {[0, 1, 2].map((i) => (
             <div
               key={i}
               className="grid grid-cols-4 gap-3 border-b border-[var(--color-navy-border)] py-3 last:border-b-0"
@@ -384,26 +280,20 @@ function ProcessPaymentModalBodySkeleton() {
 export default function ProcessPaymentBulkModal({
   open,
   onClose,
-  periodFrom,
-  periodTo,
   onCompleted,
 }: Props) {
   const apiBase = getApiBaseUrl();
   const queryClient = useQueryClient();
-    const onCloseRef = useRef(onClose);
+  const onCloseRef = useRef(onClose);
 
   const [portalReady, setPortalReady] = useState(false);
-  const [rangeFrom, setRangeFrom] = useState(periodFrom);
-  const [rangeTo, setRangeTo] = useState(periodTo);
-  const [defaultRange, setDefaultRange] = useState({ from: periodFrom, to: periodTo });
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
+  const [expandedBranch, setExpandedBranch] = useState<Record<string, boolean>>({});
   const [paymentMethod, setPaymentMethod] = useState<SettlementPaymentMethodKey | ''>('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState<BulkResult[] | null>(null);
   const [statement, setStatement] = useState<SettlementStatement | null>(null);
-  const [activeTab, setActiveTab] = useState<PayoutTab>('ready');
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -427,166 +317,84 @@ export default function ProcessPaymentBulkModal({
     };
   }, [open, submitting]);
 
-  const rangeValid = !!rangeFrom && !!rangeTo && rangeFrom <= rangeTo;
-
   const {
-    data: pendingAllData,
+    data: months = [],
     isPending,
     isFetching,
     isError,
     error: queryError,
-    refetch,
-    dataUpdatedAt,
+    refetch: refetchMonths,
   } = useQuery({
-    queryKey: paymentHistoryPendingAllQueryKey(rangeFrom, rangeTo),
-    queryFn: () => fetchPaymentHistoryPendingAll(rangeFrom, rangeTo),
-    enabled: open && rangeValid,
+    queryKey: readyToProcessMonthsQueryKey(),
+    queryFn: fetchReadyToProcessMonths,
+    enabled: open,
     staleTime: 60_000,
   });
 
-  const rows = pendingAllData?.items ?? [];
-  const totalWalletRemaining = pendingAllData?.totalWalletRemaining ?? 0;
-  const loading =
-    open && rangeValid && (isPending || (isFetching && !pendingAllData));
+  const {
+    data: monthDetail,
+    isFetching: monthDetailFetching,
+    isError: monthDetailError,
+    error: monthDetailQueryError,
+  } = useQuery({
+    queryKey: readyToProcessMonthDetailQueryKey(expandedMonth ?? ''),
+    queryFn: () => fetchReadyToProcessMonthDetail(expandedMonth!),
+    enabled: open && !!expandedMonth,
+    staleTime: 60_000,
+  });
+
+  const loading = open && (isPending || (isFetching && months.length === 0));
   const loadError = isError
     ? queryError instanceof Error
       ? queryError.message
-      : 'Failed to load branches'
+      : 'Failed to load months'
     : '';
-
-  const periodLabel = useMemo(
-    () => formatPeriodLabel(rangeFrom, rangeTo),
-    [rangeFrom, rangeTo],
-  );
-
-  const periodOptions = useMemo(() => generateMonthlyPeriods(), []);
-
-  const rangeIsDefault =
-    rangeFrom === defaultRange.from && rangeTo === defaultRange.to;
-
-  const clearRange = useCallback(() => {
-    setRangeFrom(defaultRange.from);
-    setRangeTo(defaultRange.to);
-  }, [defaultRange.from, defaultRange.to]);
 
   useEffect(() => {
     if (!open) {
-      setExpanded({});
-      setSelected({});
+      setExpandedMonth(null);
+      setExpandedBranch({});
       setPaymentMethod('');
       setReceiptFile(null);
       setSubmitting(false);
       setResults(null);
-      return;
     }
-    const nextDefault = { from: periodFrom, to: periodTo };
-    setDefaultRange(nextDefault);
-    setRangeFrom(periodFrom);
-    setRangeTo(periodTo);
-    setResults(null);
-    setExpanded({});
-  }, [open, periodFrom, periodTo]);
+  }, [open]);
 
   useEffect(() => {
-    if (!open || loading || !pendingAllData) return;
-    // Show all unsettled PENDING/APPROVED requests (not period-scoped), so Ready/Pending
-    // are not emptied when withdrawal windows differ from the commission period.
-    const requestRows = buildPayoutRequestRows(
-      pendingAllData.items.filter((row) => !row.hasOverlap),
-    );
-    const initialSelected: Record<string, boolean> = {};
-    for (const row of requestRows) {
-      if (row.selectable) initialSelected[row.withdrawal.id] = true;
+    if (!monthDetail || monthDetail.month !== expandedMonth) return;
+    setExpandedBranch({});
+  }, [expandedMonth, monthDetail]);
+
+  const listTotalReceivable = useMemo(
+    () => months.reduce((sum, m) => sum + m.totalReceivable, 0),
+    [months],
+  );
+
+  /** All completed branch payout periods for the expanded month (included in one bulk submit). */
+  const monthPayoutItems = useMemo(() => {
+    if (!monthDetail) return [];
+    const items: Array<{ storeId: string; withdrawalId: string }> = [];
+    for (const branch of monthDetail.branches) {
+      for (const p of branch.periods) {
+        items.push({ storeId: branch.storeId, withdrawalId: p.withdrawalId });
+      }
     }
-    setSelected(initialSelected);
-  }, [open, loading, pendingAllData, rangeFrom, rangeTo, dataUpdatedAt]);
+    return items;
+  }, [monthDetail]);
 
-  const payoutRequestRows = useMemo(
-    () => buildPayoutRequestRows(rows),
-    [rows],
-  );
+  const monthTotalReceivable = monthDetail?.totalReceivable ?? 0;
 
-  const branchesAwaitingPayout = useMemo(
-    () =>
-      rows.filter((row) => {
-        if (row.hasOverlap) return false;
-        // Exclude stores that already have any unsettled PENDING/APPROVED request.
-        const unsettledRequests = row.unsettledWithdrawals.filter(
-          (w) => w.status === 'PENDING' || w.status === 'APPROVED',
-        );
-        return unsettledRequests.length === 0;
-      }),
-    [rows],
-  );
-
-  const selectableRows = useMemo(
-    () => payoutRequestRows.filter((row) => row.selectable),
-    [payoutRequestRows],
-  );
-  const pendingApprovalRows = useMemo(
-    () =>
-      payoutRequestRows.filter(
-        (row) => !row.selectable && row.withdrawal.status === 'PENDING',
-      ),
-    [payoutRequestRows],
-  );
-
-  const readyToProcessTotal = useMemo(
-    () => selectableRows.reduce((sum, row) => sum + row.dartCodesReceives, 0),
-    [selectableRows],
-  );
-
-  const hiddenSettledCount = useMemo(
-    () => rows.filter((row) => row.hasOverlap).length,
-    [rows],
-  );
-
-  const selectedItems = useMemo(
-    () =>
-      selectableRows
-        .filter((row) => selected[row.withdrawal.id])
-        .map((row) => ({
-          storeId: row.storeId,
-          withdrawalId: row.withdrawal.id,
-        })),
-    [selectableRows, selected],
-  );
-
-  const totalPendingAll = useMemo(
-    () => rows.reduce((sum, row) => sum + row.pendingDues, 0),
-    [rows],
-  );
-
-  useEffect(() => {
-    if (!open || loading) return;
-    if (selectableRows.length > 0) setActiveTab('ready');
-    else if (pendingApprovalRows.length > 0) setActiveTab('pending');
-    else if (branchesAwaitingPayout.length > 0) setActiveTab('payout-required');
-    else setActiveTab('ready');
-  }, [
-    open,
-    loading,
-    rangeFrom,
-    rangeTo,
-    selectableRows.length,
-    pendingApprovalRows.length,
-    branchesAwaitingPayout.length,
-  ]);
-
-  const selectedPeriodTotal = useMemo(
-    () =>
-      selectableRows
-        .filter((row) => selected[row.withdrawal.id])
-        .reduce((sum, row) => sum + row.dartCodesReceives, 0),
-    [selectableRows, selected],
-  );
-
-  const remainingAfterProcessing = Math.max(0, totalPendingAll - selectedPeriodTotal);
+  const expandedMonthLabel = useMemo(() => {
+    if (!expandedMonth) return '';
+    return months.find((m) => m.month === expandedMonth)?.label ?? expandedMonth;
+  }, [expandedMonth, months]);
 
   const openStatement = async (settlementId: string) => {
     try {
       const res = await fetch(`${apiBase}/admin/payment-history/settlements/${settlementId}`, {
-        headers: adminAuthHeaders(), credentials: 'include',
+        headers: adminAuthHeaders(),
+        credentials: 'include',
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || 'Failed to load statement');
@@ -597,6 +405,10 @@ export default function ProcessPaymentBulkModal({
   };
 
   const handleSubmit = async () => {
+    if (!expandedMonth || !monthDetail) {
+      toast.error('Expand a month to process payments');
+      return;
+    }
     if (!paymentMethod) {
       toast.error('Select a payment method');
       return;
@@ -605,14 +417,14 @@ export default function ProcessPaymentBulkModal({
       toast.error('Payment receipt proof is required');
       return;
     }
-    if (selectedItems.length === 0) {
-      toast.error('Select at least one approved payout request');
+    if (monthPayoutItems.length === 0) {
+      toast.error('No payout periods ready for this month');
       return;
     }
 
     const confirmed = await confirmDialog({
-      title: 'Process payments?',
-      message: `Settle commission for ${selectedItems.length} payout request(s) for ${periodLabel}?`,
+      title: 'Process monthly payment?',
+      message: `Submit platform provider payment for all ${monthDetail.branches.length} branch${monthDetail.branches.length !== 1 ? 'es' : ''} in ${expandedMonthLabel} (${formatMoney(monthTotalReceivable)} total)?`,
       confirmLabel: 'Yes, process',
       cancelLabel: 'Cancel',
     });
@@ -623,15 +435,14 @@ export default function ProcessPaymentBulkModal({
 
     try {
       const form = new FormData();
-      form.append('from', rangeFrom);
-      form.append('to', rangeTo);
       form.append('paymentMethod', paymentMethod);
-      form.append('items', JSON.stringify(selectedItems));
+      form.append('items', JSON.stringify(monthPayoutItems));
       form.append('receipt', receiptFile);
 
       const res = await fetch(`${apiBase}/admin/payment-history/settlement/bulk`, {
         method: 'POST',
-        headers: adminAuthHeaders(), credentials: 'include',
+        headers: adminAuthHeaders(),
+        credentials: 'include',
         body: form,
       });
       const json = await res.json();
@@ -645,16 +456,17 @@ export default function ProcessPaymentBulkModal({
       if (failCount === 0) {
         toast.success(`Processed ${successCount} settlement(s)`);
         onCompleted();
-        await queryClient.invalidateQueries({
-          queryKey: ['payment-history-pending-all'],
-        });
-        await refetch();
+        await queryClient.invalidateQueries({ queryKey: readyToProcessMonthsQueryKey() });
+        if (expandedMonth) {
+          await queryClient.invalidateQueries({
+            queryKey: readyToProcessMonthDetailQueryKey(expandedMonth),
+          });
+        }
+        await refetchMonths();
       } else {
         toast.error(`${successCount} succeeded, ${failCount} failed`);
         onCompleted();
-        await queryClient.invalidateQueries({
-          queryKey: ['payment-history-pending-all'],
-        });
+        await queryClient.invalidateQueries({ queryKey: readyToProcessMonthsQueryKey() });
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Processing failed');
@@ -663,7 +475,20 @@ export default function ProcessPaymentBulkModal({
     }
   };
 
+  const toggleMonth = useCallback((row: ReadyToProcessMonthRow) => {
+    setExpandedMonth((prev) => (prev === row.month ? null : row.month));
+    setResults(null);
+  }, []);
+
   if (!portalReady) return null;
+
+  const canSubmit =
+    !!expandedMonth &&
+    !!monthDetail &&
+    monthPayoutItems.length > 0 &&
+    !!paymentMethod &&
+    !!receiptFile &&
+    !submitting;
 
   return createPortal(
     <>
@@ -713,58 +538,6 @@ export default function ProcessPaymentBulkModal({
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-                  <div className="process-payment-modal__period-bar mb-5">
-                    <div className="process-payment-modal__period-label">
-                      <div className="process-payment-modal__period-icon" aria-hidden>
-                        <CalendarRange size={16} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-[var(--color-text-muted)]">
-                          Commission period
-                        </p>
-                        <p className="mt-0.5 text-sm font-medium text-[var(--color-text)]">
-                          {periodLabel}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="process-payment-modal__period-controls">
-                      <select
-                        id="process-payment-period"
-                        aria-label="Billing period"
-                        value={rangeFrom && rangeTo ? periodValueKey(rangeFrom, rangeTo) : ''}
-                        disabled={submitting}
-                        onChange={(e) => {
-                          const parsed = parsePeriodValue(e.target.value);
-                          if (!parsed) return;
-                          setRangeFrom(parsed.from);
-                          setRangeTo(parsed.to);
-                        }}
-                        className="process-payment-modal__period-select input-field !w-[14rem] !min-w-[14rem] shrink-0 px-3 py-2 text-sm"
-                      >
-                        <option value="">Select period…</option>
-                        {periodOptions.map((period) => (
-                          <option
-                            key={period.from}
-                            value={periodValueKey(period.from, period.to)}
-                          >
-                            {period.label}
-                          </option>
-                        ))}
-                      </select>
-                      {loading && (
-                        <Skeleton className="size-4 shrink-0 rounded-full bg-[var(--color-navy-light)]/50" />
-                      )}
-                      <button
-                        type="button"
-                        onClick={clearRange}
-                        disabled={submitting || loading || rangeIsDefault}
-                        className="process-payment-modal__period-clear payment-history-header__btn payment-history-header__btn--ghost shrink-0 whitespace-nowrap disabled:opacity-40"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-
                   {loadError && (
                     <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
                       <AlertCircle size={16} className="mt-0.5 shrink-0" />
@@ -776,29 +549,6 @@ export default function ProcessPaymentBulkModal({
 
                   {!loading && !loadError && (
                     <div className="process-payment-modal__summary-grid mb-5">
-                      <div className="process-payment-modal__summary-card process-payment-modal__summary-card--amber">
-                        <div className="process-payment-modal__summary-icon" aria-hidden>
-                          <ClipboardList size={18} />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                            Total Outstanding
-                          </p>
-                          <p className="mt-1 text-xl font-bold tabular-nums text-[var(--color-text)]">
-                            {formatMoney(selectedPeriodTotal > 0 ? remainingAfterProcessing : totalPendingAll)}
-                          </p>
-                          <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                            {selectedPeriodTotal > 0
-                              ? 'Outstanding after settling selected branches'
-                              : 'Across all branches'}
-                            {selectedPeriodTotal > 0 && (
-                              <span className="mt-0.5 block text-emerald-400/80">
-                                − {formatMoney(selectedPeriodTotal)} from selection
-                              </span>
-                            )}
-                          </p>
-                        </div>
-                      </div>
                       <div className="process-payment-modal__summary-card process-payment-modal__summary-card--green">
                         <div className="process-payment-modal__summary-icon" aria-hidden>
                           <CheckCircle2 size={18} />
@@ -808,248 +558,91 @@ export default function ProcessPaymentBulkModal({
                             Ready to Process
                           </p>
                           <p className="mt-1 text-xl font-bold tabular-nums text-[var(--color-text)]">
-                            {formatMoney(readyToProcessTotal)}
+                            {formatMoney(listTotalReceivable)}
                           </p>
                           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                            {selectableRows.length} approved request
-                            {selectableRows.length !== 1 ? 's' : ''}
+                            {months.length} month{months.length !== 1 ? 's' : ''} with completed branch
+                            payouts
                           </p>
                         </div>
                       </div>
-                      <div className="process-payment-modal__summary-card process-payment-modal__summary-card--blue">
-                        <div className="process-payment-modal__summary-icon" aria-hidden>
-                          <Wallet size={18} />
+                      {expandedMonth && monthDetail && (
+                        <div className="process-payment-modal__summary-card process-payment-modal__summary-card--amber">
+                          <div className="process-payment-modal__summary-icon" aria-hidden>
+                            <ClipboardList size={18} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                              {expandedMonthLabel}
+                            </p>
+                            <p className="mt-1 text-xl font-bold tabular-nums text-[var(--color-text)]">
+                              {formatMoney(monthTotalReceivable)}
+                            </p>
+                            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                              All branches included in this payment
+                            </p>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                            Wallet Available
-                          </p>
-                          <p className="mt-1 text-xl font-bold tabular-nums text-[var(--color-text)]">
-                            {formatMoney(totalWalletRemaining)}
-                          </p>
-                          <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                            Available after payouts
-                          </p>
-                        </div>
-                      </div>
+                      )}
                     </div>
-                  )}
-
-                  {!loading && hiddenSettledCount > 0 && (
-                    <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-                      {hiddenSettledCount} branch(es) already settled for this period — hidden.
-                    </p>
                   )}
 
                   {!loading && (
                     <div className="process-payment-modal__section-head">
-                      <h3 className="process-payment-modal__section-title">Payout requests</h3>
+                      <h3 className="process-payment-modal__section-title">Ready to process</h3>
                       <p className="process-payment-modal__section-subtitle">
-                        Requests are grouped by their next required action.
+                        Monthly totals from branches with completed payout periods. Expand a month to
+                        review branch breakdowns and process the full month in one payment.
                       </p>
                     </div>
                   )}
 
-                  {!loading && (
-                    <div className="process-payment-modal__tabs mb-4" role="tablist" aria-label="Payout request groups">
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={activeTab === 'ready'}
-                        className={`process-payment-modal__tab${activeTab === 'ready' ? ' process-payment-modal__tab--active' : ''}`}
-                        onClick={() => setActiveTab('ready')}
-                      >
-                        Ready to process
-                        <span className="process-payment-modal__tab-badge">{selectableRows.length}</span>
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={activeTab === 'pending'}
-                        className={`process-payment-modal__tab${activeTab === 'pending' ? ' process-payment-modal__tab--active' : ''}`}
-                        onClick={() => setActiveTab('pending')}
-                      >
-                        Pending approval
-                        <span className="process-payment-modal__tab-badge">{pendingApprovalRows.length}</span>
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={activeTab === 'payout-required'}
-                        className={`process-payment-modal__tab${activeTab === 'payout-required' ? ' process-payment-modal__tab--active' : ''}`}
-                        onClick={() => setActiveTab('payout-required')}
-                      >
-                        Payout required first
-                        <span className="process-payment-modal__tab-badge">{branchesAwaitingPayout.length}</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {!loading && activeTab === 'ready' && selectableRows.length > 0 && (
-                    <div className="mb-4 flex gap-3 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next: Record<string, boolean> = {};
-                          for (const row of selectableRows) next[row.withdrawal.id] = true;
-                          setSelected(next);
-                        }}
-                        disabled={selectableRows.length === 0}
-                        className="font-semibold text-[var(--color-brand)] hover:underline disabled:opacity-40"
-                      >
-                        Select all approved
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSelected({})}
-                        className="font-semibold text-[var(--color-text-muted)] hover:underline"
-                      >
-                        Deselect all
-                      </button>
-                    </div>
-                  )}
-
-                  {!loading &&
-                    activeTab === 'ready' &&
-                    selectableRows.length === 0 &&
-                    !loadError && (
+                  {!loading && months.length === 0 && !loadError && (
                     <div className="rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/30 px-6 py-12 text-center">
                       <p className="text-sm font-medium text-[var(--color-text)]">
-                        No approved payout requests
+                        Nothing ready to process
                       </p>
                       <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-                        Approved requests for {periodLabel} will appear here when branches are ready
-                        to settle.
-                        {hiddenSettledCount > 0
-                          ? ` ${hiddenSettledCount} branch(es) already settled for this period.`
-                          : ''}
+                        Months appear here after branch payout periods are approved and platform
+                        commission is still outstanding.
                       </p>
                     </div>
                   )}
 
-                  {!loading &&
-                    activeTab === 'pending' &&
-                    pendingApprovalRows.length === 0 &&
-                    !loadError && (
-                    <div className="rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/30 px-6 py-12 text-center">
-                      <p className="text-sm font-medium text-[var(--color-text)]">
-                        No pending payout requests
-                      </p>
-                      <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-                        Branch payout requests awaiting approval will appear here.
-                      </p>
-                    </div>
-                  )}
-
-                  {!loading &&
-                    activeTab === 'payout-required' &&
-                    branchesAwaitingPayout.length === 0 &&
-                    !loadError && (
-                    <div className="rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/30 px-6 py-12 text-center">
-                      <p className="text-sm font-medium text-[var(--color-text)]">
-                        No branches awaiting payout submission
-                      </p>
-                      <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-                        Branches with commission due but no payout request will appear here.
-                      </p>
-                    </div>
-                  )}
-
-                  {!loading && activeTab === 'payout-required' && branchesAwaitingPayout.length > 0 && (
+                  {!loading && months.length > 0 && (
                     <ProcessPaymentRequestTable>
-                      {branchesAwaitingPayout.map((row) => {
-                        const expandKey = branchReceivableExpandKey(row.storeId);
-                        const isExpanded = !!expanded[expandKey];
-
+                      {months.map((row) => {
+                        const isExpanded = expandedMonth === row.month;
                         return (
                           <ProcessPaymentRequestTableRow
-                            key={row.storeId}
-                            dateRangeText={periodLabel}
-                            branchName={row.storeName}
-                            totalReceivableLkr={row.dartCodesReceives ?? row.periodCommission}
-                            isExpanded={isExpanded}
-                            onToggleReceivable={() =>
-                              setExpanded((prev) => ({
-                                ...prev,
-                                [expandKey]: !prev[expandKey],
-                              }))
-                            }
-                            expandedContent={
-                              <PeriodReceivablePanel
-                                receivableLkr={row.platformProviderReceivable?.lkr}
-                              />
-                            }
-                          />
-                        );
-                      })}
-                    </ProcessPaymentRequestTable>
-                  )}
-
-                  {!loading && activeTab === 'pending' && pendingApprovalRows.length > 0 && (
-                    <ProcessPaymentRequestTable>
-                      {pendingApprovalRows.map((row) => {
-                        const { withdrawal } = row;
-                        const isExpanded = !!expanded[withdrawal.id];
-
-                        return (
-                          <ProcessPaymentRequestTableRow
-                            key={withdrawal.id}
-                            dateRangeText={formatWithdrawalPeriod(
-                              withdrawal.periodFrom,
-                              withdrawal.periodTo,
-                            )}
-                            branchName={row.storeName}
-                            totalReceivableLkr={row.dartCodesReceives}
-                            remarks={withdrawal.remarks}
-                            isExpanded={isExpanded}
-                            onToggleReceivable={() =>
-                              setExpanded((prev) => ({
-                                ...prev,
-                                [withdrawal.id]: !prev[withdrawal.id],
-                              }))
-                            }
-                            expandedContent={<WithdrawalBreakdownPanel withdrawal={withdrawal} />}
-                          />
-                        );
-                      })}
-                    </ProcessPaymentRequestTable>
-                  )}
-
-                  {!loading && activeTab === 'ready' && selectableRows.length > 0 && (
-                    <ProcessPaymentRequestTable>
-                      {selectableRows.map((row) => {
-                        const { withdrawal } = row;
-                        const isExpanded = !!expanded[withdrawal.id];
-
-                        return (
-                          <ProcessPaymentRequestTableRow
-                            key={withdrawal.id}
-                            dateRangeText={formatWithdrawalPeriod(
-                              withdrawal.periodFrom,
-                              withdrawal.periodTo,
-                            )}
-                            branchName={row.storeName}
-                            totalReceivableLkr={row.dartCodesReceives}
-                            remarks={withdrawal.remarks}
-                            isExpanded={isExpanded}
-                            onToggleReceivable={() =>
-                              setExpanded((prev) => ({
-                                ...prev,
-                                [withdrawal.id]: !prev[withdrawal.id],
-                              }))
-                            }
-                            selection={{
-                              checked: !!selected[withdrawal.id],
-                              disabled: submitting,
-                              onChange: () =>
-                                setSelected((prev) => ({
-                                  ...prev,
-                                  [withdrawal.id]: !prev[withdrawal.id],
-                                })),
-                              ariaLabel: `Select ${formatBranchName(row.storeName)} for settlement`,
-                            }}
-                            expandedContent={<WithdrawalBreakdownPanel withdrawal={withdrawal} />}
-                          />
+                            key={row.month}
+                              dateRangeText={row.label}
+                              branchName={`${row.branchCount} branch${row.branchCount !== 1 ? 'es' : ''}`}
+                              totalReceivableLkr={row.totalReceivable}
+                              isExpanded={isExpanded}
+                              onToggleReceivable={() => toggleMonth(row)}
+                              expandedContent={
+                                monthDetailFetching && isExpanded ? (
+                                  <div className="py-6 text-center text-sm text-[var(--color-text-muted)]">
+                                    <Loader2 className="mx-auto mb-2 size-5 animate-spin" />
+                                    Loading branch breakdown…
+                                  </div>
+                                ) : monthDetailError && isExpanded ? (
+                                  <p className="py-3 text-sm text-red-400">
+                                    {monthDetailQueryError instanceof Error
+                                      ? monthDetailQueryError.message
+                                      : 'Failed to load breakdown'}
+                                  </p>
+                                ) : monthDetail && isExpanded ? (
+                                  <MonthBranchBreakdown
+                                    month={row.month}
+                                    branches={monthDetail.branches}
+                                    expandedBranch={expandedBranch}
+                                    setExpandedBranch={setExpandedBranch}
+                                  />
+                                ) : null
+                              }
+                            />
                         );
                       })}
                     </ProcessPaymentRequestTable>
@@ -1063,7 +656,7 @@ export default function ProcessPaymentBulkModal({
                       <div className="divide-y divide-[var(--color-navy-border)]">
                         {results.map((result) => (
                           <div
-                            key={result.storeId}
+                            key={`${result.storeId}-${result.statementRef ?? result.error}`}
                             className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"
                           >
                             <div>
@@ -1109,23 +702,10 @@ export default function ProcessPaymentBulkModal({
 
                 <div className="border-t border-[var(--color-navy-border)] px-6 py-5">
                   <div className="process-payment-modal__footer">
-                    {activeTab !== 'ready' ? (
-                      <div className="process-payment-modal__footer-lock">
-                        <span className="process-payment-modal__footer-lock-icon" aria-hidden>
-                          <Lock size={14} />
-                        </span>
-                        <span>
-                          Payment controls are available only in{' '}
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab('ready')}
-                            className="font-semibold text-[var(--color-brand)] hover:underline"
-                          >
-                            Ready to process
-                          </button>
-                          .
-                        </span>
-                      </div>
+                    {!expandedMonth ? (
+                      <p className="text-xs text-[var(--color-text-muted)]">
+                        Expand a month above to enter payment details and process settlements.
+                      </p>
                     ) : (
                       <div className="process-payment-modal__footer-controls">
                         <div className="min-w-[140px] flex-1">
@@ -1181,13 +761,7 @@ export default function ProcessPaymentBulkModal({
                       </button>
                       <button
                         type="button"
-                        disabled={
-                          submitting ||
-                          activeTab !== 'ready' ||
-                          selectedItems.length === 0 ||
-                          !paymentMethod ||
-                          !receiptFile
-                        }
+                        disabled={!canSubmit}
                         onClick={handleSubmit}
                         className="payment-history-header__btn payment-history-header__btn--primary inline-flex items-center gap-2 disabled:opacity-50"
                       >
@@ -1197,7 +771,7 @@ export default function ProcessPaymentBulkModal({
                             Processing…
                           </>
                         ) : (
-                          `Process ${selectedItems.length || 0} payment${selectedItems.length !== 1 ? 's' : ''}`
+                          'Process monthly payment'
                         )}
                       </button>
                     </div>

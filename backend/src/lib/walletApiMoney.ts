@@ -31,6 +31,7 @@ export function serializeEnrichedWalletRow<T extends StoreWallet>(
     netTransferableEarnings: number;
     currentBalance: number;
     availableBalance: number;
+    allTimeAvailableBalanceCents?: number;
     _count?: { transactions: number };
     store?: T extends { store: infer S } ? S : unknown;
   },
@@ -41,6 +42,9 @@ export function serializeEnrichedWalletRow<T extends StoreWallet>(
     store: (wallet as { store?: unknown }).store ?? extras.store,
     netTransferableEarnings: String(extras.netTransferableEarnings),
     availableBalance: String(extras.availableBalance),
+    ...(extras.allTimeAvailableBalanceCents != null
+      ? { allTimeAvailableBalanceCents: String(extras.allTimeAvailableBalanceCents) }
+      : {}),
     _count: extras._count,
   };
 }

@@ -1,10 +1,29 @@
 {
   "host": "https://bingchun-delivery-6mgs2.ondigitalocean.app",
-  "checkedAt": "2026-10-30",
+  "checkedAt": "2026-11-02T06:40+0530",
   "findings": {
-    "GET /delivery-api/admin/health": { "status": 400, "body": "Transport unknown (Engine.IO)" },
-    "GET /health": { "status": 404, "note": "hits delivery-web Next.js, no route" },
-    "GET /delivery-api/admin/drivers": { "status": 400, "body": "Transport unknown", "via": "delivery-web proxy" }
+    "deliveryProxyAdminHealth": {
+      "url": "GET /api/admin/health",
+      "status": 401,
+      "note": "JSON from admin-api — delivery-web /api proxy reaches admin-api (auth required)"
+    },
+    "adminRootHealth": {
+      "url": "GET https://bingchun-admin-a4ndy.ondigitalocean.app/health",
+      "note": "Returns admin-web Next payload on live app — use /api/health/spaces for admin-api probes after deploy"
+    },
+    "browserDriversUrl": "/api/admin/drivers on delivery host causes double-proxy multipart; runtime ADMIN_WEB_URL injection + buffered proxy fix in repo"
   },
-  "likelyCause": "Ingress routed /socket.io to delivery-service; /delivery-api proxied via Next to private URL but upstream returned Engine.IO errors. Fix: route /delivery-api to delivery component; route /socket.io via delivery-web rewrite to shop; point client sockets at shop origin."
+  "uploadFailures": {
+    "pattern": "multipart + DO Spaces PutObject on admin-api",
+    "affected": [
+      "POST /api/admin/drivers",
+      "POST /api/admin/wallet/:storeId/initiate-payout"
+    ],
+    "verifyAfterDeploy": "node deploy/digitalocean/diagnose-upload-health.cjs"
+  },
+  "fixAppliedInRepo": [
+    "delivery-frontend: runtime __BC_ADMIN_API_BASE__, clear same-origin override, multipart buffer in runtimeProxy, proxyTimeout 180s",
+    "backend: S3 client timeouts, GET /api/health/spaces, createDriver presign timeout",
+    "deploy: DO_SPACES_* in app.admin.yaml, apply-admin-app-spec.cjs, diagnose-upload-health.cjs"
+  ]
 }

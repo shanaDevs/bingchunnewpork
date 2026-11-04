@@ -109,7 +109,33 @@ describe('buildPlatformSalesRows', () => {
 });
 
 describe('buildInvoiceSummaryRows', () => {
-  it('always includes online gross, payback, and net payout', () => {
+  it('matches the net branch payout section on page 2', () => {
+    const input = {
+      requestedCents: 500_000,
+      channelSummary: { onlineWalletGrossCents: 500_000 },
+      promoSummary: { platformPaybackCents: 10_000 },
+      payoutStatement: buildPayoutStatementFromBreakdown(
+        {
+          grossAmount: 500_000,
+          onlinePaymentsCollected: 500_000,
+          commissionFee: 50_000,
+          platformOwnedPromoDiscountTotal: 10_000,
+          sharedPromoPlatformContributionAmount: 15_400,
+          platformPaybackTotal: 10_000,
+        },
+        500_000,
+        true,
+      ),
+    } as GenerateWithdrawalInvoiceInput;
+
+    const summary = buildInvoiceSummaryRows(input);
+    const netBranch = buildPage2PayoutSections(input.payoutStatement!).find(
+      (s) => s.title === 'Net branch payout',
+    );
+    expect(summary).toEqual(netBranch?.rows);
+  });
+
+  it('ends with highlighted branch net payout from the locked statement', () => {
     const input = {
       requestedCents: 848548,
       channelSummary: { onlineWalletGrossCents: 53000 },
@@ -117,14 +143,9 @@ describe('buildInvoiceSummaryRows', () => {
     } as GenerateWithdrawalInvoiceInput;
 
     const rows = buildInvoiceSummaryRows(input);
-    expect(rows.map((row) => row.label)).toEqual([
-      'Online gross amount',
-      'Platform discount payback',
-      'Net payout amount',
-    ]);
-    expect(rows[0]?.amount).toBe('LKR 530.00');
-    expect(rows[1]?.amount).toBe('LKR 8,000.00');
-    expect(rows[2]).toMatchObject({
+    expect(rows[0]?.label).toBe('Online Wallet Amount');
+    expect(rows.at(-1)).toMatchObject({
+      label: 'Branch Net Payout',
       amount: 'LKR 8,485.48',
       bold: true,
       highlight: true,
@@ -174,10 +195,29 @@ describe('buildPayoutStatementFromBreakdown', () => {
     expect(statement.deliveryRefundsCents).toBe(50_000);
     expect(statement.totalRefundCents).toBe(544_000);
     expect(statement.platformDiscountsReportCents).toBe(413_800);
-    expect(statement.netPlatformAmountCents).toBe(-231_280);
+    expect(statement.platformOwnedPromoCents).toBe(413_800);
+    expect(statement.sharedPlatformDiscountCents).toBe(0);
+    expect(statement.platformPaybackCents).toBe(413_800);
+    expect(statement.netPlatformAmountCents).toBe(-331_280);
     expect(statement.bankPenaltyCents).toBe(15_000);
     expect(statement.bankPenaltyOrderCount).toBe(1);
     expect(statement.branchNetPayoutCents).toBe(3_445_732);
+  });
+
+  it('maps shared platform discount cost from breakdown', () => {
+    const statement = buildPayoutStatementFromBreakdown(
+      {
+        grossAmount: 500_000,
+        commissionFee: 50_000,
+        platformOwnedPromoDiscountTotal: 10_000,
+        sharedPromoPlatformContributionAmount: 15_400,
+        platformPaybackTotal: 10_000,
+      },
+      450_000,
+      true,
+    );
+    expect(statement.sharedPlatformDiscountCents).toBe(15_400);
+    expect(statement.platformDiscountsReportCents).toBe(25_400);
   });
 
   it('ignores platform payback when payback is disabled', () => {
@@ -225,7 +265,9 @@ describe('buildPage2PayoutSections', () => {
     const discounts = buildPage2PayoutSections(statement).find((s) => s.title === 'Discounts');
     expect(discounts?.rows.map((row) => row.label)).toEqual([
       'Branch',
-      'Platform',
+      'Platform-owned discount',
+      'Shared platform discount cost',
+      'Loyalty Points by Platform',
       'Jason',
       'Total by Cost Partner',
     ]);

@@ -130,6 +130,23 @@ export type PayoutBreakdownBundle = {
   reportValues: PayoutReportValues;
 };
 
+type BuildPayoutBreakdownDisplayInputParams = Omit<
+  PayoutBreakdownDisplayInput,
+  'loyaltyDiscountLkr'
+> & {
+  loyaltyDiscountLkr?: number | null;
+};
+
+export function buildPayoutBreakdownDisplayInput(
+  input: BuildPayoutBreakdownDisplayInputParams,
+): PayoutBreakdownDisplayInput {
+  return {
+    ...input,
+    loyaltyDiscountLkr:
+      input.loyaltyDiscountLkr ?? input.periodBreakdownLkr?.periodLoyaltyDiscountTotal ?? 0,
+  };
+}
+
 function firstNumber(
   ...values: Array<number | null | undefined>
 ): number {
@@ -213,8 +230,10 @@ function resolveDiscountReport(params: {
   totalDiscountLkr: number;
   sharedPromo: SharedPromoBreakdownLkr | null;
   loyaltyDiscountLkr: number;
+  paybackEnabled: boolean;
 }) {
-  const { periodBreakdownLkr, totalDiscountLkr, sharedPromo, loyaltyDiscountLkr } = params;
+  const { periodBreakdownLkr, totalDiscountLkr, sharedPromo, loyaltyDiscountLkr, paybackEnabled } =
+    params;
   const sharedPromoPlatformLkr = sharedPromo?.platformContributionLkr ?? 0;
   const sharedPromoJasonLkr = sharedPromo?.jasonContributionLkr ?? 0;
   const sharedPromoBranchLkr = sharedPromo?.branchContributionLkr ?? 0;
@@ -229,8 +248,9 @@ function resolveDiscountReport(params: {
     roundLkr(totalProvidedDiscountsLkr - totalPromotionDiscountsLkr - loyaltyDiscountLkr),
   );
   const costPartnerBranchDiscountsLkr = branchOwnedPromoDiscountsLkr + sharedPromoBranchLkr;
+  const sharedPromoPlatformForCostPartner = paybackEnabled ? sharedPromoPlatformLkr : 0;
   const costPartnerPlatformDiscountsLkr =
-    platformOwnedPromoDiscountsLkr + sharedPromoPlatformLkr + loyaltyDiscountLkr;
+    platformOwnedPromoDiscountsLkr + sharedPromoPlatformForCostPartner + loyaltyDiscountLkr;
   const costPartnerJasonDiscountsLkr = sharedPromoJasonLkr;
   const costPartnerDiscountsTotalLkr =
     costPartnerBranchDiscountsLkr +
@@ -448,6 +468,7 @@ export function resolvePayoutReportValues(
     totalDiscountLkr: sales.totalDiscountLkr,
     sharedPromo,
     loyaltyDiscountLkr,
+    paybackEnabled: showPaybackDetails,
   });
   const refunds = resolveRefundReport(periodBreakdownLkr, input);
   const gateway = resolveGatewayFigures({
@@ -477,7 +498,7 @@ export function resolvePayoutReportValues(
     roundLkr(
       sales.commissionLkr -
         commissionPaybackLkr -
-        discounts.sharedPromoPlatformLkr -
+        (showPaybackDetails ? discounts.sharedPromoPlatformLkr : 0) -
         loyaltyDiscountLkr,
     );
   const storedNetPlatformLkr =
@@ -528,6 +549,7 @@ export function resolvePayoutReportValues(
       platformOwnedPromoDiscountLkr: discounts.platformOwnedPromoDiscountsLkr,
       commissionPaybackLkr,
       sharedPromoPlatformLkr: discounts.sharedPromoPlatformLkr,
+      paybackEnabled: showPaybackDetails,
     }),
     loyaltyDiscountLkr,
     netPlatformCommissionLkr,
@@ -538,4 +560,12 @@ export function resolvePayoutReportValues(
     branchNetPayoutLkr,
     showPaybackDetails,
   };
+}
+
+/** Net payout (final pay amount) — branch wallet net plus Jason shared-promo top-up. */
+export function resolveFinalNetPayoutPayLkr(
+  values: Pick<PayoutReportValues, 'branchNetPayoutLkr' | 'sharedPromoJasonLkr'>,
+): number {
+  const jason = values.sharedPromoJasonLkr;
+  return roundLkr(values.branchNetPayoutLkr + (jason > 0.001 ? jason : 0));
 }

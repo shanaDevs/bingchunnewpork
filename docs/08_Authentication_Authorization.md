@@ -11,7 +11,7 @@
 **Primary transport:** `Authorization: Bearer <token>`  
 **Cookie session auth as primary:** Not Implemented  
 **OAuth redirect server flow:** Not Implemented (token verification only)  
-**Admin MFA challenge:** Not Implemented (schema fields only)  
+**Admin MFA:** Removed (no schema columns; email + password only)  
 **Password reset HTTP API:** Not Implemented
 
 ---

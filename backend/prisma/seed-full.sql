@@ -1348,13 +1348,13 @@ VALUES ('user-demo-customer', 'Demo Customer', 'customer@bingchun.lk', '07712345
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`), `passwordHash`=VALUES(`passwordHash`);
 
 -- ── Admin users ─────────────────────────────────────────────────────────────
-INSERT INTO `admin_users` (`id`, `name`, `email`, `passwordHash`, `pinLookup`, `roleId`, `storeId`, `mfaEnabled`, `isActive`) VALUES
-  ('admin-system', 'System Admin', 'admin@bingchunsrilanka.lk', '$2b$12$yzcQXOFFlIUu9DkxcbGb0u2W1tAFUn.RN7PaN2ItNETd.wDDBIfCu', NULL, 'role-system-admin', NULL, 0, 1),
-  ('admin-branch-nugegoda', 'Nugegoda Branch Manager', 'branch@bingchunsrilanka.lk', '$2b$12$Asn5PSKJWA6QiSWB/IsunOyDKqU43KlSxy6WxyBeWC4kjXLSWHEBC', NULL, 'role-store-manager', 'store-bing-chun---nugegoda', 0, 1),
-  ('admin-branch-dehiwala', 'Dehiwala Branch Manager', 'dehiwala@bingchunsrilanka.lk', '$2b$12$Asn5PSKJWA6QiSWB/IsunOyDKqU43KlSxy6WxyBeWC4kjXLSWHEBC', NULL, 'role-store-manager', 'store-bing-chun---dehiwala-1', 0, 1),
-  ('admin-branch-rathmalana', 'Rathmalana Branch Manager', 'rathmalana@bingchunsrilanka.lk', '$2b$12$Asn5PSKJWA6QiSWB/IsunOyDKqU43KlSxy6WxyBeWC4kjXLSWHEBC', NULL, 'role-store-manager', 'store-bing-chun---rathmalana', 0, 1),
-  ('admin-cashier-nugegoda', 'Nugegoda Cashier', 'cashier@bingchunsrilanka.lk', '$2b$12$dRbrBTzkY5I/ybOwA7wR/ughdhD/0CEqTXZ8z8hxNV3zrmaCP6rMK', NULL, 'role-cashier', 'store-bing-chun---nugegoda', 0, 1),
-  ('admin-driver-nugegoda', 'Nugegoda Delivery Driver', 'delivery@bingchunsrilanka.lk', '$2b$12$A/zTpX/2rzxE.FRqYWnKOONI8oG0/fb4tlq0e7c7g3zZwIXN55q1C', '8592fe3617ba257246f7385b3569183d5707fb16875756956f2ab60933a2e3db', 'role-delivery-driver', 'store-bing-chun---nugegoda', 0, 1)
+INSERT INTO `admin_users` (`id`, `name`, `email`, `passwordHash`, `pinLookup`, `roleId`, `storeId`, `isActive`) VALUES
+  ('admin-system', 'System Admin', 'admin@bingchunsrilanka.lk', '$2b$12$yzcQXOFFlIUu9DkxcbGb0u2W1tAFUn.RN7PaN2ItNETd.wDDBIfCu', NULL, 'role-system-admin', NULL, 1),
+  ('admin-branch-nugegoda', 'Nugegoda Branch Manager', 'branch@bingchunsrilanka.lk', '$2b$12$Asn5PSKJWA6QiSWB/IsunOyDKqU43KlSxy6WxyBeWC4kjXLSWHEBC', NULL, 'role-store-manager', 'store-bing-chun---nugegoda', 1),
+  ('admin-branch-dehiwala', 'Dehiwala Branch Manager', 'dehiwala@bingchunsrilanka.lk', '$2b$12$Asn5PSKJWA6QiSWB/IsunOyDKqU43KlSxy6WxyBeWC4kjXLSWHEBC', NULL, 'role-store-manager', 'store-bing-chun---dehiwala-1', 1),
+  ('admin-branch-rathmalana', 'Rathmalana Branch Manager', 'rathmalana@bingchunsrilanka.lk', '$2b$12$Asn5PSKJWA6QiSWB/IsunOyDKqU43KlSxy6WxyBeWC4kjXLSWHEBC', NULL, 'role-store-manager', 'store-bing-chun---rathmalana', 1),
+  ('admin-cashier-nugegoda', 'Nugegoda Cashier', 'cashier@bingchunsrilanka.lk', '$2b$12$dRbrBTzkY5I/ybOwA7wR/ughdhD/0CEqTXZ8z8hxNV3zrmaCP6rMK', NULL, 'role-cashier', 'store-bing-chun---nugegoda', 1),
+  ('admin-driver-nugegoda', 'Nugegoda Delivery Driver', 'delivery@bingchunsrilanka.lk', '$2b$12$A/zTpX/2rzxE.FRqYWnKOONI8oG0/fb4tlq0e7c7g3zZwIXN55q1C', '8592fe3617ba257246f7385b3569183d5707fb16875756956f2ab60933a2e3db', 'role-delivery-driver', 'store-bing-chun---nugegoda', 1)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`), `passwordHash`=VALUES(`passwordHash`), `pinLookup`=VALUES(`pinLookup`), `roleId`=VALUES(`roleId`), `storeId`=VALUES(`storeId`);
 
 -- ── Permissions ─────────────────────────────────────────────────────────────

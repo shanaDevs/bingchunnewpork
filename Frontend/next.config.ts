@@ -26,7 +26,7 @@ function getBackendOrigin(): string {
   const api = process.env.NEXT_PUBLIC_API_URL || '/api';
   if (api.startsWith('/')) {
     if (process.env.NODE_ENV === 'production' && !fromEnv) {
-      return 'https://bing-chung-b.mp.dartcodes.com';
+      return 'https://bing-chun-ui2ow.ondigitalocean.app';
     }
     return fromEnv || 'http://localhost:4000';
   }
@@ -143,6 +143,12 @@ const ADMIN_CSP = ADMIN_CSP_PARTS.join('; ');
 const ADMIN_ROUTE_HEADERS = [
   ...BASE_SECURITY_HEADERS,
   { key: 'Content-Security-Policy', value: ADMIN_CSP },
+  // Admin is auth-gated. Never let Cloudflare/CDN cache HTML or RSC flight
+  // for the same URL — CF ignores Vary: rsc and will serve text/x-component
+  // as the document (raw :HL[...] dump after login).
+  { key: 'Cache-Control', value: 'private, no-store, no-cache, max-age=0, must-revalidate' },
+  { key: 'CDN-Cache-Control', value: 'no-store' },
+  { key: 'Cloudflare-CDN-Cache-Control', value: 'no-store' },
 ];
 
 const SHOP_ROUTE_HEADERS = [
@@ -193,6 +199,12 @@ const nextConfig: NextConfig = {
     return [];
   },
   async rewrites() {
+    // Production App Platform injects the API hostname only after the
+    // container starts. A rewrite baked here would keep pointing at
+    // localhost:4000. Request handlers under src/app/api and
+    // src/app/delivery-api proxy with the live URL instead.
+    if (process.env.NODE_ENV === 'production') return [];
+
     const surface = getWebSurface();
     const apiOrigin = surface === 'admin'
       ? getAdminApiOrigin()

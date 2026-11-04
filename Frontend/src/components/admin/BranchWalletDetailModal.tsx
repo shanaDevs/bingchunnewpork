@@ -7,6 +7,7 @@ import BranchWalletDetail from '@/components/admin/BranchWalletDetail';
 import WalletApproveWithdrawalModal from '@/components/admin/WalletApproveWithdrawalModal';
 import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
 import type { DuePeriodFocus } from '@/components/admin/payoutPeriodView';
+import type { BranchPayoutCompletedMeta } from '@/lib/branchPayoutsDue';
 
 type Props = {
   open: boolean;
@@ -20,6 +21,7 @@ type Props = {
   periodFrom?: string | null;
   periodTo?: string | null;
   periodLabel?: string | null;
+  onBranchPayoutCompleted?: (meta: BranchPayoutCompletedMeta) => void;
 };
 
 export default function BranchWalletDetailModal({
@@ -32,6 +34,7 @@ export default function BranchWalletDetailModal({
   periodFrom = null,
   periodTo = null,
   periodLabel = null,
+  onBranchPayoutCompleted,
 }: Props) {
   const [viewWithdrawalTarget, setViewWithdrawalTarget] = useState<WithdrawalRow | null>(null);
   const [withdrawalRefreshSignal, setWithdrawalRefreshSignal] = useState(0);
@@ -81,6 +84,7 @@ export default function BranchWalletDetailModal({
                 periodFrom={periodFrom}
                 periodTo={periodTo}
                 periodLabel={periodLabel}
+                onBranchPayoutCompleted={onBranchPayoutCompleted}
               />
             </div>
           </div>

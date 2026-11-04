@@ -65,9 +65,40 @@ class AuthRepository {
   Future<List<DriverShiftEntry>> getShiftHistory() =>
       _api.call(() => _api.core.get<dynamic>('delivery/me/shifts'), (d) => _list(d, DriverShiftEntry.fromJson));
 
-  Future<DriverProfile> setDuty(String dutyStatus) async {
-    await _api.call(() => _api.core.patch<dynamic>('delivery/me/duty', data: {'dutyStatus': dutyStatus}), (_) {});
-    return getMe();
+  Future<DriverProfile> setDuty(String dutyStatus, {DriverProfile? current}) async {
+    final patch = await _api.call(
+      () => _api.core.patch<dynamic>('delivery/me/duty', data: {'dutyStatus': dutyStatus}),
+      (d) => asJson(d),
+    );
+    final patchedStatus = str(patch, 'dutyStatus', dutyStatus);
+    final branchPoolStoreIds = DriverProfile.parseStringList(patch, 'branchPoolStoreIds');
+    // Duty is authoritative from PATCH. GET /delivery/me can 504 when licence presign
+    // stalls on Spaces — do not fail go-online after a successful duty update.
+    if (current != null) {
+      return current.copyWith(
+        dutyStatus: patchedStatus,
+        branchPoolStoreIds: branchPoolStoreIds.isNotEmpty ? branchPoolStoreIds : null,
+      );
+    }
+    final session = restore();
+    if (session != null) {
+      final storeId = session.storeId;
+      return DriverProfile(
+        id: session.id,
+        name: session.name,
+        dutyStatus: patchedStatus,
+        storeId: storeId,
+        store: storeId != null && (session.storeName?.isNotEmpty ?? false)
+            ? StoreRef(id: storeId, name: session.storeName!, city: session.storeCity)
+            : null,
+        branchPoolStoreIds: branchPoolStoreIds,
+      );
+    }
+    try {
+      return await getMe();
+    } catch (_) {
+      rethrow;
+    }
   }
 
   /// Restores a persisted session; returns the driver only when a token is present.

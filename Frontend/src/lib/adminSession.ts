@@ -118,7 +118,7 @@ function isApiUrl(url: string): boolean {
 }
 
 function isAdminAuthRoute(url: string): boolean {
-  return /\/auth\/admin\/(login|refresh|logout|mfa\/|password\/)/.test(url);
+  return /\/auth\/admin\/(login|refresh|logout|password\/)/.test(url);
 }
 
 function hasValidBearerJwt(headers: Headers): boolean {

@@ -8,14 +8,20 @@ import { openDriverShift, closeDriverShift, listDriverShifts } from '../lib/driv
 import { broadcastDriverDutyChanged, broadcastDeliveryJobUpdated } from '../lib/socket';
 import { getDriverAccessibleStoreIds } from '../lib/driverAccess';
 import { patchDriverOpsProfile } from '@bingchun/delivery-domain';
-import { viewableLicenseImageUrl } from '../lib/spaces';
+import { viewableLicenseImageUrlWithTimeout } from '../lib/spaces';
 import { meritStatusBand } from '../lib/meritPoints';
 import { computeRiderStats, isRiderStatsPeriod } from '@bingchun/delivery-domain';
-import {
-  canDriverClaimMore,
-  getDriverActiveRidePhase,
-  isDriverAlertEligible,
-} from '../lib/deliveryJobHelpers';
+import { deriveDriverJobFlags, DRIVER_HELD_JOB_STATUSES } from '../lib/deliveryJobHelpers';
+
+function accessibleStoreIdsFromDriver(driver: {
+  storeId: string | null;
+  accessibleStores: ReadonlyArray<{ id: string }>;
+}): string[] {
+  const ids = new Set<string>();
+  if (driver.storeId) ids.add(driver.storeId);
+  for (const s of driver.accessibleStores) ids.add(s.id);
+  return [...ids];
+}
 
 export async function getMe(req: Request, res: Response, next: NextFunction) {
   try {
@@ -45,28 +51,34 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
     });
     if (!driver) throw new AppError('Driver not found', 404);
 
-    // Always include home branch + every linked branch the rider can deliver for.
-    const storeIds = await getDriverAccessibleStoreIds(driverId, driver.storeId);
-    const stores =
+    const storeIds = accessibleStoreIdsFromDriver(driver);
+    const [stores, ratingAgg, heldJobs] = await Promise.all([
       storeIds.length === 0
-        ? []
-        : await prisma.store.findMany({
+        ? Promise.resolve([] as Array<{ id: string; name: string; city: string | null }>)
+        : prisma.store.findMany({
             where: { id: { in: storeIds } },
             select: { id: true, name: true, city: true },
             orderBy: { name: 'asc' },
-          });
-
-    const ratingAgg = await prisma.riderRating.aggregate({
-      where: { driverId },
-      _avg: { stars: true },
-      _count: { _all: true },
-    });
-    const points = driver.meritPoints ?? 100;
-    const [alertEligible, activeRidePhase, canClaimMore] = await Promise.all([
-      isDriverAlertEligible(driverId),
-      getDriverActiveRidePhase(driverId),
-      canDriverClaimMore(driverId),
+          }),
+      prisma.riderRating.aggregate({
+        where: { driverId },
+        _avg: { stars: true },
+        _count: { _all: true },
+      }),
+      prisma.deliveryJob.findMany({
+        where: { driverId, status: { in: [...DRIVER_HELD_JOB_STATUSES] } },
+        select: { status: true },
+      }),
     ]);
+    let licenseImageUrl: string | null = null;
+    try {
+      licenseImageUrl = await viewableLicenseImageUrlWithTimeout(driver.licenseImageUrl, 1500);
+    } catch {
+      licenseImageUrl = null;
+    }
+
+    const points = driver.meritPoints ?? 100;
+    const { alertEligible, activeRidePhase, canClaimMore } = deriveDriverJobFlags(heldJobs);
 
     return success(res, {
       id: driver.id,
@@ -80,7 +92,7 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
       licenseNumber: driver.licenseNumber,
       disabilities: driver.disabilities,
       profilePhotoUrl: driver.profilePhotoUrl,
-      licenseImageUrl: await viewableLicenseImageUrl(driver.licenseImageUrl),
+      licenseImageUrl,
       dutyStatus: driver.dutyStatus,
       storeId: driver.storeId,
       store: driver.store,
@@ -234,6 +246,7 @@ export async function updateDuty(req: Request, res: Response, next: NextFunction
     return success(res, {
       id: updated.id,
       dutyStatus: updated.dutyStatus,
+      branchPoolStoreIds: storeIds,
     });
   } catch (err) {
     next(err);

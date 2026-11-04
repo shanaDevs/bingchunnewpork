@@ -1,11 +1,14 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { Prisma, prisma } from '../lib/prisma';
 import { config } from '../config';
 import { AppError } from '../middleware/errorHandler';
 import {
+  assertSettlementProofFile,
   requireSettlementProofUpload,
   withUploadedProofCleanup,
 } from '../lib/settlementProofUpload';
+import { uploadSettlementProof } from '../lib/spaces';
 import { buildProofAccessResponse } from '../lib/settlementProofAccess';
 import { logPinGatedDeniedIf401, logWalletSecurityEventFromRequest } from '../lib/walletSecurityAudit';
 import {
@@ -18,7 +21,7 @@ import {
 } from '../lib/walletSecurityAuditSchema';
 import { z } from 'zod';
 import { resolveBranchCancellationGatewayFeeLkr } from '../lib/refundPaymentStructure';
-import { isOnlinePaymentMethod } from '../lib/orderPayment';
+import { isWalletCreditPaymentMethod } from '../lib/orderPayment';
 import { ensureWalletSettlementColumns } from '../lib/walletSchema';
 import { ensureWithdrawalSchema } from '../lib/withdrawalSchema';
 import {
@@ -32,7 +35,9 @@ import {
   decimalFieldToCentsNumber,
   lkrToCents,
   parseDecimalFromDb,
+  zLkrToCentsInput,
 } from '../lib/moneyDecimal';
+import { insertWalletLedgerRow } from '../lib/walletTransactionInsert';
 import { parseLockedStoreWallet, walletDataAfterBalanceDelta, walletDataAfterDebit } from '../lib/walletStoreUpdates';
 import {
   serializeStoreWallet,
@@ -64,6 +69,7 @@ import {
   PAYOUT_PERIOD_DAYS,
   rejectWithdrawal,
   requestWithdrawal,
+  validatePayoutRequest,
 } from '../lib/withdrawalService';
 import { verifyAdminPin } from '../lib/verifyAdminPin';
 import { isBranchScopedRole, resolveBranchStoreId } from '../middleware/auth';
@@ -127,7 +133,7 @@ const walletPinSchema = z.object({
 });
 
 const withdrawalRequestSchema = z.object({
-  amount: z.number().positive(),
+  amount: zLkrToCentsInput(z).pipe(z.number().int().positive()),
   periodDays: z.coerce.number().refine((n) => (PAYOUT_PERIOD_DAYS as readonly number[]).includes(n), {
     message: `periodDays must be one of: ${PAYOUT_PERIOD_DAYS.join(', ')}`,
   }),
@@ -178,7 +184,7 @@ const approveWithdrawalBodySchema = z
 
 const initiatePayoutBodySchema = z
   .object({
-    amount: z.coerce.number().positive(),
+    amount: zLkrToCentsInput(z).pipe(z.number().int().positive()),
     periodDays: z.coerce.number().refine((n) => (PAYOUT_PERIOD_DAYS as readonly number[]).includes(n), {
       message: `periodDays must be one of: ${PAYOUT_PERIOD_DAYS.join(', ')}`,
     }),
@@ -194,6 +200,13 @@ const initiatePayoutBodySchema = z
     checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     /** Admin password (PIN) — required to initiate a direct branch payout. */
     password: adminPinField,
+    /**
+     * Preferred proof transport: base64 JSON (multipart to App Platform was returning
+     * edge 504 before the handler ran).
+     */
+    proofBase64: z.string().min(8).max(6_000_000).optional(),
+    proofFileName: z.string().min(1).max(255).optional(),
+    proofMimeType: z.string().min(3).max(100).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.paymentMethod !== 'CHECK') return;
@@ -440,6 +453,67 @@ export async function getWithdrawalProofUrlHandler(req: Request, res: Response, 
   }
 }
 
+const attachWithdrawalProofBodySchema = z.object({
+  password: adminPinField,
+  proofBase64: z.string().min(8).max(6_000_000),
+  proofFileName: z.string().min(1).max(255).optional(),
+  proofMimeType: z.string().min(3).max(100).optional(),
+});
+
+/** Attach / replace settlement proof on an already-approved payout (JSON base64). */
+export async function attachWithdrawalProofHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    await ensureWithdrawalSchema();
+    const user = req.user!;
+    if (user.role !== 'SYSTEM_ADMIN') throw new AppError('Forbidden', 403);
+
+    const data = attachWithdrawalProofBodySchema.parse(req.body ?? {});
+    await verifyAdminPin(user.sub, data.password);
+
+    const withdrawal = await prisma.storeWithdrawal.findUnique({
+      where: { id: req.params.id as string },
+    });
+    if (!withdrawal) throw new AppError('Withdrawal not found', 404);
+    if (withdrawal.status !== 'APPROVED') {
+      throw new AppError('Proof can only be attached to an approved payout', 400);
+    }
+
+    const buffer = Buffer.from(data.proofBase64, 'base64');
+    const proofFile = assertSettlementProofFile({
+      fieldname: 'proof',
+      originalname: data.proofFileName?.trim() || 'proof.bin',
+      encoding: '7bit',
+      mimetype: data.proofMimeType?.trim() || 'application/octet-stream',
+      buffer,
+      size: buffer.length,
+    } as Express.Multer.File);
+
+    const proofUrl = await uploadSettlementProof(
+      proofFile.buffer,
+      proofFile.originalname,
+      proofFile.mimetype,
+      withdrawal.storeId,
+    );
+
+    const updated = await withUploadedProofCleanup(proofUrl, () =>
+      prisma.storeWithdrawal.update({
+        where: { id: withdrawal.id },
+        data: { proofUrl },
+      }),
+    );
+
+    logWalletSecurityEventFromRequest(req, user, {
+      event: 'wallet.withdrawal.attach_proof',
+      storeId: withdrawal.storeId,
+      withdrawalId: withdrawal.id,
+    });
+
+    res.json({ success: true, data: serializeWithdrawal(updated) });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /admin/wallet/verify-pin
 // Pre-check admin PIN before showing the payout confirmation dialog.
@@ -486,7 +560,7 @@ export async function requestWithdrawalHandler(req: Request, res: Response, next
     // Independently verify PIN on every payout request (do not trust client pre-check alone).
     await verifyAdminPin(user.sub, data.password);
 
-    const amountCents = lkrToCents(data.amount);
+    const amountCents = data.amount;
 
     const withdrawal = await requestWithdrawal(
       storeId,
@@ -631,62 +705,117 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
 
     await verifyAdminPin(user.sub, data.password);
 
-    const amountCents = lkrToCents(data.amount);
-    const proofUrl = await requireSettlementProofUpload(req.file, storeId);
+    const amountCents = data.amount;
+    const periodDays = data.periodDays as (typeof PAYOUT_PERIOD_DAYS)[number];
+    const periodBounds =
+      data.from && data.to ? { from: data.from, to: data.to } : null;
     const checkDate = parseSettlementCheckDate(data.paymentMethod, data.checkDate);
 
-    const [wallet, store, netTransferableEarnings] = await Promise.all([
+    // Prefer JSON base64 proof — multipart/form-data to this route was getting an edge
+    // 504 in <1s before the handler ran. Multer file is kept as a fallback.
+    let uploadedProof = req.file;
+    if (!uploadedProof && data.proofBase64) {
+      const buffer = Buffer.from(data.proofBase64, 'base64');
+      uploadedProof = {
+        fieldname: 'proof',
+        originalname: data.proofFileName?.trim() || 'proof.bin',
+        encoding: '7bit',
+        mimetype: data.proofMimeType?.trim() || 'application/octet-stream',
+        size: buffer.length,
+        buffer,
+      } as Express.Multer.File;
+    }
+    const proofFile = assertSettlementProofFile(uploadedProof);
+
+    const [prevalidated, wallet, store] = await Promise.all([
+      validatePayoutRequest(
+        storeId,
+        amountCents,
+        periodDays,
+        data.isAdvance ?? false,
+        periodBounds,
+      ),
       getOrCreateWallet(storeId),
       prisma.store.findUnique({
         where: { id: storeId },
         select: { name: true },
       }),
-      computeNetTransferableEarnings(storeId),
     ]);
     const balanceBefore = walletBalanceCents(wallet);
     const totalWithdrawnBefore = walletTotalWithdrawnCents(wallet);
 
-    const updated = await withUploadedProofCleanup(proofUrl, () =>
-      initiateAndApproveWithdrawal(
-        storeId,
-        amountCents,
-        data.remarks,
-        user.sub!,
-        data.periodDays as (typeof PAYOUT_PERIOD_DAYS)[number],
-        data.paymentMethod,
-        proofUrl,
-        data.isAdvance ?? false,
-        {
-          checkNumber: data.paymentMethod === 'CHECK' ? data.checkNumber?.trim() : null,
-          checkDate,
-          ...(data.from && data.to
-            ? { periodBounds: { from: data.from, to: data.to } }
-            : {}),
-        },
-      ),
-    );
-
-    const final = await finalizeWithdrawalWithInvoice({
+    // Commit the payout first with proofUrl null; attach Spaces URL after the response.
+    const updated = await initiateAndApproveWithdrawal(
       storeId,
-      storeName: store?.name ?? 'Branch',
-      updated,
-      paymentMethod: data.paymentMethod,
-      balanceBefore,
-      totalWithdrawnBefore,
-      netTransferableEarnings,
-    });
+      amountCents,
+      data.remarks,
+      user.sub!,
+      periodDays,
+      data.paymentMethod,
+      null,
+      data.isAdvance ?? false,
+      {
+        checkNumber: data.paymentMethod === 'CHECK' ? data.checkNumber?.trim() : null,
+        checkDate,
+        ...(periodBounds ? { periodBounds } : {}),
+        prevalidated,
+      },
+    );
 
     logWalletSecurityEventFromRequest(req, user, {
       event: 'wallet.payout.initiate',
       storeId,
       amountCents,
-      withdrawalId: final.id,
+      withdrawalId: updated.id,
     });
 
     invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
     invalidateWalletPayoutsDueCache();
 
-    res.status(201).json({ success: true, data: serializeWithdrawal(final) });
+    // Respond as soon as the payout is committed. Spaces proof + invoice PDF must not
+    // hold the DO/Cloudflare gateway open (504).
+    res.status(201).json({ success: true, data: serializeWithdrawal(updated) });
+
+    void (async () => {
+      let proofUrl: string | null = null;
+      try {
+        proofUrl = await uploadSettlementProof(
+          proofFile.buffer,
+          proofFile.originalname,
+          proofFile.mimetype,
+          storeId,
+        );
+        await prisma.storeWithdrawal.update({
+          where: { id: updated.id },
+          data: { proofUrl },
+        });
+      } catch (err) {
+        console.error('[initiate-payout] background proof upload failed', {
+          storeId,
+          withdrawalId: updated.id,
+          err,
+        });
+      }
+
+      try {
+        const netTransferableEarnings = await computeNetTransferableEarnings(storeId);
+        await finalizeWithdrawalWithInvoice({
+          storeId,
+          storeName: store?.name ?? 'Branch',
+          updated: { ...updated, proofUrl: proofUrl ?? updated.proofUrl },
+          paymentMethod: data.paymentMethod,
+          balanceBefore,
+          totalWithdrawnBefore,
+          netTransferableEarnings,
+        });
+      } catch (err) {
+        console.error('[initiate-payout] background invoice finalize failed', {
+          storeId,
+          withdrawalId: updated.id,
+          err,
+        });
+      }
+    })();
   } catch (err) {
     next(err);
   }
@@ -918,6 +1047,9 @@ export async function adjustWallet(req: Request, res: Response, next: NextFuncti
       totalEarnings: currentEarnings,
       totalWithdrawn: currentWithdrawn,
     });
+    if (next.balance.lt(0)) {
+      throw new AppError('Insufficient wallet balance for debit', 400);
+    }
     const balanceAfter = Number(next.balance.toFixed(0));
     const updatedWallet = await tx.storeWallet.update({
       where: { storeId: storeId as string },
@@ -1189,7 +1321,7 @@ export async function creditWalletForOrder(
   amount: number,
   paymentMethod: string,
 ): Promise<void> {
-  if (!isOnlinePaymentMethod(paymentMethod as any)) {
+  if (!isWalletCreditPaymentMethod(paymentMethod as any)) {
     return;
   }
 
@@ -1214,9 +1346,7 @@ export async function creditWalletForOrder(
   });
 
   const centsAmount = lkrToCents(amount);
-  const wallet = await getOrCreateWallet(storeId);
-  const newBalance =
-    Number(parseDecimalFromDb(wallet.balance).toFixed(0)) + centsAmount;
+  await getOrCreateWallet(storeId);
 
   const descParts = [
     `Order #${order?.orderNumber ?? orderId}`,
@@ -1235,26 +1365,26 @@ export async function creditWalletForOrder(
       if (!lockedRows[0]) throw new AppError('Wallet not found', 404);
       const bal = parseDecimalFromDb(lockedRows[0].balance);
       const earnings = parseDecimalFromDb(lockedRows[0].totalEarnings);
+      const balanceAfter = bal.plus(centsToDecimal(centsAmount));
       await tx.storeWallet.update({
         where: { storeId },
         data: {
-          balance: bal.plus(centsToDecimal(centsAmount)),
+          balance: balanceAfter,
           totalEarnings: earnings.plus(centsToDecimal(centsAmount)),
         },
       });
-      await tx.walletTransaction.create({
-        data: {
-          id: require('crypto').randomUUID(),
-          storeId,
-          orderId,
-          type: 'ORDER_PAYMENT',
-          amount: centsToDecimal(centsAmount),
-          balanceAfter: centsToDecimal(newBalance),
-          paymentMethod: paymentMethod as any,
-          paymentRef: order?.paymentRef ?? null,
-          description: descParts,
-          reference: order?.orderNumber ?? null,
-        },
+      const ledgerId = crypto.randomUUID();
+      await insertWalletLedgerRow(tx, {
+        id: ledgerId,
+        storeId,
+        orderId,
+        type: 'ORDER_PAYMENT',
+        amountCents: centsAmount,
+        balanceAfterCents: Number(balanceAfter.toFixed(0)),
+        paymentMethod,
+        paymentRef: order?.paymentRef ?? null,
+        description: descParts,
+        reference: order?.orderNumber ?? null,
       });
     });
   } catch (err) {
@@ -1286,9 +1416,7 @@ export async function creditWalletAddonPayment(
   });
 
   const centsAmount = lkrToCents(amountLkr);
-  const wallet = await getOrCreateWallet(storeId);
-  const newBalance =
-    Number(parseDecimalFromDb(wallet.balance).toFixed(0)) + centsAmount;
+  await getOrCreateWallet(storeId);
   const methodLabel = paymentMethod === 'CARD' ? 'card at counter' : 'cash at counter';
 
   try {
@@ -1299,10 +1427,11 @@ export async function creditWalletAddonPayment(
       if (!lockedRows[0]) throw new AppError('Wallet not found', 404);
       const bal = parseDecimalFromDb(lockedRows[0].balance);
       const earnings = parseDecimalFromDb(lockedRows[0].totalEarnings);
+      const balanceAfter = bal.plus(centsToDecimal(centsAmount));
       await tx.storeWallet.update({
         where: { storeId },
         data: {
-          balance: bal.plus(centsToDecimal(centsAmount)),
+          balance: balanceAfter,
           totalEarnings: earnings.plus(centsToDecimal(centsAmount)),
         },
       });
@@ -1313,7 +1442,7 @@ export async function creditWalletAddonPayment(
           orderId,
           type: 'ORDER_ADDON_PAYMENT',
           amount: centsToDecimal(centsAmount),
-          balanceAfter: centsToDecimal(newBalance),
+          balanceAfter,
           paymentMethod: paymentMethod as any,
           description: `Order #${order?.orderNumber ?? orderId} · add-on items (${methodLabel})`,
           reference: order?.orderNumber ?? null,

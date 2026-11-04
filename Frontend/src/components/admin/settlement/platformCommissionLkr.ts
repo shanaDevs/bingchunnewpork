@@ -1,8 +1,7 @@
 import { roundLkr } from './lkrUtils';
 import { resolveTotalRetainedRefundConvenienceFeeLkr } from './channelBreakdown';
 
-/** Net platform commission for payout allocation cards and summaries. */
-export function resolvePlatformCommissionForPeriodLkr(params: {
+type PeriodNetPlatformInput = {
   commissionLkr: number;
   periodBreakdownLkr: {
     platformPaybackTotal?: number;
@@ -14,16 +13,29 @@ export function resolvePlatformCommissionForPeriodLkr(params: {
   } | null;
   paybackEnabled: boolean;
   sharedPromoPlatformLkr?: number;
-}): number {
-  const baseNetPlatformCommissionLkr = resolveTotalPlatformCommissionDisplayLkr({
+};
+
+function resolveNetPlatformAmountDisplayLkr(params: PeriodNetPlatformInput): number {
+  return resolveTotalPlatformCommissionDisplayLkr({
     commissionLkr: params.commissionLkr,
     platformPaybackTotal: params.periodBreakdownLkr?.platformPaybackTotal,
     paybackEnabled: params.paybackEnabled,
     sharedPromoPlatformLkr: params.sharedPromoPlatformLkr ?? 0,
     loyaltyDiscountLkr: params.periodBreakdownLkr?.periodLoyaltyDiscountTotal ?? 0,
     platformOwnedPromoDiscountLkr: params.periodBreakdownLkr?.platformOwnedPromoDiscountTotal,
-    netPlatformEarningLkr: params.periodBreakdownLkr?.netPlatformEarning,
+    // Match Payout Request Details — always recalculate; ignore netPlatformEarning snapshot.
+    netPlatformEarningLkr: null,
   });
+}
+
+/** Payout Request Details / 15-day period table "Net Platform Amount". */
+export function resolveNetPlatformAmountForPeriodLkr(params: PeriodNetPlatformInput): number {
+  return resolveNetPlatformAmountDisplayLkr(params);
+}
+
+/** Net platform commission for payout allocation cards and summaries. */
+export function resolvePlatformCommissionForPeriodLkr(params: PeriodNetPlatformInput): number {
+  const baseNetPlatformCommissionLkr = resolveNetPlatformAmountDisplayLkr(params);
   return resolveNetPlatformCommissionWithRefundFeesLkr({
     baseNetPlatformCommissionLkr,
     refundConvenienceFeeLkr: params.periodBreakdownLkr?.refundConvenienceFee,
@@ -55,10 +67,12 @@ export function resolvePlatformDiscountsReportLkr(params: {
   platformOwnedPromoDiscountLkr?: number;
   commissionPaybackLkr: number;
   sharedPromoPlatformLkr: number;
+  paybackEnabled: boolean;
 }): number {
   const owned = params.platformOwnedPromoDiscountLkr ?? 0;
   const platformDeduct = Math.max(params.commissionPaybackLkr, owned);
-  return roundLkr(platformDeduct + params.sharedPromoPlatformLkr);
+  const sppc = params.paybackEnabled ? params.sharedPromoPlatformLkr : 0;
+  return roundLkr(platformDeduct + sppc);
 }
 
 /** Max(platform-owned, payback) deducted from commission before shared promo & loyalty. */
@@ -102,9 +116,14 @@ export function resolveNetPlatformCommissionLkr(params: {
     platformOwnedPromoDiscountLkr: params.platformOwnedPromoDiscountLkr,
     commissionPaybackLkr,
   });
+  const sharedPromoDeductLkr = params.paybackEnabled ? (params.sharedPromoPlatformLkr ?? 0) : 0;
 
   if (params.netPlatformEarningLkr != null) {
-    return roundLkr(params.netPlatformEarningLkr - extraOwned);
+    const snapshotNet = params.netPlatformEarningLkr - extraOwned;
+    if (!params.paybackEnabled && (params.sharedPromoPlatformLkr ?? 0) > 0) {
+      return roundLkr(snapshotNet + (params.sharedPromoPlatformLkr ?? 0));
+    }
+    return roundLkr(snapshotNet);
   }
 
   const platformPromoDeduct = resolvePlatformPromoCommissionDeductionLkr({
@@ -115,7 +134,7 @@ export function resolveNetPlatformCommissionLkr(params: {
   return roundLkr(
     params.commissionLkr -
       platformPromoDeduct -
-      (params.sharedPromoPlatformLkr ?? 0) -
+      sharedPromoDeductLkr -
       (params.loyaltyDiscountLkr ?? 0),
   );
 }

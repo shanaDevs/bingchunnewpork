@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { CheckCircle, ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
-import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
+import { formatMoneyAmount } from '@/lib/receipt';
 import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
 import { cn } from '@/lib/utils';
 import { getApiBaseUrl } from '@/lib/apiBase';
@@ -40,12 +40,11 @@ const ALLOCATION_COLUMNS = [
   'Delivery fee received',
 ] as const;
 
-const PAYOUTS_DUE_TABLE_COL_COUNT = 4 + ALLOCATION_COLUMNS.length + 2;
+const PAYOUTS_DUE_TABLE_COL_COUNT = 3 + ALLOCATION_COLUMNS.length + 2;
 
 const PAYOUTS_DUE_SKELETON_WIDTHS = [
   'w-28',
   'w-36',
-  'w-20',
   'w-10',
   'w-16',
   'w-16',
@@ -74,9 +73,6 @@ function PayoutsDueTableSkeleton({ rows = 6 }: { rows?: number }) {
               </th>
               <th scope="col" className="px-3 py-2.5 font-semibold whitespace-nowrap">
                 Period
-              </th>
-              <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
-                Amount due
               </th>
               <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
                 Orders
@@ -108,15 +104,15 @@ function PayoutsDueTableSkeleton({ rows = 6 }: { rows?: number }) {
                   <td
                     key={col}
                     className={
-                      col >= 2 && col <= 7 ? 'px-3 py-3 text-right' : 'px-3 py-3'
+                      col >= 2 && col <= 6 ? 'px-3 py-3 text-right' : 'px-3 py-3'
                     }
                   >
                     <Skeleton
                       className={cn(
                         'h-3.5 bg-[var(--color-navy-light)]/70',
                         PAYOUTS_DUE_SKELETON_WIDTHS[col] ?? 'w-20',
-                        col >= 2 && col <= 7 && 'ml-auto',
-                        col >= 8 && 'ml-auto inline-block',
+                        col >= 2 && col <= 6 && 'ml-auto',
+                        col >= 7 && 'ml-auto inline-block',
                       )}
                     />
                   </td>
@@ -315,9 +311,6 @@ export default function PayoutsDuePanel({
                     Period
                   </th>
                   <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
-                    Amount due
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
                     Orders
                   </th>
                   {ALLOCATION_COLUMNS.map((label) => (
@@ -354,9 +347,6 @@ export default function PayoutsDuePanel({
                       <span className="ml-1.5 text-[10px] font-semibold text-[var(--color-text)]">
                         {row.days} days
                       </span>
-                    </td>
-                    <td className="px-3 py-3 text-right font-semibold tabular-nums text-[var(--color-text)]">
-                      {formatMoney(row.netAmountCents / 100)}
                     </td>
                     <td className="px-3 py-3 text-right tabular-nums text-[var(--color-text)]">
                       {row.orderCount}

@@ -9,12 +9,72 @@ import {
   computePeriodPayoutSplitLkr,
   parseWithdrawalBreakdown,
   parseWithdrawalBreakdownFromNetPreview,
-  resolvePlatformCommissionForPeriodLkr,
+  resolveNetPlatformAmountForPeriodLkr,
   resolveTotalDeliveryFeeForAllocationLkr,
   type SettlementPreview,
   withdrawalBreakdownToLkr,
 } from '@/components/admin/settlementTypes';
 import { withAdminCredentials } from '@/lib/adminSession';
+
+type PayoutPeriodExpenseRow = {
+  status: 'PAID' | 'PENDING' | 'IN_PROGRESS';
+  amountCents: number;
+  breakdown?: unknown;
+  periodFrom: string;
+  periodTo: string;
+  summaryThrough?: string;
+};
+
+export type PayoutPeriodExpensesCents = {
+  netPlatformAmountCents: number;
+  gatewayFeeCents: number;
+  branchReceivableCents: number;
+  totalExpensesCents: number;
+};
+
+function lkrToExpenseCents(lkr: number): number {
+  return Math.round(lkr * 100);
+}
+
+/**
+ * Expenses Summary totals — Payout Request Details figures summed for **PAID** periods only.
+ * Pending / in-progress cycles are excluded.
+ */
+export function aggregatePaidPayoutPeriodExpensesCents(
+  rows: PayoutPeriodExpenseRow[],
+): PayoutPeriodExpensesCents {
+  let netPlatformAmountCents = 0;
+  let gatewayFeeCents = 0;
+  let branchReceivableCents = 0;
+
+  for (const row of rows) {
+    if (row.status !== 'PAID') continue;
+
+    const periodTo = row.summaryThrough ?? row.periodTo;
+    const amounts = resolvePayoutPeriodRowDisplayAmounts({
+      amountCents: row.amountCents,
+      breakdown: row.breakdown,
+      periodFrom: row.periodFrom,
+      periodTo,
+    });
+
+    netPlatformAmountCents += lkrToExpenseCents(amounts.commissionLkr);
+    branchReceivableCents += lkrToExpenseCents(amounts.branchReceives);
+
+    const parsed = parseWithdrawalBreakdown(row.breakdown);
+    if (parsed?.gatewayFee != null && Number.isFinite(parsed.gatewayFee)) {
+      gatewayFeeCents += Math.round(parsed.gatewayFee);
+    }
+  }
+
+  return {
+    netPlatformAmountCents,
+    gatewayFeeCents,
+    branchReceivableCents,
+    totalExpensesCents:
+      netPlatformAmountCents + gatewayFeeCents + branchReceivableCents,
+  };
+}
 
 function netPreviewToChannelPreview(
   preview: {
@@ -104,9 +164,9 @@ export function resolvePayoutPeriodRowDisplayAmounts(params: {
     convenienceFee: breakdownLkr.convenienceFee,
   });
 
-  const branchCommissionLkr = channelPreview?.totalCommission ?? breakdownLkr.commissionFee ?? 0;
-  const platformCommissionLkr = resolvePlatformCommissionForPeriodLkr({
-    commissionLkr: branchCommissionLkr,
+  const netPlatformAmountLkr = resolveNetPlatformAmountForPeriodLkr({
+    commissionLkr:
+      breakdownLkr.commissionFee ?? channelPreview?.totalCommission ?? 0,
     periodBreakdownLkr: breakdownLkr,
     paybackEnabled,
     sharedPromoPlatformLkr: breakdownLkr.sharedPromoPlatformContributionLkr ?? 0,
@@ -115,7 +175,7 @@ export function resolvePayoutPeriodRowDisplayAmounts(params: {
   return resolvePeriodPayoutCardAmounts({
     payoutSplit,
     branchReceivesLkr: branchPayout.totalBranchPayoutLkr,
-    platformCommissionLkr,
+    platformCommissionLkr: netPlatformAmountLkr,
     periodNetLkr: branchPayout.periodWalletNetLkr,
     deliveryFeeLkr: deliveryFeeForPeriodLkr,
   });

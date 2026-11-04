@@ -32,8 +32,14 @@ import { getApiBaseUrl } from '@/lib/apiBase';
 async function fetchWalletAnalysis(
   monthKey: string,
   storeId: string | null,
+  periodFrom: string | null,
+  periodTo: string | null,
 ): Promise<WalletAnalysisSnapshot> {
-    const params = new URLSearchParams({ month: monthKey });
+  const params = new URLSearchParams({ month: monthKey });
+  if (periodFrom && periodTo && periodFrom <= periodTo) {
+    params.set('from', periodFrom);
+    params.set('to', periodTo);
+  }
   if (storeId) params.set('storeId', storeId);
   const res = await fetch(`${getApiBaseUrl()}/admin/wallet/analysis?${params}`, {
     headers: adminAuthHeaders(),
@@ -67,7 +73,7 @@ export default function WalletAnalysisSection({
 
   const { data, isLoading, isError, error, isFetching } = useQuery({
     queryKey: ['wallet-analysis', monthKey, storeId],
-    queryFn: () => fetchWalletAnalysis(monthKey, storeId),
+    queryFn: () => fetchWalletAnalysis(monthKey, storeId, null, null),
     enabled: monthValid && walletListReady,
     staleTime: 60_000,
     gcTime: 60_000,

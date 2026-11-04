@@ -231,13 +231,17 @@ class JobsController extends ChangeNotifier {
     error = null;
     _emit();
     try {
-      final p = await _c.authRepository.setDuty(online ? 'ONLINE' : 'OFF_DUTY');
+      final p = await _c.authRepository.setDuty(
+        online ? 'ONLINE' : 'OFF_DUTY',
+        current: profile,
+      );
       dutyLoading = false;
       profile = p;
       banner = p.isOnline ? null : tr('Go online to receive jobs');
       _emit();
       if (online) {
         _ensureSocketPool(p);
+        _c.deliverySocket.goOnline();
         await _c.alertService.start();
         _c.alertService.setAlertEligible(p.alertEligible);
         await _c.locationTracker.startIdle();
@@ -375,7 +379,18 @@ class JobsController extends ChangeNotifier {
 
   void _ensureSocketPool(DriverProfile p) {
     _c.deliverySocket.connect();
-    _c.deliverySocket.joinBranchPool(p.poolStoreIds);
+    final ids = {...p.poolStoreIds};
+    _c.jobsRepository
+        .listJobs()
+        .then((jobs) {
+          for (final j in jobs) {
+            if (j.storeId.isNotEmpty) ids.add(j.storeId);
+          }
+          _c.deliverySocket.joinBranchPool(ids.toList());
+        })
+        .catchError((_) {
+          _c.deliverySocket.joinBranchPool(p.poolStoreIds);
+        });
   }
 
   @override

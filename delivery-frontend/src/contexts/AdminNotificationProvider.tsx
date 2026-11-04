@@ -22,6 +22,7 @@ import type { Socket } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import { adminAuthHeaders } from '@/lib/adminSession';
 import { createAdminSocket, fetchAdminSocketToken } from '@/lib/adminSocket';
+import { openMainAdminPage } from '@/lib/mainAdminUrl';
 
 export interface AdminNotificationPayload {
   id?: string;
@@ -900,26 +901,26 @@ function AdminNotificationProviderInner({
         id: alert.orderNumber,
         tab,
       });
-      router.push(`/admin/orders?${params.toString()}`);
+      openMainAdminPage(`/admin/orders?${params.toString()}`);
     },
-    [markNotificationRead, pathname, removeOrderToast, router],
+    [markNotificationRead, pathname, removeOrderToast],
   );
 
   const focusProduct = useCallback(
     (alert: NewProductAlert) => {
       removeProductToast(alert.key);
       void markNotificationRead(alert.notificationId);
-      router.push(`/admin/stock?highlight=${encodeURIComponent(alert.productId)}`);
+      openMainAdminPage(`/admin/stock?highlight=${encodeURIComponent(alert.productId)}`);
     },
-    [markNotificationRead, removeProductToast, router],
+    [markNotificationRead, removeProductToast],
   );
 
   const focusStock = useCallback(
     (alert: StockAlert) => {
       removeStockToast(alert.key);
-      router.push(`/admin/stock?highlight=${encodeURIComponent(alert.productId)}`);
+      openMainAdminPage(`/admin/stock?highlight=${encodeURIComponent(alert.productId)}`);
     },
-    [removeStockToast, router],
+    [removeStockToast],
   );
 
   const dismissOrderToast = useCallback(
