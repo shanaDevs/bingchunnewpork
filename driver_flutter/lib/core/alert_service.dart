@@ -146,7 +146,10 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     // post the notification only once the app leaves the screen, drop it on return.
     final ringing = _ringingAlert;
     final burstActive = _ringBurstTimer?.isActive ?? false;
-    if (ringing == null || !burstActive) return;
+    if (ringing == null || !burstActive) {
+      _syncQueuedNotification(state);
+      return;
+    }
     if (state == AppLifecycleState.resumed) {
       BcNotifications.cancelJob(ringing.jobId);
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
@@ -436,7 +439,43 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     if (alert.jobId.isEmpty) return;
     _activeAlerts[alert.jobId] = alert;
     notifyListeners();
-    if (alertEligible) _promoteFrontIfNeeded();
+    if (alertEligible) {
+      _promoteFrontIfNeeded();
+    } else {
+      _notifyQueuedIfOffScreen();
+    }
+  }
+
+  /// The card the in-app overlay shows: the ringing ride, else the first queued one.
+  RideAlert? get _displayedAlert {
+    if (_ringingAlert != null) return _ringingAlert;
+    if (_isPostRejectHoldActive) return null;
+    final queued = activeAlerts;
+    return queued.isEmpty ? null : queued.first;
+  }
+
+  String? _queuedNotifiedJobId;
+
+  void _notifyQueuedIfOffScreen() {
+    if (_appInForeground || alertEligible) return;
+    final alert = _displayedAlert;
+    if (alert == null || alert.jobId == _queuedNotifiedJobId) return;
+    _queuedNotifiedJobId = alert.jobId;
+    BcNotifications.notifyNewJob(alert);
+    try {
+      FlutterForegroundTask.wakeUpScreen();
+    } catch (_) {}
+  }
+
+  /// Queued-card counterpart of the ringing hand-off in [didChangeAppLifecycleState].
+  void _syncQueuedNotification(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final shown = _queuedNotifiedJobId;
+      _queuedNotifiedJobId = null;
+      if (shown != null) BcNotifications.cancelJob(shown);
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _notifyQueuedIfOffScreen();
+    }
   }
 
   void _forceRingNow(RideAlert alert) {
@@ -454,6 +493,7 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _onAlertRemoved(String jobId) {
+    if (_queuedNotifiedJobId == jobId) _queuedNotifiedJobId = null;
     if (_ringingJobId == jobId) _pauseRingCycle();
     _promoteFrontIfNeeded();
   }

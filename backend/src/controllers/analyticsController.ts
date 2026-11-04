@@ -10,6 +10,7 @@ import {
   type OrderChannelHints,
   storePeriodKey,
   sumBreakdownCommission,
+  commissionableSubtotal,
   sumCommissionableBase,
   sumBreakdownConvenienceFee,
   sumBreakdownProviderFee,
@@ -286,6 +287,8 @@ type OrderSummaryBucket = {
   pickupCard: number;
   orderCount: number;
   grossSales: number;
+  /** Product sales only (excludes delivery & customer convenience fees). */
+  productSales: number;
 };
 
 const EMPTY_CHANNEL_TOTALS = {
@@ -308,6 +311,7 @@ function emptyOrderSummaryBucket(label: string): OrderSummaryBucket {
     pickupCard: 0,
     orderCount: 0,
     grossSales: 0,
+    productSales: 0,
   };
 }
 
@@ -316,10 +320,17 @@ function addOrderToSummaryBucket(
   orderMode: string,
   paymentMethod: string,
   total: number,
-  hints?: OrderChannelHints,
+  hints?: OrderChannelHints & {
+    subtotal?: number;
+    discount?: number;
+    loyaltyDiscount?: number;
+  },
 ) {
   bucket.orderCount += 1;
   bucket.grossSales += total;
+  if (hints && typeof hints.subtotal === 'number') {
+    bucket.productSales += commissionableSubtotal(hints);
+  }
   const channel = orderCommissionChannel(orderMode, paymentMethod, hints);
   if (channel === 'deliveryOnline') bucket.delivery += total;
   else if (channel === 'pickupCash') bucket.pickupCash += total;
@@ -349,6 +360,9 @@ function buildOrderSummaryChart(
   orders: Array<{
     createdAt: Date;
     total: number;
+    subtotal: number;
+    discount?: number;
+    loyaltyDiscount?: number;
     orderMode: string;
     paymentMethod: string;
     paymentGateway?: string | null;
@@ -2636,6 +2650,7 @@ export async function getBranchAnalytics(req: Request, res: Response, next: Next
       dateTo: period === 'custom' ? to : undefined,
       kpiCards: {
         grossSales,
+        productGrossSales: windowBase,
         totalOrders,
         totalDeliveryRevenue,
         totalConvenienceRevenue,

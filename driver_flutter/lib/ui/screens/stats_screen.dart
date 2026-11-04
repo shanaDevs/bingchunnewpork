@@ -53,8 +53,11 @@ class _StatsBodyState extends State<_StatsBody> {
     final totalRuns = totals?.completedRuns ?? vm.history.length;
     final totalEarnings = totals?.earningsLkr ?? vm.history.fold<int>(0, (a, r) => a + r.deliveredTotal);
     final distanceLabel = Format.km(totals?.totalDistanceKm ?? 0);
-    final rating = s.ratingsAverage ?? s.stats?.rating.average ?? vm.profile?.avgRating ?? 5.0;
-    final ratingCount = s.ratingsCount > 0 ? s.ratingsCount : (s.stats?.rating.count ?? vm.profile?.ratingCount ?? 0);
+    // The rating card follows the selected period; the all-time figures only stand in until stats load.
+    final periodRating = s.stats?.rating;
+    final rating = periodRating != null ? periodRating.average : (s.ratingsAverage ?? vm.profile?.avgRating);
+    final ratingCount =
+        periodRating?.count ?? (s.ratingsCount > 0 ? s.ratingsCount : (vm.profile?.ratingCount ?? 0));
     final meritPoints = s.stats?.merit.points ?? vm.profile?.meritPoints;
     final rawStatus = s.stats?.merit.status ?? vm.profile?.meritStatus;
     final meritStatus = (rawStatus == null || rawStatus.trim().isEmpty) ? null : rawStatus.toUpperCase();
@@ -107,12 +110,12 @@ class _StatsBodyState extends State<_StatsBody> {
                   iconBg: c.warningSubtle,
                   iconTint: c.warning,
                   label: tr('Driver Rating'),
-                  value: rating.toStringAsFixed(1),
-                  subtitle: rating >= 4.8
+                  value: rating == null ? '—' : rating.toStringAsFixed(1),
+                  subtitle: rating == null || ratingCount == 0
+                      ? tr('No reviews yet')
+                      : rating >= 4.8
                       ? tr('Top rated')
-                      : ratingCount > 0
-                      ? '$ratingCount reviews'
-                      : tr('Top rated'),
+                      : '$ratingCount reviews',
                 ),
               ),
             ],
