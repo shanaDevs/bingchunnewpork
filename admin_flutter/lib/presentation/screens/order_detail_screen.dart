@@ -138,8 +138,7 @@ class _OrderDetailViewState extends State<_OrderDetailView> {
         resizeToAvoidBottomInset:
             o != null && o.status == OrderStatus.ready && !o.isDelivery && ctrl.needsCounterPayment,
         appBar: AppBar(
-          leading: IconButton(onPressed: _close, icon: const Icon(Icons.arrow_back_rounded)),
-          titleSpacing: 0,
+          leading: BackButton(onPressed: _close),
           // The title stacks label + number + badges, which overflows the default
           // 56px toolbar and gets clipped — give it room when badges are shown.
           toolbarHeight: o != null ? 96 : 64,

@@ -226,7 +226,6 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
       canPop: !_creating,
       child: Scaffold(
         appBar: AppBar(
-          titleSpacing: 0,
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

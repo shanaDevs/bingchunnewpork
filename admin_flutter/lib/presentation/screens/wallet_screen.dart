@@ -9,6 +9,7 @@ import '../../domain/entities/order.dart';
 import '../../domain/logic/period.dart';
 import '../../l10n/l10n.dart';
 import '../components/admin_widgets.dart';
+import '../components/pos_app_bar.dart';
 import '../components/badges.dart';
 import '../components/layout.dart';
 import '../components/period_filter.dart';
@@ -526,7 +527,7 @@ class _BranchLedgerScreenState extends State<BranchLedgerScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(shortBranch(widget.storeName)), toolbarHeight: 52),
+    appBar: PosAppBar(title: shortBranch(widget.storeName), eyebrow: tr('Branch wallet')),
     body: ListView(
       padding: centeredPadding(context, maxWidth: 1400),
       children: [

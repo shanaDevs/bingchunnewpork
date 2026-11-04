@@ -54,7 +54,6 @@ class _JobView extends StatelessWidget {
     final job = ctrl.job;
     return Scaffold(
       appBar: AppBar(
-        titleSpacing: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -425,7 +424,6 @@ class _RouteView extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        titleSpacing: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

@@ -10,6 +10,7 @@ import '../../domain/entities/menu.dart';
 import '../../domain/logic/period.dart';
 import '../../l10n/l10n.dart';
 import '../components/admin_widgets.dart';
+import '../components/pos_app_bar.dart';
 import '../components/buttons.dart';
 import '../components/layout.dart';
 import '../components/period_filter.dart';
@@ -217,7 +218,7 @@ class _ReportViewScreenState extends State<ReportViewScreen> {
   Widget build(BuildContext context) {
     final c = context.pos;
     return Scaffold(
-      appBar: AppBar(title: Text(_r.title), toolbarHeight: 52),
+      appBar: PosAppBar(title: _r.title, eyebrow: tr('Report')),
       body: ListenableBuilder(
         listenable: _data,
         builder: (context, _) {

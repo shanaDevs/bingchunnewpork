@@ -7,6 +7,7 @@ import '../../domain/entities/admin_session.dart';
 import '../../domain/logic/menu_access.dart';
 import '../../l10n/l10n.dart';
 import '../components/buttons.dart';
+import '../components/pos_app_bar.dart';
 import '../components/language_switch.dart';
 import '../components/layout.dart';
 import '../components/snack.dart';
@@ -157,7 +158,12 @@ class _ShellViewState extends State<_ShellView> {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => Scaffold(
-          appBar: AppBar(toolbarHeight: 52, title: Text(pageLabel(page, _session))),
+          appBar: PosAppBar(
+            title: pageLabel(page, _session),
+            eyebrow: _session.isSuperAdmin
+                ? tr('All branches')
+                : [?_session.branchLabel, roleLabel(_session.role)].join(' · '),
+          ),
           body: TitleInAppBar(child: _pageBody(page)),
         ),
       ),

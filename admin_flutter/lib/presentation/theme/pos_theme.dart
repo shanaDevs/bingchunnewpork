@@ -275,9 +275,14 @@ ThemeData buildPosTheme(bool dark) {
       foregroundColor: c.text,
       elevation: 0,
       scrolledUnderElevation: 0,
-      titleTextStyle: PosType.heading.copyWith(color: c.text),
+      toolbarHeight: 64,
+      leadingWidth: 64,
+      titleSpacing: 4,
+      titleTextStyle: PosType.heading.copyWith(color: c.text, fontSize: 18),
       systemOverlayStyle: dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
     ),
+    // Every back button is a rounded bordered chip, like the app's PosIconButton.
+    actionIconTheme: ActionIconThemeData(backButtonIconBuilder: (_) => _BackChip(colors: c)),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: c.inputBg,
@@ -309,5 +314,26 @@ ThemeData buildPosTheme(bool dark) {
       thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Colors.white : null),
       trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.brand : null),
     ),
+  );
+}
+
+/// Back button face: a 40px rounded square on the card colour with a hairline border.
+class _BackChip extends StatelessWidget {
+  const _BackChip({required this.colors});
+  final PosColors colors;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 40,
+    height: 40,
+    decoration: BoxDecoration(
+      color: colors.card,
+      borderRadius: BorderRadius.circular(PosRadius.button + 2),
+      border: Border.all(color: colors.border),
+      boxShadow: colors.cardShadow.a == 0
+          ? null
+          : [BoxShadow(color: colors.cardShadow, blurRadius: 10, offset: const Offset(0, 2))],
+    ),
+    child: Icon(Icons.arrow_back_rounded, size: 20, color: colors.text),
   );
 }

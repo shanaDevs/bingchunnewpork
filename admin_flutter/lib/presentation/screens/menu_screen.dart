@@ -13,6 +13,7 @@ import '../../domain/entities/admin.dart';
 import '../../domain/entities/menu.dart';
 import '../../l10n/l10n.dart';
 import '../components/admin_widgets.dart';
+import '../components/pos_app_bar.dart';
 import '../components/badges.dart';
 import '../components/buttons.dart';
 import '../components/layout.dart';
@@ -527,7 +528,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: a), const SizedBox(width: PosSpacing.md), Expanded(child: b)])
         : Column(children: [a, const SizedBox(height: PosSpacing.md), b]);
     return Scaffold(
-      appBar: AppBar(title: Text(p == null ? tr('New product') : tr('Edit product')), toolbarHeight: 52),
+      appBar: PosAppBar(title: p == null ? tr('New product') : tr('Edit product'), eyebrow: tr('Menu')),
       body: Form(
         key: _form,
         child: ListView(

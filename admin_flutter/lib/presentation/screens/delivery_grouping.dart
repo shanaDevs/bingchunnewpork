@@ -556,7 +556,6 @@ class _ClassifyRunsScreenState extends State<ClassifyRunsScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          titleSpacing: 0,
           title: Text(tr('Delivery classification'), style: PosType.heading.copyWith(color: c.text)),
           actions: [
             Padding(
