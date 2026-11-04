@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  branchProductGrossSales,
   buildBranchGrossRevenueBreakdown,
   buildBranchSalesOverviewPoints,
   buildSalesVsDiscountSeries,
@@ -9,8 +10,8 @@ describe('buildBranchSalesOverviewPoints', () => {
   it('allocates unmatched refunds and period fees across revenue periods', () => {
     const result = buildBranchSalesOverviewPoints({
       orderSummaryChart: [
-        { label: 'Jan', delivery: 100, pickupCash: 0, pickupOnline: 0, pickupCard: 0 },
-        { label: 'Feb', delivery: 300, pickupCash: 0, pickupOnline: 0, pickupCard: 0 },
+        { label: 'Jan', delivery: 100, pickupCash: 0, pickupOnline: 0, pickupCard: 0, productSales: 80 },
+        { label: 'Feb', delivery: 300, pickupCash: 0, pickupOnline: 0, pickupCard: 0, productSales: 250 },
       ],
       refundByMonth: [
         { month: 'Jan', amountLkr: 50 },
@@ -26,10 +27,24 @@ describe('buildBranchSalesOverviewPoints', () => {
     expect(result.reduce((sum, row) => sum + row.outflow, 0)).toBe(165);
   });
 
+  it('uses productSales when provided (excludes delivery & convenience fees)', () => {
+    const result = buildBranchSalesOverviewPoints({
+      orderSummaryChart: [
+        { label: 'Jan', delivery: 500, pickupCash: 100, pickupOnline: 0, pickupCard: 0, productSales: 90 },
+      ],
+      refundByMonth: [],
+      commissionFee: 0,
+      gatewayFee: 0,
+      pickupOnly: false,
+    });
+
+    expect(result[0].revenue).toBe(90);
+  });
+
   it('excludes delivery from revenue when pickup-only', () => {
     const result = buildBranchSalesOverviewPoints({
       orderSummaryChart: [
-        { label: 'Jan', delivery: 500, pickupCash: 100, pickupOnline: 0, pickupCard: 0 },
+        { label: 'Jan', delivery: 500, pickupCash: 100, pickupOnline: 0, pickupCard: 0, productSales: 100 },
       ],
       refundByMonth: [],
       commissionFee: 0,
@@ -65,5 +80,18 @@ describe('buildBranchGrossRevenueBreakdown', () => {
       convenience: 50,
       other: 0,
     });
+  });
+});
+
+describe('branchProductGrossSales', () => {
+  it('prefers productGrossSales from API', () => {
+    expect(
+      branchProductGrossSales({
+        productGrossSales: 750,
+        grossSales: 1000,
+        totalDeliveryRevenue: 200,
+        totalConvenienceRevenue: 50,
+      }),
+    ).toBe(750);
   });
 });

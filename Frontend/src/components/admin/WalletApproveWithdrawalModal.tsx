@@ -280,7 +280,8 @@ export default function WalletApproveWithdrawalModal({
   const availableLkr = centsToLkr(walletSummary?.availableBalance);
   const payoutBreakdownPanelProps = periodBreakdownLkr
     ? {
-        preview: useSnapshotDisplay ? null : previewForBreakdown,
+        preview: previewForBreakdown ?? preview,
+        channelBreakdown: channelBreakdown ?? previewForBreakdown?.breakdown ?? preview?.breakdown,
         periodBreakdownLkr,
         onlineOrderSubtotalLkr:
           storedBreakdownLkr?.grossAmount ?? totalSalesLkr ?? periodBreakdownLkr.grossAmount,

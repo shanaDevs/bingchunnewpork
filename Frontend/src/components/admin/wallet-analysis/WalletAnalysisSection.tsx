@@ -141,8 +141,10 @@ export default function WalletAnalysisSection({
               <>
                 <WalletTankCard
                   balance={data.tank.balance}
+                  onlineAvailableBalance={data.onlineAvailableBalance ?? 0}
                   capacity={data.tank.capacity}
                   healthPercent={data.health.percent}
+                  excludedFees={data.excludedFees}
                 />
                 <InflowOutflowTrendChart data={data.trend} headerRight={analysisFilters} />
               </>
