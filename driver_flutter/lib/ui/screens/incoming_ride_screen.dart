@@ -13,6 +13,7 @@ import '../theme/bc_theme.dart';
 import '../../l10n/l10n.dart';
 
 const _dropRed = Color(0xFFE11D48);
+const _green = [Color(0xFF34D399), Color(0xFF10B981), Color(0xFF059669)];
 
 /// Full-screen incoming ride card — port of IncomingRideScreen.kt.
 /// Auto-dismisses after the 30s ring window.
@@ -371,12 +372,11 @@ class _EarningsCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(BcRadius.card),
         gradient: LinearGradient(
-          // Theme blue like the header.
-          colors: [c.brandDark, c.brand],
+          colors: c.isDark ? [const Color(0xFF064E3B), const Color(0xFF065F46)] : _green,
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        boxShadow: [BoxShadow(color: c.brand.withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6))],
+        boxShadow: [BoxShadow(color: _green[1].withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6))],
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(
@@ -438,11 +438,11 @@ class _EarningsCard extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.bolt_rounded, color: c.brandDark, size: 15),
+                      Icon(Icons.bolt_rounded, color: _green[2], size: 15),
                       const SizedBox(width: 3),
                       Text(
                         tr('Good earnings!'),
-                        style: TextStyle(color: c.brandDark, fontSize: 11, fontWeight: FontWeight.w800),
+                        style: TextStyle(color: _green[2], fontSize: 11, fontWeight: FontWeight.w800),
                       ),
                     ],
                   ),
@@ -470,16 +470,16 @@ class _FactsRow extends StatelessWidget {
       if (km != null)
         RunFactTile(icon: Icons.route_rounded, tint: c.brand, value: Format.km(km), label: tr('Distance')),
       if (min != null)
-        RunFactTile(icon: Icons.schedule_rounded, tint: c.brand, value: Format.minutes(min), label: tr('ETA')),
+        RunFactTile(icon: Icons.schedule_rounded, tint: c.warning, value: Format.minutes(min), label: tr('ETA')),
       if (alert.orderCount > 0)
         RunFactTile(
           icon: Icons.shopping_bag_rounded,
-          tint: c.brand,
+          tint: c.success,
           value: '${alert.orderCount}',
           label: tr('Orders'),
         ),
       if (alert.totalCups > 0)
-        RunFactTile(icon: Icons.local_cafe_rounded, tint: c.brand, value: '${alert.totalCups}', label: tr('Cups')),
+        RunFactTile(icon: Icons.local_cafe_rounded, tint: _dropRed, value: '${alert.totalCups}', label: tr('Cups')),
     ];
     if (tiles.isEmpty) return const SizedBox.shrink();
     return Row(
@@ -797,9 +797,9 @@ class _Footer extends StatelessWidget {
             height: 58,
             decoration: BoxDecoration(
               borderRadius: radius,
-              gradient: LinearGradient(colors: [c.brand, c.brandDark]),
+              gradient: const LinearGradient(colors: _green),
               boxShadow: [
-                BoxShadow(color: c.brand.withValues(alpha: 0.35), blurRadius: 16, offset: const Offset(0, 6)),
+                BoxShadow(color: _green[1].withValues(alpha: 0.35), blurRadius: 16, offset: const Offset(0, 6)),
               ],
             ),
             child: Material(

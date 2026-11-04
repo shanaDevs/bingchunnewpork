@@ -175,7 +175,6 @@ class _AppLockScreenState extends State<AppLockScreen> {
               ),
             ),
             child: Stack(
-              fit: StackFit.expand,
               children: [
                 Positioned.fill(
                   child: CustomPaint(painter: HeroSwooshPainter(Colors.white.withValues(alpha: 0.08))),

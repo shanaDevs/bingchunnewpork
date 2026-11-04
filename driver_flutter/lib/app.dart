@@ -354,27 +354,13 @@ class _IncomingRideOverlayState extends State<_IncomingRideOverlay> {
   String? _acceptingId;
   String? _error;
   String? _errorFor;
-  late final AlertService _alerts;
-
-  @override
-  void initState() {
-    super.initState();
-    _alerts = context.read<AlertService>()..addListener(_syncLockScreen);
-    _syncLockScreen();
-  }
 
   @override
   void dispose() {
-    _alerts.removeListener(_syncLockScreen);
     // Signed out while a card was up — the overlay is removed.
     SystemSettings.setRideAlertActive(false);
     super.dispose();
   }
-
-  static RideAlert? _currentAlert(AlertService alerts) =>
-      alerts.ringingAlert ??
-      (alerts.postRejectHoldActive ? null : (alerts.activeAlerts.isEmpty ? null : alerts.activeAlerts.first));
-  void _syncLockScreen() => SystemSettings.setRideAlertActive(_currentAlert(_alerts) != null);
 
   Future<void> _accept(AlertService alerts, RideAlert alert) async {
     setState(() {
@@ -405,7 +391,13 @@ class _IncomingRideOverlayState extends State<_IncomingRideOverlay> {
   @override
   Widget build(BuildContext context) {
     final alerts = context.watch<AlertService>();
-    final alert = _currentAlert(alerts);
+    final alert =
+        alerts.ringingAlert ??
+        (alerts.postRejectHoldActive ? null : (alerts.activeAlerts.isEmpty ? null : alerts.activeAlerts.first));
+    // No ride ringing → the app drops back behind the lock screen (see SystemSettings).
+    // Not tied to appInForeground: the lock screen coming up briefly pauses the app, and
+    // releasing then hid the ringing ride behind the lock screen.
+    SystemSettings.setRideAlertActive(alert != null);
     return ValueListenableBuilder<bool>(
       valueListenable: SystemSettings.deviceLocked,
       builder: (_, locked, _) {

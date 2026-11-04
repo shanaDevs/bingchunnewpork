@@ -10,8 +10,7 @@ abstract final class Endpoints {
   static const productionCore = 'https://bingchunsrilanka.com/api';
 
   /// Production delivery service (includes `/delivery-api`).
-  static const productionDelivery =
-      'https://delivery.bingchunsrilanka.com/delivery-api';
+  static const productionDelivery = 'https://bing-chun-delivery.bc.dartcodes.com/delivery-api';
 
   /// Local core API on this PC (debug). Needs `adb reverse tcp:4000 tcp:4000`.
   static const localCore = 'http://127.0.0.1:4000/api';

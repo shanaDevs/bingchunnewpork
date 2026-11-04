@@ -25,7 +25,6 @@ Future<void> main() async {
   // Start GPS + internet monitoring early so the lock overlay is ready on first frame.
   container.deviceRequirements.start();
   container.pushTokens.listenForeground(container.alertService);
-  BcNotifications.listenForBackgroundActions(container.alertService.silenceJob);
 
   runApp(BingChunDriverApp(container: container));
 }
