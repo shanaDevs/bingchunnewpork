@@ -10,6 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'reac
 import { createPortal } from 'react-dom';
 import {
   AlertCircle,
+  Building2,
   Clock,
   CreditCard,
   History,
@@ -17,6 +18,8 @@ import {
   RefreshCw,
   Wallet,
 } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { WALLET_TAB_TRIGGER_CLASS } from '@/components/admin/useAdminWalletTab';
 
 import toast from 'react-hot-toast';
 import DashboardKpiCard from '@/components/admin/DashboardKpiCard';
@@ -26,6 +29,7 @@ import CommissionBreakdownBadges, {
   type CommissionBreakdown,
 } from '@/components/admin/CommissionBreakdownBadges';
 import ProcessPaymentBulkModal from '@/components/admin/ProcessPaymentBulkModal';
+import PlatformPayoutStatementView from '@/components/admin/PlatformPayoutStatementView';
 import SettlementStatementView from '@/components/admin/SettlementStatementView';
 import {
   hasWithdrawalInvoice,
@@ -36,8 +40,13 @@ import { getAdminSession, isSuperAdmin, type AdminSession } from '@/lib/adminAut
 import {
   openCommissionSettlementReceipt,
   openPayoutProof,
+  openPlatformProviderSettlementInvoice,
   openWithdrawalInvoice,
 } from '@/lib/adminProtectedFile';
+import {
+  fetchPlatformPayoutStatement,
+  type PlatformPayoutStatement,
+} from '@/lib/platformPayoutStatement';
 import {
   fetchPaymentHistoryPendingAll,
   paymentHistoryPendingAllQueryKey,
@@ -58,6 +67,8 @@ type PayoutRow = {
   statementRef: string;
   paidAt: string;
   amount: number;
+  platformReceivable?: number;
+  platformInvoiceUrl?: string;
   paymentMethod: string;
   hasReceipt?: boolean;
   receiptUrl: string | null;
@@ -70,6 +81,8 @@ type PayoutRow = {
   storeName?: string;
 };
 
+type PayoutHistoryView = 'commission' | 'platform';
+
 type PaymentHistoryData = {
   pendingDues: number;
   totalSettled: number;
@@ -81,6 +94,7 @@ type PaymentHistoryData = {
   slabInfo?: SlabInfo;
   period?: { from: string; to: string; isCurrentMonth: boolean };
   payouts: PayoutRow[];
+  platformPayouts?: PayoutRow[];
 };
 
 function billingMonthOptions(count = 36) {
@@ -208,6 +222,7 @@ export default function PaymentHistoryContent({
   const [adminUser, setAdminUser] = useState<AdminSession | null>(() => getAdminSession());
   const [processOpen, setProcessOpen] = useState(false);
   const [statement, setStatement] = useState<SettlementStatement | null>(null);
+  const [platformStatement, setPlatformStatement] = useState<PlatformPayoutStatement | null>(null);
   const [loadingStatementId, setLoadingStatementId] = useState<string | null>(null);
   const [periodFrom, setPeriodFrom] = useState(() => controlledFrom ?? currentMonthPeriod().from);
   const [periodTo, setPeriodTo] = useState(() => controlledTo ?? currentMonthPeriod().to);
@@ -215,6 +230,7 @@ export default function PaymentHistoryContent({
   const [payoutMonth, setPayoutMonth] = useState('');
   const [payoutDateFrom, setPayoutDateFrom] = useState('');
   const [payoutDateTo, setPayoutDateTo] = useState('');
+  const [payoutHistoryView, setPayoutHistoryView] = useState<PayoutHistoryView>('commission');
   const [actionsHost, setActionsHost] = useState<HTMLElement | null>(null);
   const [processHost, setProcessHost] = useState<HTMLElement | null>(null);
 
@@ -252,13 +268,17 @@ export default function PaymentHistoryContent({
 
   const setSelectedStoreId = useCallback(
     (storeId: string) => {
-      const params = new URLSearchParams(searchParams.toString());
+      // Live location search — do not clobber ?tab= / period params from a stale snapshot.
+      const params = new URLSearchParams(
+        typeof window !== 'undefined' ? window.location.search : searchParams.toString(),
+      );
       if (storeId) {
         params.set('storeId', storeId);
       } else {
         params.delete('storeId');
       }
-      router.replace(`${pathname}?${params.toString()}`);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [pathname, router, searchParams],
   );
@@ -335,25 +355,45 @@ export default function PaymentHistoryContent({
     setSelectedPayoutId(null);
   }, [hideLocalPeriodControls]);
 
+  const openPlatformPayoutBreakdown = useCallback(async (id: string) => {
+    setLoadingStatementId(id);
+    try {
+      const result = await fetchPlatformPayoutStatement(id);
+      setPlatformStatement(result);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load platform payout breakdown');
+    } finally {
+      setLoadingStatementId(null);
+    }
+  }, []);
+
   const selectPayoutPeriod = (row: PayoutRow) => {
     if (!hideLocalPeriodControls) {
       setPeriodFrom(row.periodFrom);
       setPeriodTo(row.periodTo);
     }
     setSelectedPayoutId(row.id);
+    if (showPlatformPayoutHistoryTab && payoutHistoryView === 'platform') {
+      void openPlatformPayoutBreakdown(row.id);
+      return;
+    }
     void openSettlement(row.id);
   };
 
   const billingMonths = useMemo(() => billingMonthOptions(), []);
 
   const payoutMonths = useMemo(() => {
-    if (!data?.payouts?.length) return [];
+    const rows = [
+      ...(data?.payouts ?? []),
+      ...(superAdmin ? data?.platformPayouts ?? [] : []),
+    ];
+    if (rows.length === 0) return [];
     const months = new Set<string>();
-    for (const row of data.payouts) {
+    for (const row of rows) {
       months.add(payoutPaidOn(row).slice(0, 7));
     }
     return Array.from(months).sort().reverse();
-  }, [data?.payouts]);
+  }, [data?.payouts, data?.platformPayouts, superAdmin]);
 
   const filteredPayouts = useMemo(() => {
     if (!data?.payouts) return [];
@@ -373,6 +413,35 @@ export default function PaymentHistoryContent({
     payoutDateFrom,
     payoutDateTo,
   ]);
+
+  const filteredPlatformPayouts = useMemo(() => {
+    if (!data?.platformPayouts?.length) return [];
+    return filterPayoutRowsForDisplay(data.platformPayouts, {
+      periodControlled,
+      embedded,
+      payoutMonth,
+      payoutDateFrom,
+      payoutDateTo,
+      monthRange,
+    });
+  }, [
+    data?.platformPayouts,
+    embedded,
+    periodControlled,
+    payoutMonth,
+    payoutDateFrom,
+    payoutDateTo,
+  ]);
+
+  const showPlatformPayoutHistoryTab = superAdmin;
+  const activePayoutRows =
+    showPlatformPayoutHistoryTab && payoutHistoryView === 'platform'
+      ? filteredPlatformPayouts
+      : filteredPayouts;
+  const payoutAmountColumnLabel =
+    showPlatformPayoutHistoryTab && payoutHistoryView === 'platform'
+      ? 'Platform receivable'
+      : 'Commission settled';
 
   const payoutFiltersActive = hideLocalPeriodControls
     ? false
@@ -550,16 +619,58 @@ export default function PaymentHistoryContent({
       <div className="admin-orders-table card overflow-hidden !rounded-[10px]">
         <div className="border-b border-[var(--color-navy-border)] px-4 py-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="flex items-center gap-2">
-              <History size={16} className="text-[var(--color-brand)]" />
-              <div>
-                <h2 className="text-sm font-semibold text-[var(--color-text)]">Payout History</h2>
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  {hideLocalPeriodControls
-                    ? `Click a row to view the settlement breakdown · ${formatPeriodLabel(periodFrom, periodTo)}`
-                    : 'Click a row to view the settlement breakdown · filter by settlement billing period'}
-                </p>
-              </div>
+            <div className="min-w-0 flex-1">
+              {showPlatformPayoutHistoryTab ? (
+                <Tabs
+                  value={payoutHistoryView}
+                  onValueChange={(v) => setPayoutHistoryView(v as PayoutHistoryView)}
+                  className="gap-2"
+                >
+                  <div className="flex items-start gap-2">
+                    {payoutHistoryView === 'platform' ? (
+                      <Building2 size={16} className="mt-0.5 shrink-0 text-[var(--color-brand)]" />
+                    ) : (
+                      <History size={16} className="mt-0.5 shrink-0 text-[var(--color-brand)]" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <TabsList className="mb-2 h-8 w-fit justify-start gap-0.5 bg-transparent p-0 shadow-none">
+                        <TabsTrigger value="commission" className={WALLET_TAB_TRIGGER_CLASS}>
+                          Payout History
+                        </TabsTrigger>
+                        <TabsTrigger value="platform" className={WALLET_TAB_TRIGGER_CLASS}>
+                          Platform Payout History
+                        </TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="commission" className="mt-0 outline-none">
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          {hideLocalPeriodControls
+                            ? `Branch commission settlements · ${formatPeriodLabel(periodFrom, periodTo)}`
+                            : 'Branch commission settlements · filter by billing period or paid date'}
+                        </p>
+                      </TabsContent>
+                      <TabsContent value="platform" className="mt-0 outline-none">
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          {hideLocalPeriodControls
+                            ? `Platform provider receivable from processed branch payouts · ${formatPeriodLabel(periodFrom, periodTo)}`
+                            : 'Platform provider receivable from processed branch payouts · filter by billing period or paid date'}
+                        </p>
+                      </TabsContent>
+                    </div>
+                  </div>
+                </Tabs>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <History size={16} className="text-[var(--color-brand)]" />
+                  <div>
+                    <h2 className="text-sm font-semibold text-[var(--color-text)]">Payout History</h2>
+                    <p className="text-xs text-[var(--color-text-muted)]">
+                      {hideLocalPeriodControls
+                        ? `Click a row to view the settlement breakdown · ${formatPeriodLabel(periodFrom, periodTo)}`
+                        : 'Click a row to view the settlement breakdown · filter by settlement billing period'}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {!hideLocalPeriodControls && (
@@ -649,7 +760,7 @@ export default function PaymentHistoryContent({
                 <th className="!bg-transparent px-4 py-2.5">Date</th>
                 {showBranchColumn && <th className="!bg-transparent px-4 py-2.5">Branch</th>}
                 <th className="!bg-transparent px-4 py-2.5">Period</th>
-                <th className="!bg-transparent px-4 py-2.5">Commission settled</th>
+                <th className="!bg-transparent px-4 py-2.5">{payoutAmountColumnLabel}</th>
                 <th className="!bg-transparent px-4 py-2.5">Payment Method</th>
                 <th className="!bg-transparent px-4 py-2.5">Status</th>
                 <th className="!bg-transparent px-4 py-2.5 text-right">Invoice</th>
@@ -658,31 +769,39 @@ export default function PaymentHistoryContent({
             </thead>
             <tbody>
               {tableLoading && <PaymentHistoryTableSkeleton colSpan={payoutTableColSpan} />}
-              {!tableLoading && !isError && filteredPayouts.length === 0 && (
+              {!tableLoading && !isError && activePayoutRows.length === 0 && (
                 <tr>
                   <td colSpan={payoutTableColSpan} className="px-4 py-8 text-center">
                     <div className="mx-auto flex max-w-md flex-col items-center gap-2 text-[var(--color-text-muted)]">
                       <CreditCard size={28} className="opacity-40" />
                       <p className="text-sm font-medium text-[var(--color-text)]">
                         {payoutFiltersActive
-                          ? 'No settlements match your filters'
-                          : hideLocalPeriodControls
-                            ? 'No settlements recorded for this period'
-                            : 'No settlements recorded yet'}
+                          ? 'No records match your filters'
+                          : payoutHistoryView === 'platform'
+                            ? hideLocalPeriodControls
+                              ? 'No platform payouts recorded for this period'
+                              : 'No platform payouts recorded yet'
+                            : hideLocalPeriodControls
+                              ? 'No settlements recorded for this period'
+                              : 'No settlements recorded yet'}
                       </p>
                       <p className="text-xs leading-relaxed">
                         {payoutFiltersActive
                           ? 'Try a different month or date range, or clear the payout filters.'
-                          : hideLocalPeriodControls
-                            ? 'Commission is calculated from paid orders. Payout records appear here once settlements are submitted for this billing period.'
-                            : 'Commission is calculated from paid orders. Payout records will appear here once settlements are submitted.'}
+                          : payoutHistoryView === 'platform'
+                            ? hideLocalPeriodControls
+                              ? 'Records appear here after you process platform provider payments for approved branch payout periods in this billing window.'
+                              : 'Records appear here after platform provider payments are processed for approved branch payout periods.'
+                            : hideLocalPeriodControls
+                              ? 'Commission is calculated from paid orders. Payout records appear here once settlements are submitted for this billing period.'
+                              : 'Commission is calculated from paid orders. Payout records will appear here once settlements are submitted.'}
                       </p>
                     </div>
                   </td>
                 </tr>
               )}
               {!tableLoading &&
-                filteredPayouts.map((row) => {
+                activePayoutRows.map((row) => {
                 const isSelected =
                   selectedPayoutId === row.id ||
                   (row.periodFrom === periodFrom && row.periodTo === periodTo);
@@ -720,7 +839,24 @@ export default function PaymentHistoryContent({
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-right">
-                      {hasWithdrawalInvoice(row.invoiceUrl) ? (
+                      {showPlatformPayoutHistoryTab && payoutHistoryView === 'platform' ? (
+                        row.storeWithdrawalId ? (
+                          <button
+                            type="button"
+                            className="text-[13px] font-medium text-[var(--color-brand)] hover:underline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void openPlatformProviderSettlementInvoice(row.id).catch(() => {
+                                toast.error('Could not open invoice');
+                              });
+                            }}
+                          >
+                            View Invoice
+                          </button>
+                        ) : (
+                          <span className="text-xs text-[var(--color-text-muted)]">—</span>
+                        )
+                      ) : hasWithdrawalInvoice(row.invoiceUrl) ? (
                         <button
                           type="button"
                           className="text-[13px] font-medium text-[var(--color-brand)] hover:underline"
@@ -782,6 +918,10 @@ export default function PaymentHistoryContent({
       )}
 
       <SettlementStatementView statement={statement} onClose={() => setStatement(null)} />
+      <PlatformPayoutStatementView
+        statement={platformStatement}
+        onClose={() => setPlatformStatement(null)}
+      />
     </>
   );
 

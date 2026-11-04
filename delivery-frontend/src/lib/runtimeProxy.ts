@@ -72,7 +72,9 @@ export async function proxyTo(req: NextRequest, origin: string): Promise<Respons
 
   let requestBody: BodyInit | undefined;
   if (hasBody) {
-    requestBody = bufferRequestBody ? Buffer.from(await req.arrayBuffer()) : req.body;
+    requestBody = bufferRequestBody
+      ? Buffer.from(await req.arrayBuffer())
+      : (req.body ?? undefined);
   }
 
   let upstream: Response;
@@ -83,10 +85,9 @@ export async function proxyTo(req: NextRequest, origin: string): Promise<Respons
       body: requestBody,
       ...(bufferRequestBody
         ? {}
-        : {
-            // @ts-expect-error `duplex` is required by Node fetch for streamed request bodies
+        : ({
             duplex: hasBody ? 'half' : undefined,
-          }),
+          } as RequestInit)),
       redirect: 'manual',
       cache: 'no-store',
     });

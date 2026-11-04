@@ -184,6 +184,16 @@ export function resolveChannelDeliveryFeeLkr(breakdown: SettlementBreakdown | nu
   return breakdown.deliveryOnline.deliveryFeeTotal ?? 0;
 }
 
+/**
+ * Initiate Payout header: Pickup Online + Delivery Online net amounts only
+ * (pickup cash/card, convenience, and delivery fees excluded).
+ */
+export function computeAvailableToWithdrawFromChannelBreakdown(
+  breakdown: SettlementBreakdown,
+): number {
+  return sumOnlineRevenueSubtotals(breakdown);
+}
+
 /** Delivery fee for the selected payout period — channel preview when available. */
 export function resolvePeriodDeliveryFeeLkr(params: {
   channelBreakdown?: SettlementBreakdown | null;

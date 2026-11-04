@@ -39,10 +39,11 @@ import AdminInitiatePayoutModal from '@/components/admin/AdminInitiatePayoutModa
 import BranchPayoutPeriodsSection from '@/components/admin/BranchPayoutPeriodsSection';
 import type { DuePeriodFocus } from '@/components/admin/payoutPeriodView';
 import AdminPrintCanvas, { printScopedAdminReport } from '@/components/admin/AdminPrintCanvas';
-import AdminReportPdf from '@/components/admin/AdminReportPdf';
+import AdminReportPdf, { type ReportStatCard } from '@/components/admin/AdminReportPdf';
 import ReportOptionsBar from '@/components/admin/ReportOptionsBar';
 import { formatPrintCents } from '@/components/admin/AdminPrintReport';
 import toast from 'react-hot-toast';
+import type { BranchPayoutCompletedMeta } from '@/lib/branchPayoutsDue';
 
 interface WalletInfo {
   id: string;
@@ -139,6 +140,8 @@ type BranchWalletDetailProps = {
   periodLabel?: string | null;
   /** Payouts Due View: show oldest periods first and highlight the clicked due window. */
   duePeriodFocus?: DuePeriodFocus | null;
+  /** Super Admin payout from this wallet — refresh Payouts Due / period lists on parent. */
+  onBranchPayoutCompleted?: (meta: BranchPayoutCompletedMeta) => void;
 };
 
 /** Flip to true (with backend ENABLE_BRANCH_PAYOUT_REQUESTS) to restore Branch Admin requests. */
@@ -154,6 +157,7 @@ export default function BranchWalletDetail({
   periodTo = null,
   periodLabel = null,
   duePeriodFocus = null,
+  onBranchPayoutCompleted,
 }: BranchWalletDetailProps) {
   const router = useRouter();
 
@@ -174,7 +178,6 @@ export default function BranchWalletDetail({
     summaryStats: true,
     withdrawals: true,
   });
-
   // Filters (used for PDF export period)
   const [filterType, setFilterType] = useState('');
   const [filterDirection, setFilterDirection] = useState('');
@@ -470,46 +473,47 @@ export default function BranchWalletDetail({
   );
 
   const pdfStats = useMemo(() => {
-    const earnings = walletDashboard?.allTimeEarnings;
-    const pickup = earnings?.pickupOnlineIn ?? 0;
-    const delivery = earnings?.deliveryOnlineIn ?? 0;
-    const receivableTotal = earnings?.total ?? pickup + delivery;
-    const modeTotal = pickup + delivery;
-    const sharePct = (part: number) =>
-      modeTotal > 0 ? (Math.round((part / modeTotal) * 1000) / 10).toFixed(1) : '0.0';
-    const periodCaption = exportPeriodLabel(periodFrom, periodTo, periodLabel);
-    const walletBalance = wallet?.currentBalance ?? walletDashboard?.liveEarningsCents ?? 0;
+    const allTimeHint = 'All-time';
+    const payables = walletDashboard?.payablesBreakdown;
+    const ch = payables?.channelRevenueCents;
+    const pickupCash = ch?.pickupCashIn ?? 0;
+    const pickupOnline = ch?.pickupOnlineIn ?? 0;
+    const pickupCard = ch?.pickupCardIn ?? 0;
+    const deliveryOnline = ch?.deliveryOnlineIn ?? 0;
+    const totalRevenue = payables?.totalRevenueCents ?? 0;
+    const totalExpenses = payables?.totalExpensesCents ?? 0;
+    const availableBalance = payables?.allTimeAvailableBalanceCents ?? 0;
+
+    const stat = (
+      label: string,
+      cents: number,
+      tone: NonNullable<ReportStatCard['tone']>,
+      sub = allTimeHint,
+    ): ReportStatCard => ({
+      label,
+      value: formatPrintCents(cents),
+      sub,
+      tone,
+    });
 
     return [
-      {
-        label: 'Online Wallet Balance',
-        value: formatPrintCents(walletBalance),
-        sub: 'All-time available balance',
-        tone: 'teal' as const,
-      },
-      {
-        label: 'Refund Amount',
-        value: formatMoneyAmount(walletDashboard?.refundsLkr ?? 0),
-        sub: 'All-time refunds',
-        tone: 'yellow' as const,
-      },
-      {
-        label: 'Branch Receivable',
-        value: formatPrintCents(receivableTotal),
-        sub:
-          periodCaption === 'All time'
-            ? 'All-time branch receivable'
-            : `${periodCaption} receivable`,
-        tone: 'blue' as const,
-      },
-      {
-        label: 'Breakdown',
-        value: formatPrintCents(receivableTotal),
-        sub: `Total revenue (${periodCaption}) · Pickup ${formatPrintCents(pickup)} (${sharePct(pickup)}%) · Delivery ${formatPrintCents(delivery)} (${sharePct(delivery)}%)`,
-        tone: 'purple' as const,
-      },
+      stat('All-Time Available Balance', availableBalance, 'teal'),
+      stat('Total Revenue (Net)', totalRevenue, 'green'),
+      stat('Delivery Online Revenue', deliveryOnline, 'blue'),
+      stat('Pickup Online Revenue', pickupOnline, 'blue'),
+      stat('Pickup Cash Revenue', pickupCash, 'purple'),
+      stat('Pickup Card Revenue', pickupCard, 'purple'),
+      stat('Total Expenses', totalExpenses, 'orange'),
+      stat('Net Platform Amount', payables?.platformCommissionCents ?? 0, 'yellow'),
+      stat('Payment Gateway Fees', payables?.gatewayFeeCents ?? 0, 'yellow'),
+      stat(
+        'Branch Receivable',
+        payables?.branchReceivableCents ?? 0,
+        'yellow',
+        'Paid 15-day payouts',
+      ),
     ];
-  }, [wallet, walletDashboard, periodFrom, periodTo, periodLabel]);
+  }, [walletDashboard]);
 
   return (
     <div style={{ maxWidth: embedded ? 'none' : 1000, margin: embedded ? 0 : '0 auto' }}>
@@ -619,6 +623,7 @@ export default function BranchWalletDetail({
             periodFrom={periodFrom}
             periodTo={periodTo}
             periodLabel={periodLabel}
+            storeId={storeId}
           />
         </div>
       ) : (
@@ -805,8 +810,9 @@ export default function BranchWalletDetail({
             Math.max(0, (wallet.netTransferableEarnings ?? 0) - (wallet.totalWithdrawn ?? 0))
           }
           apiBase={apiBase}
-          onCompleted={(_meta) => {
+          onCompleted={(meta) => {
             void Promise.all([fetchWallet(), fetchWithdrawals(1)]);
+            onBranchPayoutCompleted?.(meta);
           }}
         />
       )}

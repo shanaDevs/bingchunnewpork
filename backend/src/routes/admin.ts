@@ -42,6 +42,11 @@ router.get(
   requireAnyPermission(['PAYMENT_HISTORY', 'WALLET'], 'read'),
   invoiceController.getSettlementInvoiceHandler,
 );
+router.get(
+  '/invoices/settlement/:settlementId/platform-provider',
+  requireAnyPermission(['PAYMENT_HISTORY', 'WALLET'], 'read'),
+  invoiceController.getPlatformProviderSettlementInvoiceHandler,
+);
 
 router.get(
   '/spaces-proof',
@@ -66,6 +71,16 @@ router.get(
   requirePermission('PAYMENT_HISTORY', 'read'),
   paymentHistoryController.listPendingAllHandler,
 );
+router.get(
+  '/payment-history/ready-to-process',
+  requirePermission('PAYMENT_HISTORY', 'read'),
+  paymentHistoryController.listReadyToProcessHandler,
+);
+router.get(
+  '/payment-history/ready-to-process/:month',
+  requirePermission('PAYMENT_HISTORY', 'read'),
+  paymentHistoryController.getReadyToProcessMonthHandler,
+);
 router.get('/payment-history/settlement-preview', requirePermission('PAYMENT_HISTORY', 'read'), paymentHistoryController.getSettlementPreview);
 router.post(
   '/payment-history/settlement',
@@ -80,6 +95,11 @@ router.post(
   paymentHistoryController.bulkSettleHandler,
 );
 router.get('/payment-history/settlements/:id', requirePermission('PAYMENT_HISTORY', 'read'), paymentHistoryController.getSettlement);
+router.get(
+  '/payment-history/settlements/:id/platform-receivable',
+  requirePermission('PAYMENT_HISTORY', 'read'),
+  paymentHistoryController.getSettlementPlatformReceivable,
+);
 router.get(
   '/payment-history/settlements/:id/receipt-url',
   requirePermission('PAYMENT_HISTORY', 'read'),
@@ -211,6 +231,11 @@ router.get(
   requirePermission('WALLET', 'read'),
   walletController.getWithdrawalProofUrlHandler,
 );
+router.post(
+  '/wallet/withdrawals/:id/proof',
+  requireSystemAdmin,
+  walletController.attachWithdrawalProofHandler,
+);
 router.get('/wallet/withdrawals/:id', requirePermission('WALLET', 'read'), walletController.getWithdrawalByIdHandler);
 router.post(
   '/wallet/verify-pin',
@@ -254,7 +279,14 @@ router.post(
   '/wallet/:storeId/initiate-payout',
   requireSystemAdmin,
   walletController.attachStoreIdFromWalletParams,
-  settlementProofMemoryUpload.single('proof'),
+  // Multipart to this route was 504'ing at the App Platform edge; JSON base64 is preferred.
+  // Keep multer as a no-op fallback when Content-Type is still multipart.
+  (req, res, next) => {
+    if (req.is('multipart/form-data')) {
+      return settlementProofMemoryUpload.single('proof')(req, res, next);
+    }
+    return next();
+  },
   walletController.initiatePayoutHandler,
 );
 router.get('/wallet/:storeId/settle-info', requirePermission('WALLET', 'read'), walletController.getSettleInfo);

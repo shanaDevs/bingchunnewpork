@@ -46,9 +46,9 @@ type Props = {
 };
 
 const AMOUNT_COLUMNS = [
-  'Branch payout',
+  'Branch receives',
   'Customer convenience fee',
-  'Platform commission',
+  'Net platform amount',
   'Delivery fee received',
 ] as const;
 
@@ -64,14 +64,17 @@ function statusBadgeClass(status: PayoutPeriodStatus) {
 }
 
 function previewPeriodTo(row: PayoutPeriodRow) {
-  return row.summaryThrough ?? row.periodTo;
+  const through = row.summaryThrough ?? row.periodTo;
+  // Guard inverted ranges (e.g. last-day boundary bugs) so summaries never run from > to.
+  if (through < row.periodFrom) return row.periodFrom;
+  return through;
 }
 
 function formatPayoutPeriodCell(row: PayoutPeriodRow) {
   if (row.status !== 'IN_PROGRESS') {
     return formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo);
   }
-  const through = row.summaryThrough ?? row.periodTo;
+  const through = previewPeriodTo(row);
   return (
     <span className="flex flex-col gap-0.5">
       <span>{formatBiweeklyPeriodLabel(row.periodFrom, through)}</span>
@@ -221,7 +224,7 @@ function PayoutPeriodAmountCells({
           {feeColumnsLoading && index > 0 ? (
             <Skeleton className="ml-auto inline-block h-3.5 w-16 bg-[var(--color-navy-light)]/70" />
           ) : (
-            formatAmountCell(value)
+            formatAmountCell(value ?? 0)
           )}
         </td>
       ))}
@@ -256,14 +259,20 @@ export default function BranchPayoutPeriodsSection({
   } | null>(null);
 
   const {
-    data: rows = [],
-    isLoading,
+    data: payoutPeriodsData,
+    isPending,
+    isFetching,
     refetch,
   } = useQuery({
     queryKey: payoutPeriodsQueryKey(storeId),
     queryFn: () => fetchPayoutPeriods(apiBase, storeId),
     enabled: Boolean(storeId),
   });
+
+  const rows = payoutPeriodsData ?? [];
+  /** Disabled query (no storeId) or first fetch — avoid empty state while wallet overview still loads. */
+  const periodsLoading =
+    !storeId || isPending || (isFetching && payoutPeriodsData === undefined);
 
   const rowsNeedingPreview = useMemo(
     () =>
@@ -326,17 +335,17 @@ export default function BranchPayoutPeriodsSection({
   }, [storeId]);
 
   useEffect(() => {
-    if (!focusOldestPending || isLoading || openedOldestPending.current || !oldestPending) return;
+    if (!focusOldestPending || periodsLoading || openedOldestPending.current || !oldestPending) return;
     openedOldestPending.current = true;
     setViewRow(periodToViewRow(oldestPending, storeId));
-  }, [focusOldestPending, isLoading, oldestPending, storeId]);
+  }, [focusOldestPending, periodsLoading, oldestPending, storeId]);
 
   useEffect(() => {
-    if (!activeHighlight || isLoading) return;
+    if (!activeHighlight || periodsLoading) return;
     const el = highlightRowRef.current;
     if (!el) return;
     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [activeHighlight?.periodFrom, activeHighlight?.periodTo, isLoading, displayRows.length]);
+  }, [activeHighlight?.periodFrom, activeHighlight?.periodTo, periodsLoading, displayRows.length]);
 
   return (
     <div className="mb-7 overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
@@ -347,9 +356,9 @@ export default function BranchPayoutPeriodsSection({
         </span>
       </div>
 
-      {isLoading && <PayoutPeriodsTableSkeleton />}
+      {periodsLoading && <PayoutPeriodsTableSkeleton />}
 
-      {!isLoading && rows.length === 0 && (
+      {!periodsLoading && rows.length === 0 && (
         <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-brand-subtle)] text-[var(--color-brand)]">
             <CalendarRange size={28} />
@@ -361,7 +370,7 @@ export default function BranchPayoutPeriodsSection({
         </div>
       )}
 
-      {!isLoading && displayRows.length > 0 && (
+      {!periodsLoading && displayRows.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[960px] text-left text-xs">
             <thead>

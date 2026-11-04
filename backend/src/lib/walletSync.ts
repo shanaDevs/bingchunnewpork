@@ -119,11 +119,20 @@ function buildMissingWalletPaymentRows(
 }
 
 async function loadPaidWalletCreditOrders(scopeStoreId?: string): Promise<PaidOrderRow[]> {
+  const onlineAndLoyalty = WALLET_CREDIT_METHODS.filter((m) => m !== 'CASH_AT_COUNTER');
   return prisma.order.findMany({
     where: {
-      paymentStatus: 'PAID',
-      paymentMethod: { in: [...WALLET_CREDIT_METHODS] },
       ...(scopeStoreId ? { storeId: scopeStoreId } : {}),
+      OR: [
+        {
+          paymentStatus: 'PAID',
+          paymentMethod: { in: [...onlineAndLoyalty] },
+        },
+        {
+          paymentMethod: 'CASH_AT_COUNTER',
+          status: { not: 'CANCELLED' },
+        },
+      ],
     },
     select: PAID_ORDER_SELECT,
     orderBy: { createdAt: 'asc' },
@@ -156,7 +165,7 @@ function collectStoreIdsToRecalc(
 }
 
 /**
- * Add missing ORDER_PAYMENT rows for paid online orders and recalculate balances.
+ * Add missing ORDER_PAYMENT rows for paid online/loyalty orders and active counter-cash pickup orders.
  * Does not delete existing transactions (settlements/adjustments preserved).
  */
 export async function syncMissingWalletPayments(scopeStoreId?: string): Promise<{

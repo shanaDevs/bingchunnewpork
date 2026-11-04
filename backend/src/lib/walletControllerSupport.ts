@@ -12,16 +12,25 @@ import {
   walletReportOrderSelect,
   platformItemSalesLkr,
 } from './walletRevenue';
-import { buildPeriodChannelPreview } from './periodChannelPreview';
+import { buildPeriodChannelPreview, type PeriodChannelPreview } from './periodChannelPreview';
+import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import {
   computeBreakdownForPeriod,
+  computeBranchPayablesBreakdown,
   computeNetTransferableEarnings,
   enrichWalletRow,
   getBranchWalletDashboard,
   getSuperAdminWalletDashboard,
   getOrCreateWallet,
   getWalletSummary,
+  type PeriodBreakdown,
 } from './walletService';
+import {
+  getSlabIndex,
+  sumBreakdownCommission,
+  sumBreakdownOrderCount,
+  sumBreakdownProviderFee,
+} from './commission';
 import {
   computeSharedPromoContribution,
   enrichSharedPromoForApi,
@@ -311,24 +320,26 @@ export async function loadPayoutPeriodItems(storeId: string) {
   items.push(...pendingWindows);
 
   const openWindow = await resolveOpenRollingPayoutWindow(storeId, FIXED_PAYOUT_PERIOD_DAYS);
-  if (openWindow?.capped) {
+  if (openWindow?.capped && openWindow.from <= openWindow.to) {
     const idealTo = addDaysToDateStr(openWindow.from, FIXED_PAYOUT_PERIOD_DAYS - 1);
     const inProgressKey = periodKey(openWindow.from, idealTo);
     const pendingKeys = new Set(
       pendingWindows.map((w) => periodKey(w.periodFrom, w.periodTo)),
     );
     if (!covered.has(inProgressKey) && !pendingKeys.has(inProgressKey)) {
+      const summaryThrough =
+        openWindow.to < openWindow.from ? openWindow.from : openWindow.to;
       const merged = await computeMergedPeriodSummary(
         storeId,
         openWindow.from,
-        openWindow.to,
+        summaryThrough,
       );
       // Visibility only — same summary helpers; show open cycle even when net is still zero.
       items.push({
         key: `period-in-progress-${openWindow.from}-${idealTo}`,
         periodFrom: openWindow.from,
         periodTo: idealTo,
-        summaryThrough: openWindow.to,
+        summaryThrough,
         status: 'IN_PROGRESS',
         amountCents: merged.netAmount,
         orderCount: merged.orderCount,
@@ -601,6 +612,29 @@ export async function resolveNetPreviewPeriodBounds(
   return { from, to };
 }
 
+/** Build the API channelPreview shape from a period breakdown's reused channel rows. */
+export function channelPreviewFromPeriodBreakdown(
+  from: string,
+  to: string,
+  period: PeriodBreakdown,
+): PeriodChannelPreview {
+  const breakdown = period.channelBreakdown;
+  const monthlyBaseLkr = period.windowBase / 100;
+  return {
+    period: { from, to },
+    breakdown,
+    totalCommission: sumBreakdownCommission(breakdown),
+    totalProviderFee: sumBreakdownProviderFee(breakdown),
+    orderCount: sumBreakdownOrderCount(breakdown),
+    storeDiscountsTotal: period.periodDiscountsTotal / 100,
+    slabInfo: {
+      monthlyBase: monthlyBaseLkr,
+      effectiveRate: period.commissionRate,
+      slabIndex: getSlabIndex(monthlyBaseLkr),
+    },
+  };
+}
+
 export async function buildNetPreviewResponseData(storeId: string, from: string, to: string) {
   const loadStorePaybackFlag = () =>
     prisma.store.findUnique({
@@ -608,18 +642,22 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
       select: { platformDiscountPaybackEnabled: true },
     });
 
-  const [breakdown, channelPreview, storeRow, sharedPromo, promoOwnership] = await Promise.all([
-    computeBreakdownForPeriod(storeId, from, to),
-    buildPeriodChannelPreview(storeId, from, to),
-    loadStorePaybackFlag().catch(async (err) => {
-      const code = (err as { code?: string })?.code;
-      if (code !== 'P2022') throw err;
-      await ensurePlatformPaybackSchema();
-      return loadStorePaybackFlag();
-    }),
-    computeSharedPromoContribution(storeId, from, to),
-    loadPromoOwnershipTotalsForPeriod(storeId, from, to),
-  ]);
+  // PR #27 calc path: channel preview + order-available match the Initiate Payout UI.
+  // Run all independent reads in parallel (same as wallet-issue-fix).
+  const [breakdown, channelPreview, orderAvailable, storeRow, sharedPromo, promoOwnership] =
+    await Promise.all([
+      computeBreakdownForPeriod(storeId, from, to),
+      buildPeriodChannelPreview(storeId, from, to),
+      computePeriodOrderAvailableCents(storeId, from, to),
+      loadStorePaybackFlag().catch(async (err) => {
+        const code = (err as { code?: string })?.code;
+        if (code !== 'P2022') throw err;
+        await ensurePlatformPaybackSchema();
+        return loadStorePaybackFlag();
+      }),
+      computeSharedPromoContribution(storeId, from, to),
+      loadPromoOwnershipTotalsForPeriod(storeId, from, to),
+    ]);
 
   const periodBreakdown = attachPromoOwnershipTotals(
     mergeSharedPromoIntoBreakdown(breakdown, sharedPromo),
@@ -653,6 +691,9 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
     rejectedRefundGatewayDeductionLkr: breakdown.rejectedRefundGatewayDeduction / 100,
     rejectedRefundNetAmountLkr: breakdown.rejectedRefundNetAmount / 100,
     channelPreview,
+    orderAvailableFromOrdersLkr: orderAvailable.fromOrdersCents / 100,
+    orderAvailableRemainingLkr: orderAvailable.remainingCents / 100,
+    orderPayoutReservedLkr: orderAvailable.priorPayoutCents / 100,
     ...finalPayoutFields,
   };
 }
@@ -1050,6 +1091,23 @@ export async function loadAdminWalletListPayload(
     );
   }
 
+  const allTimeAvailableByStore = new Map<string, number>();
+  if (isSuper && storeIds.length > 0) {
+    const rows: Array<{ storeId: string; cents: number }> = await promiseAllLimited(
+      getPrismaFanOutLimit(),
+      storeIds.map(
+        (id) => (): Promise<{ storeId: string; cents: number }> =>
+          computeBranchPayablesBreakdown(id).then((breakdown) => ({
+            storeId: id,
+            cents: breakdown.allTimeAvailableBalanceCents,
+          })),
+      ),
+    );
+    for (const row of rows) {
+      allTimeAvailableByStore.set(row.storeId, row.cents);
+    }
+  }
+
   const walletsWithCounts = wallets.map((w) => {
     const pendingTotal = pendingMap.get(w.storeId) ?? 0;
     const netTransferableEarnings = netEarningsMap.get(w.storeId);
@@ -1058,6 +1116,7 @@ export async function loadAdminWalletListPayload(
       netTransferableEarnings: enriched.netTransferableEarnings,
       currentBalance: enriched.currentBalance,
       availableBalance: enriched.availableBalance,
+      allTimeAvailableBalanceCents: allTimeAvailableByStore.get(w.storeId),
       _count: { transactions: txnCountMap.get(w.storeId) ?? 0 },
     });
   });
@@ -1146,9 +1205,44 @@ export async function loadWithdrawalInvoicePeriodContext(
     const computed = await computeBreakdownForPeriod(storeId, fromStr, toStr);
     periodBreakdown = parseInvoicePeriodBreakdown(computed);
   }
-  const channelPreview = await buildPeriodChannelPreview(storeId, fromStr, toStr);
-  const channelSummary = buildInvoiceChannelSummary(channelPreview.breakdown);
-  const storeDiscountsCents = Math.round(channelPreview.storeDiscountsTotal * 100);
+
+  // Prefer channel snapshot locked on the withdrawal — avoid a third order scan
+  // just to render the invoice after initiate-payout already computed it.
+  const storedChannel =
+    storedBreakdown &&
+    typeof storedBreakdown === 'object' &&
+    (storedBreakdown as { channelBreakdown?: Parameters<typeof buildInvoiceChannelSummary>[0] })
+      .channelBreakdown;
+
+  let channelSummary;
+  let storeDiscountsCents = 0;
+  if (storedChannel) {
+    channelSummary = buildInvoiceChannelSummary(storedChannel);
+    const storedDiscounts =
+      storedBreakdown &&
+      typeof storedBreakdown === 'object' &&
+      typeof (storedBreakdown as { storeDiscountsTotal?: unknown }).storeDiscountsTotal === 'number'
+        ? (storedBreakdown as { storeDiscountsTotal: number }).storeDiscountsTotal
+        : null;
+    storeDiscountsCents =
+      storedDiscounts != null
+        ? Math.round(storedDiscounts * 100)
+        : Math.round(
+            (
+              ((storedBreakdown as { branchOwnedPromoDiscountTotal?: number })
+                .branchOwnedPromoDiscountTotal ?? 0) +
+              ((storedBreakdown as { platformOwnedPromoDiscountTotal?: number })
+                .platformOwnedPromoDiscountTotal ?? 0) +
+              ((storedBreakdown as { periodLoyaltyDiscountTotal?: number })
+                .periodLoyaltyDiscountTotal ?? 0)
+            ),
+          );
+  } else {
+    const channelPreview = await buildPeriodChannelPreview(storeId, fromStr, toStr);
+    channelSummary = buildInvoiceChannelSummary(channelPreview.breakdown);
+    storeDiscountsCents = Math.round(channelPreview.storeDiscountsTotal * 100);
+  }
+
   const promoData = await loadInvoicePromoSummary(storeId, fromStr, toStr);
 
   return {

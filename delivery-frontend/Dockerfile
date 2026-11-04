@@ -11,20 +11,20 @@ COPY delivery-frontend ./delivery-frontend
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Browser calls admin API (delivery-jobs live on admin surface, not shop).
-ARG NEXT_PUBLIC_API_URL=https://bingchun-admin-a4ndy.ondigitalocean.app/api
+# Same-origin /api (proxied to admin). Never bake the starter DO host — it 302s to the custom domain.
+ARG NEXT_PUBLIC_API_URL=/api
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ARG BACKEND_URL=https://bingchun-admin-a4ndy.ondigitalocean.app
+ARG BACKEND_URL=https://admin.bingchunsrilanka.com
 ENV BACKEND_URL=$BACKEND_URL
-ARG API_PROXY_URL=https://bingchun-admin-a4ndy.ondigitalocean.app
+ARG API_PROXY_URL=https://admin.bingchunsrilanka.com
 ENV API_PROXY_URL=$API_PROXY_URL
 ARG DELIVERY_SERVICE_URL=
 ENV DELIVERY_SERVICE_URL=$DELIVERY_SERVICE_URL
-ARG NEXT_PUBLIC_SOCKET_URL=https://bingchun-admin-a4ndy.ondigitalocean.app
+ARG NEXT_PUBLIC_SOCKET_URL=https://admin.bingchunsrilanka.com
 ENV NEXT_PUBLIC_SOCKET_URL=$NEXT_PUBLIC_SOCKET_URL
-ARG NEXT_PUBLIC_SITE_URL=https://bingchun-delivery-6mgs2.ondigitalocean.app
+ARG NEXT_PUBLIC_SITE_URL=https://delivery.bingchunsrilanka.com
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
-ARG NEXT_PUBLIC_MAIN_ADMIN_URL=https://bingchun-admin-a4ndy.ondigitalocean.app/admin
+ARG NEXT_PUBLIC_MAIN_ADMIN_URL=https://admin.bingchunsrilanka.com/admin
 ENV NEXT_PUBLIC_MAIN_ADMIN_URL=$NEXT_PUBLIC_MAIN_ADMIN_URL
 ARG NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE=true
 ENV NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE=$NEXT_PUBLIC_DELIVERY_ADMIN_VIA_CORE

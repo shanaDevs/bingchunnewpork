@@ -1,3 +1,5 @@
+import { resolveFinalNetPayoutPayLkr } from '@/components/admin/resolvePayoutReportValues';
+import type { PayoutReportValues } from '@/components/admin/resolvePayoutReportValues';
 import {
   computeFinalPayoutLkr,
   extractSharedPromoLkrFromBreakdown,
@@ -66,6 +68,19 @@ export function resolvePayableWalletLkrForPayout(params: {
     return Math.min(requestedWalletLkr, availableWalletLkr, periodNetLkr);
   }
   return Math.min(requestedWalletLkr, availableWalletLkr);
+}
+
+/** Branch receives total aligned with payout report "Net payout (final pay amount)". */
+export function branchPayoutDisplayFromReportValues(
+  reportValues: PayoutReportValues,
+): BranchPayoutDisplay {
+  return {
+    totalBranchPayoutLkr: resolveFinalNetPayoutPayLkr(reportValues),
+    periodWalletNetLkr: reportValues.branchNetPayoutLkr,
+    walletRequestLkr: reportValues.branchNetPayoutLkr,
+    jasonTopUpLkr: reportValues.sharedPromoJasonLkr,
+    scope: 'fullPeriod',
+  };
 }
 
 /** Branch-facing payout figures — one source for tables, modals, and allocation cards. */

@@ -230,8 +230,12 @@ export function monthsInRange(from: string, to: string): string[] {
 }
 
 export function computePlatformCommission(base: number, monthlyBase: number): number {
-  // Whole-LKR ledger unit — round half-up at the calculation site.
-  return Math.round(base * getEffectiveRate(monthlyBase));
+  return base * getEffectiveRate(monthlyBase);
+}
+
+/** Per-order commission in cents (half-up to nearest cent when stored). */
+export function computePlatformCommissionCents(base: number, monthlyBase: number): number {
+  return Math.round(computePlatformCommission(base, monthlyBase) * 100);
 }
 
 export function computeProviderFee(orderSubtotal: number, rate = GATEWAY_FEE_RATE): number {

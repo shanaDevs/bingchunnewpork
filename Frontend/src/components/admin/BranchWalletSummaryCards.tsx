@@ -1,11 +1,28 @@
 'use client';
 
-import { ArrowLeftRight, BarChart3, ChevronDown, ChevronRight, RotateCcw, Wallet } from 'lucide-react';
+import { BarChart3, ChevronRight, HandCoins, Wallet } from 'lucide-react';
 import { DashSkel } from '@/components/admin/BranchDashboardSkeleton';
-import { currentMonthKey } from '@/components/admin/MonthPickerSelect';
-import { monthRange, todayDateStr } from '@/components/admin/useWalletPeriodFilter';
 import { formatMoneyAmount } from '@/lib/receipt';
 import { cn } from '@/lib/utils';
+import type { PayoutPeriodExpensesCents } from '@/components/admin/payoutPeriodRowAmounts';
+import { usePaidPayoutPeriodExpenses } from '@/components/admin/usePaidPayoutPeriodExpenses';
+
+export type BranchWalletPayablesBreakdown = {
+  channelRevenueCents: {
+    pickupCashIn: number;
+    pickupOnlineIn: number;
+    pickupCardIn: number;
+    deliveryOnlineIn: number;
+  };
+  totalRevenueCents: number;
+  /** Net platform amount from paid 15-day payouts (cents). */
+  platformCommissionCents: number;
+  deliveryCommissionCents: number;
+  gatewayFeeCents: number;
+  branchReceivableCents: number;
+  totalExpensesCents: number;
+  allTimeAvailableBalanceCents: number;
+};
 
 export type BranchWalletDashboard = {
   allTimeEarnings: {
@@ -20,86 +37,16 @@ export type BranchWalletDashboard = {
   };
   liveEarningsCents: number;
   refundsLkr: number;
+  payablesBreakdown?: BranchWalletPayablesBreakdown;
 };
 
 function centsToMoney(cents: number): string {
   return formatMoneyAmount(cents / 100);
 }
 
-function lkrMoney(value: number): string {
-  return formatMoneyAmount(value);
-}
-
-function pct(part: number, total: number) {
-  if (total <= 0) return '0.0';
-  return (Math.round((part / total) * 1000) / 10).toFixed(1);
-}
-
-function revenuePeriodCaption(
-  periodFrom: string | null,
-  periodTo: string | null,
-  periodLabel: string | null,
-): string {
-  if (!periodFrom || !periodTo || !periodLabel) return 'All time';
-  const ym = currentMonthKey();
-  const range = monthRange(ym);
-  const isThisMonth =
-    periodFrom === `${ym}-01` && (periodTo === todayDateStr() || periodTo === range.to);
-  return isThisMonth ? 'This Month' : periodLabel;
-}
-
-const DECORATIVE_BARS = [28, 40, 34, 52, 46, 68, 58, 78];
-
-function DecorativeBars() {
-  return (
-    <div className="branch-wallet-metric-card__bars" aria-hidden>
-      {DECORATIVE_BARS.map((height, index) => (
-        <span
-          key={index}
-          style={{
-            height: `${height}%`,
-            opacity: 0.22 + index * 0.09,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function RevenueSparkline({
-  pickup,
-  delivery,
-}: {
-  pickup: number;
-  delivery: number;
-  total: number;
-}) {
-  const modeTotal = pickup + delivery;
-  const pickupShare = modeTotal > 0 ? pickup / modeTotal : 0.38;
-  const deliveryShare = modeTotal > 0 ? delivery / modeTotal : 0.62;
-  const midY = (48 - pickupShare * 8 - deliveryShare * 12).toFixed(1);
-  const endY = (22 - deliveryShare * 6).toFixed(1);
-  const line = `M0 52 C 72 54, 118 58, 156 ${midY} C 204 26, 268 ${endY}, 320 18`;
-  const area = `${line} L 320 72 L 0 72 Z`;
-
-  return (
-    <svg
-      className="branch-wallet-revenue__spark"
-      viewBox="0 0 320 72"
-      preserveAspectRatio="none"
-      aria-hidden
-    >
-      <defs>
-        <linearGradient id="branchWalletRevenueFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#307ef2" stopOpacity="0.22" />
-          <stop offset="100%" stopColor="#307ef2" stopOpacity="0.02" />
-        </linearGradient>
-      </defs>
-      <path d={area} fill="url(#branchWalletRevenueFill)" />
-      <path d={line} fill="none" stroke="#307ef2" strokeWidth="2.2" strokeLinecap="round" />
-    </svg>
-  );
-}
+const ALL_TIME_HINT = 'All-time';
+const BRANCH_RECEIVABLE_HINT = 'Paid 15-day payouts';
+const PAYOUT_PERIOD_EXPENSE_HINT = 'Paid 15-day payouts';
 
 type Props = {
   dashboard: BranchWalletDashboard | null;
@@ -111,144 +58,297 @@ type Props = {
   periodTo?: string | null;
   periodLabel?: string | null;
   hideDelivery?: boolean;
+  /** When set, expenses use paid 15-day payout periods only (same query as the table). */
+  storeId?: string;
+  payoutPeriodExpenses?: PayoutPeriodExpensesCents | null;
+  payoutPeriodExpensesLoading?: boolean;
 };
+
+const EMPTY_PAID_PAYOUT_EXPENSES: PayoutPeriodExpensesCents = {
+  netPlatformAmountCents: 0,
+  gatewayFeeCents: 0,
+  branchReceivableCents: 0,
+  totalExpensesCents: 0,
+};
+
+function RevenueChannelKpiCard({
+  label,
+  amount,
+  loading,
+  hint,
+}: {
+  label: string;
+  amount: string;
+  loading?: boolean;
+  hint?: string;
+}) {
+  return (
+    <div className="branch-wallet-payables-revenue__channel min-w-0 rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm dark:border-navy-border/60 dark:bg-[var(--color-navy-card)]">
+      <p className="text-[0.78rem] font-semibold leading-[1.15] text-slate-950 dark:text-fg">
+        {label}
+      </p>
+      <p className="mt-[0.28rem] truncate text-[1rem] font-bold tabular-nums leading-[1.15] text-slate-950 dark:text-fg">
+        {loading ? <DashSkel className="h-4 w-28 max-w-full" /> : amount}
+      </p>
+      {hint ? (
+        <p className="mt-0.5 truncate text-[0.68rem] font-medium leading-[1.15] text-slate-500 dark:text-muted-fg">
+          {hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function PayablesRevenueSummaryCard({
+  totalRevenueCents,
+  deliveryOnlineCents,
+  pickupOnlineCents,
+  pickupCashCents,
+  pickupCardCents,
+  loading,
+  hideDelivery,
+}: {
+  totalRevenueCents: number;
+  deliveryOnlineCents: number;
+  pickupOnlineCents: number;
+  pickupCashCents: number;
+  pickupCardCents: number;
+  loading: boolean;
+  hideDelivery: boolean;
+}) {
+  const channelCols = hideDelivery
+    ? 'sm:grid-cols-2 lg:grid-cols-3'
+    : 'sm:grid-cols-2 lg:grid-cols-4';
+
+  return (
+    <section className="branch-wallet-payables-summary branch-wallet-payables__metric">
+      <div className="relative z-10 flex items-center gap-2">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-[#2563EB] dark:bg-[rgba(48,126,242,0.12)] dark:text-[#307ef2]">
+          <BarChart3 size={14} strokeWidth={2.3} aria-hidden />
+        </div>
+        <h2 className="m-0 text-[0.9rem] font-bold leading-[1.15] text-slate-950 dark:text-fg">
+          Revenue Summary
+        </h2>
+      </div>
+
+      <div className="mt-2 flex min-h-0 flex-1 flex-col">
+        <p className="branch-wallet-payables-summary__total m-0 tabular-nums leading-[1.05] tracking-[-0.03em] text-slate-950 dark:text-fg">
+          {loading ? <DashSkel className="h-8 w-48 max-w-full" /> : centsToMoney(totalRevenueCents)}
+        </p>
+
+        <div className={cn('mt-auto grid grid-cols-1 gap-2 pt-2', channelCols)}>
+          {!hideDelivery && (
+            <RevenueChannelKpiCard
+              label="Delivery Online Revenue"
+              amount={centsToMoney(deliveryOnlineCents)}
+              loading={loading}
+            />
+          )}
+          <RevenueChannelKpiCard
+            label="Pickup Online Revenue"
+            amount={centsToMoney(pickupOnlineCents)}
+            loading={loading}
+          />
+          <RevenueChannelKpiCard
+            label="Pickup Cash Revenue"
+            amount={centsToMoney(pickupCashCents)}
+            loading={loading}
+          />
+          <RevenueChannelKpiCard
+            label="Pickup Card Revenue"
+            amount={centsToMoney(pickupCardCents)}
+            loading={loading}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BranchReceivableCard({
+  branchReceivableCents,
+  loading,
+}: {
+  branchReceivableCents: number;
+  loading: boolean;
+}) {
+  return (
+    <section className="branch-wallet-receivable branch-wallet-payables__receivable">
+      <HandCoins
+        aria-hidden
+        size={96}
+        strokeWidth={1}
+        className="branch-wallet-receivable__art"
+      />
+      <div className="branch-wallet-receivable__icon" aria-hidden>
+        <HandCoins size={15} strokeWidth={2.25} />
+      </div>
+      <div className="branch-wallet-receivable__body">
+        <p className="branch-wallet-receivable__label">Branch Receivable</p>
+        <p className="branch-wallet-receivable__amount">
+          {loading ? (
+            <DashSkel className="h-7 w-40 max-w-full bg-blue-900/10" />
+          ) : (
+            centsToMoney(branchReceivableCents)
+          )}
+        </p>
+        <p className="branch-wallet-receivable__hint">{BRANCH_RECEIVABLE_HINT}</p>
+      </div>
+    </section>
+  );
+}
+
+function PayablesExpensesSummaryCard({
+  totalExpensesCents,
+  platformCommissionCents,
+  gatewayFeeCents,
+  loading,
+  fromPayoutPeriods,
+}: {
+  totalExpensesCents: number;
+  platformCommissionCents: number;
+  gatewayFeeCents: number;
+  loading: boolean;
+  fromPayoutPeriods?: boolean;
+}) {
+  const periodHint = fromPayoutPeriods ? PAYOUT_PERIOD_EXPENSE_HINT : undefined;
+  return (
+    <section className="branch-wallet-payables-summary branch-wallet-payables__metric">
+      <div className="relative z-10 flex items-center gap-2">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-[#2563EB] dark:bg-[rgba(48,126,242,0.12)] dark:text-[#307ef2]">
+          <BarChart3 size={14} strokeWidth={2.3} aria-hidden />
+        </div>
+        <h2 className="m-0 text-[0.9rem] font-bold leading-[1.15] text-slate-950 dark:text-fg">
+          Expenses Summary
+        </h2>
+      </div>
+
+      <div className="mt-2 flex min-h-0 flex-1 flex-col">
+        <p className="branch-wallet-payables-summary__total m-0 tabular-nums leading-[1.05] tracking-[-0.03em] text-slate-950 dark:text-fg">
+          {loading ? <DashSkel className="h-8 w-48 max-w-full" /> : centsToMoney(totalExpensesCents)}
+        </p>
+
+        <div className="mt-auto grid grid-cols-1 gap-2 pt-2 sm:grid-cols-2">
+          <RevenueChannelKpiCard
+            label="Net Platform Amount"
+            amount={centsToMoney(platformCommissionCents)}
+            loading={loading}
+            hint={periodHint}
+          />
+          <RevenueChannelKpiCard
+            label="Payment Gateway Fees"
+            amount={centsToMoney(gatewayFeeCents)}
+            loading={loading}
+            hint={periodHint}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function BranchWalletSummaryCards({
   dashboard,
   loading = false,
   periodLoading = false,
   className = '',
-  allTimeBalanceCents,
-  periodFrom = null,
-  periodTo = null,
-  periodLabel = null,
   hideDelivery = false,
+  storeId,
+  payoutPeriodExpenses: payoutPeriodExpensesProp = null,
+  payoutPeriodExpensesLoading: payoutPeriodExpensesLoadingProp = false,
 }: Props) {
-  const earnings = dashboard?.allTimeEarnings;
-  const pickup = earnings?.pickupOnlineIn ?? 0;
-  const delivery = hideDelivery ? 0 : (earnings?.deliveryOnlineIn ?? 0);
-  const total = hideDelivery ? pickup : (earnings?.total ?? pickup + delivery);
-  const modeTotal = pickup + delivery;
-  const periodCaption = revenuePeriodCaption(periodFrom, periodTo, periodLabel);
-  const walletBalance = allTimeBalanceCents ?? dashboard?.liveEarningsCents ?? 0;
-  const lifetimeLoading = loading;
-  const filteredLoading = loading || periodLoading;
+  const { expenses: paidPeriodExpenses, loading: paidPeriodExpensesLoading } =
+    usePaidPayoutPeriodExpenses(storeId);
+  const paidPayoutExpensesOnly = Boolean(storeId);
+  const payoutPeriodExpenses =
+    payoutPeriodExpensesProp ?? (paidPayoutExpensesOnly ? paidPeriodExpenses : null);
+  const payoutPeriodExpensesLoading =
+    payoutPeriodExpensesLoadingProp ||
+    (paidPayoutExpensesOnly ? paidPeriodExpensesLoading : false);
+
+  const payables = dashboard?.payablesBreakdown;
+  const channels = payables?.channelRevenueCents;
+  const deliveryOnlineCents = hideDelivery ? 0 : (channels?.deliveryOnlineIn ?? 0);
+  const pickupCashCents = channels?.pickupCashIn ?? 0;
+  const pickupOnlineCents = channels?.pickupOnlineIn ?? 0;
+  const pickupCardCents = channels?.pickupCardIn ?? 0;
+
+  const totalRevenueCents = hideDelivery
+    ? Math.max(0, (payables?.totalRevenueCents ?? 0) - deliveryOnlineCents)
+    : (payables?.totalRevenueCents ?? 0);
+
+  const usePayoutPeriodExpenses = paidPayoutExpensesOnly || payoutPeriodExpenses != null;
+  const resolvedPaidExpenses =
+    payoutPeriodExpenses ?? (paidPayoutExpensesOnly ? EMPTY_PAID_PAYOUT_EXPENSES : null);
+  const platformCommissionCents = usePayoutPeriodExpenses
+    ? (resolvedPaidExpenses?.netPlatformAmountCents ?? 0)
+    : (payables?.platformCommissionCents ?? 0);
+  const gatewayFeeCents = usePayoutPeriodExpenses
+    ? (resolvedPaidExpenses?.gatewayFeeCents ?? 0)
+    : (payables?.gatewayFeeCents ?? 0);
+  const branchReceivableCents = usePayoutPeriodExpenses
+    ? (resolvedPaidExpenses?.branchReceivableCents ?? 0)
+    : (payables?.branchReceivableCents ?? 0);
+  const totalExpensesCents = usePayoutPeriodExpenses
+    ? (resolvedPaidExpenses?.totalExpensesCents ?? 0)
+    : (payables?.totalExpensesCents ?? 0);
+  /** Keep in sync with expense cards (paid 15-day payouts when storeId is set). */
+  const availableBalanceCents = totalRevenueCents - totalExpensesCents;
+
+  const cardLoading = loading || periodLoading || payoutPeriodExpensesLoading;
 
   return (
-    <div className={cn('branch-wallet-overview', className)}>
-      <section className="branch-wallet-balance">
-        <Wallet
-          aria-hidden
-          size={118}
-          strokeWidth={1}
-          className="branch-wallet-balance__art"
+    <div className={cn('branch-wallet-overview branch-wallet-payables', className)}>
+      <div className="branch-wallet-payables__row branch-wallet-payables__row--top">
+        <PayablesRevenueSummaryCard
+          totalRevenueCents={totalRevenueCents}
+          deliveryOnlineCents={deliveryOnlineCents}
+          pickupOnlineCents={pickupOnlineCents}
+          pickupCashCents={pickupCashCents}
+          pickupCardCents={pickupCardCents}
+          loading={cardLoading}
+          hideDelivery={hideDelivery}
         />
-        <div className="branch-wallet-balance__icon" aria-hidden>
-          <Wallet size={15} strokeWidth={2.25} />
-        </div>
-        <div className="branch-wallet-balance__body">
-          <p className="branch-wallet-balance__label">Online Wallet Balance</p>
-          <p className="branch-wallet-balance__amount">
-            {lifetimeLoading ? (
-              <DashSkel className="h-7 w-40 max-w-full bg-white/20" />
-            ) : (
-              centsToMoney(walletBalance)
-            )}
-          </p>
-          <p className="branch-wallet-balance__hint">All-time available balance</p>
-        </div>
-        <span className="branch-wallet-balance__go" aria-hidden>
-          <ChevronRight size={16} strokeWidth={2.25} />
-        </span>
-      </section>
-
-      <section className="branch-wallet-metric-card">
-        <div className="branch-wallet-metric-card__top">
-          <span className="branch-wallet-metric-card__icon" aria-hidden>
-            <RotateCcw size={14} strokeWidth={2.25} />
-          </span>
-          <h2>Refund Amount</h2>
-        </div>
-        <p className="branch-wallet-metric-card__amount">
-          {lifetimeLoading ? (
-            <DashSkel className="h-7 w-24" />
-          ) : (
-            lkrMoney(dashboard?.refundsLkr ?? 0)
-          )}
-        </p>
-        <p className="branch-wallet-metric-card__hint">All-time refunds</p>
-        <DecorativeBars />
-      </section>
-
-      <section className="branch-wallet-metric-card">
-        <div className="branch-wallet-metric-card__top">
-          <span className="branch-wallet-metric-card__icon" aria-hidden>
-            <ArrowLeftRight size={14} strokeWidth={2.25} />
-          </span>
-          <h2>Branch Receivable</h2>
-        </div>
-        <p className="branch-wallet-metric-card__amount">
-          {filteredLoading ? <DashSkel className="h-7 w-28" /> : centsToMoney(total)}
-        </p>
-        <p className="branch-wallet-metric-card__hint">
-          {periodCaption === 'All time' ? 'All-time branch receivable' : `${periodCaption} receivable`}
-        </p>
-        <DecorativeBars />
-      </section>
-
-      <section className="branch-wallet-revenue">
-        <div className="branch-wallet-revenue__head">
-          <div className="branch-wallet-revenue__title">
-            <span className="branch-wallet-revenue__icon" aria-hidden>
-              <BarChart3 size={13} strokeWidth={2.25} />
-            </span>
-            <h2>Breakdown</h2>
+        <section className="branch-wallet-balance branch-wallet-payables__balance">
+          <Wallet
+            aria-hidden
+            size={96}
+            strokeWidth={1}
+            className="branch-wallet-balance__art"
+          />
+          <div className="branch-wallet-balance__icon" aria-hidden>
+            <Wallet size={15} strokeWidth={2.25} />
           </div>
-          <span className="branch-wallet-revenue__period">
-            {periodCaption}
-            <ChevronDown size={12} strokeWidth={2.25} />
+          <div className="branch-wallet-balance__body">
+            <p className="branch-wallet-balance__label">All-Time Available Balance</p>
+            <p className="branch-wallet-balance__amount">
+              {cardLoading ? (
+                <DashSkel className="h-7 w-40 max-w-full bg-white/20" />
+              ) : (
+                centsToMoney(availableBalanceCents)
+              )}
+            </p>
+            <p className="branch-wallet-balance__hint">{ALL_TIME_HINT}</p>
+          </div>
+          <span className="branch-wallet-balance__go" aria-hidden>
+            <ChevronRight size={16} strokeWidth={2.25} />
           </span>
-        </div>
+        </section>
+      </div>
 
-        <div
-          className={cn(
-            'branch-wallet-revenue__metrics',
-            hideDelivery && 'branch-wallet-revenue__metrics--two',
-          )}
-        >
-          <div className="branch-wallet-revenue__metric">
-            <p>Total Revenue</p>
-            <strong>
-              {filteredLoading ? <DashSkel className="h-4 w-24" /> : centsToMoney(total)}
-            </strong>
-            <span>{periodCaption}</span>
-          </div>
-          <div className="branch-wallet-revenue__metric">
-            <p>Pickup Revenue</p>
-            <strong>
-              {filteredLoading ? <DashSkel className="h-4 w-20" /> : centsToMoney(pickup)}
-            </strong>
-            <span>{pct(pickup, modeTotal)}% of total</span>
-          </div>
-          {!hideDelivery && (
-            <div className="branch-wallet-revenue__metric">
-              <p>Delivery Revenue</p>
-              <strong>
-                {filteredLoading ? <DashSkel className="h-4 w-20" /> : centsToMoney(delivery)}
-              </strong>
-              <span>{pct(delivery, modeTotal)}% of total</span>
-            </div>
-          )}
-        </div>
-
-        <div className="branch-wallet-revenue__chart">
-          {filteredLoading ? (
-            <DashSkel className="block h-full w-full rounded-md" />
-          ) : (
-            <RevenueSparkline pickup={pickup} delivery={delivery} total={total} />
-          )}
-        </div>
-      </section>
+      <div className="branch-wallet-payables__row branch-wallet-payables__row--expenses">
+        <PayablesExpensesSummaryCard
+          totalExpensesCents={totalExpensesCents}
+          platformCommissionCents={platformCommissionCents}
+          gatewayFeeCents={gatewayFeeCents}
+          loading={cardLoading}
+          fromPayoutPeriods={usePayoutPeriodExpenses}
+        />
+        <BranchReceivableCard
+          branchReceivableCents={branchReceivableCents}
+          loading={cardLoading}
+        />
+      </div>
     </div>
   );
 }

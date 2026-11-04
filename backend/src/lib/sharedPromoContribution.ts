@@ -233,6 +233,37 @@ export function resolveFinalPayoutAmountFromBreakdown(
   return computeFinalPayoutAmountCents(fallbackAmount, splitContributionAmounts(raw).jasonAmount);
 }
 
+/**
+ * Branch payout total for a paid 15-day withdrawal (cents) — aligned with admin
+ * "Branch payout" column (`resolveBranchPayoutDisplay` / `branchReceives`).
+ */
+export function branchPayoutCentsFromWithdrawalBreakdown(
+  breakdown: unknown,
+  fallbackAmountCents: number,
+): number {
+  const raw = asBreakdownRecord(breakdown);
+  if (!raw) return fallbackAmountCents;
+
+  const finalAmount = finiteAmount(raw.finalPayoutAmount);
+  if (finalAmount > 0) return Math.round(finalAmount);
+
+  const branchRequestRaw = finiteAmount(raw.branchRequestNetAmount);
+  const branchRequestCents =
+    branchRequestRaw > 0 ? Math.round(branchRequestRaw) : fallbackAmountCents;
+
+  const jasonCents = splitContributionAmounts(raw).jasonAmount;
+  const withPromo = computeFinalPayoutAmountCents(branchRequestCents, jasonCents);
+  if (withPromo > 0) return withPromo;
+
+  const periodNetRaw =
+    finiteAmount(raw.periodNetAmount) > 0
+      ? finiteAmount(raw.periodNetAmount)
+      : finiteAmount(raw.netAmount);
+  if (periodNetRaw > 0) return Math.round(periodNetRaw);
+
+  return fallbackAmountCents;
+}
+
 export function parseSharedPromoFromBreakdown(breakdown: unknown): SharedPromoContribution {
   const raw = asBreakdownRecord(breakdown);
   if (!raw) return { ...EMPTY_SHARED_PROMO_CONTRIBUTION };

@@ -56,7 +56,6 @@ export default function BranchSystemWalletTab({
   payoutPeriodsRefresh = 0,
 }: Props) {
   const [sectionTab, setSectionTab] = useState<SectionTab>('payouts');
-
   return (
     <>
       <BranchWalletSummaryCards
@@ -68,6 +67,7 @@ export default function BranchSystemWalletTab({
         periodTo={periodTo}
         periodLabel={periodLabel}
         hideDelivery={hideDelivery}
+        storeId={storeId}
       />
       <Tabs
         value={sectionTab}
