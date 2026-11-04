@@ -10,6 +10,7 @@ import CustomerSidebar from '@/components/layout/CustomerSidebar';
 import { useDeletedAccountGuard, isDeletedAccountUser } from '@/hooks/useDeletedAccountGuard';
 import { useAuthStore } from '@/store/authStore';
 import { useAuthHydrated } from '@/hooks/useAuthHydrated';
+import { ACCOUNT_SHELL_PATHS } from '@/components/account-redesign/AccountShell';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -25,9 +26,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // The home, offers and stores pages bring their own header and footer (components/home-redesign).
-  // The admin's floating spin button still shows there; elsewhere FloatingCart brings it.
-  if (pathname === '/' || pathname === '/promotions' || pathname === '/stores') {
+  // The home, offers, stores, sign-in and redesigned account pages bring their own header and footer
+  // (components/home-redesign). The admin's floating spin button still shows there (it hides itself on sign-in);
+  // elsewhere FloatingCart brings it.
+  if (
+    pathname === '/' ||
+    pathname === '/promotions' ||
+    pathname === '/stores' ||
+    pathname === '/account/login' ||
+    ACCOUNT_SHELL_PATHS.has(pathname ?? '') ||
+    /^\/order\/[^/]+\/receipt\/?$/.test(pathname ?? '')
+  ) {
     return (
       <>
         {children}

@@ -24,7 +24,7 @@ const MENU_SIDEBAR_LINKS = [
   { href: '/wishlist', label: 'Wishlist', icon: Heart },
   { href: '/promotions', label: 'Offers', icon: Tag },
   { href: '/stores', label: 'Stores', icon: Store },
-  { href: '/account/loyalty', label: 'Rewards', icon: Gift },
+  { href: '/account/rewards', label: 'Rewards', icon: Gift },
   { href: '/account/orders', label: 'My Orders', icon: ClipboardList },
   { href: '/contact', label: 'Help', icon: CircleHelp },
   { href: '/account', label: 'Profile', icon: User },
@@ -35,7 +35,7 @@ const SIDEBAR_LINKS_PUBLIC = [
   { href: '/menu', label: 'Menu', icon: UtensilsCrossed },
   { href: '/wishlist', label: 'Wishlist', icon: Heart },
   { href: '/promotions', label: 'Offers', icon: Tag },
-  { href: '/account/loyalty', label: 'Rewards', icon: Gift },
+  { href: '/account/rewards', label: 'Rewards', icon: Gift },
   { href: '/stores', label: 'Stores', icon: Store },
   { href: '/contact', label: 'Help', icon: CircleHelp },
 ] as const;
@@ -60,7 +60,7 @@ function isLinkActive(pathname: string, href: string) {
       pathname === '/account' ||
       (pathname.startsWith('/account') &&
         !pathname.startsWith('/account/login') &&
-        !pathname.startsWith('/account/loyalty') &&
+        !pathname.startsWith('/account/rewards') &&
         !pathname.startsWith('/account/orders'))
     );
   }
@@ -111,16 +111,16 @@ export default function CustomerSidebar({
             <Link
               key={link.href}
               href={link.href}
-              data-loyalty-target={link.href === '/account/loyalty' ? 'rewards' : undefined}
+              data-loyalty-target={link.href === '/account/rewards' ? 'rewards' : undefined}
               className={`home-desktop__sidebar-link${active ? ' home-desktop__sidebar-link--active' : ''}${
-                link.href === '/account/loyalty' ? ' home-desktop__sidebar-link--rewards' : ''
+                link.href === '/account/rewards' ? ' home-desktop__sidebar-link--rewards' : ''
               }`}
               title={link.href === '/contact' ? 'Help & Support' : link.label}
               aria-label={link.href === '/contact' ? 'Help & Support' : undefined}
             >
               <span className="home-desktop__sidebar-link-icon-wrap">
                 <Icon size={20} strokeWidth={2} />
-                {link.href === '/account/loyalty' ? <LoyaltyRewardsNavBadge /> : null}
+                {link.href === '/account/rewards' ? <LoyaltyRewardsNavBadge /> : null}
               </span>
               <span>{link.label}</span>
             </Link>
