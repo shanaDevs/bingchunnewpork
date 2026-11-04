@@ -19,8 +19,6 @@ import { HeroProductStage } from "./HeroProductStage";
  * Phone and tablet canvases start below the fixed header (pt-22) and are as wide as the screen,
  * unless that would push the composition below the first screen: then they narrow just enough to fit
  * 100svh (the viewport with the browser toolbars showing), with a floor for landscape phones.
- * The phones' bottom nav waits until the composition has scrolled clear of it (data-bottom-nav-after),
- * so it never covers the composition.
  * The multipliers are the canvas aspect ratios from HERO_COMPACT_CANVAS.
  */
 export function HeroSection() {
@@ -30,7 +28,7 @@ export function HeroSection() {
       aria-labelledby="hero-heading"
       className="relative isolate overflow-hidden pb-16 text-snow"
     >
-      <div data-bottom-nav-after className="relative pt-22 wide:pt-0">
+      <div className="relative pt-22 wide:pt-0">
         <HeroBackdrop />
         <div className="@container relative mx-auto aspect-[390/580] w-[min(100%,max(18rem,calc((100svh-5.5rem)*0.672)))] max-w-site sm:aspect-[768/880] sm:w-[min(100%,max(20rem,calc((100svh-5.5rem)*0.873)))] wide:w-full wide:aspect-[1440/820]">
           <HeroDecor />

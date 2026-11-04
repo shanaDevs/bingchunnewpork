@@ -80,8 +80,7 @@ export function SpinFab({ aboveCup = false }: { aboveCup?: boolean }) {
         // The cup (FloatingCart): 56px, 12px in from the edge, above the bottom nav on phones; none from 1280px.
         aboveCup
           ? 'right-3 bottom-[calc(11.5rem+env(safe-area-inset-bottom,0))] md:bottom-24 xl:right-6 xl:bottom-6'
-          : // The redesigned pages: on phones above their bottom nav (--bottom-nav-space, 0 elsewhere).
-            'right-4 bottom-[max(calc(var(--bottom-nav-space,0px)+0.75rem),calc(1.25rem+env(safe-area-inset-bottom,0px)))] sm:right-6 md:bottom-6',
+          : 'right-4 bottom-[calc(1.25rem+env(safe-area-inset-bottom,0))] sm:right-6 sm:bottom-6',
       )}
     >
       <button

@@ -7,7 +7,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import toast from "react-hot-toast";
 import { homeFontVariables } from "@/components/home-redesign/fonts";
-import { BottomNav } from "@/components/home-redesign/layout/BottomNav";
 import { SiteFooter } from "@/components/home-redesign/layout/SiteFooter";
 import { SiteHeader } from "@/components/home-redesign/layout/SiteHeader";
 import { cn } from "@/components/home-redesign/lib/cn";
@@ -215,7 +214,7 @@ export default function LocationsPage() {
 
           <section className="relative -mt-8 rounded-t-[2.5rem] bg-white max-md:min-h-0 sm:-mt-10">
             {/* Mobile: the page fills the screen, with a minimum height that leaves a usable map on short screens. */}
-            <Container className="pt-6 pb-12 max-md:flex max-md:h-full max-md:min-h-0 max-md:flex-col max-md:pb-[calc(var(--bottom-nav-space)+1rem)] sm:pt-8 lg:pt-10 lg:pb-16">
+            <Container className="pt-6 pb-12 max-md:flex max-md:h-full max-md:min-h-0 max-md:flex-col max-md:pb-[calc(env(safe-area-inset-bottom)+1.5rem)] sm:pt-8 lg:pt-10 lg:pb-16">
               <header data-locations="title" className="mb-6 max-md:shrink-0 sm:mb-8">
                 <h1 className="font-display-condensed text-[clamp(2.25rem,5vw,3.5rem)] leading-[0.95] text-brand-950 uppercase">
                   Find a Bing Chun <TitleHighlight>near you</TitleHighlight>
@@ -378,7 +377,6 @@ export default function LocationsPage() {
         </div>
       </main>
       <SiteFooter />
-      <BottomNav />
     </div>
   );
 }

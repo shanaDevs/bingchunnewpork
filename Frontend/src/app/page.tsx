@@ -6,7 +6,6 @@ import { useQuery } from '@tanstack/react-query';
 import ProductDrawer from '@/components/menu/ProductDrawer';
 import { openOrderModal, ORDER_PROMPT_SKIP_KEY } from '@/components/order/SiteOrderPrompt';
 import { homeFontVariables } from '@/components/home-redesign/fonts';
-import { BottomNav } from '@/components/home-redesign/layout/BottomNav';
 import { SiteFooter } from '@/components/home-redesign/layout/SiteFooter';
 import { SiteHeader } from '@/components/home-redesign/layout/SiteHeader';
 import {
@@ -78,7 +77,6 @@ export default function HomePage() {
         <AppPromoSection />
       </main>
       <SiteFooter />
-      <BottomNav />
 
       <AnimatePresence>
         {selectedProduct && (
