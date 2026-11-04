@@ -5,6 +5,7 @@ import '../../core/bluetooth_printer.dart';
 import '../../core/feedback.dart';
 import '../../core/runtime_config.dart';
 import '../../l10n/l10n.dart';
+import '../components/pos_app_bar.dart';
 import '../components/buttons.dart';
 import '../components/layout.dart';
 import '../components/pos_card.dart';
@@ -119,8 +120,9 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     final selected = rc.bluetoothPrinterMac;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(tr('Printer')),
+      appBar: PosAppBar(
+        title: tr('Printer'),
+        eyebrow: tr('Hardware'),
         actions: [
           IconButton(
             tooltip: tr('Refresh'),

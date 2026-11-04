@@ -7,6 +7,7 @@ import '../../domain/entities/menu.dart';
 import '../../domain/entities/order.dart';
 import '../../domain/logic/order_rules.dart';
 import '../../l10n/l10n.dart';
+import '../components/pos_app_bar.dart';
 import '../components/buttons.dart';
 import '../components/layout.dart';
 import '../components/pos_card.dart';
@@ -66,14 +67,9 @@ class _OrderEditView extends StatelessWidget {
     final c = context.pos;
     final addOnly = ctrl.mode == OrderEditMode.addOnly;
     return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(addOnly ? tr('Add items') : tr('Edit order'), style: PosType.heading.copyWith(color: c.text)),
-            Text('#${ctrl.order.orderNumber}', style: PosType.caption.copyWith(color: c.textMuted)),
-          ],
-        ),
+      appBar: PosAppBar(
+        title: addOnly ? tr('Add items') : tr('Edit order'),
+        eyebrow: '#${ctrl.order.orderNumber}',
       ),
       body: CustomScrollView(
         slivers: [

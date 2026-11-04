@@ -5,6 +5,7 @@ import '../../core/format.dart';
 import '../../domain/entities/order.dart';
 import '../../domain/logic/order_rules.dart';
 import '../../l10n/l10n.dart';
+import '../components/pos_app_bar.dart';
 import '../components/layout.dart';
 import '../components/snack.dart';
 import '../labels.dart';
@@ -47,8 +48,9 @@ class ReceiptScreen extends StatelessWidget {
     final o = order;
     final name = customerDisplayName(o, fallback: '');
     return Scaffold(
-      appBar: AppBar(
-        title: Text(tr('Receipt')),
+      appBar: PosAppBar(
+        title: tr('Receipt'),
+        eyebrow: '#${order.orderNumber}',
         actions: [
           IconButton(
             tooltip: tr('Copy receipt'),

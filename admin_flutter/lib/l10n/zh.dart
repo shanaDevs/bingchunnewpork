@@ -550,6 +550,7 @@ const Map<String, String> zhStrings = {
   'Admin': '管理',
   'Run every branch, or your own, from one tablet.': '在一台平板上管理所有门店或您自己的门店。',
   'Admin Panel': '管理面板',
+  'Order alerts': '订单提醒',
   'Branch wallet': '门店钱包',
   'Report': '报表',
   'Calculating wallet totals… this can take a minute.': '正在计算钱包总额…可能需要一分钟。',

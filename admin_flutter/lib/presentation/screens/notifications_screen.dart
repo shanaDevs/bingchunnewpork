@@ -5,6 +5,7 @@ import '../../core/format.dart';
 import '../../domain/entities/admin_notification.dart';
 import '../../domain/entities/order.dart';
 import '../../l10n/l10n.dart';
+import '../components/pos_app_bar.dart';
 import '../components/badges.dart';
 import '../components/layout.dart';
 import '../components/pos_card.dart';
@@ -30,10 +31,16 @@ class NotificationsScreen extends StatelessWidget {
     final c = context.pos;
     final notices = alerts.notices;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(tr('Notifications')),
+      appBar: PosAppBar(
+        title: tr('Notifications'),
+        eyebrow: tr('Order alerts'),
         actions: [
-          if (alerts.unreadCount > 0) TextButton(onPressed: alerts.markAllRead, child: Text(tr('Mark all read'))),
+          if (alerts.unreadCount > 0)
+            TextButton(
+              onPressed: alerts.markAllRead,
+              style: TextButton.styleFrom(foregroundColor: Colors.white),
+              child: Text(tr('Mark all read')),
+            ),
         ],
       ),
       body: notices.isEmpty
