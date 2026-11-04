@@ -477,8 +477,7 @@ class _BranchRequestSheetState extends State<_BranchRequestSheet> {
     switch (_type) {
       case 'ADD_BRANCH':
         return stores.where((s) => !acc.contains(s.id)).toList();
-      // Change home and remove both pick from the driver's other assigned branches.
-      default:
+      case 'REMOVE_BRANCH':
         final list = stores.where((s) => acc.contains(s.id) && s.id != home).toList();
         if (list.isNotEmpty) return list;
         // Fall back to accessible ids if listStores didn't include them as options
@@ -490,6 +489,8 @@ class _BranchRequestSheetState extends State<_BranchRequestSheet> {
                   BranchOption(id: id, name: id.length > 8 ? id.substring(0, 8) : id),
             )
             .toList();
+      default:
+        return stores.where((s) => s.id != home).toList();
     }
   }
 
@@ -604,7 +605,7 @@ class _BranchRequestSheetState extends State<_BranchRequestSheet> {
               child: Text(switch (_type) {
                 'ADD_BRANCH' => tr('No other branches available to add.'),
                 'REMOVE_BRANCH' => tr('No removable branches (cannot remove home).'),
-                _ => tr('You only have one assigned branch, so you cannot change your home branch.'),
+                _ => tr('No other branches available.'),
               }, style: BcType.caption.copyWith(color: c.errorSoft, fontSize: 12.5)),
             )
           else ...[

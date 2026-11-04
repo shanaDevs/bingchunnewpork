@@ -35,8 +35,6 @@ class RuntimeConfig extends ChangeNotifier {
   static const _keyTheme = 'theme_mode';
   static const _keySound = 'sound_enabled';
   static const _keyHaptics = 'haptics_enabled';
-  static const _keyFullScreenAlerts = 'full_screen_alerts_enabled';
-  static const _keyFullScreenAlertsReset = 'full_screen_alerts_reset_v1';
   static const _keyLanguage = 'app_language';
   static const _defaultTheme = 'LIGHT';
 
@@ -45,20 +43,12 @@ class RuntimeConfig extends ChangeNotifier {
   String _themeMode = _defaultTheme;
   bool _soundEnabled = true;
   bool _hapticsEnabled = true;
-  bool _fullScreenAlertsEnabled = true;
 
   Future<void> init() async {
     _prefs ??= await SharedPreferences.getInstance();
     _themeMode = _prefs?.getString(_keyTheme) ?? _defaultTheme;
     _soundEnabled = _prefs?.getBool(_keySound) ?? true;
     _hapticsEnabled = _prefs?.getBool(_keyHaptics) ?? true;
-    // Riders who switched full-screen alerts off never saw new rides over the lock screen.
-    // Turn it back on once after this update; a later choice to switch it off is kept.
-    if (!(_prefs?.getBool(_keyFullScreenAlertsReset) ?? false)) {
-      await _prefs?.setBool(_keyFullScreenAlerts, true);
-      await _prefs?.setBool(_keyFullScreenAlertsReset, true);
-    }
-    _fullScreenAlertsEnabled = _prefs?.getBool(_keyFullScreenAlerts) ?? true;
     L10n.current = AppLanguage.fromCode(_prefs?.getString(_keyLanguage));
   }
 
@@ -128,25 +118,6 @@ class RuntimeConfig extends ChangeNotifier {
     _hapticsEnabled = value;
     _prefs?.setBool(_keyHaptics, value);
     notifyListeners();
-  }
-
-  /// Rider's in-app choice; the Android permission is checked separately.
-  bool get fullScreenAlertsEnabled => _fullScreenAlertsEnabled;
-  set fullScreenAlertsEnabled(bool value) {
-    _fullScreenAlertsEnabled = value;
-    _prefs?.setBool(_keyFullScreenAlerts, value);
-    notifyListeners();
-  }
-
-  /// Reads the saved choice straight from disk — the FCM background isolate never runs [init].
-  static Future<bool> readFullScreenAlertsEnabled() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.reload();
-      return prefs.getBool(_keyFullScreenAlerts) ?? true;
-    } catch (_) {
-      return true;
-    }
   }
 
   bool get hasOverrides =>
