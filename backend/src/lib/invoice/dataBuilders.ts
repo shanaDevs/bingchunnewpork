@@ -3,6 +3,7 @@ import {
   type ChannelSettlementRow,
   type CommissionChannel,
 } from '../commission';
+import { resolvePayoutStatement } from './payoutStatement';
 import { formatAmountOnly, formatInvoiceLkr, formatLkr, formatMinus, formatPlus } from './format';
 import {
   INVOICE_CHANNEL_LABELS,
@@ -349,30 +350,8 @@ export function buildPlatformSalesRows(
   return rows;
 }
 
-/** Page 1 INVOICE SUMMARY — DESCRIPTION | AMOUNT. */
-export function buildInvoiceSummaryRows(input: GenerateWithdrawalInvoiceInput): WithdrawalTableRow[] {
-  const onlineGross =
-    input.channelSummary?.onlineWalletGrossCents ??
-    input.periodBreakdown?.onlineWalletGrossCents ??
-    0;
-  const paybackCents = input.promoSummary?.platformPaybackCents ?? 0;
-  return [
-    { label: 'Online gross amount', amount: formatInvoiceLkr(onlineGross) },
-    { label: 'Platform discount payback', amount: formatInvoiceLkr(paybackCents) },
-    {
-      label: 'Net payout amount',
-      amount: formatInvoiceLkr(input.requestedCents),
-      bold: true,
-      highlight: true,
-    },
-  ];
-}
-
-/** Page 2 tables keyed by section title. */
-export function buildPage2PayoutSections(statement: InvoicePayoutStatement): {
-  title: string;
-  rows: WithdrawalTableRow[];
-}[] {
+/** Net branch payout lines (page 1 invoice summary + page 2 section). */
+export function buildNetBranchPayoutRows(statement: InvoicePayoutStatement): WithdrawalTableRow[] {
   const rateLabel = Number.isInteger(statement.gatewayRatePct)
     ? `${statement.gatewayRatePct}`
     : String(statement.gatewayRatePct);
@@ -384,6 +363,53 @@ export function buildPage2PayoutSections(statement: InvoicePayoutStatement): {
         }`
       : undefined;
 
+  const rows: WithdrawalTableRow[] = [
+    { label: 'Online Wallet Amount', amount: formatInvoiceLkr(statement.onlineWalletCents) },
+  ];
+  if (statement.jasonPayoutTopUpCents > 0) {
+    rows.push({
+      label: '+ Jason Discounts',
+      amount: formatInvoiceLkr(statement.jasonPayoutTopUpCents),
+    });
+  }
+  rows.push({
+    label: '+ Non-returning refunds (Branch)',
+    amount: formatInvoiceLkr(statement.nonReturningRefundsCents),
+  });
+  if (statement.netPlatformAmountCents !== 0) {
+    rows.push({
+      label: '– Net Platform Amount',
+      amount: formatInvoiceLkr(Math.abs(statement.netPlatformAmountCents)),
+    });
+  }
+  rows.push({
+    label: `– Payment Gateway Fee ${rateLabel}%`,
+    amount: formatInvoiceLkr(statement.gatewayFeeCents),
+  });
+  rows.push({
+    label: '– Bank penalty (branch cancellation)',
+    amount: formatInvoiceLkr(statement.bankPenaltyCents),
+    hint: bankHint,
+  });
+  rows.push({
+    label: 'Branch Net Payout',
+    amount: formatInvoiceLkr(statement.branchNetPayoutCents),
+    bold: true,
+    highlight: true,
+  });
+  return rows;
+}
+
+/** Page 1 INVOICE SUMMARY — same breakdown as the net branch payout section. */
+export function buildInvoiceSummaryRows(input: GenerateWithdrawalInvoiceInput): WithdrawalTableRow[] {
+  return buildNetBranchPayoutRows(resolvePayoutStatement(input));
+}
+
+/** Page 2 tables keyed by section title. */
+export function buildPage2PayoutSections(statement: InvoicePayoutStatement): {
+  title: string;
+  rows: WithdrawalTableRow[];
+}[] {
   const netPlatformRows: WithdrawalTableRow[] = [
     { label: 'Commission', amount: formatInvoiceLkr(statement.commissionCents) },
     {
@@ -404,40 +430,7 @@ export function buildPage2PayoutSections(statement: InvoicePayoutStatement): {
     highlight: true,
   });
 
-  const netBranchRows: WithdrawalTableRow[] = [
-    { label: 'Online Wallet Amount', amount: formatInvoiceLkr(statement.onlineWalletCents) },
-  ];
-  if (statement.jasonPayoutTopUpCents > 0) {
-    netBranchRows.push({
-      label: '+ Jason Discounts',
-      amount: formatInvoiceLkr(statement.jasonPayoutTopUpCents),
-    });
-  }
-  netBranchRows.push({
-    label: '+ Non-returning refunds (Branch)',
-    amount: formatInvoiceLkr(statement.nonReturningRefundsCents),
-  });
-  if (statement.netPlatformAmountCents !== 0) {
-    netBranchRows.push({
-      label: '– Net Platform Amount',
-      amount: formatInvoiceLkr(Math.abs(statement.netPlatformAmountCents)),
-    });
-  }
-  netBranchRows.push({
-    label: `– Payment Gateway Fee ${rateLabel}%`,
-    amount: formatInvoiceLkr(statement.gatewayFeeCents),
-  });
-  netBranchRows.push({
-    label: '– Bank penalty (branch cancellation)',
-    amount: formatInvoiceLkr(statement.bankPenaltyCents),
-    hint: bankHint,
-  });
-  netBranchRows.push({
-    label: 'Branch Net Payout',
-    amount: formatInvoiceLkr(statement.branchNetPayoutCents),
-    bold: true,
-    highlight: true,
-  });
+  const netBranchRows = buildNetBranchPayoutRows(statement);
 
   return [
     {
@@ -452,7 +445,18 @@ export function buildPage2PayoutSections(statement: InvoicePayoutStatement): {
       title: 'Discounts',
       rows: [
         { label: 'Branch', amount: formatInvoiceLkr(statement.branchDiscountCents) },
-        { label: 'Platform', amount: formatInvoiceLkr(statement.platformDiscountCents) },
+        {
+          label: 'Platform-owned discount',
+          amount: formatInvoiceLkr(statement.platformOwnedPromoCents),
+        },
+        {
+          label: 'Shared platform discount cost',
+          amount: formatInvoiceLkr(statement.sharedPlatformDiscountCents),
+        },
+        {
+          label: 'Loyalty Points by Platform',
+          amount: formatInvoiceLkr(statement.loyaltyDiscountCents),
+        },
         { label: 'Jason', amount: formatInvoiceLkr(statement.jasonDiscountCents) },
         {
           label: 'Total by Cost Partner',

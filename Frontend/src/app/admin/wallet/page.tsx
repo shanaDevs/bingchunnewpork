@@ -171,6 +171,7 @@ function WalletOverviewPageContent() {
   const invalidateWalletData = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['admin-wallet-overview'] });
     void queryClient.invalidateQueries({ queryKey: ['admin-wallet-withdrawals'] });
+    void queryClient.invalidateQueries({ queryKey: ['payout-periods'] });
   }, [queryClient]);
 
   const superAdminSession = admin != null && isSuperAdmin(admin);

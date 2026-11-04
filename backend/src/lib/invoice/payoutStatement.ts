@@ -3,6 +3,9 @@ import type {
   InvoicePayoutStatement,
   InvoicePeriodBreakdown,
 } from './types';
+import { resolveNetPlatformAmountCentsFromWithdrawalBreakdown } from './netPlatformAmountFromBreakdown';
+
+export { resolveNetPlatformAmountCentsFromWithdrawalBreakdown } from './netPlatformAmountFromBreakdown';
 
 function num(o: Record<string, unknown>, key: string): number {
   const value = o[key];
@@ -27,6 +30,9 @@ const EMPTY_STATEMENT: InvoicePayoutStatement = {
   deliveryRefundsCents: 0,
   totalRefundCents: 0,
   platformDiscountsReportCents: 0,
+  platformOwnedPromoCents: 0,
+  sharedPlatformDiscountCents: 0,
+  platformPaybackCents: 0,
   loyaltyDiscountCents: 0,
   netPlatformAmountCents: 0,
   gatewayFeeCents: 0,
@@ -36,6 +42,13 @@ const EMPTY_STATEMENT: InvoicePayoutStatement = {
   jasonPayoutTopUpCents: 0,
   branchNetPayoutCents: 0,
 };
+
+function paybackEnabledFromWithdrawalBreakdown(o: Record<string, unknown>): boolean {
+  if (typeof o.platformDiscountPaybackEnabled === 'boolean') {
+    return o.platformDiscountPaybackEnabled;
+  }
+  return num(o, 'platformPaybackTotal') > 0;
+}
 
 /** Build page-2 payout figures from the stored withdrawal breakdown (cents). */
 export function buildPayoutStatementFromBreakdown(
@@ -76,9 +89,8 @@ export function buildPayoutStatementFromBreakdown(
 
   const platformPromoDeductCents = Math.max(paybackCents, platformOwned);
   const platformDiscountsReportCents = platformPromoDeductCents + sharedPlatform;
-  const netPlatformAmountCents = hasNumber(o, 'netPlatformEarning')
-    ? num(o, 'netPlatformEarning')
-    : commissionCents - platformPromoDeductCents - sharedPlatform - loyaltyDiscountCents;
+  const netPlatformAmountCents = resolveNetPlatformAmountCentsFromWithdrawalBreakdown(breakdown);
+  const platformPaybackCents = paybackCents;
 
   const gatewayRateRaw = o.gatewayRatePct;
   const gatewayRatePct =
@@ -99,6 +111,9 @@ export function buildPayoutStatementFromBreakdown(
     deliveryRefundsCents,
     totalRefundCents,
     platformDiscountsReportCents,
+    platformOwnedPromoCents: platformOwned,
+    sharedPlatformDiscountCents: sharedPlatform,
+    platformPaybackCents,
     loyaltyDiscountCents,
     netPlatformAmountCents,
     gatewayFeeCents: num(o, 'gatewayFee'),
@@ -168,6 +183,9 @@ export function parsePayoutStatement(value: unknown): InvoicePayoutStatement | n
     deliveryRefundsCents: num(o, 'deliveryRefundsCents'),
     totalRefundCents: num(o, 'totalRefundCents'),
     platformDiscountsReportCents: num(o, 'platformDiscountsReportCents'),
+    platformOwnedPromoCents: num(o, 'platformOwnedPromoCents'),
+    sharedPlatformDiscountCents: num(o, 'sharedPlatformDiscountCents'),
+    platformPaybackCents: num(o, 'platformPaybackCents'),
     loyaltyDiscountCents: num(o, 'loyaltyDiscountCents'),
     netPlatformAmountCents: num(o, 'netPlatformAmountCents'),
     gatewayFeeCents: num(o, 'gatewayFeeCents'),

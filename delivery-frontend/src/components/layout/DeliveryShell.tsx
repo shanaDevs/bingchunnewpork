@@ -34,7 +34,7 @@ import {
   isSuperAdmin,
   type AdminSession,
 } from '@/lib/adminAuth';
-import { getApiBaseUrl } from '@/lib/apiBase';
+import { getApiBaseUrl, clearSameOriginApiOverrideIfNeeded } from '@/lib/apiBase';
 import { hasMenuReadAccess } from '@/lib/adminPermissions';
 import { mainAdminHref } from '@/lib/mainAdminUrl';
 import { useAdminSessionGuard } from '@/hooks/useAdminSessionGuard';
@@ -67,6 +67,7 @@ export default function DeliveryShell({ children }: { children: React.ReactNode 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
+    clearSameOriginApiOverrideIfNeeded();
     installAdminFetch();
     let cancelled = false;
     void refreshAdminAuth()

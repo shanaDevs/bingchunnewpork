@@ -78,7 +78,7 @@ export default function WalletTankCard({
             className="mt-[3px] mb-0 text-[12px] leading-none"
             style={{ color: MUTED }}
           >
-            Current balance fill level
+            Total all-time available across branches
           </p>
         </div>
         {loading ? (

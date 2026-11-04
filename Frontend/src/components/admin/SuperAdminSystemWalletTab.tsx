@@ -20,6 +20,8 @@ export interface StoreWallet {
   totalWithdrawn?: number;
   currentBalance?: number;
   availableBalance?: number;
+  /** Matches branch detail “All-Time Available Balance” (net revenue − paid payout expenses). */
+  allTimeAvailableBalanceCents?: number;
   updatedAt: string;
   store: { id: string; name: string; city: string; isActive: boolean };
   _count: { transactions: number };
@@ -37,6 +39,10 @@ function payableBalanceClass(balance: number) {
   if (balance < 0) return 'text-red-500';
   if (balance > 0) return 'text-[#307ef2]';
   return 'text-muted';
+}
+
+function branchCardPayableBalanceCents(wallet: StoreWallet): number {
+  return wallet.allTimeAvailableBalanceCents ?? wallet.balance;
 }
 
 export type SuperAdminSystemWalletTabProps = {
@@ -173,7 +179,9 @@ export default function SuperAdminSystemWalletTab({
         ) : (
           <>
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-              {pageWallets.map((wallet) => (
+              {pageWallets.map((wallet) => {
+                const cardPayableCents = branchCardPayableBalanceCents(wallet);
+                return (
                 <button
                   key={wallet.id}
                   type="button"
@@ -210,10 +218,10 @@ export default function SuperAdminSystemWalletTab({
                   <p
                     className={cn(
                       'm-0 mt-auto text-[15px] font-bold tabular-nums tracking-tight',
-                      payableBalanceClass(wallet.balance),
+                      payableBalanceClass(cardPayableCents),
                     )}
                   >
-                    {fmt(wallet.balance)}
+                    {fmt(cardPayableCents)}
                   </p>
 
                   <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-[#307ef2]">
@@ -224,7 +232,8 @@ export default function SuperAdminSystemWalletTab({
                     />
                   </span>
                 </button>
-              ))}
+              );
+              })}
             </div>
             <AdminTablePagination
               pageSize={BRANCH_WALLETS_PAGE_SIZE}

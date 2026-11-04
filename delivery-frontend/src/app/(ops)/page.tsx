@@ -247,6 +247,8 @@ function AdminDeliveryContent() {
   const {
     data: activeJobs = [],
     isLoading: activeLoading,
+    isError: activeLoadError,
+    error: activeLoadErrorDetail,
     refetch: refetchActive,
     isFetching: activeFetching,
   } = useQuery({
@@ -260,6 +262,8 @@ function AdminDeliveryContent() {
   const {
     data: completedJobs = [],
     isLoading: completedLoading,
+    isError: completedLoadError,
+    error: completedLoadErrorDetail,
     refetch: refetchCompleted,
     isFetching: completedFetching,
   } = useQuery({
@@ -274,6 +278,8 @@ function AdminDeliveryContent() {
   const {
     data: incompleteJobs = [],
     isLoading: incompleteLoading,
+    isError: incompleteLoadError,
+    error: incompleteLoadErrorDetail,
     refetch: refetchIncomplete,
     isFetching: incompleteFetching,
   } = useQuery({
@@ -337,6 +343,17 @@ function AdminDeliveryContent() {
     () => activeJobs.filter(isActiveDeliveryJob),
     [activeJobs],
   );
+
+  const jobsListLoadError =
+    jobsQueryEnabled && (activeLoadError || completedLoadError || incompleteLoadError)
+      ? activeLoadErrorDetail ?? completedLoadErrorDetail ?? incompleteLoadErrorDetail
+      : null;
+  const jobsListLoadErrorMessage =
+    jobsListLoadError instanceof Error
+      ? jobsListLoadError.message
+      : jobsListLoadError
+        ? 'Could not load delivery schedules'
+        : null;
 
   const branchScoped = isBranchScoped(admin);
   const jobsRefreshing = activeFetching || completedFetching || incompleteFetching;
@@ -856,6 +873,26 @@ function AdminDeliveryContent() {
         />
       ) : (
         <>
+          {jobsListLoadErrorMessage ? (
+            <div
+              role="alert"
+              className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+            >
+              <p className="font-medium">Delivery schedules failed to load</p>
+              <p className="mt-1 text-amber-100/90">{jobsListLoadErrorMessage}</p>
+              <p className="mt-2 text-xs text-amber-100/80">
+                Try signing out and back in. If this persists after a deploy, confirm API calls use this
+                site&apos;s <code className="text-amber-50">/api</code> proxy (not cross-origin admin).
+              </p>
+              <button
+                type="button"
+                onClick={() => void refreshCurrentTab()}
+                className="mt-3 btn-outline px-3 py-1.5 text-xs"
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
           {filterBar}
 
           <div className="mb-4 flex flex-wrap gap-2">

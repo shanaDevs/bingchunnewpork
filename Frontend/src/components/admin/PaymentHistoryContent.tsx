@@ -268,13 +268,17 @@ export default function PaymentHistoryContent({
 
   const setSelectedStoreId = useCallback(
     (storeId: string) => {
-      const params = new URLSearchParams(searchParams.toString());
+      // Live location search — do not clobber ?tab= / period params from a stale snapshot.
+      const params = new URLSearchParams(
+        typeof window !== 'undefined' ? window.location.search : searchParams.toString(),
+      );
       if (storeId) {
         params.set('storeId', storeId);
       } else {
         params.delete('storeId');
       }
-      router.replace(`${pathname}?${params.toString()}`);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [pathname, router, searchParams],
   );

@@ -1,8 +1,7 @@
 import { roundLkr } from './lkrUtils';
 import { resolveTotalRetainedRefundConvenienceFeeLkr } from './channelBreakdown';
 
-/** Net platform commission for payout allocation cards and summaries. */
-export function resolvePlatformCommissionForPeriodLkr(params: {
+type PeriodNetPlatformInput = {
   commissionLkr: number;
   periodBreakdownLkr: {
     platformPaybackTotal?: number;
@@ -14,16 +13,29 @@ export function resolvePlatformCommissionForPeriodLkr(params: {
   } | null;
   paybackEnabled: boolean;
   sharedPromoPlatformLkr?: number;
-}): number {
-  const baseNetPlatformCommissionLkr = resolveTotalPlatformCommissionDisplayLkr({
+};
+
+function resolveNetPlatformAmountDisplayLkr(params: PeriodNetPlatformInput): number {
+  return resolveTotalPlatformCommissionDisplayLkr({
     commissionLkr: params.commissionLkr,
     platformPaybackTotal: params.periodBreakdownLkr?.platformPaybackTotal,
     paybackEnabled: params.paybackEnabled,
     sharedPromoPlatformLkr: params.sharedPromoPlatformLkr ?? 0,
     loyaltyDiscountLkr: params.periodBreakdownLkr?.periodLoyaltyDiscountTotal ?? 0,
     platformOwnedPromoDiscountLkr: params.periodBreakdownLkr?.platformOwnedPromoDiscountTotal,
-    netPlatformEarningLkr: params.periodBreakdownLkr?.netPlatformEarning,
+    // Match Payout Request Details — always recalculate; ignore netPlatformEarning snapshot.
+    netPlatformEarningLkr: null,
   });
+}
+
+/** Payout Request Details / 15-day period table "Net Platform Amount". */
+export function resolveNetPlatformAmountForPeriodLkr(params: PeriodNetPlatformInput): number {
+  return resolveNetPlatformAmountDisplayLkr(params);
+}
+
+/** Net platform commission for payout allocation cards and summaries. */
+export function resolvePlatformCommissionForPeriodLkr(params: PeriodNetPlatformInput): number {
+  const baseNetPlatformCommissionLkr = resolveNetPlatformAmountDisplayLkr(params);
   return resolveNetPlatformCommissionWithRefundFeesLkr({
     baseNetPlatformCommissionLkr,
     refundConvenienceFeeLkr: params.periodBreakdownLkr?.refundConvenienceFee,
