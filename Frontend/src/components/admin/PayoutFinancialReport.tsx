@@ -21,6 +21,11 @@ import {
   ReportSubtotalRow,
   ReportTotalRow,
 } from '@/components/admin/payoutFinancialReportUi';
+import {
+  PAYOUT_FIRST_CYCLE_BODY,
+  PAYOUT_FIRST_CYCLE_DEFERRED_SECTION,
+  PAYOUT_FIRST_CYCLE_HEADLINE,
+} from '@/components/admin/payoutFirstCycleCopy';
 
 type Props = {
   values: PayoutReportValues;
@@ -28,22 +33,28 @@ type Props = {
 };
 
 export default function PayoutFinancialReport({ values, className = 'mb-4' }: Props) {
-  const hasRefundSection = hasAnyPositiveLkr(
-    values.nonReturningRefundsBranchLkr,
-    values.nonReturningRefundsBranchGrossLkr,
-    values.platformRefundsLkr,
-    values.deliveryRefundsLkr,
-    values.totalRefundAmountLkr,
-    values.totalRefundAmountGrossLkr,
-  );
-  const hasNetPlatformBreakdown = hasAnyPositiveLkr(
-    values.commissionLkr,
-    values.platformDiscountsReportLkr,
-    values.loyaltyDiscountLkr,
-  );
+  const isFirstCyclePayout = values.cycleStage === 'FIRST';
+  const hasRefundSection =
+    !isFirstCyclePayout &&
+    hasAnyPositiveLkr(
+      values.nonReturningRefundsBranchLkr,
+      values.nonReturningRefundsBranchGrossLkr,
+      values.platformRefundsLkr,
+      values.deliveryRefundsLkr,
+      values.totalRefundAmountLkr,
+      values.totalRefundAmountGrossLkr,
+    );
+  const hasNetPlatformBreakdown =
+    !isFirstCyclePayout &&
+    hasAnyPositiveLkr(
+      values.commissionLkr,
+      values.platformDiscountsReportLkr,
+      values.loyaltyDiscountLkr,
+    );
   const hasNetBranchBreakdown = hasAnyPositiveLkr(
     values.onlinePaymentsCollectedLkr,
     values.jasonDiscountsLkr,
+    values.priorOnlineWalletAmountLkr,
     values.nonReturningRefundsBranchGrossLkr,
     values.netPlatformAmountLkr,
     values.gatewayLkr,
@@ -54,6 +65,16 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
     <div
       className={`overflow-hidden rounded-xl border border-[#e2e8f0] bg-white dark:border-slate-700 dark:bg-slate-900 ${className}`}
     >
+      {isFirstCyclePayout ? (
+        <div className="border-b border-[#e2e8f0] bg-[#eff6ff] px-4 py-3 dark:border-slate-700 dark:bg-blue-950/30">
+          <p className="text-[13px] font-bold text-[#1e40af] dark:text-blue-300">
+            {PAYOUT_FIRST_CYCLE_HEADLINE}
+          </p>
+          <p className="mt-1.5 text-[12px] font-medium leading-relaxed text-[#475569] dark:text-slate-300">
+            {PAYOUT_FIRST_CYCLE_BODY}
+          </p>
+        </div>
+      ) : null}
       <ReportSection
         title="Total Sale"
         amount={plainAmount(values.grossLkr)}
@@ -66,37 +87,45 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
       />
       <ReportSection
         title="Commission"
-        amount={plainAmount(values.commissionLkr)}
+        amount={isFirstCyclePayout ? '—' : plainAmount(values.commissionLkr)}
         info={<CommissionInfoPopover values={values} />}
       />
 
-      <ReportSection
-        title="Discounts"
-        amount={plainAmount(values.totalProvidedDiscountsLkr)}
-        info={<DiscountDetailsInfoPopover values={values} />}
-      >
-        <ReportRow
-          label="Branch"
-          value={plainAmount(values.costPartnerBranchDiscountsLkr)}
-          indent={1}
-        />
-        <ReportRow
-          label="Platform"
-          value={plainAmount(values.costPartnerPlatformDiscountsLkr)}
-          indent={1}
-        />
-        <ReportRow
-          label="Jason"
-          value={plainAmount(values.costPartnerJasonDiscountsLkr)}
-          indent={1}
-        />
-        <ReportRow
-          label="Total by Cost Partner"
-          value={plainAmount(values.costPartnerDiscountsTotalLkr)}
-          indent={1}
-          bold
-        />
-      </ReportSection>
+      {isFirstCyclePayout ? (
+        <ReportSection title="Discounts & platform share" amount="—">
+          <p className="text-[12px] font-medium leading-relaxed text-[#64748b] dark:text-slate-400">
+            {PAYOUT_FIRST_CYCLE_DEFERRED_SECTION}
+          </p>
+        </ReportSection>
+      ) : (
+        <ReportSection
+          title="Discounts"
+          amount={plainAmount(values.totalProvidedDiscountsLkr)}
+          info={<DiscountDetailsInfoPopover values={values} />}
+        >
+          <ReportRow
+            label="Branch"
+            value={plainAmount(values.costPartnerBranchDiscountsLkr)}
+            indent={1}
+          />
+          <ReportRow
+            label="Platform"
+            value={plainAmount(values.costPartnerPlatformDiscountsLkr)}
+            indent={1}
+          />
+          <ReportRow
+            label="Jason"
+            value={plainAmount(values.costPartnerJasonDiscountsLkr)}
+            indent={1}
+          />
+          <ReportRow
+            label="Total by Cost Partner"
+            value={plainAmount(values.costPartnerDiscountsTotalLkr)}
+            indent={1}
+            bold
+          />
+        </ReportSection>
+      )}
 
       {hasRefundSection && (
         <ReportSection title="Refunds" info={<RefundsInfoPopover values={values} />}>
@@ -136,33 +165,42 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
         title="Net Platform Amount"
         info={<NetPlatformAmountInfoPopover values={values} />}
       >
-        {hasNetPlatformBreakdown && (
+        {isFirstCyclePayout ? (
+          <p className="text-[12px] font-medium leading-relaxed text-[#64748b] dark:text-slate-400">
+            {PAYOUT_FIRST_CYCLE_DEFERRED_SECTION} Commission, platform discounts, and loyalty for
+            the full cycle are reconciled in Payout 2.
+          </p>
+        ) : (
           <>
-            {hasPositiveLkr(values.commissionLkr) && (
-              <ReportRow label="Commission" value={plainAmount(values.commissionLkr)} indent={1} />
+            {hasNetPlatformBreakdown && (
+              <>
+                {hasPositiveLkr(values.commissionLkr) && (
+                  <ReportRow label="Commission" value={plainAmount(values.commissionLkr)} indent={1} />
+                )}
+                {hasPositiveLkr(values.platformDiscountsReportLkr) && (
+                  <ReportRow
+                    label="- Platform Discounts"
+                    value={signedAmount(values.platformDiscountsReportLkr, '−')}
+                    indent={1}
+                    valueTone="red"
+                  />
+                )}
+                {hasPositiveLkr(values.loyaltyDiscountLkr) && (
+                  <ReportRow
+                    label="- Loyalty Points by Platform"
+                    value={signedAmount(values.loyaltyDiscountLkr, '−')}
+                    indent={1}
+                    valueTone="red"
+                  />
+                )}
+              </>
             )}
-            {hasPositiveLkr(values.platformDiscountsReportLkr) && (
-              <ReportRow
-                label="- Platform Discounts"
-                value={signedAmount(values.platformDiscountsReportLkr, '−')}
-                indent={1}
-                valueTone="red"
-              />
-            )}
-            {hasPositiveLkr(values.loyaltyDiscountLkr) && (
-              <ReportRow
-                label="- Loyalty Points by Platform"
-                value={signedAmount(values.loyaltyDiscountLkr, '−')}
-                indent={1}
-                valueTone="red"
-              />
-            )}
+            <ReportSubtotalRow
+              label="Net Platform Amount"
+              value={plainAmount(values.netPlatformAmountLkr)}
+            />
           </>
         )}
-        <ReportSubtotalRow
-          label="Net Platform Amount"
-          value={plainAmount(values.netPlatformAmountLkr)}
-        />
       </ReportSection>
 
       <ReportSection
@@ -175,6 +213,13 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
               <ReportRow
                 label="Online Wallet Amount"
                 value={plainAmount(values.onlinePaymentsCollectedLkr)}
+              />
+            )}
+            {hasPositiveLkr(values.priorOnlineWalletAmountLkr) && (
+              <ReportRow
+                label="- Online Wallet Amount (Payout 1)"
+                value={signedAmount(values.priorOnlineWalletAmountLkr, '−')}
+                valueTone="red"
               />
             )}
             {hasPositiveLkr(values.jasonDiscountsLkr) && (

@@ -10,6 +10,7 @@ import {
   ReportRow,
   SectionInfoPopover,
 } from '@/components/admin/payoutFinancialReportUi';
+import { PAYOUT_FIRST_CYCLE_BODY } from '@/components/admin/payoutFirstCycleCopy';
 
 export function DiscountDetailsInfoPopover({ values }: { values: PayoutReportValues }) {
   return (
@@ -226,6 +227,17 @@ export function RefundsInfoPopover({ values }: { values: PayoutReportValues }) {
 }
 
 export function NetPlatformAmountInfoPopover({ values }: { values: PayoutReportValues }) {
+  if (values.cycleStage === 'FIRST') {
+    return (
+      <SectionInfoPopover ariaLabel="Net Platform Amount — Payout 1">
+        <InfoPopoverHeader
+          title="Net Platform Amount"
+          description={PAYOUT_FIRST_CYCLE_BODY}
+        />
+      </SectionInfoPopover>
+    );
+  }
+
   const parts: string[] = [plainAmount(values.commissionLkr)];
   if (hasPositiveLkr(values.platformDiscountsReportLkr)) {
     parts.push(`− ${plainAmount(values.platformDiscountsReportLkr)}`);

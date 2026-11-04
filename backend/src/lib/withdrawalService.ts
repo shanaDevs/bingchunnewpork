@@ -9,7 +9,7 @@ import {
 import { creditPlatformEarning } from './platformEarningsService';
 import { ensurePlatformEarningsSchema } from './platformEarningsSchema';
 import { ensurePlatformPaybackSchema } from './platformPaybackSchema';
-import { buildPeriodChannelPreview } from './periodChannelPreview';
+import { buildPeriodChannelPreview, channelPreviewFromPeriodBreakdown } from './periodChannelPreview';
 import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import {
   computeFinalPayoutAmountCents,
@@ -47,6 +47,7 @@ import {
   PAYOUT_PERIOD_DAYS,
   resolvePayoutPeriod,
   type PayoutPeriodDays,
+  resolvePayoutCycleContext,
 } from './withdrawalPayoutPeriod';
 
 export {
@@ -205,6 +206,8 @@ export async function requestWithdrawal(
         requestedById,
         isAdvance,
         breakdown,
+        cycleStage: breakdown.cycleStage ?? 'FIRST',
+        cyclePairId: breakdown.cyclePairId ?? null,
       },
     });
   } catch (err) {
@@ -342,14 +345,17 @@ export async function validatePayoutRequest(
   }
 
   const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
+  const cycle = await resolvePayoutCycleContext(storeId);
 
-  // PR #27 calc path: available + channel rows come from channel preview (matches Initiate UI).
-  // Period net still comes from computePeriodBreakdownForPayout. Keep both in parallel.
-  const [orderAvailable, periodWithDiscountReport, channelPreview] = await Promise.all([
-    computePeriodOrderAvailableCents(storeId, fromStr, toStr),
-    computePeriodBreakdownForPayout(storeId, fromStr, toStr),
-    buildPeriodChannelPreview(storeId, fromStr, toStr),
+  const [orderAvailable, periodWithDiscountReport] = await Promise.all([
+    computePeriodOrderAvailableCents(storeId, fromStr, toStr, cycle),
+    computePeriodBreakdownForPayout(storeId, fromStr, toStr, cycle),
   ]);
+  const channelPreview = channelPreviewFromPeriodBreakdown(
+    periodWithDiscountReport,
+    fromStr,
+    toStr,
+  );
   if (amount > orderAvailable.remainingCents) {
     throw new AppError(
       `Insufficient available balance. Available: LKR ${(orderAvailable.remainingCents / 100).toFixed(2)}`,
@@ -488,6 +494,8 @@ export async function initiateAndApproveWithdrawal(
         checkDate: checkDt,
         isAdvance,
         breakdown,
+        cycleStage: breakdown.cycleStage ?? 'FIRST',
+        cyclePairId: breakdown.cyclePairId ?? null,
       },
     });
 

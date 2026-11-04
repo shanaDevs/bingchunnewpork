@@ -71,6 +71,9 @@ export default function AdminSettingsPage() {
   const [pickupConvenienceFeePercent, setPickupConvenienceFeePercent] = useState('6');
   const [deliveryConvenienceFeePercent, setDeliveryConvenienceFeePercent] = useState('7.5');
   const [gatewayFeePercent, setGatewayFeePercent] = useState('1.9');
+  const [commissionSlab1UpTo, setCommissionSlab1UpTo] = useState('1000000');
+  const [commissionSlab1RatePercent, setCommissionSlab1RatePercent] = useState('6.5');
+  const [commissionSlab2RatePercent, setCommissionSlab2RatePercent] = useState('5');
   const [deliveryPlatformFeePercent, setDeliveryPlatformFeePercent] = useState('0');
   const [pickupAllowAddItemsPaidOnline, setPickupAllowAddItemsPaidOnline] = useState(true);
   const [pickupAllowEditCashUnpaid, setPickupAllowEditCashUnpaid] = useState(true);
@@ -245,6 +248,13 @@ export default function AdminSettingsPage() {
     if (payload?.gatewayFeePercent != null) {
       setGatewayFeePercent(String(payload.gatewayFeePercent));
     }
+    if (Array.isArray(payload?.commissionSlabs) && payload.commissionSlabs.length > 0) {
+      const first = payload.commissionSlabs[0];
+      const second = payload.commissionSlabs[1];
+      if (first?.upTo != null) setCommissionSlab1UpTo(String(first.upTo));
+      if (first?.ratePercent != null) setCommissionSlab1RatePercent(String(first.ratePercent));
+      if (second?.ratePercent != null) setCommissionSlab2RatePercent(String(second.ratePercent));
+    }
     if (payload?.deliveryPlatformFeePercent != null) {
       setDeliveryPlatformFeePercent(String(payload.deliveryPlatformFeePercent));
     }
@@ -326,6 +336,18 @@ export default function AdminSettingsPage() {
           pickupConvenientFeeRate: parseFloat(pickupConvenienceFeePercent) / 100,
           gatewayFeeRate: parseFloat(gatewayFeePercent) / 100,
           deliveryPlatformFeeRate: parseFloat(deliveryPlatformFeePercent) / 100,
+          commissionSlabs: [
+            {
+              upTo: parseFloat(commissionSlab1UpTo),
+              rate: parseFloat(commissionSlab1RatePercent) / 100,
+              label: `Up to LKR ${Number(commissionSlab1UpTo).toLocaleString('en-LK')}`,
+            },
+            {
+              upTo: Number.MAX_SAFE_INTEGER,
+              rate: parseFloat(commissionSlab2RatePercent) / 100,
+              label: `Above LKR ${Number(commissionSlab1UpTo).toLocaleString('en-LK')}`,
+            },
+          ],
         }),
       });
     },
@@ -930,6 +952,48 @@ export default function AdminSettingsPage() {
                 </div>
                 <p className="mt-1 text-[11px] text-muted">
                   Applied to branch revenue when calculating payout gateway deductions.
+                </p>
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs text-muted block mb-1">Branch commission slabs</label>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div>
+                    <span className="text-[11px] text-muted">Net amount up to (LKR)</span>
+                    <input
+                      className="input-field mt-1"
+                      type="number"
+                      min="0"
+                      value={commissionSlab1UpTo}
+                      onChange={(e) => setCommissionSlab1UpTo(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-muted">Rate at/below threshold (%)</span>
+                    <input
+                      className="input-field mt-1"
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="100"
+                      value={commissionSlab1RatePercent}
+                      onChange={(e) => setCommissionSlab1RatePercent(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-muted">Rate above threshold (%)</span>
+                    <input
+                      className="input-field mt-1"
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="100"
+                      value={commissionSlab2RatePercent}
+                      onChange={(e) => setCommissionSlab2RatePercent(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <p className="mt-1 text-[11px] text-muted">
+                  Applied on the second payout of each two-window cycle using full-cycle net sales.
                 </p>
               </div>
               <div>

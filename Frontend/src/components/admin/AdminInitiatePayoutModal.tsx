@@ -480,12 +480,15 @@ export default function AdminInitiatePayoutModal({
     : null;
   const branchCommissionLkr =
     channelPreview?.totalCommission ?? periodBreakdownLkr?.commissionFee ?? 0;
-  const platformCommissionLkr = resolvePlatformCommissionForPeriodLkr({
-    commissionLkr: branchCommissionLkr,
-    periodBreakdownLkr,
-    paybackEnabled,
-    sharedPromoPlatformLkr: sharedPromo.platformContributionLkr,
-  });
+  const platformCommissionLkr =
+    periodBreakdownLkr?.cycleStage === 'FIRST'
+      ? 0
+      : resolvePlatformCommissionForPeriodLkr({
+          commissionLkr: branchCommissionLkr,
+          periodBreakdownLkr,
+          paybackEnabled,
+          sharedPromoPlatformLkr: sharedPromo.platformContributionLkr,
+        });
   const payoutBreakdownDisplayInput = periodBreakdownLkr
     ? buildPayoutBreakdownDisplayInput({
         preview: channelPreview,

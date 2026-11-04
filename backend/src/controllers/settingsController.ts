@@ -12,7 +12,7 @@ import {
   type PaymentMethodConfig,
   type OnlineGateway,
 } from '../lib/paymentSettings';
-import { ensureAppSchema, getConvenienceFeeRates, getConvenientFeeRate, getGatewayFeeRate, getDeliveryPlatformFeeRate, setDeliveryPlatformFeeRate, getMaxCupsPerRider, invalidatePickupOrderEditSettingsCache, invalidateGatewayFeeRateCache, invalidateDeliveryPlatformFeeRateCache, setMaxCupsPerRider, getAppDownloadSettings, setAppDownloadSettings, getWeeklyResetDay, setWeeklyResetDay, getSpinSettings, setSpinSettings, getCancelWindowMinutes, setCancelWindowMinutes, invalidateCancelWindowMinutesCache, getBranchCompletionRadiusM, setBranchCompletionRadiusM } from '../lib/appSchema';
+import { ensureAppSchema, getConvenienceFeeRates, getConvenientFeeRate, getGatewayFeeRate, getCommissionSlabs, setCommissionSlabs, invalidateCommissionSlabsCache, getDeliveryPlatformFeeRate, setDeliveryPlatformFeeRate, getMaxCupsPerRider, invalidatePickupOrderEditSettingsCache, invalidateGatewayFeeRateCache, invalidateDeliveryPlatformFeeRateCache, setMaxCupsPerRider, getAppDownloadSettings, setAppDownloadSettings, getWeeklyResetDay, setWeeklyResetDay, getSpinSettings, setSpinSettings, getCancelWindowMinutes, setCancelWindowMinutes, invalidateCancelWindowMinutesCache, getBranchCompletionRadiusM, setBranchCompletionRadiusM } from '../lib/appSchema';
 import { parseSpinCriteria, parseSpinDisplay } from '../lib/spinDisplay';
 import {
   getActiveCancelReasons,
@@ -241,7 +241,7 @@ export async function updateAdminMessagingSettings(req: Request, res: Response, 
 export async function getAppSettings(_req: Request, res: Response, next: NextFunction) {
   try {
     await ensureAppSchema();
-    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, , , branchCompletionRadiusM] = await Promise.all([
+    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, gatewayFeeRate, , branchCompletionRadiusM, commissionSlabs] = await Promise.all([
       getConvenienceFeeRates(),
       prisma.appSetting.findUnique({ where: { id: 'default' } }),
       getMaxCupsPerRider(),
@@ -253,6 +253,7 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       getGatewayFeeRate(),
       getDeliveryPlatformFeeRate(),
       getBranchCompletionRadiusM(),
+      getCommissionSlabs(),
     ]);
     return success(res, {
       convenientFeeRate: feeRates.delivery,
@@ -261,6 +262,14 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       pickupConvenientFeePercent: Math.round(feeRates.pickup * 1000) / 10,
       deliveryConvenientFeeRate: feeRates.delivery,
       deliveryConvenientFeePercent: Math.round(feeRates.delivery * 1000) / 10,
+      gatewayFeeRate,
+      gatewayFeePercent: Math.round(gatewayFeeRate * 1000) / 10,
+      commissionSlabs: commissionSlabs.map((slab) => ({
+        upTo: slab.upTo,
+        rate: slab.rate,
+        ratePercent: Math.round(slab.rate * 1000) / 10,
+        label: slab.label,
+      })),
       pickupAllowAddItemsPaidOnline: row?.pickupAllowAddItemsPaidOnline ?? true,
       pickupAllowEditCashUnpaid: row?.pickupAllowEditCashUnpaid ?? true,
       maxCupsPerRider,
@@ -288,6 +297,15 @@ const appSettingsSchema = z.object({
   convenientFeeRate: z.number().min(0).max(1).optional(),
   pickupConvenientFeeRate: z.number().min(0).max(1).optional(),
   gatewayFeeRate: z.number().min(0).max(1).optional(),
+  commissionSlabs: z
+    .array(
+      z.object({
+        upTo: z.number().min(0),
+        rate: z.number().min(0).max(1),
+        label: z.string().max(120).optional(),
+      }),
+    )
+    .optional(),
   deliveryPlatformFeeRate: z.number().min(0).max(1).optional(),
   pickupAllowAddItemsPaidOnline: z.boolean().optional(),
   pickupAllowEditCashUnpaid: z.boolean().optional(),
@@ -372,6 +390,7 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       spinCriteria,
       cancelWindowMinutes,
       deliveryPlatformFeeRate,
+      commissionSlabs,
       ...prismaData
     } = data;
 
@@ -488,13 +507,19 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       await setDeliveryPlatformFeeRate(deliveryPlatformFeeRate);
     }
 
+    if (data.commissionSlabs != null) {
+      await setCommissionSlabs(data.commissionSlabs);
+    }
+
     invalidatePickupOrderEditSettingsCache();
     invalidateGatewayFeeRateCache();
+    invalidateCommissionSlabsCache();
     invalidateDeliveryPlatformFeeRateCache();
     invalidateDeliveryMilestoneSettingsCache();
     const savedRates = await getConvenienceFeeRates();
     const savedGatewayFeeRate = await getGatewayFeeRate();
     const savedDeliveryPlatformFeeRate = await getDeliveryPlatformFeeRate();
+    const savedCommissionSlabs = await getCommissionSlabs();
     return success(res, {
       convenientFeeRate: savedRates.delivery,
       convenientFeePercent: Math.round(savedRates.delivery * 1000) / 10,
@@ -504,6 +529,12 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       deliveryConvenientFeePercent: Math.round(savedRates.delivery * 1000) / 10,
       gatewayFeeRate: savedGatewayFeeRate,
       gatewayFeePercent: Math.round(savedGatewayFeeRate * 1000) / 10,
+      commissionSlabs: savedCommissionSlabs.map((slab) => ({
+        upTo: slab.upTo,
+        rate: slab.rate,
+        ratePercent: Math.round(slab.rate * 1000) / 10,
+        label: slab.label,
+      })),
       deliveryPlatformFeeRate: savedDeliveryPlatformFeeRate,
       deliveryPlatformFeePercent: Math.round(savedDeliveryPlatformFeeRate * 1000) / 10,
       pickupAllowAddItemsPaidOnline: updated.pickupAllowAddItemsPaidOnline,

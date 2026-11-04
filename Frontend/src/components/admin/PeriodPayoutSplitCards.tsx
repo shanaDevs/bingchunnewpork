@@ -13,6 +13,7 @@ import {
   formatPayoutAllocationPeriodLabel,
   resolvePeriodPayoutCardAmounts,
 } from '@/components/admin/periodPayoutSplitDisplay';
+import { PAYOUT_FIRST_CYCLE_COMMISSION_CARD_SUBTITLE } from '@/components/admin/payoutFirstCycleCopy';
 
 type Props = {
   payoutSplit: PeriodPayoutSplitLkr | null;
@@ -26,6 +27,7 @@ type Props = {
   advanceAmountLkr?: number;
   branchPayout?: BranchPayoutDisplay | null;
   branchReceiveDifference?: BranchReceiveDifference | null;
+  cycleStage?: 'FIRST' | 'SECOND';
   className?: string;
 };
 
@@ -35,12 +37,14 @@ function PayoutMetricCard({
   icon: Icon,
   title,
   amount,
+  amountLabel,
   subtitle,
   variant,
 }: {
   icon: LucideIcon;
   title: string;
   amount: number;
+  amountLabel?: string;
   subtitle: string;
   variant: MetricCardVariant;
 }) {
@@ -66,7 +70,9 @@ function PayoutMetricCard({
       </div>
       <div>
         <p className={`text-[10px] font-bold uppercase tracking-wide ${titleClass}`}>{title}</p>
-        <p className={`text-[16px] font-bold ${amountClass}`}>{formatMoneyAmount(amount)}</p>
+        <p className={`text-[16px] font-bold ${amountClass}`}>
+          {amountLabel ?? formatMoneyAmount(amount)}
+        </p>
         <p className="mt-1 text-[10px] text-[#64748b] dark:text-slate-400">{subtitle}</p>
       </div>
     </div>
@@ -85,13 +91,15 @@ export default function PeriodPayoutSplitCards({
   advanceAmountLkr = 0,
   branchPayout = null,
   branchReceiveDifference = null,
+  cycleStage,
   className = 'mb-6',
 }: Props) {
+  const isFirstCyclePayout = cycleStage === 'FIRST';
   const { branchReceives, commissionLkr, orderConvenienceFeeLkr, deliveryFee } =
     resolvePeriodPayoutCardAmounts({
     payoutSplit,
     branchReceivesLkr,
-    platformCommissionLkr,
+    platformCommissionLkr: isFirstCyclePayout ? 0 : platformCommissionLkr,
     periodNetLkr,
     deliveryFeeLkr,
   });
@@ -133,7 +141,12 @@ export default function PeriodPayoutSplitCards({
           variant="platform"
           title="Platform commission"
           amount={commissionLkr}
-          subtitle="Platform commission for this period"
+          amountLabel={isFirstCyclePayout ? '—' : undefined}
+          subtitle={
+            isFirstCyclePayout
+              ? PAYOUT_FIRST_CYCLE_COMMISSION_CARD_SUBTITLE
+              : 'Platform commission for this period'
+          }
         />
         <PayoutMetricCard
           icon={Truck}

@@ -5,6 +5,7 @@ import {
   type PeriodChannelPreview,
 } from './periodChannelPreview';
 import { decimalFieldToCentsNumber } from './moneyDecimal';
+import { resolvePayoutCycleContext, type PayoutCycleContext } from './payoutCycle';
 
 export type PeriodOrderAvailable = {
   fromOrdersCents: number;
@@ -64,7 +65,19 @@ export async function computePeriodOrderAvailableCents(
   storeId: string,
   fromStr: string,
   toStr: string,
+  cycleCtx?: PayoutCycleContext,
 ): Promise<PeriodOrderAvailable> {
-  const channelPreview = await buildPeriodChannelPreview(storeId, fromStr, toStr);
-  return periodOrderAvailableFromChannelPreview(storeId, fromStr, toStr, channelPreview);
+  const cycle = cycleCtx ?? (await resolvePayoutCycleContext(storeId));
+  const orderFrom = cycle.cycleStage === 'SECOND' && cycle.cycleFrom ? cycle.cycleFrom : fromStr;
+  const channelPreview = await buildPeriodChannelPreview(storeId, orderFrom, toStr);
+  let fromOrdersCents = Math.round(
+    sumOnlinePaymentsCollectedFromBreakdown(channelPreview.breakdown) * 100,
+  );
+  if (cycle.cycleStage === 'SECOND') {
+    fromOrdersCents = Math.max(
+      0,
+      fromOrdersCents - (cycle.priorOnlineWalletAmountCents ?? 0),
+    );
+  }
+  return periodOrderAvailableFromOnlineCollectedCents(storeId, fromStr, toStr, fromOrdersCents);
 }

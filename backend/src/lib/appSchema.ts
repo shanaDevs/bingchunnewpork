@@ -18,6 +18,11 @@ import {
   type SpinCriterion,
   type SpinDisplaySettings,
 } from './spinDisplay';
+import {
+  DEFAULT_COMMISSION_SLABS,
+  normalizeCommissionSlabs,
+  type CommissionSlab,
+} from './commission';
 
 let appSchemaReady = false;
 
@@ -108,6 +113,9 @@ export async function ensureAppSchema(): Promise<void> {
     'gatewayFeeRate',
     'DOUBLE NOT NULL DEFAULT 0.019',
   );
+  await addColumnIfMissing('app_settings', 'commissionSlabsJson', 'JSON NULL');
+  await addColumnIfMissing('store_withdrawals', 'cycleStage', "TEXT NOT NULL DEFAULT 'FIRST'");
+  await addColumnIfMissing('store_withdrawals', 'cyclePairId', 'TEXT NULL');
   await addColumnIfMissing(
     'app_settings',
     'deliveryPlatformFeeRate',
@@ -293,6 +301,57 @@ export async function getGatewayFeeRate(): Promise<number> {
   const row = await prisma.appSetting.findUnique({ where: { id: 'default' } });
   gatewayFeeRateCache = row?.gatewayFeeRate ?? 0.019;
   return gatewayFeeRateCache;
+}
+
+let commissionSlabsCache: readonly CommissionSlab[] | null = null;
+
+export function invalidateCommissionSlabsCache(): void {
+  commissionSlabsCache = null;
+}
+
+function parseCommissionSlabsJson(value: unknown): readonly CommissionSlab[] | null {
+  if (!Array.isArray(value)) return null;
+  const rows: { upTo: number; rate: number; label?: string }[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { upTo?: unknown; rate?: unknown; label?: unknown };
+    const upTo = Number(row.upTo);
+    const rate = Number(row.rate);
+    if (!Number.isFinite(upTo) || !Number.isFinite(rate)) continue;
+    rows.push({
+      upTo,
+      rate,
+      label: typeof row.label === 'string' ? row.label : undefined,
+    });
+  }
+  return rows.length ? normalizeCommissionSlabs(rows) : null;
+}
+
+export async function getCommissionSlabs(): Promise<readonly CommissionSlab[]> {
+  if (commissionSlabsCache) return commissionSlabsCache;
+  await ensureAppSchema();
+  const row = await prisma.appSetting.findUnique({ where: { id: 'default' } });
+  commissionSlabsCache =
+    parseCommissionSlabsJson(row?.commissionSlabsJson) ?? DEFAULT_COMMISSION_SLABS;
+  return commissionSlabsCache;
+}
+
+export async function setCommissionSlabs(
+  slabs: readonly { upTo: number; rate: number; label?: string }[],
+): Promise<readonly CommissionSlab[]> {
+  const normalized = normalizeCommissionSlabs(slabs);
+  await ensureAppSchema();
+  await prisma.appSetting.upsert({
+    where: { id: 'default' },
+    update: { commissionSlabsJson: normalized as unknown as object[] },
+    create: {
+      id: 'default',
+      commissionSlabsJson: normalized as unknown as object[],
+    },
+  });
+  invalidateCommissionSlabsCache();
+  commissionSlabsCache = normalized;
+  return normalized;
 }
 
 let deliveryPlatformFeeRateCache: number | null = null;

@@ -12,7 +12,9 @@ import {
   walletReportOrderSelect,
   platformItemSalesLkr,
 } from './walletRevenue';
-import { buildPeriodChannelPreview, type PeriodChannelPreview } from './periodChannelPreview';
+import { buildPeriodChannelPreview, channelPreviewFromPeriodBreakdown } from './periodChannelPreview';
+import { computePeriodBreakdownForPayout } from './withdrawalPeriodNet';
+import { resolvePayoutCycleContext } from './payoutCycle';
 import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import {
   computeBreakdownForPeriod,
@@ -642,28 +644,32 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
       select: { platformDiscountPaybackEnabled: true },
     });
 
-  // PR #27 calc path: channel preview + order-available match the Initiate Payout UI.
-  // Run all independent reads in parallel (same as wallet-issue-fix).
-  const [breakdown, channelPreview, orderAvailable, storeRow, sharedPromo, promoOwnership] =
-    await Promise.all([
-      computeBreakdownForPeriod(storeId, from, to),
-      buildPeriodChannelPreview(storeId, from, to),
-      computePeriodOrderAvailableCents(storeId, from, to),
-      loadStorePaybackFlag().catch(async (err) => {
-        const code = (err as { code?: string })?.code;
-        if (code !== 'P2022') throw err;
-        await ensurePlatformPaybackSchema();
-        return loadStorePaybackFlag();
-      }),
-      computeSharedPromoContribution(storeId, from, to),
-      loadPromoOwnershipTotalsForPeriod(storeId, from, to),
-    ]);
+  const cycle = await resolvePayoutCycleContext(storeId);
 
-  const periodBreakdown = attachPromoOwnershipTotals(
-    mergeSharedPromoIntoBreakdown(breakdown, sharedPromo),
-    promoOwnership,
+  const [periodBreakdown, orderAvailable, storeRow] = await Promise.all([
+    computePeriodBreakdownForPayout(storeId, from, to, cycle),
+    computePeriodOrderAvailableCents(storeId, from, to, cycle),
+    loadStorePaybackFlag().catch(async (err) => {
+      const code = (err as { code?: string })?.code;
+      if (code !== 'P2022') throw err;
+      await ensurePlatformPaybackSchema();
+      return loadStorePaybackFlag();
+    }),
+  ]);
+  const channelPreview = channelPreviewFromPeriodBreakdown(periodBreakdown, from, to);
+  const finalPayoutFields = enrichSharedPromoForApi(
+    {
+      sharedPromoTotalDiscount: periodBreakdown.sharedPromoTotalDiscount ?? 0,
+      sharedPromoBranchContributionPct: periodBreakdown.sharedPromoBranchContributionPct ?? 0,
+      sharedPromoBranchContributionAmount: periodBreakdown.sharedPromoBranchContributionAmount ?? 0,
+      sharedPromoPlatformContributionPct: periodBreakdown.sharedPromoPlatformContributionPct ?? 0,
+      sharedPromoPlatformContributionAmount:
+        periodBreakdown.sharedPromoPlatformContributionAmount ?? 0,
+      sharedPromoJasonContributionPct: periodBreakdown.sharedPromoJasonContributionPct ?? 0,
+      sharedPromoJasonContributionAmount: periodBreakdown.sharedPromoJasonContributionAmount ?? 0,
+    },
+    periodBreakdown.netAmount,
   );
-  const finalPayoutFields = enrichSharedPromoForApi(sharedPromo, periodBreakdown.netAmount);
 
   const durationDays =
     Math.floor(
@@ -671,25 +677,38 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
         (24 * 60 * 60 * 1000),
     ) + 1;
 
+  const cycleLabel =
+    periodBreakdown.cycleStage === 'SECOND'
+      ? `Payout 2 · cycle ${periodBreakdown.cycleFrom ?? from} – ${to}`
+      : 'Payout 1';
+
   return {
     ...periodBreakdown,
     from,
     to,
     durationDays,
+    cycleLabel,
+    cycleStage: periodBreakdown.cycleStage ?? cycle.cycleStage,
+    cycleFrom: periodBreakdown.cycleFrom ?? cycle.cycleFrom,
+    cycleTo: periodBreakdown.cycleTo ?? to,
+    payoutWindowFrom: periodBreakdown.payoutWindowFrom ?? from,
+    payoutWindowTo: periodBreakdown.payoutWindowTo ?? to,
+    priorOnlineWalletAmountLkr: (periodBreakdown.priorOnlineWalletAmountCents ?? 0) / 100,
+    remainingOnlineWalletLkr: (periodBreakdown.remainingOnlineWalletCents ?? 0) / 100,
     platformDiscountPaybackEnabled: storeRow?.platformDiscountPaybackEnabled ?? false,
-    totalSalesLkr: breakdown.windowBase / 100,
-    commissionRatePct: Math.round(breakdown.commissionRate * 1000) / 10,
-    tierLabel: breakdown.tierLabel,
-    commissionAmountLkr: breakdown.commissionFee / 100,
+    totalSalesLkr: periodBreakdown.windowBase / 100,
+    commissionRatePct: Math.round(periodBreakdown.commissionRate * 1000) / 10,
+    tierLabel: periodBreakdown.tierLabel,
+    commissionAmountLkr: periodBreakdown.commissionFee / 100,
     netAmountLkr: periodBreakdown.netAmount / 100,
-    cancelledByBranchGatewayFeeLkr: breakdown.cancelledByBranchGatewayFee / 100,
-    cancelledByBranchOrderCount: breakdown.cancelledByBranchOrderCount,
-    customerLateCancelSubtotalLkr: breakdown.customerLateCancelSubtotal / 100,
-    customerLateCancelGatewayDeductionLkr: breakdown.customerLateCancelGatewayDeduction / 100,
-    customerLateCancelNetAmountLkr: breakdown.customerLateCancelNetAmount / 100,
-    rejectedRefundSubtotalLkr: breakdown.rejectedRefundSubtotal / 100,
-    rejectedRefundGatewayDeductionLkr: breakdown.rejectedRefundGatewayDeduction / 100,
-    rejectedRefundNetAmountLkr: breakdown.rejectedRefundNetAmount / 100,
+    cancelledByBranchGatewayFeeLkr: periodBreakdown.cancelledByBranchGatewayFee / 100,
+    cancelledByBranchOrderCount: periodBreakdown.cancelledByBranchOrderCount,
+    customerLateCancelSubtotalLkr: periodBreakdown.customerLateCancelSubtotal / 100,
+    customerLateCancelGatewayDeductionLkr: periodBreakdown.customerLateCancelGatewayDeduction / 100,
+    customerLateCancelNetAmountLkr: periodBreakdown.customerLateCancelNetAmount / 100,
+    rejectedRefundSubtotalLkr: periodBreakdown.rejectedRefundSubtotal / 100,
+    rejectedRefundGatewayDeductionLkr: periodBreakdown.rejectedRefundGatewayDeduction / 100,
+    rejectedRefundNetAmountLkr: periodBreakdown.rejectedRefundNetAmount / 100,
     channelPreview,
     orderAvailableFromOrdersLkr: orderAvailable.fromOrdersCents / 100,
     orderAvailableRemainingLkr: orderAvailable.remainingCents / 100,

@@ -257,12 +257,15 @@ export default function WalletApproveWithdrawalModal({
     : (previewForBreakdown?.totalCommission ?? periodBreakdownLkr?.commissionFee ?? 0);
   const requestedLkr = activeWithdrawal ? activeWithdrawal.amount / 100 : 0;
   const sharedPromo = extractSharedPromoLkrFromBreakdown(breakdown, activeWithdrawal?.amount ?? 0);
-  const platformCommissionLkr = resolvePlatformCommissionForPeriodLkr({
-    commissionLkr: branchCommissionLkr,
-    periodBreakdownLkr,
-    paybackEnabled,
-    sharedPromoPlatformLkr: sharedPromo.platformContributionLkr,
-  });
+  const platformCommissionLkr =
+    periodBreakdownLkr?.cycleStage === 'FIRST'
+      ? 0
+      : resolvePlatformCommissionForPeriodLkr({
+          commissionLkr: branchCommissionLkr,
+          periodBreakdownLkr,
+          paybackEnabled,
+          sharedPromoPlatformLkr: sharedPromo.platformContributionLkr,
+        });
   const branchPayout = resolveBranchPayoutDisplay({
     breakdown,
     amountCents: activeWithdrawal?.amount ?? 0,

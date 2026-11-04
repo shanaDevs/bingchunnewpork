@@ -194,3 +194,10 @@ export async function getNextPayoutStartDate(storeId: string): Promise<string | 
   if (!latest?.periodTo) return null;
   return dayAfterUtcDateStr(toUtcDateStr(latest.periodTo));
 }
+
+export {
+  determineNextPayoutCycleStage,
+  resolveCycleFromDate,
+  resolvePayoutCycleContext,
+} from './payoutCycle';
+export type { PayoutCycleStage, PayoutCycleContext } from './payoutCycle';

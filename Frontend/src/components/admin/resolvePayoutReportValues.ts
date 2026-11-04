@@ -120,6 +120,8 @@ export type PayoutReportValues = {
   gatewayHint: string;
   branchNetPayoutLkr: number;
   cancelledByBranchGatewayFeeLkr: number;
+  cycleStage?: 'FIRST' | 'SECOND';
+  priorOnlineWalletAmountLkr: number;
   cancelledByBranchOrderCount: number;
   customerLateCancelSubtotalLkr: number;
   customerLateCancelGatewayDeductionLkr: number;
@@ -410,7 +412,12 @@ function resolveGatewayFigures(params: {
     snapshotGatewayRatePct,
     snapshotOnlineWalletGrossLkr,
   } = params;
-  const gatewayBaseLkr = snapshotOnlineWalletGrossLkr ?? onlinePaymentsCollectedLkr;
+  const gatewayBaseLkr =
+    snapshotOnlineWalletGrossLkr ??
+    (periodBreakdownLkr.remainingOnlineWalletLkr != null &&
+    periodBreakdownLkr.remainingOnlineWalletLkr >= 0
+      ? periodBreakdownLkr.remainingOnlineWalletLkr
+      : onlinePaymentsCollectedLkr);
   const gatewayRatePct =
     snapshotGatewayRatePct ??
     (snapshotActive
@@ -614,29 +621,71 @@ export function resolvePayoutReportValues(
     periodBreakdownLkr,
   });
 
+  const cycleStage =
+    periodBreakdownLkr.cycleStage ??
+    (periodBreakdownLkr.commissionFee <= 0.001 &&
+    (periodBreakdownLkr.netPlatformEarning ?? 0) <= 0.001 &&
+    (periodBreakdownLkr.priorOnlineWalletAmountLkr ?? 0) <= 0.001
+      ? ('FIRST' as const)
+      : undefined);
+  const priorOnlineWalletAmountLkr = periodBreakdownLkr.priorOnlineWalletAmountLkr ?? 0;
+  const isFirstCyclePayout = cycleStage === 'FIRST';
+
+  const finalBranchNetPayoutLkr = isFirstCyclePayout
+    ? roundLkr(sales.onlinePaymentsCollectedLkr - gateway.gatewayLkr)
+    : branchNetPayoutLkr;
+
+  const displayCommissionLkr = isFirstCyclePayout ? 0 : sales.commissionLkr;
+  const displayNetPlatformForPayoutLkr = isFirstCyclePayout ? 0 : netPlatformCommissionForPayoutLkr;
+  const displayNetPlatformAmountLkr = isFirstCyclePayout ? 0 : netPlatformAmountLkr;
+  const displayDiscountTotals = isFirstCyclePayout
+    ? {
+        totalProvidedDiscountsLkr: 0,
+        costPartnerBranchDiscountsLkr: 0,
+        costPartnerPlatformDiscountsLkr: 0,
+        costPartnerJasonDiscountsLkr: 0,
+        costPartnerDiscountsTotalLkr: 0,
+        branchDiscountsLkr: 0,
+        platformDiscountsLkr: 0,
+        jasonDiscountsLkr: 0,
+        sharedPromoPlatformLkr: 0,
+        sharedPromoJasonLkr: 0,
+        sharedPromoTotalLkr: 0,
+        showSharedPromo: false,
+      }
+    : null;
+
   return {
     hasPeriodData: true,
     ...sales,
+    commissionLkr: displayCommissionLkr,
     ...onlineWalletChannelNets,
     ...discounts,
+    ...(displayDiscountTotals ?? {}),
     ...refunds,
     ...gateway,
-    platformPaybackLkr,
-    commissionPaybackLkr,
-    platformDiscountsReportLkr: resolvePlatformDiscountsReportLkr({
-      platformOwnedPromoDiscountLkr: discounts.platformOwnedPromoDiscountsLkr,
-      commissionPaybackLkr,
-      sharedPromoPlatformLkr: discounts.sharedPromoPlatformLkr,
-      paybackEnabled: showPaybackDetails,
-    }),
-    loyaltyDiscountLkr,
-    netPlatformCommissionLkr,
-    netPlatformCommissionForPayoutLkr,
-    netPlatformAmountLkr,
+    platformPaybackLkr: isFirstCyclePayout ? 0 : platformPaybackLkr,
+    commissionPaybackLkr: isFirstCyclePayout ? 0 : commissionPaybackLkr,
+    platformDiscountsReportLkr: isFirstCyclePayout
+      ? 0
+      : resolvePlatformDiscountsReportLkr({
+          platformOwnedPromoDiscountLkr: discounts.platformOwnedPromoDiscountsLkr,
+          commissionPaybackLkr,
+          sharedPromoPlatformLkr: discounts.sharedPromoPlatformLkr,
+          paybackEnabled: showPaybackDetails,
+        }),
+    loyaltyDiscountLkr: isFirstCyclePayout ? 0 : loyaltyDiscountLkr,
+    netPlatformCommissionLkr: isFirstCyclePayout ? 0 : netPlatformCommissionLkr,
+    netPlatformCommissionForPayoutLkr: displayNetPlatformForPayoutLkr,
+    netPlatformAmountLkr: displayNetPlatformAmountLkr,
     orderConvenienceFeeLkr: convenienceFeeLkr,
-    totalBranchPayoutLkr: sales.onlinePaymentsCollectedLkr + discounts.sharedPromoJasonLkr,
-    branchNetPayoutLkr,
-    showPaybackDetails,
+    totalBranchPayoutLkr: isFirstCyclePayout
+      ? sales.onlinePaymentsCollectedLkr
+      : sales.onlinePaymentsCollectedLkr + discounts.sharedPromoJasonLkr,
+    branchNetPayoutLkr: finalBranchNetPayoutLkr,
+    cycleStage,
+    priorOnlineWalletAmountLkr,
+    showPaybackDetails: isFirstCyclePayout ? false : showPaybackDetails,
     slabRatePct,
     ...applicableSlabCommission,
   };

@@ -71,6 +71,12 @@ export type WithdrawalBreakdown = {
   branchOwnedPromoDiscountTotal?: number;
   /** PLATFORM-ownership promotion discounts in period (cents). Display snapshot only. */
   platformOwnedPromoDiscountTotal?: number;
+  cycleStage?: 'FIRST' | 'SECOND';
+  cycleFrom?: string;
+  cycleTo?: string;
+  cyclePairId?: string;
+  priorOnlineWalletAmountCents?: number;
+  remainingOnlineWalletCents?: number;
 };
 
 const WITHDRAWAL_REQUIRED_NUMBER_KEYS = [
@@ -117,6 +123,50 @@ const WITHDRAWAL_OPTIONAL_NUMBER_KEYS = [
   'branchRequestNetAmount',
   'branchOwnedPromoDiscountTotal',
   'platformOwnedPromoDiscountTotal',
+  'priorOnlineWalletAmountCents',
+  'remainingOnlineWalletCents',
+] as const satisfies ReadonlyArray<keyof WithdrawalBreakdown>;
+
+const PAYOUT_CYCLE_STAGE_VALUES = ['FIRST', 'SECOND'] as const;
+
+function parseWithdrawalCycleFields(
+  raw: Record<string, unknown>,
+  result: WithdrawalBreakdown,
+): void {
+  const stage = raw.cycleStage;
+  if (stage === 'FIRST' || stage === 'SECOND') {
+    result.cycleStage = stage;
+  }
+  if (typeof raw.cycleFrom === 'string' && raw.cycleFrom.trim()) {
+    result.cycleFrom = raw.cycleFrom.trim();
+  }
+  if (typeof raw.cycleTo === 'string' && raw.cycleTo.trim()) {
+    result.cycleTo = raw.cycleTo.trim();
+  }
+  if (typeof raw.cyclePairId === 'string' && raw.cyclePairId.trim()) {
+    result.cyclePairId = raw.cyclePairId.trim();
+  }
+
+  const priorCents = coerceBreakdownNumber(raw.priorOnlineWalletAmountCents);
+  if (priorCents != null) {
+    result.priorOnlineWalletAmountCents = priorCents;
+  } else {
+    const priorLkr = coerceBreakdownNumber(raw.priorOnlineWalletAmountLkr);
+    if (priorLkr != null) {
+      result.priorOnlineWalletAmountCents = Math.round(priorLkr * 100);
+    }
+  }
+}
+
+/** Payout math fields refreshed from live net preview for Payout 1 (FIRST cycle stage). */
+const FIRST_PAYOUT_PREVIEW_MATH_KEYS = [
+  'commissionFee',
+  'netPlatformEarning',
+  'gatewayFee',
+  'netAmount',
+  'gatewayBase',
+  'onlineWalletGross',
+  'remainingOnlineWalletCents',
 ] as const satisfies ReadonlyArray<keyof WithdrawalBreakdown>;
 
 export function parseWithdrawalBreakdown(value: unknown): WithdrawalBreakdown | null {
@@ -149,6 +199,7 @@ export function parseWithdrawalBreakdown(value: unknown): WithdrawalBreakdown | 
   if (channelBreakdownRaw && typeof channelBreakdownRaw === 'object') {
     result.channelBreakdown = normalizeSettlementBreakdown(channelBreakdownRaw);
   }
+  parseWithdrawalCycleFields(o, result);
   return result;
 }
 
@@ -275,6 +326,33 @@ export function mergeSharedPromoContributionFieldsIntoBreakdown(
   return merged;
 }
 
+/** Merge live net-preview cycle stage and Payout 1 math into a locked withdrawal snapshot. */
+export function mergeLivePayoutPreviewIntoStoredBreakdown(
+  stored: WithdrawalBreakdown,
+  preview: WithdrawalBreakdown,
+): WithdrawalBreakdown {
+  let merged = mergeSharedPromoContributionFieldsIntoBreakdown(stored, preview);
+
+  if (preview.cycleStage && PAYOUT_CYCLE_STAGE_VALUES.includes(preview.cycleStage)) {
+    merged.cycleStage = preview.cycleStage;
+  }
+  if (preview.cycleFrom) merged.cycleFrom = preview.cycleFrom;
+  if (preview.cycleTo) merged.cycleTo = preview.cycleTo;
+  if (preview.cyclePairId) merged.cyclePairId = preview.cyclePairId;
+  if (preview.priorOnlineWalletAmountCents != null) {
+    merged.priorOnlineWalletAmountCents = preview.priorOnlineWalletAmountCents;
+  }
+
+  if (preview.cycleStage === 'FIRST') {
+    for (const key of FIRST_PAYOUT_PREVIEW_MATH_KEYS) {
+      const value = preview[key];
+      if (value != null) merged[key] = value;
+    }
+  }
+
+  return merged;
+}
+
 /** Compact payout reference for Jason ledger and admin tables. */
 export function formatWithdrawalPayoutRef(
   storeWithdrawalId: string,
@@ -309,6 +387,8 @@ export function parseWithdrawalBreakdownFromNetPreview(data: unknown): Withdrawa
     const gatewayBase = coerceBreakdownNumber(raw.gatewayBase);
     if (gatewayBase != null) result.onlineWalletGross = gatewayBase;
   }
+
+  parseWithdrawalCycleFields(raw, result);
 
   return result;
 }
@@ -528,6 +608,11 @@ export function withdrawalBreakdownToLkr(b: WithdrawalBreakdown) {
     orderCount: b.orderCount,
     commissionRate: b.commissionRate,
     gatewayRatePct: b.gatewayRatePct,
+    cycleStage: b.cycleStage,
+    cycleFrom: b.cycleFrom,
+    cycleTo: b.cycleTo,
+    priorOnlineWalletAmountLkr: (b.priorOnlineWalletAmountCents ?? 0) / 100,
+    remainingOnlineWalletLkr: (b.remainingOnlineWalletCents ?? 0) / 100,
   };
 }
 

@@ -20,7 +20,7 @@ import {
   channelBreakdownHasSalesActivity,
   parseWithdrawalBreakdown,
   parseWithdrawalBreakdownFromNetPreview,
-  mergeSharedPromoContributionFieldsIntoBreakdown,
+  mergeLivePayoutPreviewIntoStoredBreakdown,
   extractSharedPromoLkrFromBreakdown,
   resolvePlatformCommissionForPeriodLkr,
   resolvePeriodNetLkrFromBreakdown,
@@ -162,7 +162,7 @@ async function fetchNetPreviewMergedSharedPromoBreakdown(
     if (!res.ok) return stored;
     const preview = parseWithdrawalBreakdownFromNetPreview(json.data);
     if (!preview) return stored;
-    return mergeSharedPromoContributionFieldsIntoBreakdown(stored, preview);
+    return mergeLivePayoutPreviewIntoStoredBreakdown(stored, preview);
   } catch {
     return stored;
   }
@@ -372,7 +372,7 @@ export default function WalletWithdrawalModal({
             const storedParsed = parseWithdrawalBreakdown(viewWithdrawal.breakdown);
             if (storedParsed?.grossAmount != null && previewBreakdown) {
               setBreakdown(
-                mergeSharedPromoContributionFieldsIntoBreakdown(storedParsed, previewBreakdown),
+                mergeLivePayoutPreviewIntoStoredBreakdown(storedParsed, previewBreakdown),
               );
               setPeriodNet(resolvePeriodNetLkrFromBreakdown(storedParsed));
             } else {
@@ -628,12 +628,15 @@ export default function WalletWithdrawalModal({
     : null;
   const branchCommissionLkr =
     channelPreview?.totalCommission ?? breakdownLkr?.commissionFee ?? 0;
-  const platformCommissionLkr = resolvePlatformCommissionForPeriodLkr({
-    commissionLkr: branchCommissionLkr,
-    periodBreakdownLkr: breakdownLkr,
-    paybackEnabled,
-    sharedPromoPlatformLkr: breakdownLkr?.sharedPromoPlatformContributionLkr ?? 0,
-  });
+  const platformCommissionLkr =
+    breakdownLkr?.cycleStage === 'FIRST'
+      ? 0
+      : resolvePlatformCommissionForPeriodLkr({
+          commissionLkr: branchCommissionLkr,
+          periodBreakdownLkr: breakdownLkr,
+          paybackEnabled,
+          sharedPromoPlatformLkr: breakdownLkr?.sharedPromoPlatformContributionLkr ?? 0,
+        });
   const periodNetLkr =
     (breakdown ? resolvePeriodNetLkrFromBreakdown(breakdown) : null) ??
     periodNet;

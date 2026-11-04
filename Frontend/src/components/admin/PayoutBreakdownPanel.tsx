@@ -60,6 +60,7 @@ export default function PayoutBreakdownPanel({
       advanceAmountLkr={advanceAmountLkr}
       branchPayout={branchPayout}
       branchReceiveDifference={branchReceiveDifference}
+      cycleStage={reportValues.cycleStage}
       className="mb-4"
     />
   );

@@ -6,11 +6,12 @@ import {
   sumBreakdownOrderCount,
   sumBreakdownProviderFee,
   sumCommissionableBase,
+  getSlabIndex,
   type ChannelSettlementRow,
   type CommissionChannel,
   type SlabInfo,
 } from './commission';
-import { getConvenienceFeeRates, getGatewayFeeRate } from './appSchema';
+import { getCommissionSlabs, getConvenienceFeeRates, getGatewayFeeRate } from './appSchema';
 import { periodActivePaidOrdersWhere } from './walletRevenue';
 
 const PAID_ORDER_SELECT = {
@@ -50,9 +51,10 @@ export async function buildPeriodChannelPreview(
   to: string,
 ): Promise<PeriodChannelPreview> {
   const orders = await fetchPaidOrdersInRange(storeId, from, to);
-  const [convenienceFeeRates, gatewayFeeRate] = await Promise.all([
+  const [convenienceFeeRates, gatewayFeeRate, commissionSlabs] = await Promise.all([
     getConvenienceFeeRates(),
     getGatewayFeeRate(),
+    getCommissionSlabs(),
   ]);
   const windowBase = sumCommissionableBase(orders);
   const breakdown = accumulateSettlementBreakdown(
@@ -60,8 +62,9 @@ export async function buildPeriodChannelPreview(
     windowBase,
     convenienceFeeRates,
     gatewayFeeRate,
+    commissionSlabs,
   );
-  const slabInfo = buildSlabInfo(windowBase);
+  const slabInfo = buildSlabInfo(windowBase, commissionSlabs);
 
   return {
     period: { from, to },
@@ -77,6 +80,40 @@ export async function buildPeriodChannelPreview(
       monthlyBase: slabInfo.monthlyBase,
       effectiveRate: slabInfo.effectiveRate,
       slabIndex: slabInfo.slabIndex,
+    },
+  };
+}
+
+export function channelPreviewFromPeriodBreakdown(
+  period: {
+    channelBreakdown: Record<CommissionChannel, ChannelSettlementRow>;
+    windowBase: number;
+    commissionRate: number;
+    periodDiscountsTotal: number;
+    orderCount: number;
+    cycleStage?: string;
+    cycleFrom?: string;
+    cycleTo?: string;
+  },
+  windowFrom: string,
+  windowTo: string,
+): PeriodChannelPreview {
+  const breakdown = period.channelBreakdown;
+  const monthlyBaseLkr = period.windowBase / 100;
+  const from =
+    period.cycleStage === 'SECOND' && period.cycleFrom ? period.cycleFrom : windowFrom;
+  const to = period.cycleTo ?? windowTo;
+  return {
+    period: { from, to },
+    breakdown,
+    totalCommission: sumBreakdownCommission(breakdown),
+    totalProviderFee: sumBreakdownProviderFee(breakdown),
+    orderCount: period.orderCount,
+    storeDiscountsTotal: period.periodDiscountsTotal / 100,
+    slabInfo: {
+      monthlyBase: monthlyBaseLkr,
+      effectiveRate: period.commissionRate,
+      slabIndex: getSlabIndex(monthlyBaseLkr),
     },
   };
 }
