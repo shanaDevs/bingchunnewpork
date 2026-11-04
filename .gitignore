@@ -4,6 +4,8 @@ jspm_packages/
 web_modules/
 
 # Local env files
+.env
+.env.local
 .env.development.local
 .env.test.local
 .env.production.local
@@ -56,6 +58,7 @@ output/
 *.tsbuildinfo
 
 # IDE / Editors
+.vscode/
 .idea/
 *.suo
 *.ntvs*
@@ -94,4 +97,3 @@ deploy/digitalocean/.generated-app.delivery.yaml
 deploy/digitalocean/.generated-app.shop.yaml
 deploy/digitalocean/.generated-app.admin.yaml
 deploy/digitalocean/.live-delivery-me-audit.json
-config.bat
