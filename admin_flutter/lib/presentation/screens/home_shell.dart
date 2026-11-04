@@ -155,7 +155,12 @@ class _ShellViewState extends State<_ShellView> {
   /// On phones, pages that don't fit the bar open full screen from More.
   void _openFull(AppPage page) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => Scaffold(appBar: AppBar(toolbarHeight: 48), body: _pageBody(page))),
+      MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          appBar: AppBar(toolbarHeight: 52, title: Text(pageLabel(page, _session))),
+          body: TitleInAppBar(child: _pageBody(page)),
+        ),
+      ),
     );
   }
 
@@ -204,7 +209,7 @@ class _ShellViewState extends State<_ShellView> {
     return IndexedStack(
       index: index,
       children: [
-        for (final p in pages) _visited.contains(p) ? KeyedSubtree(key: ValueKey(p), child: _pageBody(p)) : const SizedBox.shrink(),
+        for (final p in pages) _visited.contains(p) ? KeyedSubtree(key: ValueKey(p), child: TitleInAppBar(child: _pageBody(p))) : const SizedBox.shrink(),
         more,
       ],
     );

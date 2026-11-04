@@ -7,6 +7,17 @@ import 'package:flutter/rendering.dart';
 import '../../core/format.dart';
 import '../theme/pos_theme.dart';
 
+/// Marks a page shown under a bar that already names it (the admin shell top bar),
+/// so [PageHeader] drops its big title and keeps only the description and actions.
+class TitleInAppBar extends InheritedWidget {
+  const TitleInAppBar({super.key, required super.child});
+
+  static bool of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<TitleInAppBar>() != null;
+
+  @override
+  bool updateShouldNotify(TitleInAppBar oldWidget) => false;
+}
+
 /// Screen title row (web page header: bold title, muted subtitle, actions right).
 class PageHeader extends StatelessWidget {
   const PageHeader({super.key, required this.title, this.subtitle, this.actions = const []});
@@ -18,6 +29,25 @@ class PageHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.pos;
+    if (TitleInAppBar.of(context)) {
+      // The bar above shows the title: keep a compact description line and the actions.
+      if (subtitle == null && actions.isEmpty) return const SizedBox.shrink();
+      return Row(
+        children: [
+          Expanded(
+            child: subtitle == null
+                ? const SizedBox.shrink()
+                : Text(
+                    subtitle!,
+                    style: PosType.caption.copyWith(color: c.textMuted, fontSize: 11.5),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+          ),
+          for (final a in actions) ...[const SizedBox(width: PosSpacing.sm), a],
+        ],
+      );
+    }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
