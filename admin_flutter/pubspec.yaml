@@ -79,3 +79,8 @@ flutter:
           weight: 700
         - asset: assets/fonts/Poppins-ExtraBold.ttf
           weight: 800
+
+# image 4.6+ calls archive APIs that need archive 4.1+, but pdf 3.12 (the last
+# release for Dart 3.9) caps archive below 4.1. image 4.5.x builds with archive 4.0.x.
+dependency_overrides:
+  image: 4.5.4
