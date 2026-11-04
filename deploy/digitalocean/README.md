@@ -86,11 +86,16 @@ database dump on this cluster, so the first boot is an empty schema. PayHere,
 WebXPay, Spaces, FCM, Google, and Facebook keys are not set. Copy those from
 the current production apps when you have them.
 
-After `/health` shows `socketAdapter` redis, point DNS here. Then set
-`FRONTEND_URL` to `https://bingchunsrilanka.com`, and update the PayHere notify
-URL and the Flutter API base URL. `backgroundJobs` is true only on shop-worker.
-shop-api stays at 2 instances. Do not add a second shop-web, delivery, cashier,
-or admin instance.
+After `/health` shows `socketAdapter` redis, point DNS here. Shop payment
+redirects use custom-domain envs on shop-api / shop-worker:
+
+- `FRONTEND_URL` / `LIVE_SHOP_URL` / `API_BASE_URL` = `https://bingchunsrilanka.com`
+- `WEBXPAY_RETURN_URL` = `https://bingchunsrilanka.com/api/payments/webxpay-return?returnOrigin=https%3A%2F%2Fbingchunsrilanka.com`
+
+Also paste that `WEBXPAY_RETURN_URL` into the WebXPay dashboard Return URL, and
+update the PayHere notify URL plus the Flutter API base URL.
+`backgroundJobs` is true only on shop-worker. shop-api stays at 2 instances.
+Do not add a second shop-web, delivery, cashier, or admin instance.
 
 `BACKEND_URL` on shop-web, pos-web, and admin-web is the private API URL inside
 that app. Do not replace those with a public URL. Cross-app links use the
