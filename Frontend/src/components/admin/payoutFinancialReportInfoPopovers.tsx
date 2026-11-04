@@ -140,7 +140,7 @@ export function OnlineWalletInfoPopover({ values }: { values: PayoutReportValues
     <SectionInfoPopover ariaLabel="Online Wallet Amount calculation details">
       <InfoPopoverHeader
         title="Online Wallet Amount"
-        description="Online item revenue collected for the branch (pickup online + delivery online). This is the base for the payment gateway fee and the starting point for the net branch payout."
+        description="Total online payments from pickup and delivery orders. Gateway fees and your branch payout are calculated from this amount."
       />
       <InfoFormulaLine>
         Online Wallet Amount = Net Amount Pickup Online + Net Amount Delivery Online ={' '}
@@ -161,8 +161,8 @@ export function CommissionInfoPopover({ values }: { values: PayoutReportValues }
   const ratePct = values.applicableSlabCommissionRatePct;
   const monthlyBaseHint =
     values.slabMonthlyBaseLkr != null && values.slabMonthlyBaseLkr >= 0
-      ? `From rolling monthly sales base LKR ${plainAmount(values.slabMonthlyBaseLkr)}`
-      : 'From rolling monthly sales and commission slab tiers';
+      ? `Based on month-to-date sales of LKR ${plainAmount(values.slabMonthlyBaseLkr)}`
+      : 'Based on your monthly sales and commission tier';
 
   return (
     <SectionInfoPopover ariaLabel="Commission calculation details">
@@ -171,13 +171,13 @@ export function CommissionInfoPopover({ values }: { values: PayoutReportValues }
         description="Slab commission for the period. Platform-owned promo payback and discount offsets are applied in Net Platform Amount, not here."
       />
       <InfoFormulaLine>
-        Commission = Online Wallet Amount × Applicable Slab-Based Commission Rate ={' '}
+        Commission = Online Wallet Amount × Commission Rate ={' '}
         {plainAmount(walletLkr)} × {ratePct != null ? `${ratePct}%` : '—'}
       </InfoFormulaLine>
       <div className="space-y-2 border-t border-[#e2e8f0] pt-2.5 dark:border-slate-700">
         <ReportRow label="Online Wallet Amount" value={plainAmount(walletLkr)} />
         <ReportRow
-          label="Applicable Slab-Based Commission Rate"
+          label="Commission rate"
           value={ratePct != null ? `${ratePct}%` : '—'}
           hint={monthlyBaseHint}
         />
