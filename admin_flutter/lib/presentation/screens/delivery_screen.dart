@@ -382,7 +382,7 @@ class _FiltersCardState extends State<_FiltersCard> {
       ],
     );
 
-    Widget box(String text, {IconData? trailing, VoidCallback? onTap}) => Material(
+    Widget box(String text, {IconData? leading, IconData? trailing, VoidCallback? onTap}) => Material(
       color: c.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(PosRadius.button),
@@ -396,6 +396,7 @@ class _FiltersCardState extends State<_FiltersCard> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
+              if (leading != null) ...[Icon(leading, size: 17, color: c.textMuted), const SizedBox(width: 8)],
               Expanded(
                 child: Text(
                   text,
@@ -432,42 +433,40 @@ class _FiltersCardState extends State<_FiltersCard> {
           Divider(height: 1, color: c.border.withValues(alpha: 0.7)),
           Padding(
             padding: const EdgeInsets.all(PosSpacing.lg),
-            // One row like the web: Branch, Rider, Apply and the reset icon.
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(child: field(tr('Branch'), box(widget.branch))),
-                const SizedBox(width: PosSpacing.sm),
-                Expanded(
-                  child: field(
-                    tr('Rider'),
-                    box(
-                      _riderName(_pending),
-                      trailing: Icons.expand_more_rounded,
-                      onTap: () async {
-                        final v = await showOptionSheet<String>(
-                          context,
-                          title: tr('Rider'),
-                          selected: _pending,
-                          options: [('', tr('All riders')), for (final r in ctrl.riders) (r.id, r.name)],
-                        );
-                        if (v != null) setState(() => _pending = v);
-                      },
-                    ),
+            // Wide: one row like the web (Branch, Rider, Apply, reset).
+            // Narrow: Branch + Rider share a row, Apply + reset go underneath, so
+            // neither field is squeezed into a truncated stub.
+            child: LayoutBuilder(
+              builder: (context, size) {
+                final branchField = field(
+                  tr('Branch'),
+                  box(widget.branch, leading: Icons.storefront_outlined),
+                );
+                final riderField = field(
+                  tr('Rider'),
+                  box(
+                    _riderName(_pending),
+                    leading: Icons.person_outline_rounded,
+                    trailing: Icons.expand_more_rounded,
+                    onTap: () async {
+                      final v = await showOptionSheet<String>(
+                        context,
+                        title: tr('Rider'),
+                        selected: _pending,
+                        options: [('', tr('All riders')), for (final r in ctrl.riders) (r.id, r.name)],
+                      );
+                      if (v != null) setState(() => _pending = v);
+                    },
                   ),
-                ),
-                const SizedBox(width: PosSpacing.sm),
-                SizedBox(
-                  width: 100,
-                  child: PosButton(
-                    label: tr('Apply'),
-                    height: 44,
-                    onPressed: () => ctrl.setDriver(_pending.isEmpty ? null : _pending),
-                  ),
-                ),
-                const SizedBox(width: PosSpacing.sm),
+                );
+                final apply = PosButton(
+                  label: tr('Apply'),
+                  icon: Icons.filter_alt_outlined,
+                  height: 44,
+                  onPressed: () => ctrl.setDriver(_pending.isEmpty ? null : _pending),
+                );
                 // Monochrome reset icon in place of the web's "Reset" text button.
-                Tooltip(
+                final reset = Tooltip(
                   message: tr('Reset'),
                   child: Material(
                     color: c.card,
@@ -488,8 +487,43 @@ class _FiltersCardState extends State<_FiltersCard> {
                       ),
                     ),
                   ),
-                ),
-              ],
+                );
+                if (size.maxWidth >= 640) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(child: branchField),
+                      const SizedBox(width: PosSpacing.sm),
+                      Expanded(child: riderField),
+                      const SizedBox(width: PosSpacing.sm),
+                      SizedBox(width: 120, child: apply),
+                      const SizedBox(width: PosSpacing.sm),
+                      reset,
+                    ],
+                  );
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(child: branchField),
+                        const SizedBox(width: PosSpacing.sm),
+                        Expanded(child: riderField),
+                      ],
+                    ),
+                    const SizedBox(height: PosSpacing.sm),
+                    Row(
+                      children: [
+                        Expanded(child: apply),
+                        const SizedBox(width: PosSpacing.sm),
+                        reset,
+                      ],
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ],
