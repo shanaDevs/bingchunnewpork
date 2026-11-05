@@ -30,6 +30,8 @@ const THEME_INIT_SCRIPT = `(function(){try{var stored=localStorage.getItem('bc-t
 const HTTPS_UPGRADE_SCRIPT = `(function(){try{var l=window.location;if(l.protocol!=='http:'||l.port)return;var h=l.hostname;if(h==='localhost'||h.endsWith('.local')||h.endsWith('.localhost')||/^[0-9.]+$/.test(h)||h.indexOf(':')!==-1)return;l.replace('https://'+l.host+l.pathname+l.search+l.hash);}catch(e){}})();`;
 
 const gscVerification = process.env.NEXT_PUBLIC_GSC_VERIFICATION?.trim();
+const webSurface = (process.env.WEB_SURFACE || 'shop').trim().toLowerCase();
+const isPosWeb = webSurface === 'pos';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -39,7 +41,16 @@ export const metadata: Metadata = {
   },
   description: DEFAULT_DESCRIPTION,
   keywords: DEFAULT_KEYWORDS,
-  applicationName: SITE_NAME,
+  applicationName: isPosWeb ? 'Bing Chun Cashier' : SITE_NAME,
+  ...(isPosWeb
+    ? {
+        appleWebApp: {
+          capable: true,
+          title: 'Bing Chun Cashier',
+          statusBarStyle: 'default' as const,
+        },
+      }
+    : {}),
   authors: [{ name: SITE_NAME, url: SITE_URL }],
   creator: SITE_NAME,
   publisher: SITE_NAME,
@@ -87,7 +98,7 @@ export const metadata: Metadata = {
         },
       }
     : {}),
-  manifest: '/manifest.json',
+  manifest: isPosWeb ? '/cashier-manifest.json' : '/manifest.json',
   icons: {
     icon: [
       { url: '/icons/icon-192x192.png', sizes: '192x192', type: 'image/png' },
@@ -108,6 +119,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="en"
       data-theme="light"
+      data-web-surface={isPosWeb ? 'pos' : webSurface === 'admin' ? 'admin' : 'shop'}
       className={cn('font-sans', geist.variable, poppins.variable)}
       suppressHydrationWarning
     >
