@@ -1443,6 +1443,7 @@ export async function bulkSettleHandler(req: Request, res: Response, next: NextF
 
     const results: Array<{
       storeId: string;
+      withdrawalId: string;
       storeName: string;
       success: boolean;
       statementRef?: string;
@@ -1461,6 +1462,7 @@ export async function bulkSettleHandler(req: Request, res: Response, next: NextF
       if (!store) {
         results.push({
           storeId: item.storeId,
+          withdrawalId: item.withdrawalId,
           storeName: item.storeId,
           success: false,
           error: 'Store not found',
@@ -1485,6 +1487,7 @@ export async function bulkSettleHandler(req: Request, res: Response, next: NextF
 
         results.push({
           storeId: store.id,
+          withdrawalId: item.withdrawalId,
           storeName: store.name,
           success: true,
           statementRef: settlement.statementRef,
@@ -1494,6 +1497,7 @@ export async function bulkSettleHandler(req: Request, res: Response, next: NextF
       } catch (err) {
         results.push({
           storeId: store.id,
+          withdrawalId: item.withdrawalId,
           storeName: store.name,
           success: false,
           error: err instanceof AppError ? err.message : 'Settlement failed',

@@ -58,6 +58,7 @@ export function serializeWalletSummary(summary: {
   totalWithdrawn: number;
   pendingWithdrawalTotal: number;
   availableBalance: number;
+  onlineWalletAvailableBalance: number;
 }) {
   return {
     storeId: summary.storeId,
@@ -68,6 +69,7 @@ export function serializeWalletSummary(summary: {
     totalWithdrawn: String(summary.totalWithdrawn),
     pendingWithdrawalTotal: String(summary.pendingWithdrawalTotal),
     availableBalance: String(summary.availableBalance),
+    onlineWalletAvailableBalance: String(summary.onlineWalletAvailableBalance),
   };
 }
 

@@ -43,6 +43,7 @@ import {
 } from './sharedPromoContribution';
 import { attachPromoOwnershipTotals, loadPromoOwnershipTotalsForPeriod } from './promoOwnershipTotals';
 import { resolveNetPlatformAmountCentsFromWithdrawalBreakdown } from './invoice/payoutStatement';
+import { readWithdrawalCycleStage } from './payoutWithdrawalAmounts';
 import { Prisma } from '@prisma/client';
 import { centsToDecimal, parseDecimalFromDb } from './moneyDecimal';
 import {
@@ -94,6 +95,8 @@ export type WalletSummary = {
   totalWithdrawn: number;
   pendingWithdrawalTotal: number;
   availableBalance: number;
+  /** Pickup + delivery online net (after discounts), all-time, minus payables expenses and pending payouts. */
+  onlineWalletAvailableBalance: number;
 };
 
 export type BranchWalletPayablesBreakdown = {
@@ -234,6 +237,7 @@ function buildBranchPayablesBreakdown(
   const deliveryCommissionCents = Math.round(toDeliveryLkr * 100);
   const totalExpensesCents =
     platformCommissionCents + gatewayFeeCents + branchReceivableCents;
+  const onlineRevenueCents = channels.pickupOnlineIn + channels.deliveryOnlineIn;
 
   return {
     channelRevenueCents: { ...channels },
@@ -243,7 +247,7 @@ function buildBranchPayablesBreakdown(
     gatewayFeeCents,
     branchReceivableCents,
     totalExpensesCents,
-    allTimeAvailableBalanceCents: totalRevenueCents - totalExpensesCents,
+    allTimeAvailableBalanceCents: onlineRevenueCents - totalExpensesCents,
   };
 }
 
@@ -270,17 +274,23 @@ export async function computeBranchPayablesBreakdown(
     0,
   );
 
-  const paidPayoutGatewayFeeCents = paidPayoutWithdrawals.reduce(
-    (sum, row) => sum + gatewayFeeCentsFromWithdrawalBreakdown(row.breakdown),
-    0,
-  );
-
-  const paidBranchReceivableCents = paidPayoutWithdrawals.reduce(
-    (sum, row) =>
-      sum +
-      branchPayoutCentsFromWithdrawalBreakdown(row.breakdown, withdrawalAmountCents(row)),
-    0,
-  );
+  let paidPayoutGatewayFeeCents = 0;
+  let paidBranchReceivableCents = 0;
+  for (const row of paidPayoutWithdrawals) {
+    const fallbackCents = withdrawalAmountCents(row);
+    paidBranchReceivableCents += branchPayoutCentsFromWithdrawalBreakdown(
+      row.breakdown,
+      fallbackCents,
+    );
+    const raw =
+      row.breakdown && typeof row.breakdown === 'object'
+        ? (row.breakdown as Record<string, unknown>)
+        : null;
+    // Payout 1: gateway is already reflected in net payout (final pay); do not double-subtract.
+    if (readWithdrawalCycleStage(raw ?? {}) !== 'FIRST') {
+      paidPayoutGatewayFeeCents += gatewayFeeCentsFromWithdrawalBreakdown(row.breakdown);
+    }
+  }
 
   const paidNetPlatformAmountCents = paidPayoutWithdrawals.reduce(
     (sum, row) => sum + resolveNetPlatformAmountCentsFromWithdrawalBreakdown(row.breakdown),
@@ -294,6 +304,20 @@ export async function computeBranchPayablesBreakdown(
     paidPayoutGatewayFeeCents,
     paidBranchReceivableCents,
   );
+}
+
+/**
+ * Remaining withdrawable online wallet: pickup + delivery online item net (no convenience/delivery fees),
+ * after platform/gateway/paid branch payouts — offline channel revenue absorbs expenses first.
+ */
+export function onlineWalletAvailableFromPayablesBreakdown(
+  breakdown: BranchWalletPayablesBreakdown,
+): number {
+  const ch = breakdown.channelRevenueCents;
+  const onlineGrossCents = ch.pickupOnlineIn + ch.deliveryOnlineIn;
+  const offlineGrossCents = ch.pickupCashIn + ch.pickupCardIn;
+  const expensesAfterOffline = Math.max(0, breakdown.totalExpensesCents - offlineGrossCents);
+  return Math.max(0, onlineGrossCents - expensesAfterOffline);
 }
 
 export async function getBranchWalletDashboard(
@@ -1567,9 +1591,10 @@ export async function computeBreakdownForPeriodOrders(
     commissionSlabs,
   );
   const onlinePaymentsCollected = Math.round(
-    (cycleStage === 'FIRST'
-      ? sumFirstPayoutOnlineWalletBaseFromBreakdown(channelBreakdown)
-      : sumOnlinePaymentsCollectedFromBreakdown(channelBreakdown)) * 100,
+    sumOnlinePaymentsCollectedFromBreakdown(channelBreakdown) * 100,
+  );
+  const firstPayoutOnlineSubtotalCents = Math.round(
+    sumFirstPayoutOnlineWalletBaseFromBreakdown(channelBreakdown) * 100,
   );
 
   let netPlatformEarning = storePaybackEnabled
@@ -1584,10 +1609,11 @@ export async function computeBreakdownForPeriodOrders(
   if (cycleStage === 'FIRST') {
     netPlatformEarning = 0;
     commissionFee = 0;
-    gatewayBase = onlinePaymentsCollected;
+    // Payout 1: gateway fee on pickup + delivery online subtotal (before discounts), not online net.
+    gatewayBase = firstPayoutOnlineSubtotalCents;
     gatewayFee = Math.round(gatewayBase * gatewayFeeRate);
     remainingOnlineWalletCents = onlinePaymentsCollected;
-    signedNet = onlinePaymentsCollected - gatewayFee;
+    signedNet = gatewayBase - gatewayFee;
   } else {
     remainingOnlineWalletCents = Math.max(0, onlinePaymentsCollected - priorOnlineWalletAmountCents);
     gatewayBase = remainingOnlineWalletCents;
@@ -1608,7 +1634,7 @@ export async function computeBreakdownForPeriodOrders(
   ).length;
 
   const onlineWalletGrossForSnapshot =
-    cycleStage === 'FIRST' ? onlinePaymentsCollected : onlineWalletGross;
+    cycleStage === 'FIRST' ? firstPayoutOnlineSubtotalCents : onlineWalletGross;
 
   return {
     grossAmount,
@@ -1733,13 +1759,15 @@ async function recalculateBalanceFromLedger(storeId: string): Promise<number> {
 
 export async function getWalletSummary(storeId: string): Promise<WalletSummary> {
   const wallet = await getOrCreateWallet(storeId);
-  const [pendingWithdrawalTotal, netTransferableEarnings] = await Promise.all([
+  const [pendingWithdrawalTotal, netTransferableEarnings, payablesBreakdown] = await Promise.all([
     getPendingWithdrawalTotal(storeId),
     computeNetTransferableEarnings(storeId),
+    computeBranchPayablesBreakdown(storeId),
   ]);
 
   const totalWithdrawn = walletTotalWithdrawnCents(wallet);
   const remainingNet = Math.max(0, netTransferableEarnings - totalWithdrawn);
+  const onlineWalletGrossCents = onlineWalletAvailableFromPayablesBreakdown(payablesBreakdown);
 
   return {
     storeId,
@@ -1750,6 +1778,7 @@ export async function getWalletSummary(storeId: string): Promise<WalletSummary> 
     totalWithdrawn,
     pendingWithdrawalTotal,
     availableBalance: Math.max(0, remainingNet - pendingWithdrawalTotal),
+    onlineWalletAvailableBalance: Math.max(0, onlineWalletGrossCents - pendingWithdrawalTotal),
   };
 }
 

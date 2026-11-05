@@ -4,6 +4,7 @@
  */
 
 import { prisma } from './prisma';
+import { resolveNetPayoutFinalPayCentsFromWithdrawalBreakdown } from './payoutWithdrawalAmounts';
 import { periodActivePaidOrdersWhere } from './walletRevenue';
 import type { PeriodBreakdown } from './walletService';
 
@@ -226,11 +227,7 @@ export function resolveFinalPayoutAmountFromBreakdown(
   breakdown: unknown,
   fallbackAmount: number,
 ): number {
-  const raw = asBreakdownRecord(breakdown);
-  if (!raw) return fallbackAmount;
-  const finalAmount = finiteAmount(raw.finalPayoutAmount);
-  if (finalAmount > 0) return finalAmount;
-  return computeFinalPayoutAmountCents(fallbackAmount, splitContributionAmounts(raw).jasonAmount);
+  return resolveNetPayoutFinalPayCentsFromWithdrawalBreakdown(breakdown, fallbackAmount);
 }
 
 /**
@@ -241,27 +238,7 @@ export function branchPayoutCentsFromWithdrawalBreakdown(
   breakdown: unknown,
   fallbackAmountCents: number,
 ): number {
-  const raw = asBreakdownRecord(breakdown);
-  if (!raw) return fallbackAmountCents;
-
-  const finalAmount = finiteAmount(raw.finalPayoutAmount);
-  if (finalAmount > 0) return Math.round(finalAmount);
-
-  const branchRequestRaw = finiteAmount(raw.branchRequestNetAmount);
-  const branchRequestCents =
-    branchRequestRaw > 0 ? Math.round(branchRequestRaw) : fallbackAmountCents;
-
-  const jasonCents = splitContributionAmounts(raw).jasonAmount;
-  const withPromo = computeFinalPayoutAmountCents(branchRequestCents, jasonCents);
-  if (withPromo > 0) return withPromo;
-
-  const periodNetRaw =
-    finiteAmount(raw.periodNetAmount) > 0
-      ? finiteAmount(raw.periodNetAmount)
-      : finiteAmount(raw.netAmount);
-  if (periodNetRaw > 0) return Math.round(periodNetRaw);
-
-  return fallbackAmountCents;
+  return resolveNetPayoutFinalPayCentsFromWithdrawalBreakdown(breakdown, fallbackAmountCents);
 }
 
 export function parseSharedPromoFromBreakdown(breakdown: unknown): SharedPromoContribution {

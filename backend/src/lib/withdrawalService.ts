@@ -10,7 +10,7 @@ import { creditPlatformEarning } from './platformEarningsService';
 import { ensurePlatformEarningsSchema } from './platformEarningsSchema';
 import { ensurePlatformPaybackSchema } from './platformPaybackSchema';
 import { buildPeriodChannelPreview, channelPreviewFromPeriodBreakdown } from './periodChannelPreview';
-import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
+import { sumFirstPayoutOnlineWalletBaseFromBreakdown } from './commission';
 import {
   computeFinalPayoutAmountCents,
   parseSharedPromoFromBreakdown,
@@ -270,6 +270,12 @@ export async function buildStoredWithdrawalBreakdown(
   );
   const platformProviderReceivable = await resolvePlatformProviderReceivableFromBreakdown(period);
   const { channelBreakdown: _ignoredChannelBreakdown, ...periodFields } = period;
+  const firstPayoutOnlineSubtotalCents =
+    period.cycleStage === 'FIRST'
+      ? Math.round(sumFirstPayoutOnlineWalletBaseFromBreakdown(channelBreakdown) * 100)
+      : period.cycleStage === 'SECOND' && period.priorOnlineWalletAmountCents != null
+        ? period.priorOnlineWalletAmountCents
+        : undefined;
   return {
     ...periodFields,
     periodNetAmount: period.netAmount,
@@ -277,6 +283,9 @@ export async function buildStoredWithdrawalBreakdown(
     finalPayoutAmount,
     channelBreakdown,
     platformProviderReceivable,
+    ...(firstPayoutOnlineSubtotalCents != null
+      ? { firstPayoutOnlineSubtotalCents }
+      : {}),
   };
 }
 
@@ -347,8 +356,8 @@ export async function validatePayoutRequest(
   const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
   const cycle = await resolveCycleContextForWindow(storeId, fromStr, toStr);
 
-  const [orderAvailable, periodWithDiscountReport] = await Promise.all([
-    computePeriodOrderAvailableCents(storeId, fromStr, toStr, cycle),
+  const [walletSummary, periodWithDiscountReport] = await Promise.all([
+    getWalletSummary(storeId),
     computePeriodBreakdownForPayout(storeId, fromStr, toStr, cycle),
   ]);
   const channelPreview = channelPreviewFromPeriodBreakdown(
@@ -356,9 +365,10 @@ export async function validatePayoutRequest(
     fromStr,
     toStr,
   );
-  if (amount > orderAvailable.remainingCents) {
+  const remainingAvailableCents = walletSummary.onlineWalletAvailableBalance;
+  if (amount > remainingAvailableCents) {
     throw new AppError(
-      `Insufficient available balance. Available: LKR ${(orderAvailable.remainingCents / 100).toFixed(2)}`,
+      `Insufficient available balance. Available: LKR ${(remainingAvailableCents / 100).toFixed(2)}`,
       400,
     );
   }
@@ -376,7 +386,7 @@ export async function validatePayoutRequest(
   return {
     fromStr,
     toStr,
-    remainingAvailableCents: orderAvailable.remainingCents,
+    remainingAvailableCents,
     breakdown: await buildStoredWithdrawalBreakdown(
       periodWithDiscountReport,
       channelPreview.breakdown,

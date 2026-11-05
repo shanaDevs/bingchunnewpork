@@ -289,11 +289,11 @@ export default function BranchWalletSummaryCards({
   const branchReceivableCents = usePayoutPeriodExpenses
     ? (resolvedPaidExpenses?.branchReceivableCents ?? 0)
     : (payables?.branchReceivableCents ?? 0);
-  const totalExpensesCents = usePayoutPeriodExpenses
-    ? (resolvedPaidExpenses?.totalExpensesCents ?? 0)
-    : (payables?.totalExpensesCents ?? 0);
-  /** Keep in sync with expense cards (paid 15-day payouts when storeId is set). */
-  const availableBalanceCents = totalRevenueCents - totalExpensesCents;
+  const onlineRevenueCents = pickupOnlineCents + deliveryOnlineCents;
+  const expensesSummaryTotalCents =
+    platformCommissionCents + gatewayFeeCents + branchReceivableCents;
+  /** Pickup + delivery online revenue minus full expenses summary (platform + gateway + branch). */
+  const availableBalanceCents = onlineRevenueCents - expensesSummaryTotalCents;
 
   const cardLoading = loading || periodLoading || payoutPeriodExpensesLoading;
 
@@ -338,7 +338,7 @@ export default function BranchWalletSummaryCards({
 
       <div className="branch-wallet-payables__row branch-wallet-payables__row--expenses">
         <PayablesExpensesSummaryCard
-          totalExpensesCents={totalExpensesCents}
+          totalExpensesCents={expensesSummaryTotalCents}
           platformCommissionCents={platformCommissionCents}
           gatewayFeeCents={gatewayFeeCents}
           loading={cardLoading}

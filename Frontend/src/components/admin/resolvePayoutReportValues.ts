@@ -446,6 +446,7 @@ function resolveGatewayFigures(params: {
   snapshotGatewayFeeLkr: number | null;
   snapshotGatewayRatePct: number | null;
   snapshotOnlineWalletGrossLkr: number | null;
+  isFirstCyclePayout?: boolean;
 }) {
   const {
     periodBreakdownLkr,
@@ -456,23 +457,26 @@ function resolveGatewayFigures(params: {
     snapshotGatewayFeeLkr,
     snapshotGatewayRatePct,
     snapshotOnlineWalletGrossLkr,
+    isFirstCyclePayout = false,
   } = params;
-  const gatewayBaseLkr =
-    snapshotOnlineWalletGrossLkr ??
-    (periodBreakdownLkr.remainingOnlineWalletLkr != null &&
-    periodBreakdownLkr.remainingOnlineWalletLkr >= 0
-      ? periodBreakdownLkr.remainingOnlineWalletLkr
-      : onlinePaymentsCollectedLkr);
+  const gatewayBaseLkr = isFirstCyclePayout
+    ? (snapshotOnlineWalletGrossLkr ?? onlinePaymentsCollectedLkr)
+    : snapshotOnlineWalletGrossLkr ??
+      (periodBreakdownLkr.remainingOnlineWalletLkr != null &&
+      periodBreakdownLkr.remainingOnlineWalletLkr >= 0
+        ? periodBreakdownLkr.remainingOnlineWalletLkr
+        : onlinePaymentsCollectedLkr);
   const gatewayRatePct =
     snapshotGatewayRatePct ??
     (snapshotActive
       ? (periodBreakdownLkr.gatewayRatePct ?? gatewayRatePctProp)
       : gatewayRatePctProp);
-  const gatewayLkr =
-    snapshotGatewayFeeLkr ??
-    (useStoredSnapshot || snapshotActive
-      ? (periodBreakdownLkr.gatewayFee ?? 0)
-      : roundLkr(gatewayBaseLkr * (gatewayRatePct / 100)));
+  const gatewayLkr = isFirstCyclePayout
+    ? roundLkr(gatewayBaseLkr * (gatewayRatePct / 100))
+    : snapshotGatewayFeeLkr ??
+      (useStoredSnapshot || snapshotActive
+        ? (periodBreakdownLkr.gatewayFee ?? 0)
+        : roundLkr(gatewayBaseLkr * (gatewayRatePct / 100)));
   const gatewayHint =
     gatewayBaseLkr > 0.001
       ? `Online payments collected (branch revenue) ${formatMoneyAmount(gatewayBaseLkr)} x ${gatewayRatePct}%`
@@ -608,6 +612,7 @@ export function resolvePayoutReportValues(
     paybackEnabled: showPaybackDetails,
   });
   const refunds = resolveRefundReport(periodBreakdownLkr, input);
+  const isFirstCyclePayoutEarly = cycleStageEarly === 'FIRST';
   const gateway = resolveGatewayFigures({
     periodBreakdownLkr,
     snapshotActive,
@@ -616,21 +621,10 @@ export function resolvePayoutReportValues(
     gatewayRatePctProp,
     snapshotGatewayFeeLkr,
     snapshotGatewayRatePct,
-    snapshotOnlineWalletGrossLkr:
-      cycleStageEarly === 'FIRST' ? null : snapshotOnlineWalletGrossLkr,
+    snapshotOnlineWalletGrossLkr,
+    isFirstCyclePayout: isFirstCyclePayoutEarly,
   });
-  const gatewayResolved =
-    cycleStageEarly === 'FIRST' &&
-    snapshotGatewayFeeLkr == null &&
-    !useStoredSnapshot
-      ? {
-          ...gateway,
-          gatewayBaseLkr: sales.onlinePaymentsCollectedLkr,
-          gatewayLkr: roundLkr(
-            sales.onlinePaymentsCollectedLkr * (gateway.gatewayRatePct / 100),
-          ),
-        }
-      : gateway;
+  const gatewayResolved = gateway;
   const netPlatformCommissionForPayoutLkr = resolveTotalPlatformCommissionDisplayLkr({
     commissionLkr: sales.commissionLkr,
     platformPaybackTotal: platformPaybackLkr,
@@ -723,8 +717,10 @@ export function resolvePayoutReportValues(
     (periodBreakdownLkr.priorOnlineWalletAmountLkr ?? 0) <= 0.001
       ? ('FIRST' as const)
       : undefined);
-  const priorOnlineWalletAmountLkr = periodBreakdownLkr.priorOnlineWalletAmountLkr ?? 0;
   const isFirstCyclePayout = cycleStage === 'FIRST';
+  const priorOnlineWalletAmountLkr = isFirstCyclePayout
+    ? 0
+    : (periodBreakdownLkr.priorOnlineWalletAmountLkr ?? 0);
 
   const finalBranchNetPayoutLkr = isFirstCyclePayout
     ? roundLkr(sales.onlinePaymentsCollectedLkr - gatewayResolved.gatewayLkr)

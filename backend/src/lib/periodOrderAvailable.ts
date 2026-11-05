@@ -1,5 +1,5 @@
 import { prisma } from './prisma';
-import { sumOnlinePaymentsCollectedFromBreakdown, sumFirstPayoutOnlineWalletBaseFromBreakdown } from './commission';
+import { sumOnlinePaymentsCollectedFromBreakdown } from './commission';
 import {
   buildPeriodChannelPreview,
   type PeriodChannelPreview,
@@ -60,7 +60,10 @@ export async function periodOrderAvailableFromChannelPreview(
   return periodOrderAvailableFromOnlineCollectedCents(storeId, fromStr, toStr, fromOrdersCents);
 }
 
-/** Pickup + delivery online net (LKR) for paid orders in the period — matches Initiate Payout UI. */
+/**
+ * Pickup Online + Delivery Online net amounts (revenue subtotals after discounts) for the
+ * payout cycle window through `toStr`, minus prior payouts — matches Initiate Payout header.
+ */
 export async function computePeriodOrderAvailableCents(
   storeId: string,
   fromStr: string,
@@ -70,14 +73,9 @@ export async function computePeriodOrderAvailableCents(
   const cycle = cycleCtx ?? (await resolvePayoutCycleContext(storeId));
   const orderFrom = cycle.cycleStage === 'SECOND' && cycle.cycleFrom ? cycle.cycleFrom : fromStr;
   const channelPreview = await buildPeriodChannelPreview(storeId, orderFrom, toStr);
-  const sumOnlineCollected = (breakdown: PeriodChannelPreview['breakdown']) =>
-    Math.round(
-      (cycle.cycleStage === 'FIRST'
-        ? sumFirstPayoutOnlineWalletBaseFromBreakdown(breakdown)
-        : sumOnlinePaymentsCollectedFromBreakdown(breakdown)) * 100,
-    );
-
-  const fromOrdersCents = sumOnlineCollected(channelPreview.breakdown);
+  const fromOrdersCents = Math.round(
+    sumOnlinePaymentsCollectedFromBreakdown(channelPreview.breakdown) * 100,
+  );
   let adjustedFromOrdersCents = fromOrdersCents;
   if (cycle.cycleStage === 'SECOND') {
     adjustedFromOrdersCents = Math.max(
