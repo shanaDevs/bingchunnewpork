@@ -63,7 +63,10 @@ class JobDetailController extends ChangeNotifier {
   }
 
   Future<bool> assign(String jobId) => _act(() => _c.jobsRepository.assignJob(jobId));
-  Future<bool> claim(String jobId) => _act(() => _c.jobsRepository.claimJob(jobId));
+  Future<bool> claim(String jobId) => _act(() async {
+    await ensureNoUnfinishedRide(_c, claimingJobId: jobId);
+    return _c.jobsRepository.claimJob(jobId);
+  });
   Future<bool> start(String jobId) => _act(() => _c.jobsRepository.startJob(jobId));
   Future<bool> pickup(String jobId) => _act(() async {
     final fix = await requireFix(_c);

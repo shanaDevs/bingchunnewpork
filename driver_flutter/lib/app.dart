@@ -191,6 +191,7 @@ class _HomeShellState extends State<HomeShell> {
         c.alertService.forceRing(alert);
       case AcceptRide(:final alert):
         try {
+          await ensureNoUnfinishedRide(c, claimingJobId: alert.jobId);
           await c.jobsRepository.claimJob(alert.jobId);
           c.alertService.silenceJob(alert.jobId);
           AppRoutes.openDashboardFromRoot(alert.jobId);
@@ -382,7 +383,9 @@ class _IncomingRideOverlayState extends State<_IncomingRideOverlay> {
       _error = null;
     });
     try {
-      await context.read<AppContainer>().jobsRepository.claimJob(alert.jobId);
+      final container = context.read<AppContainer>();
+      await ensureNoUnfinishedRide(container, claimingJobId: alert.jobId);
+      await container.jobsRepository.claimJob(alert.jobId);
       BcFeedback.success();
       // The card may be over the lock screen; the dashboard shows customer details,
       // so it needs an unlock. If the rider cancels, it opens after they unlock.
