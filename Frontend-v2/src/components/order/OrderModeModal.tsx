@@ -1,12 +1,11 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sparkles } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
-import { OrderModeSelector } from './OrderModeSelector';
-import AnimatedMascot from '@/components/mascot/AnimatedMascot';
-import type { MascotPose } from '@/components/mascot/mascotAnimations';
+import { OrderModeSelector, type OrderFlowStep } from './OrderModeSelector';
+import { homeFontVariables } from '@/components/home-redesign/fonts';
+import { cn } from '@/components/home-redesign/lib/cn';
 import { runDeferredOrderSetupAction } from '@/lib/postOrderSetupAction';
 import type { OrderMode } from '@/store/cartStore';
 
@@ -20,10 +19,14 @@ interface Props {
   startAtSetup?: boolean;
 }
 
-function modeToPose(mode: OrderMode): MascotPose {
-  return mode === 'DELIVERY' ? 'delivery' : 'takeaway';
-}
-
+/**
+ * Order type and branch popup, in the redesign's look (the prototype's BranchSelectModal): one panel whose
+ * size follows the step — a small centred card to choose Pickup or Delivery (or to continue with last time's
+ * branch), then the wide setup panel with the list and map. On phones it is a bottom sheet, full height on the
+ * setup step. The content and every backend call live in OrderModeSelector.
+ *
+ * `required` (the menu page, nothing chosen yet): no close button, and neither Escape nor a click outside closes it.
+ */
 export default function OrderModeModal({
   isOpen,
   onClose,
@@ -35,13 +38,8 @@ export default function OrderModeModal({
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
-  const [brandHovered, setBrandHovered] = useState(false);
-  const [orderMode, setOrderMode] = useState<OrderMode>(() => initialMode ?? 'DELIVERY');
-  const [step, setStep] = useState<'choose' | 'setup'>(() => (startAtSetup ? 'setup' : 'choose'));
-
-  // Setup step uses edge-to-edge map for both delivery and pickup.
-  const mapStage = step === 'setup';
-  const expanded = step === 'setup';
+  const [step, setStep] = useState<OrderFlowStep>(() => (startAtSetup && initialMode ? 'setup' : 'type'));
+  const large = step === 'setup';
 
   useEffect(() => {
     if (!isOpen) return;
@@ -60,6 +58,13 @@ export default function OrderModeModal({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, required]);
+
+  // Each opening starts from its own first step (OrderModeSelector then reports it), not the last one's size.
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen);
+    if (isOpen) setStep(startAtSetup && initialMode ? 'setup' : 'type');
+  }
 
   const handleComplete = useCallback(() => {
     (onSetupComplete ?? onClose)();
@@ -84,142 +89,58 @@ export default function OrderModeModal({
     }
   }, [onClose, pathname, router]);
 
-  const handleBackdropClick = useCallback(() => {
-    if (!required) onClose();
-  }, [onClose, required]);
+  // No "Skip for now" link: when the popup offers a skip (an optional prompt), closing it is the skip, so the
+  // prompt isn't shown again this visit.
+  const dismiss = onSkip ?? onClose;
 
-  const mascotPose: MascotPose = brandHovered ? 'cup-offer' : modeToPose(orderMode);
+  if (!isOpen) return null;
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          key="order-modal-backdrop"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className={`order-mode-modal-backdrop fixed inset-0 z-[10000] flex ${
-            mapStage
-              ? 'order-mode-modal-backdrop--map items-stretch justify-stretch p-0'
-              : 'items-center justify-center p-3 sm:p-6'
-          }`}
-          onClick={handleBackdropClick}
-        >
-          <motion.div
-            key="order-modal-panel"
-            layout
-            initial={{ opacity: 0, scale: mapStage ? 1 : 0.94, y: mapStage ? 0 : 28 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: mapStage ? 1 : 0.94, y: mapStage ? 0 : 28 }}
-            transition={{ type: 'spring', stiffness: 320, damping: 30 }}
-            className={`order-mode-modal relative w-full ${
-              mapStage
-                ? 'order-mode-modal--map h-full max-w-none'
-                : expanded
-                  ? 'order-mode-modal--expanded max-w-[1500px]'
-                  : 'max-w-2xl lg:max-w-3xl'
-            }`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              className={`order-mode-modal__card flex overflow-hidden ${
-                mapStage
-                  ? 'order-mode-modal__card--map h-full flex-col shadow-none'
-                  : 'card shadow-2xl flex-col lg:flex-row'
-              }`}
-            >
-              {!mapStage && (
-                <div className="order-mode-modal__accent absolute top-0 left-0 right-0 z-10" aria-hidden />
-              )}
-
-              {!required && (
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className={`order-mode-modal__close absolute z-30 w-9 h-9 rounded-xl flex items-center justify-center border transition-all ${
-                    mapStage ? 'top-3 right-3' : 'top-4 right-4'
-                  }`}
-                  aria-label="Close"
-                >
-                  <X size={16} />
-                </button>
-              )}
-
-              {!mapStage && (
-                <div
-                  className="order-mode-modal__brand hidden lg:flex lg:w-[200px] xl:w-[220px] shrink-0 flex-col items-center p-5 pt-8 relative"
-                  onMouseEnter={() => setBrandHovered(true)}
-                  onMouseLeave={() => setBrandHovered(false)}
-                  onTouchStart={() => setBrandHovered(true)}
-                >
-                  <div className="order-mode-modal__brand-glow" aria-hidden />
-
-                  <div className="relative z-[1] w-full flex flex-col items-center">
-                    <AnimatedMascot
-                      pose={mascotPose}
-                      visible
-                      size="md"
-                      showCup={false}
-                      showBubble={brandHovered}
-                      className="order-mode-modal__brand-mascot"
-                    />
-
-                    <p className="text-xs font-semibold uppercase tracking-widest text-brand-light mt-3 text-center">
-                      Order your way
-                    </p>
-                    <p className="text-[11px] text-muted mt-2 leading-relaxed text-center px-1">
-                      {brandHovered
-                        ? 'Stitch is ready with your cup!'
-                        : 'Hover here to say hi to Stitch'}
-                    </p>
-                    <Sparkles size={14} className="text-accent mt-3 opacity-80" />
-                  </div>
-                </div>
-              )}
-
-              <div
-                className={`order-mode-modal__body flex-1 min-w-0 min-h-0 ${
-                  mapStage
-                    ? 'order-mode-modal__body--map overflow-hidden'
-                    : expanded
-                      ? 'overflow-y-auto overflow-x-hidden max-h-[94vh]'
-                      : 'overflow-y-auto overflow-x-hidden max-h-[min(92vh,820px)]'
-                }`}
-              >
-                <div
-                  className={
-                    mapStage
-                      ? 'order-mode-modal__body-inner--map h-full'
-                      : 'p-5 sm:p-7 lg:p-8 pt-12 sm:pt-14 lg:pt-8'
-                  }
-                >
-                  <OrderModeSelector
-                    modalOpen={isOpen}
-                    onComplete={handleComplete}
-                    onBackToHome={pathname !== '/' && !pathname.startsWith('/menu') ? handleBackToHome : undefined}
-                    onModeChange={setOrderMode}
-                    onStepChange={setStep}
-                    initialMode={initialMode}
-                    startAtSetup={startAtSetup}
-                  />
-                </div>
-
-                {onSkip && !mapStage && (
-                  <div className="px-5 sm:px-7 lg:px-8 pb-5 sm:pb-7 lg:pb-8 -mt-2">
-                    <button
-                      type="button"
-                      onClick={onSkip}
-                      className="order-mode-modal__skip w-full text-center text-sm text-muted hover:text-brand transition-colors py-2"
-                    >
-                      Skip for now — you can set this later
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        </motion.div>
+    <div
+      className={cn(
+        homeFontVariables,
+        'order-popup-backdrop fixed inset-0 z-[10000] flex items-end justify-center bg-brand-950/55 backdrop-blur-[3px] md:items-center md:p-6',
+        'transition-opacity duration-300 starting:opacity-0',
       )}
-    </AnimatePresence>
+      onClick={() => {
+        if (!required) dismiss();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="order-popup-heading"
+        onClick={(e) => e.stopPropagation()}
+        className={cn(
+          // overflow-clip, not hidden: a hidden-overflow box can still be scrolled by focus, which would push the
+          // whole panel's content out of view. `home-redesign` brings the redesign's fonts and colours.
+          'home-redesign order-popup relative flex max-h-[calc(100dvh-0.75rem)] w-full flex-col overflow-clip rounded-t-[1.75rem] bg-white text-slate-900 shadow-2xl shadow-brand-950/30',
+          'md:max-h-[min(54rem,100%)] md:rounded-[2rem]',
+          // Phones: the setup step fills the sheet, so it doesn't jump in height as its content changes.
+          large ? 'max-md:h-[calc(100dvh-0.75rem)] md:max-w-6xl' : 'md:max-w-xl',
+          'transition-[opacity,translate,scale] duration-300 ease-out starting:translate-y-4 starting:scale-[0.98] starting:opacity-0',
+        )}
+      >
+        {!required && (
+          <button
+            type="button"
+            onClick={dismiss}
+            aria-label="Close"
+            className="absolute top-5 right-5 z-20 grid size-11 place-items-center rounded-full bg-brand-50 text-brand-700 transition-colors hover:bg-brand-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 sm:top-7 sm:right-7 short:top-3"
+          >
+            <X className="size-5" aria-hidden />
+          </button>
+        )}
+
+        <OrderModeSelector
+          modalOpen={isOpen}
+          onComplete={handleComplete}
+          onBackToHome={pathname !== '/' && !pathname.startsWith('/menu') ? handleBackToHome : undefined}
+          onStepChange={setStep}
+          initialMode={initialMode}
+          startAtSetup={startAtSetup}
+        />
+      </div>
+    </div>
   );
 }
