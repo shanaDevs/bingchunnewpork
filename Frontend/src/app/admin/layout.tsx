@@ -16,6 +16,7 @@ import toast from 'react-hot-toast';
 import AdminNotificationBell from '@/components/admin/AdminNotificationBell';
 import EodStockResetPrompt, { type EodPromptVariant } from '@/components/admin/stock/EodStockResetPrompt';
 import { AdminNotificationProvider } from '@/contexts/AdminNotificationProvider';
+import CashierInstallButton, { useShowCashierInstall } from '@/components/admin/CashierInstallButton';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import BrandLogo from '@/components/ui/BrandLogo';
 import {
@@ -167,6 +168,7 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const isLoginPage = pathname === '/admin/login';
+  const showCashierInstall = useShowCashierInstall(pathname);
   const [permissions, setPermissions] = useState<Record<string, { canRead: boolean }>>({});
   const [loadingPermissions, setLoadingPermissions] = useState(true);
   const [eodPrompt, setEodPrompt] = useState<EodPromptVariant | null>(null);
@@ -692,6 +694,7 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {showCashierInstall && <CashierInstallButton />}
             {branchAdmin && adminUser?.storeId && (
               <button
                 type="button"
