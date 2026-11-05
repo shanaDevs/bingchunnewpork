@@ -1,33 +1,58 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Store, CheckCircle2, Loader2, ChevronLeft, MapPin, Search, Crosshair, Truck, ShoppingBag, Home, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Bike,
+  Check,
+  Clock,
+  House,
+  Loader2,
+  LocateFixed,
+  LocateOff,
+  MapPin,
+  Navigation,
+  Search,
+  Store,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { useCartStore, type OrderMode } from '@/store/cartStore';
+import { selectActiveStoreId, useCartStore, type LocalCartItem, type OrderMode } from '@/store/cartStore';
 import { AddressMapPicker, type AddressSelection } from './AddressMapPicker';
 import type { Store as StoreType, DeliveryValidation, DeliveryBranchOption } from '@/types';
 import toast from 'react-hot-toast';
 import { confirmDialog } from '@/store/confirmStore';
-import { getCurrentPositionWithFallback, DEFAULT_LOCATION } from '@/lib/geolocation';
+import { getCurrentPosition, DEFAULT_LOCATION } from '@/lib/geolocation';
 import { MASCOT_IMAGES } from '@/lib/mascotImages';
 import { playModeSelectSound, playLocationPinSound, playConfirmClickSound } from '@/lib/uiSounds';
 import { toMapLatLng } from '@/lib/storeCoordinates';
 import { branchManuallyClosedMessage, isBranchManuallyClosed } from '@/lib/storeOrderingHours';
+import { findCartItemsUnavailableAt } from '@/lib/branchCartConflicts';
+import { resolveProductImageUrl } from '@/lib/productImageUrl';
+import { cn } from '@/components/home-redesign/lib/cn';
 
 function isDeliveryBranchOrderable(branch: DeliveryBranchOption): boolean {
   return branch.suggested && !branch.branchClosed;
 }
 
+/**
+ * saved – a branch was set up before: continue with it, or choose again (small panel).
+ * type – step 1, Pickup or Delivery (small panel).
+ * setup – step 2, the address or branch search, list and map (large panel).
+ * conflict – the chosen branch can't supply some items in the cup: remove them and switch, or go back (small panel).
+ */
+export type OrderFlowStep = 'saved' | 'type' | 'setup' | 'conflict';
+
 interface OrderModeSelectorProps {
   onComplete?: () => void;
   onBackToHome?: () => void;
-  showContinueButton?: boolean;
   onModeChange?: (mode: OrderMode) => void;
-  onStepChange?: (step: 'choose' | 'setup') => void;
+  onStepChange?: (step: OrderFlowStep) => void;
   /** True while the order modal is open — used to refresh nearest branches on reopen. */
   modalOpen?: boolean;
   /** Skip step 1 and open setup for this mode (from navbar Delivery/Pickup buttons). */
@@ -38,9 +63,7 @@ interface OrderModeSelectorProps {
 const PickupMap = dynamic(() => import('./DeliveryMap'), {
   ssr: false,
   loading: () => (
-    <div className="h-full min-h-[220px] rounded-xl border border-navy-border bg-navy-light flex items-center justify-center text-muted text-sm">
-      Loading map...
-    </div>
+    <div className="grid h-full min-h-48 place-items-center rounded-[1.5rem] bg-brand-50 text-sm text-slate-500">Loading map…</div>
   ),
 });
 
@@ -77,25 +100,71 @@ function storeMatchesPickupSearch(store: StoreType, query: string): boolean {
   );
 }
 
+/** "0.4" → "400 m", "3.25" → "3.3 km". */
+function formatDistance(km: number): string {
+  if (km < 1) return `${Math.max(50, Math.round((km * 1000) / 50) * 50)} m`;
+  return `${km.toFixed(1)} km`;
+}
+
+/** "09:00" → "9 AM", "23:30" → "11:30 PM". */
+function formatHour(time: string): string {
+  const [h, m] = time.split(':').map(Number);
+  if (Number.isNaN(h)) return time;
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return m ? `${hour}:${String(m).padStart(2, '0')} ${suffix}` : `${hour} ${suffix}`;
+}
+
+/** The first part of an address ("12 Galle Rd, Colombo 03" → "12 Galle Rd"), for the short summaries. */
+const shortAddress = (address: string) => address.split(',')[0]?.trim() || address;
+
+const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600';
+// text-snow, not text-white: the app's light theme turns .text-white dark.
+const primaryButton = cn(
+  'inline-flex items-center justify-center gap-2 rounded-full bg-brand-600 px-7 py-3.5 font-semibold text-snow shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none',
+  focusRing,
+);
+const secondaryButton = cn(
+  'inline-flex items-center justify-center gap-2 rounded-full bg-white px-6 py-3.5 font-semibold text-brand-700 ring-1 ring-brand-200 ring-inset transition-colors hover:bg-brand-50',
+  focusRing,
+);
+
+/** A choice held back by the conflict step: the cup lines it would remove, and how to apply it. */
+type PendingSwitch = {
+  storeName: string;
+  lines: LocalCartItem[];
+  apply: () => void;
+  from: OrderFlowStep;
+};
+
 export function OrderModeSelector({
   onComplete,
   onBackToHome,
-  showContinueButton = false,
   onModeChange,
   onStepChange,
-  modalOpen = true,
   initialMode,
   startAtSetup = false,
 }: OrderModeSelectorProps) {
-  const { orderMode, setOrderMode, setDeliveryInfo, setTakeawayInfo, deliveryInfo, takeawayInfo, items, clearCart, clearMode } =
-    useCartStore();
+  const {
+    orderMode,
+    setOrderMode,
+    setDeliveryInfo,
+    setTakeawayInfo,
+    deliveryInfo,
+    takeawayInfo,
+    items,
+    clearCart,
+    clearMode,
+    removeItem,
+  } = useCartStore();
+  const activeStoreId = selectActiveStoreId({ orderMode, deliveryInfo, takeawayInfo });
 
   const hasSavedSetup = Boolean(
     (orderMode === 'DELIVERY' && deliveryInfo) || (orderMode === 'TAKEAWAY' && takeawayInfo)
   );
-  const [step, setStep] = useState<'choose' | 'setup'>(() => {
+  const [step, setStep] = useState<OrderFlowStep>(() => {
     if (startAtSetup && initialMode) return 'setup';
-    return hasSavedSetup ? 'setup' : 'choose';
+    return hasSavedSetup ? 'saved' : 'type';
   });
   const [mode, setMode] = useState<OrderMode>(() => {
     if (initialMode) return initialMode;
@@ -103,7 +172,9 @@ export function OrderModeSelector({
     if (orderMode === 'DELIVERY' || deliveryInfo) return 'DELIVERY';
     return 'DELIVERY';
   });
-  const [choiceHighlight, setChoiceHighlight] = useState<OrderMode | null>(null);
+  const [pending, setPending] = useState<PendingSwitch | null>(null);
+  const [checkingBranch, setCheckingBranch] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     onStepChange?.(step);
@@ -112,6 +183,11 @@ export function OrderModeSelector({
   useEffect(() => {
     if (step === 'setup') onModeChange?.(mode);
   }, [mode, step, onModeChange]);
+
+  // Each step swaps the panel's content; start the new step at its heading.
+  useEffect(() => {
+    headingRef.current?.focus({ preventScroll: true });
+  }, [step]);
 
   const [addressSelection, setAddressSelection] = useState<AddressSelection | null>(() => {
     if (deliveryInfo?.address && deliveryInfo.lat != null && deliveryInfo.lng != null) {
@@ -127,6 +203,8 @@ export function OrderModeSelector({
   );
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [detectingLocation, setDetectingLocation] = useState(false);
+  /** Pickup: the browser didn't give a position, so the list is measured from the default (central Colombo). */
+  const [pickupLocationOff, setPickupLocationOff] = useState(false);
   const [branchSearch, setBranchSearch] = useState('');
   const [pickupAreaLabel, setPickupAreaLabel] = useState<string | null>(null);
   const userPickedStore = useRef(false);
@@ -247,12 +325,37 @@ export function OrderModeSelector({
     return () => clearTimeout(timer);
   }, [addressSelection, mode, step, validateDeliveryAt]);
 
-  function searchDeliveryBranches() {
-    if (!addressSelection) {
-      toast.error('Set your delivery location on the map first');
+  /**
+   * Before a different branch is saved: if some items in the cup can't be ordered there, hold the choice on
+   * the conflict step (remove them and switch, or go back); otherwise apply it straight away. The branch the
+   * cup was filled at needs no check.
+   */
+  async function guardBranchSwitch(storeId: string, storeName: string, apply: () => void) {
+    if (items.length === 0 || storeId === activeStoreId) {
+      apply();
       return;
     }
-    void validateDeliveryAt(addressSelection, undefined, false);
+    setCheckingBranch(true);
+    try {
+      const lines = await findCartItemsUnavailableAt(items, storeId);
+      if (lines.length > 0) {
+        setPending({ storeName, lines, apply, from: step });
+        setStep('conflict');
+        return;
+      }
+    } finally {
+      setCheckingBranch(false);
+    }
+    apply();
+  }
+
+  function switchAndRemove() {
+    if (!pending) return;
+    for (const line of pending.lines) removeItem(line.id);
+    const count = pending.lines.length;
+    toast.success(`Removed ${count} ${count === 1 ? 'item' : 'items'} from your cup`);
+    pending.apply();
+    setPending(null);
   }
 
   async function confirmDeliveryBranch(branch: DeliveryBranchOption) {
@@ -265,22 +368,25 @@ export function OrderModeSelector({
       return;
     }
     if (!addressSelection) return;
+    const sel = addressSelection;
     setSelectedDeliveryStoreId(branch.id);
     setValidating(true);
     try {
       const result = await api.post<DeliveryValidation>('/stores/validate-delivery', {
-        lat: addressSelection.lat,
-        lng: addressSelection.lng,
-        address: addressSelection.address,
+        lat: sel.lat,
+        lng: sel.lng,
+        address: sel.address,
         storeId: branch.id,
       });
       setValidation(result);
       if (result.eligible && result.store && result.zone) {
-        playConfirmClickSound();
-        if (saveDeliveryFromValidation(result, addressSelection)) {
-          toast.success(`Delivering from ${result.store.name} · ~${result.estimatedMinutes ?? 30} min`);
-          onComplete?.();
-        }
+        await guardBranchSwitch(result.store.id, result.store.name, () => {
+          playConfirmClickSound();
+          if (saveDeliveryFromValidation(result, sel)) {
+            toast.success(`Delivering from ${result.store!.name} · ~${result.estimatedMinutes ?? 30} min`);
+            onComplete?.();
+          }
+        });
       } else {
         toast.error(result.message || 'Delivery not available from this branch');
       }
@@ -291,7 +397,8 @@ export function OrderModeSelector({
     }
   }
 
-  function handleDeliveryBranchClick(branch: DeliveryBranchOption) {
+  /** Delivery: choosing a branch selects it; "View Menu" confirms it. */
+  function selectDeliveryBranch(branch: DeliveryBranchOption) {
     if (!isDeliveryBranchOrderable(branch)) {
       if (branch.branchClosed) {
         toast.error(branchManuallyClosedMessage());
@@ -300,25 +407,30 @@ export function OrderModeSelector({
       }
       return;
     }
-    if (selectedDeliveryStoreId === branch.id) {
-      void confirmDeliveryBranch(branch);
-      return;
-    }
+    if (selectedDeliveryStoreId === branch.id) return;
     setSelectedDeliveryStoreId(branch.id);
     playModeSelectSound('DELIVERY');
   }
 
   function selectDeliveryBranchFromMap(branchId: string) {
     const branch = suggestedDeliveryBranches.find((b) => b.id === branchId);
-    if (branch) handleDeliveryBranchClick(branch);
+    if (branch) selectDeliveryBranch(branch);
   }
 
   const detectPickupLocation = useCallback(async (showToast = true) => {
     const seq = ++nearestDetectSeq.current;
     setDetectingLocation(true);
     try {
-      const coords = await getCurrentPositionWithFallback();
+      // Same fallback as getCurrentPositionWithFallback, but remembering that it was a fallback.
+      let coords = DEFAULT_LOCATION;
+      let located = true;
+      try {
+        coords = await getCurrentPosition();
+      } catch {
+        located = false;
+      }
       if (seq !== nearestDetectSeq.current) return;
+      setPickupLocationOff(!located);
 
       setPickupCoords(coords);
 
@@ -385,7 +497,7 @@ export function OrderModeSelector({
   }
 
   function goBackToChoose() {
-    setStep('choose');
+    setStep('type');
     setValidation(null);
   }
 
@@ -407,222 +519,236 @@ export function OrderModeSelector({
     return true;
   }
 
-  async function validateAndSaveDelivery() {
-    if (!addressSelection?.address) {
-      toast.error('Please set your delivery location on the map');
-      return;
-    }
-
-    if (validation?.eligible && validation.store && validation.zone) {
-      playConfirmClickSound();
-      if (saveDeliveryFromValidation(validation, addressSelection)) {
-        toast.success(`Delivering from ${validation.store.name} · ~${validation.estimatedMinutes} min`);
-        onComplete?.();
-      }
-      return;
-    }
-
-    setValidating(true);
-    try {
-      const result = await api.post<DeliveryValidation>('/stores/validate-delivery', {
-        lat: addressSelection.lat,
-        lng: addressSelection.lng,
-        address: addressSelection.address,
-        ...(selectedDeliveryStoreId ? { storeId: selectedDeliveryStoreId } : {}),
-      });
-      setValidation(result);
-      if (result.eligible) {
-        playConfirmClickSound();
-        if (saveDeliveryFromValidation(result, addressSelection)) {
-          toast.success(`Delivery available · ETA ${result.estimatedMinutes} min`);
-          onComplete?.();
-        }
-      } else {
-        toast.error(result.message || 'Delivery not available to this address');
-      }
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Could not validate address');
-    } finally {
-      setValidating(false);
-    }
-  }
-
-  function confirmTakeawayStore(store: StoreType) {
+  async function confirmTakeawayStore(store: StoreType) {
     if (isBranchManuallyClosed(store)) {
       toast.error('This branch is temporarily closed for online orders.');
       return;
     }
     userPickedStore.current = true;
     setSelectedStore(store);
-    playConfirmClickSound();
-    setOrderMode('TAKEAWAY');
-    setTakeawayInfo({
-      storeId: store.id,
-      storeName: store.name,
-      ...orderingFieldsFromStore(store),
+    await guardBranchSwitch(store.id, store.name, () => {
+      playConfirmClickSound();
+      setOrderMode('TAKEAWAY');
+      setTakeawayInfo({
+        storeId: store.id,
+        storeName: store.name,
+        ...orderingFieldsFromStore(store),
+      });
+      toast.success(`Pickup from ${store.name}`);
+      onComplete?.();
     });
-    toast.success(`Pickup from ${store.name}`);
-    onComplete?.();
   }
 
-  function handleTakeawayStoreClick(store: StoreType) {
-    if (selectedStore?.id === store.id) {
-      confirmTakeawayStore(store);
+  /** Pickup: choosing a branch selects it; "View Menu" confirms it. */
+  function selectTakeawayStore(store: StoreType) {
+    if (isBranchManuallyClosed(store)) {
+      toast.error('This branch is temporarily closed for online orders.');
       return;
     }
+    if (selectedStore?.id === store.id) return;
     userPickedStore.current = true;
     setSelectedStore(store);
     playModeSelectSound('TAKEAWAY');
   }
 
-  function confirmTakeaway() {
-    if (!selectedStore) {
-      toast.error('Please select a store for pickup');
-      return;
-    }
-    confirmTakeawayStore(selectedStore);
+  /** Saved step: carry on with the branch set up before. */
+  function continueWithSaved() {
+    playConfirmClickSound();
+    onComplete?.();
   }
 
+  // --- Branch options, as shown in the list (md+) and the phone cards ---
+
+  const deliveryOptions: BranchOptionView[] = suggestedDeliveryBranches.map((branch, index) => ({
+    id: branch.id,
+    name: branch.name,
+    badges: [
+      ...(index === 0 ? [{ label: 'Nearest', tone: 'nearest' as const }] : []),
+      ...(branch.id === deliveryInfo?.storeId ? [{ label: 'Last used', tone: 'last' as const }] : []),
+      ...(branch.branchClosed ? [{ label: 'Closed', tone: 'closed' as const }] : []),
+    ],
+    distance: `${formatDistance(branch.distanceKm)} away`,
+    extra: branch.branchClosed ? 'Not accepting orders' : `LKR ${branch.fee.toLocaleString()} delivery`,
+    disabled: !isDeliveryBranchOrderable(branch),
+  }));
+  const selectedDeliveryBranch =
+    suggestedDeliveryBranches.find((b) => b.id === selectedDeliveryStoreId && isDeliveryBranchOrderable(b)) ?? null;
+
+  const pickupOptions: BranchOptionView[] = pickupStoresList.map((store, index) => {
+    const closed = isBranchManuallyClosed(store);
+    return {
+      id: store.id,
+      name: store.name,
+      badges: [
+        ...(pickupCoords && !branchSearchQuery && index === 0 && store.distanceKm != null
+          ? [{ label: 'Nearest', tone: 'nearest' as const }]
+          : []),
+        ...(store.id === takeawayInfo?.storeId ? [{ label: 'Last used', tone: 'last' as const }] : []),
+        ...(closed ? [{ label: 'Closed', tone: 'closed' as const }] : store.isBusy ? [{ label: 'Busy', tone: 'busy' as const }] : []),
+      ],
+      distance: store.distanceKm != null ? `${formatDistance(store.distanceKm)} away` : undefined,
+      extra: store.city,
+      disabled: closed,
+    };
+  });
+
+  const selectPickupById = (id: string) => {
+    const store = allStores.find((s) => s.id === id);
+    if (store) selectTakeawayStore(store);
+  };
+  const selectDeliveryById = (id: string) => {
+    const branch = suggestedDeliveryBranches.find((b) => b.id === id);
+    if (branch) selectDeliveryBranch(branch);
+  };
+
+  // --- Header ---
+
+  const kicker =
+    step === 'saved' ? 'Welcome back' : step === 'conflict' ? 'Heads up' : 'Before you order';
+  const heading =
+    step === 'type' ? (
+      <>
+        How would you like to <Highlight>order?</Highlight>
+      </>
+    ) : step === 'saved' ? (
+      <>
+        Same as <Highlight>last time?</Highlight>
+      </>
+    ) : step === 'conflict' ? (
+      <>
+        Switch <Highlight>branches?</Highlight>
+      </>
+    ) : (
+      <>
+        Where&apos;s your <Highlight>happiness</Highlight> heading?
+      </>
+    );
+
+  const footerBusy = validating || checkingBranch;
+
   return (
-    <div className={`order-flow${step === 'setup' ? ' order-flow--map' : ''}`}>
-      <AnimatePresence mode="wait">
-        {step === 'choose' ? (
-          <motion.div
-            key="choose"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -24 }}
-            transition={{ duration: 0.28 }}
-            className="order-flow-step"
-          >
-            <div className="order-flow-step__header flex flex-col sm:flex-row sm:items-start justify-between gap-3 text-center sm:text-left">
-              <div>
-                <span className="order-flow-step__badge">Step 1 of 2</span>
-                <h3 className="order-flow-step__title">How would you like to order?</h3>
-                {/* <p className="order-flow-step__sub">Choose delivery or pickup.</p> */}
-              </div>
-              {onBackToHome && (
-                <button
-                  type="button"
-                  onClick={onBackToHome}
-                  className="flex items-center justify-center gap-1.5 text-xs sm:text-sm font-medium text-muted hover:text-brand transition-colors py-2 px-3.5 rounded-xl border border-navy-border hover:border-brand/40 bg-navy-light/60 self-center sm:self-start shrink-0 shadow-sm"
-                >
-                  <Home size={15} />
-                  Back to Home
-                </button>
+    <>
+      {/* Landscape phones (short:): tighter header, no kicker; the setup step's heading is only read out. */}
+      <header className="relative shrink-0 px-5 pt-6 pb-4 sm:px-8 sm:pt-8 short:pt-4 short:pb-3">
+        {step === 'setup' ? (
+          <div className="flex items-center gap-2 pr-12">
+            {/* 40px tall below desktop, an easy tap target. */}
+            <button
+              type="button"
+              onClick={goBackToChoose}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full py-1.5 pr-3.5 pl-2.5 text-sm font-semibold text-brand-700 ring-1 ring-brand-200 ring-inset transition-colors hover:bg-brand-50 max-lg:h-10 max-lg:pr-4 max-lg:pl-3',
+                focusRing,
               )}
-            </div>
-
-            <div className="order-mode-choices order-mode-choices--pizza">
-              <div
-                role="button"
-                tabIndex={0}
-                className={`order-mode-choice order-mode-choice--pizza${
-                  choiceHighlight === 'DELIVERY' ? ' order-mode-choice--selected' : ''
-                }`}
-                aria-pressed={choiceHighlight === 'DELIVERY'}
-                onClick={() => {
-                  if (choiceHighlight === 'DELIVERY') {
-                    void pickMode('DELIVERY');
-                    return;
-                  }
-                  setChoiceHighlight('DELIVERY');
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    if (choiceHighlight === 'DELIVERY') {
-                      void pickMode('DELIVERY');
-                      return;
-                    }
-                    setChoiceHighlight('DELIVERY');
-                  }
-                }}
-              >
-                <span className="order-mode-choice__mascot" aria-hidden>
-                  <Image src={MASCOT_IMAGES.delivery} alt="" width={88} height={88} className="object-contain" unoptimized />
-                </span>
-                <span className="order-mode-choice__title">Delivery</span>
-                <button
-                  type="button"
-                  className="order-mode-choice__action"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setChoiceHighlight('DELIVERY');
-                    void pickMode('DELIVERY');
-                  }}
-                >
-                  <Truck size={14} aria-hidden />
-                  Select Delivery
-                </button>
-              </div>
-
-              <div
-                role="button"
-                tabIndex={0}
-                className={`order-mode-choice order-mode-choice--pizza${
-                  choiceHighlight === 'TAKEAWAY' ? ' order-mode-choice--selected' : ''
-                }`}
-                aria-pressed={choiceHighlight === 'TAKEAWAY'}
-                onClick={() => {
-                  if (choiceHighlight === 'TAKEAWAY') {
-                    void pickMode('TAKEAWAY');
-                    return;
-                  }
-                  setChoiceHighlight('TAKEAWAY');
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    if (choiceHighlight === 'TAKEAWAY') {
-                      void pickMode('TAKEAWAY');
-                      return;
-                    }
-                    setChoiceHighlight('TAKEAWAY');
-                  }
-                }}
-              >
-                <span className="order-mode-choice__mascot" aria-hidden>
-                  <Image src={MASCOT_IMAGES.takeaway} alt="" width={88} height={88} className="object-contain" />
-                </span>
-                <span className="order-mode-choice__title">Takeaway</span>
-                <button
-                  type="button"
-                  className="order-mode-choice__action"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setChoiceHighlight('TAKEAWAY');
-                    void pickMode('TAKEAWAY');
-                  }}
-                >
-                  <ShoppingBag size={14} aria-hidden />
-                  Select Pickup
-                </button>
-              </div>
-            </div>
-          </motion.div>
+            >
+              <ArrowLeft className="size-4" aria-hidden />
+              Back
+            </button>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700 max-lg:h-10">
+              {mode === 'TAKEAWAY' ? <Store className="size-4" aria-hidden /> : <Bike className="size-4" aria-hidden />}
+              {mode === 'TAKEAWAY' ? 'Pickup' : 'Delivery'}
+            </span>
+          </div>
         ) : (
-          <motion.div
-            key={`setup-${mode}`}
-            initial={{ opacity: 0, x: 28 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 28 }}
-            transition={{ duration: 0.28 }}
-            className={`order-flow-step ${step === 'setup' ? 'order-flow-step--map' : ''}`}
-          >
-            {mode === 'DELIVERY' ? (
-              <div className="order-delivery-stage">
-                <div className="order-delivery-stage__chrome">
-                  <button type="button" onClick={goBackToChoose} className="order-flow-back order-flow-back--overlay">
-                    <ChevronLeft size={16} />
-                    Change order type
-                  </button>
-                </div>
+          <p className="text-xs font-semibold tracking-[0.2em] text-brand-600 uppercase short:hidden">{kicker}</p>
+        )}
+        <h2
+          ref={headingRef}
+          id="order-popup-heading"
+          tabIndex={-1}
+          className={cn(
+            "font-display pr-12 text-[clamp(1.75rem,4.2vw,2.5rem)] leading-[1.05] font-semibold tracking-[-0.01em] text-black uppercase outline-none [font-variation-settings:'wdth'_75,'opsz'_96] [word-spacing:0.12em] short:mt-0 short:text-2xl",
+            step === 'setup' ? 'mt-3 short:sr-only' : 'mt-2',
+          )}
+        >
+          {heading}
+        </h2>
+      </header>
 
+      {/* Keyed by step, so each step fades in. */}
+      <div
+        key={step}
+        className="flex min-h-0 flex-1 flex-col transition-opacity duration-300 ease-out starting:opacity-0"
+      >
+        {step === 'type' && (
+          // -mt-1 pt-1: room above the cards inside this scroll area, so a card lifted on hover isn't clipped at the top.
+          <div className="-mt-1 flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pt-1 pb-6 sm:px-8 sm:pb-8 short:pb-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
+              {MODES.map((option) => (
+                <button
+                  key={option.mode}
+                  type="button"
+                  onClick={() => void pickMode(option.mode)}
+                  className={cn(
+                    'group flex flex-col items-center rounded-[1.5rem] bg-white px-3 pt-5 pb-4 text-center ring-1 ring-brand-100 ring-inset transition-[background-color,box-shadow,translate] duration-200 ease-out hover:-translate-y-0.5 hover:bg-brand-50 hover:shadow-lg hover:ring-2 hover:shadow-brand-600/10 hover:ring-brand-600 sm:px-5 sm:pt-6 sm:pb-5 short:pt-3 short:pb-3',
+                    focusRing,
+                  )}
+                >
+                  <span className="grid size-24 place-items-center rounded-full bg-brand-50 transition-colors group-hover:bg-white sm:size-32 short:size-18">
+                    <Image
+                      src={option.image}
+                      alt=""
+                      width={500}
+                      height={500}
+                      sizes="128px"
+                      unoptimized
+                      className="size-22 object-contain transition-transform duration-300 ease-out group-hover:scale-105 group-hover:-rotate-3 sm:size-30 short:size-16"
+                    />
+                  </span>
+                  <span className="mt-4 flex items-center gap-2 text-lg font-semibold text-brand-900 sm:text-xl short:mt-2">
+                    <option.icon className="size-5 text-brand-600" aria-hidden />
+                    {option.title}
+                  </span>
+                  <span className="mt-1 text-[0.8125rem] leading-snug text-slate-600 sm:text-sm">{option.text}</span>
+                  <span
+                    aria-hidden
+                    className="mt-4 grid size-9 place-items-center rounded-full bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-600 group-hover:text-snow short:mt-2"
+                  >
+                    <ArrowRight className="size-4" />
+                  </span>
+                </button>
+              ))}
+            </div>
+            <FlowLinks onBackToHome={onBackToHome} />
+          </div>
+        )}
+
+        {step === 'saved' && (
+          <SavedStep
+            mode={orderMode === 'TAKEAWAY' ? 'TAKEAWAY' : 'DELIVERY'}
+            storeName={(orderMode === 'TAKEAWAY' ? takeawayInfo?.storeName : deliveryInfo?.storeName) ?? ''}
+            address={orderMode === 'DELIVERY' ? deliveryInfo?.address : undefined}
+            openTime={(orderMode === 'TAKEAWAY' ? takeawayInfo?.openTime : deliveryInfo?.openTime) ?? DEFAULT_OPEN_TIME}
+            closeTime={(orderMode === 'TAKEAWAY' ? takeawayInfo?.closeTime : deliveryInfo?.closeTime) ?? DEFAULT_CLOSE_TIME}
+            closed={isBranchManuallyClosed({
+              branchClosedAt: (orderMode === 'TAKEAWAY' ? takeawayInfo?.branchClosedAt : deliveryInfo?.branchClosedAt) ?? null,
+            })}
+            onContinue={continueWithSaved}
+            onChange={() => setStep('type')}
+          >
+            <FlowLinks onBackToHome={onBackToHome} />
+          </SavedStep>
+        )}
+
+        {step === 'conflict' && pending && (
+          <ConflictStep
+            pending={pending}
+            onBack={() => {
+              setStep(pending.from);
+              setPending(null);
+            }}
+            onSwitch={switchAndRemove}
+          />
+        )}
+
+        {step === 'setup' && (
+          <>
+            {/* The panel itself never scrolls: only the branch list does. */}
+            <div className="flex min-h-0 flex-1 flex-col px-5 pb-3 sm:px-8">
+              {mode === 'DELIVERY' ? (
                 <AddressMapPicker
                   value={addressSelection}
-                  variant="prominent"
-                  layout="mapOverlay"
+                  layout="panel"
                   autoDetectOnMount={!addressSelection}
                   branchMarkers={deliveryBranchMarkers}
                   selectedBranchId={selectedDeliveryStoreId}
@@ -630,275 +756,595 @@ export function OrderModeSelector({
                   showRoute
                   routeAnimation="delivery"
                   onLocationResolved={playLocationPinSound}
-                  overlayHeader={
-                    <div className="order-delivery-stage__heading">
-                      <h3 className="order-flow-step__title">Where should we deliver?</h3>
-                    </div>
-                  }
                   onChange={(sel) => {
                     setAddressSelection(sel);
                     setValidation(null);
                     setSelectedDeliveryStoreId(null);
                   }}
+                  mapOverlay={
+                    deliveryOptions.length > 0 ? (
+                      <BranchCarousel
+                        options={deliveryOptions}
+                        selectedId={selectedDeliveryBranch?.id ?? null}
+                        onSelect={selectDeliveryById}
+                      />
+                    ) : null
+                  }
                 >
-                  <div className="order-delivery-sheet">
-                    {(validating || validation) && (
-                      <>
-                        {validating && !suggestedDeliveryBranches.length ? (
-                          <div className="order-branch-slide order-branch-slide--loading">
-                            <Loader2 size={16} className="animate-spin shrink-0 text-brand" />
-                            <span className="text-sm text-brand">Finding nearest branches...</span>
-                          </div>
-                        ) : suggestedDeliveryBranches.length > 0 ? (
-                          <>
-                            <p className="order-delivery-sheet__label">Suggested branches</p>
-                            <div className="order-branch-slider" role="list">
-                              {suggestedDeliveryBranches.map((branch, index) => {
-                                const closed = Boolean(branch.branchClosed);
-                                const orderable = isDeliveryBranchOrderable(branch);
-                                const selected = orderable && selectedDeliveryStoreId === branch.id;
-                                return (
-                                  <button
-                                    key={branch.id}
-                                    type="button"
-                                    role="listitem"
-                                    disabled={closed}
-                                    aria-disabled={closed}
-                                    onClick={() => handleDeliveryBranchClick(branch)}
-                                    className={`order-branch-slide ${
-                                      selected ? 'order-branch-slide--selected' : ''
-                                    }${closed ? ' order-branch-slide--disabled' : ''}`}
-                                  >
-                                    <span className="order-branch-slide__thumb" aria-hidden>
-                                      <Store size={20} className={closed ? 'text-muted' : 'text-brand'} />
-                                    </span>
-                                    <span className="min-w-0 flex-1">
-                                      <span className="flex items-center gap-1.5 flex-wrap">
-                                        <span className="font-semibold text-fg text-sm truncate block">
-                                          {branch.name}
-                                        </span>
-                                        {index === 0 && (
-                                          <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-brand/15 text-brand-dark shrink-0">
-                                            Nearest
-                                          </span>
-                                        )}
-                                        {closed && (
-                                          <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-red-500/12 text-red-500 shrink-0">
-                                            Closed
-                                          </span>
-                                        )}
-                                      </span>
-                                      <span className="text-xs text-muted mt-0.5 block">
-                                        {branch.distanceKm} km · Fee LKR {branch.fee}
-                                        {closed ? ' · Not accepting orders' : ''}
-                                      </span>
-                                    </span>
-                                    {selected ? (
-                                      <CheckCircle2 size={20} className="text-green-500 shrink-0" />
-                                    ) : (
-                                      <span className="order-branch-slide__ring" aria-hidden />
-                                    )}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            <p className="order-delivery-sheet__hint">
-                              Tap a branch to confirm
-                            </p>
-                          </>
-                        ) : (
-                          <div className="order-delivery-sheet__empty">
-                            <div className="flex items-start gap-2 text-sm text-red-400">
-                              <MapPin size={16} className="shrink-0 mt-0.5" />
-                              <span>
-                                {validation?.message ||
-                                  'Delivery not available here. Try takeaway or move the pin.'}
-                              </span>
-                            </div>
-                            {validation?.reason === 'out-of-range' && (
-                              <button
-                                type="button"
-                                onClick={() => void pickMode('TAKEAWAY')}
-                                className="text-sm text-brand hover:text-brand-light font-medium mt-2"
-                              >
-                                Switch to Pickup instead
-                              </button>
-                            )}
-                          </div>
+                  {deliveryOptions.length > 0 ? (
+                    <BranchList options={deliveryOptions} selectedId={selectedDeliveryBranch?.id ?? null} onSelect={selectDeliveryById} />
+                  ) : validating || (addressSelection && !validation) ? (
+                    <StatusLine icon={Loader2} spin>
+                      Finding branches that deliver here…
+                    </StatusLine>
+                  ) : validation ? (
+                    <EmptyState image={MASCOT_IMAGES.emptyCartSad} title="We don't deliver there yet" role="status">
+                      {validation.message || 'Delivery is not available here. Try takeaway or move the pin.'}
+                      {validation.reason === 'out-of-range' && (
+                        <span className="mt-3 flex justify-center">
+                          <button
+                            type="button"
+                            onClick={() => void pickMode('TAKEAWAY')}
+                            className={cn(primaryButton, 'px-4 py-2 text-sm shadow-none')}
+                          >
+                            <Store className="size-4" aria-hidden />
+                            Switch to Pickup
+                          </button>
+                        </span>
+                      )}
+                    </EmptyState>
+                  ) : (
+                    <EmptyState image={MASCOT_IMAGES.delivery} title="Where should we deliver?">
+                      Search your street or area, or drag the pin, to see the branches that deliver there.
+                    </EmptyState>
+                  )}
+                </AddressMapPicker>
+              ) : (
+                <div className="flex min-h-0 flex-col gap-4 max-md:flex-1 md:mt-1 md:grid md:h-123 md:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] md:grid-rows-[minmax(0,1fr)] md:gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.4fr)] short:grid short:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] short:grid-rows-[minmax(0,1fr)]">
+                  <div className="flex min-h-0 flex-col max-md:shrink-0">
+                    <label className="relative block shrink-0">
+                      <span className="sr-only">Search pickup branches by name or city</span>
+                      <Search className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-brand-500" aria-hidden />
+                      <input
+                        type="search"
+                        value={branchSearch}
+                        onChange={(e) => setBranchSearch(e.target.value)}
+                        placeholder="Search by branch or area"
+                        autoComplete="off"
+                        className="w-full rounded-full bg-brand-50/70 py-3 pr-11 pl-12 text-base text-slate-900 ring-1 ring-brand-100 ring-inset transition-shadow placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-brand-600 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+                      />
+                      {branchSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setBranchSearch('')}
+                          aria-label="Clear branch search"
+                          className={cn('absolute top-1/2 right-3 grid size-7 -translate-y-1/2 place-items-center rounded-full text-slate-500 hover:bg-brand-100 hover:text-brand-800', focusRing)}
+                        >
+                          <X className="size-4" aria-hidden />
+                        </button>
+                      )}
+                    </label>
+
+                    {/* How the customer's location is used; "nearest first" only describes the list while nothing is searched. */}
+                    {detectingLocation || (storesLoading && pickupCoords) ? (
+                      <StatusLine icon={LocateFixed} tone="pending">
+                        Finding branches near you…
+                      </StatusLine>
+                    ) : branchSearchQuery ? null : pickupLocationOff && pickupAreaLabel !== 'pinned location' ? (
+                      <StatusLine icon={LocateOff}>
+                        Location is off, so showing branches near Colombo. Search by branch or area, or allow location in
+                        your browser.
+                      </StatusLine>
+                    ) : pickupCoords ? (
+                      <StatusLine icon={pickupAreaLabel === 'pinned location' ? MapPin : LocateFixed} tone="found">
+                        <span className="font-semibold text-emerald-700">Nearest branches first</span>,{' '}
+                        {pickupAreaLabel === 'pinned location' ? 'from the pin on the map' : 'based on your location'}
+                      </StatusLine>
+                    ) : (
+                      <StatusLine icon={LocateOff}>Search by branch or area, or use your location.</StatusLine>
+                    )}
+                    {!detectingLocation && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPickupAreaLabel('your location');
+                          setBranchSearch('');
+                          void detectPickupLocation(true);
+                        }}
+                        className={cn(
+                          'mt-1 inline-flex shrink-0 items-center gap-1.5 self-start rounded text-xs font-semibold text-brand-600 underline-offset-2 hover:underline',
+                          focusRing,
                         )}
-                      </>
+                      >
+                        <LocateFixed className="size-3.5" aria-hidden />
+                        Use my current location
+                      </button>
+                    )}
+
+                    {pickupOptions.length > 0 ? (
+                      <BranchList options={pickupOptions} selectedId={selectedStore?.id ?? null} onSelect={selectPickupById} />
+                    ) : storesLoading ? (
+                      <StatusLine icon={Loader2} spin>
+                        Loading branches…
+                      </StatusLine>
+                    ) : branchSearchQuery ? (
+                      <EmptyState image={MASCOT_IMAGES.search} title="No branches found">
+                        Nothing matches “{branchSearchQuery}”.{' '}
+                        <button
+                          type="button"
+                          onClick={() => setBranchSearch('')}
+                          className={cn('font-semibold text-brand-600 underline underline-offset-2', focusRing)}
+                        >
+                          Show all branches
+                        </button>
+                      </EmptyState>
+                    ) : (
+                      <EmptyState image={MASCOT_IMAGES.search} title="No branches available">
+                        Please try again in a little while.
+                      </EmptyState>
                     )}
                   </div>
-                </AddressMapPicker>
-              </div>
-            ) : (
-              <div className="order-delivery-stage">
-                <div className="order-delivery-stage__chrome">
-                  <button type="button" onClick={goBackToChoose} className="order-flow-back order-flow-back--overlay">
-                    <ChevronLeft size={16} />
-                    Change order type
-                  </button>
-                </div>
 
-                <div className="address-map-overlay">
-                  <div className="address-map-overlay__map">
+                  {/* Upright phones: at least a usable map, even under a tall message. */}
+                  <div className="relative grid min-h-0 grid-rows-[minmax(0,1fr)] max-md:min-h-48 max-md:flex-1 short:min-h-0!">
                     <PickupMap
                       lat={pickupCoords?.lat ?? DEFAULT_LOCATION.lat}
                       lng={pickupCoords?.lng ?? DEFAULT_LOCATION.lng}
                       onLocationChange={(la, ln) => {
                         setPickupCoords({ lat: la, lng: ln });
                         setPickupAreaLabel('pinned location');
+                        setPickupLocationOff(false);
                       }}
                       branchMarkers={pickupBranchMarkers}
                       selectedBranchId={selectedStore?.id ?? null}
-                      onBranchSelect={(id) => {
-                        const store = allStores.find((s) => s.id === id);
-                        if (store) handleTakeawayStoreClick(store);
-                      }}
+                      onBranchSelect={selectPickupById}
                       showRoute={Boolean(selectedStore && pickupCoords)}
                       routeAnimation="pickup"
-                      className="h-full min-h-0 delivery-map-wrap--bleed"
+                      look="redesign"
+                      customerPin="you"
+                      className="h-full min-h-0"
                     />
-                  </div>
-
-                  <div className="address-map-overlay__top">
-                    <div className="address-map-overlay__panel">
-                      <div className="order-delivery-stage__heading">
-                        <h3 className="order-flow-step__title">Choose your pickup store</h3>
-                      </div>
-                      <div className="input-icon-wrap input-icon-wrap--both address-map-overlay__branch-search relative">
-                        <Search size={16} className="input-icon" aria-hidden />
-                        <input
-                          type="search"
-                          value={branchSearch}
-                          onChange={(e) => setBranchSearch(e.target.value)}
-                          placeholder="Search all branches, e.g. Nugegoda..."
-                          className="input-field w-full"
-                          autoComplete="off"
-                          aria-label="Search all pickup branches by name or city"
-                        />
-                        <div className="address-map-overlay__search-actions">
-                          {branchSearchQuery ? (
-                            <button
-                              type="button"
-                              onClick={() => setBranchSearch('')}
-                              title="Clear search"
-                              aria-label="Clear branch search"
-                              className="input-action text-muted hover:text-fg"
-                            >
-                              <X size={16} strokeWidth={2} />
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPickupAreaLabel('your location');
-                              setBranchSearch('');
-                              void detectPickupLocation(true);
-                            }}
-                            disabled={detectingLocation}
-                            title="Use my current location"
-                            aria-label="Use my current location to find the nearest outlet"
-                            className="input-action text-brand hover:text-brand-dark disabled:opacity-50"
-                          >
-                            {detectingLocation ? (
-                              <Loader2 size={16} className="animate-spin" />
-                            ) : (
-                              <Crosshair size={18} strokeWidth={2} />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {(detectingLocation || (storesLoading && pickupCoords)) && (
-                      <div className="flex items-center gap-2 text-sm text-brand p-3 rounded-xl bg-white/95 border border-navy-border shadow-md">
-                        <Loader2 size={16} className="animate-spin shrink-0" />
-                        Finding the nearest outlet...
-                      </div>
+                    {pickupOptions.length > 0 && (
+                      <BranchCarousel options={pickupOptions} selectedId={selectedStore?.id ?? null} onSelect={selectPickupById} />
                     )}
                   </div>
-
-                  <div className="address-map-overlay__bottom">
-                    <div className="order-delivery-sheet">
-                      <p className="order-delivery-sheet__label">
-                        {branchSearchQuery
-                          ? `Matching branches · “${branchSearchQuery}”`
-                          : pickupCoords
-                            ? `Nearby branches${pickupAreaLabel ? ` · ${pickupAreaLabel}` : ''}`
-                            : 'All branches'}
-                      </p>
-                      {pickupStoresList.length === 0 && !storesLoading ? (
-                        <div className="order-delivery-sheet__empty">
-                          <p className="text-sm text-muted text-center py-2">
-                            {branchSearchQuery
-                              ? `No branches match “${branchSearchQuery}”. Try another name or city.`
-                              : 'No branches available.'}
-                          </p>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="order-branch-slider" role="list">
-                            {pickupStoresList.map((store, index) => {
-                              const selected = selectedStore?.id === store.id;
-                              return (
-                                <button
-                                  key={store.id}
-                                  type="button"
-                                  role="listitem"
-                                  onClick={() => handleTakeawayStoreClick(store)}
-                                  className={`order-branch-slide ${
-                                    selected ? 'order-branch-slide--selected' : ''
-                                  }`}
-                                >
-                                  <span className="order-branch-slide__thumb" aria-hidden>
-                                    <Store size={20} className="text-brand" />
-                                  </span>
-                                  <span className="min-w-0 flex-1">
-                                    <span className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="font-semibold text-fg text-sm truncate block">
-                                        {store.name}
-                                      </span>
-                                      {pickupCoords && !branchSearchQuery && index === 0 && store.distanceKm != null && (
-                                        <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-brand/15 text-brand-dark shrink-0">
-                                          Nearest
-                                        </span>
-                                      )}
-                                    </span>
-                                    <span className="text-xs text-muted mt-0.5 block truncate">
-                                      {store.distanceKm != null
-                                        ? `${store.distanceKm.toFixed(1)} km · `
-                                        : ''}
-                                      {store.city}
-                                      {isBranchManuallyClosed(store)
-                                        ? ' · Closed'
-                                        : store.isBusy
-                                          ? ' · Busy'
-                                          : ' · Open'}
-                                    </span>
-                                  </span>
-                                  {selected ? (
-                                    <CheckCircle2 size={20} className="text-green-500 shrink-0" />
-                                  ) : (
-                                    <span className="order-branch-slide__ring" aria-hidden />
-                                  )}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          <p className="order-delivery-sheet__hint">
-                            Tap a branch to confirm
-                          </p>
-                        </>
-                      )}
-                    </div>
-                  </div>
                 </div>
-              </div>
-            )}
-          </motion.div>
+              )}
+            </div>
+
+            {/* Kept slim (one row, a 40px button) so the list and map get the height. */}
+            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-brand-100 bg-white px-5 py-2.5 sm:px-8">
+              <p className="min-w-0 text-xs leading-snug text-slate-600 sm:text-sm" aria-live="polite">
+                {mode === 'DELIVERY' ? (
+                  selectedDeliveryBranch && addressSelection ? (
+                    <SelectionSummary mode="DELIVERY">
+                      Delivery to <strong className="font-semibold text-brand-900">{shortAddress(addressSelection.address)}</strong> from{' '}
+                      <strong className="font-semibold text-brand-900">{selectedDeliveryBranch.name}</strong>
+                    </SelectionSummary>
+                  ) : !addressSelection ? (
+                    'Set your delivery location to continue.'
+                  ) : (
+                    'Select a branch to continue.'
+                  )
+                ) : selectedStore ? (
+                  <SelectionSummary mode="TAKEAWAY">
+                    Pickup from <strong className="font-semibold text-brand-900">{selectedStore.name}</strong>
+                  </SelectionSummary>
+                ) : (
+                  'Select a branch to continue.'
+                )}
+              </p>
+              <button
+                type="button"
+                disabled={footerBusy || (mode === 'DELIVERY' ? !selectedDeliveryBranch || !addressSelection : !selectedStore)}
+                onClick={() => {
+                  if (mode === 'DELIVERY') {
+                    if (selectedDeliveryBranch) void confirmDeliveryBranch(selectedDeliveryBranch);
+                  } else if (selectedStore) {
+                    void confirmTakeawayStore(selectedStore);
+                  }
+                }}
+                className={cn(
+                  'inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-brand-600 px-5 text-sm font-semibold text-snow shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none sm:px-6 sm:text-base',
+                  focusRing,
+                )}
+              >
+                {footerBusy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                View Menu
+                {!footerBusy && <ArrowRight className="size-4" aria-hidden />}
+              </button>
+            </footer>
+          </>
         )}
-      </AnimatePresence>
+      </div>
+    </>
+  );
+}
+
+/** Pickup first, as in the prototype; the order type sent to the backend stays TAKEAWAY. */
+const MODES: { mode: OrderMode; title: string; text: string; image: string; icon: typeof Store }[] = [
+  { mode: 'TAKEAWAY', title: 'Pickup', text: 'Collect from a branch near you', image: MASCOT_IMAGES.takeaway, icon: Store },
+  { mode: 'DELIVERY', title: 'Delivery', text: "We'll bring it to your door", image: MASCOT_IMAGES.delivery, icon: Bike },
+];
+
+/** Brand highlight: blue word on a tilted yellow marker stroke, as in the homepage headings. */
+function Highlight({ children }: { children: ReactNode }) {
+  return (
+    <span className="relative isolate inline-block px-[0.1em] text-brand-700">
+      <span aria-hidden className="absolute inset-x-0 bottom-[0.1em] -z-10 h-[0.45em] -rotate-2 rounded-full bg-sun-300" />
+      {children}
+    </span>
+  );
+}
+
+/** "Back to Home", under the first steps when the popup was opened away from the home and menu pages. */
+function FlowLinks({ onBackToHome }: { onBackToHome?: () => void }) {
+  if (!onBackToHome) return null;
+  return (
+    <div className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm short:mt-3">
+      {onBackToHome && (
+        <button
+          type="button"
+          onClick={onBackToHome}
+          className={cn('inline-flex items-center gap-1.5 rounded font-semibold text-brand-600 hover:text-brand-800', focusRing)}
+        >
+          <House className="size-4" aria-hidden />
+          Back to Home
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** One line under the search (prototype: LocationStatus): how the location is used, or what is loading. */
+function StatusLine({
+  icon: Icon,
+  tone,
+  spin = false,
+  children,
+}: {
+  icon: typeof Search;
+  tone?: 'pending' | 'found';
+  spin?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <p role="status" className="mt-2 flex shrink-0 items-start gap-1.5 text-xs leading-5 text-slate-500">
+      <Icon
+        className={cn(
+          'mt-0.75 size-3.5 shrink-0',
+          spin && 'animate-spin text-brand-500',
+          tone === 'pending' && 'text-brand-500 motion-safe:animate-pulse',
+          tone === 'found' && 'text-emerald-600',
+        )}
+        aria-hidden
+      />
+      <span>{children}</span>
+    </p>
+  );
+}
+
+function SelectionSummary({ mode, children }: { mode: OrderMode; children: ReactNode }) {
+  const Icon = mode === 'TAKEAWAY' ? Store : Bike;
+  return (
+    <span className="flex items-center gap-2.5">
+      {/* No icon on phones, leaving the text room beside the button. */}
+      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-600 max-sm:hidden">
+        <Icon className="size-4" aria-hidden />
+      </span>
+      <span className="min-w-0">{children}</span>
+    </span>
+  );
+}
+
+type BranchBadge = { label: string; tone: 'nearest' | 'last' | 'closed' | 'busy' };
+
+/** A branch as listed: name, badges, distance and one more detail (fee or city). */
+type BranchOptionView = {
+  id: string;
+  name: string;
+  badges: BranchBadge[];
+  distance?: string;
+  extra?: string;
+  /** Closed (or can't deliver here): shown greyed out, not selectable. */
+  disabled: boolean;
+};
+
+const BADGE_TONE: Record<BranchBadge['tone'], string> = {
+  nearest: 'bg-brand-100 text-brand-800',
+  last: 'bg-sun-300 text-brand-900',
+  closed: 'bg-red-100 text-red-700',
+  busy: 'bg-amber-100 text-amber-800',
+};
+
+/** One branch as a radio option. */
+function BranchOption({
+  option,
+  group,
+  card = false,
+  selected,
+  onSelect,
+}: {
+  option: BranchOptionView;
+  /** The list and the phone cards are separate radio groups, so each keeps its own checked radio. */
+  group: string;
+  /** Phones: a white card laid over the map, a little tighter. */
+  card?: boolean;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <label
+      className={cn(
+        // relative: keeps the visually hidden radio inside this row, so it scrolls with the list.
+        'relative flex gap-3 rounded-[1rem] ring-1 ring-brand-100 ring-inset transition-[background-color,box-shadow]',
+        card ? 'h-full items-center bg-white p-3 shadow-lg shadow-brand-950/15' : 'items-start p-4',
+        option.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-brand-50/60',
+        'has-checked:bg-brand-50 has-checked:ring-2 has-checked:ring-brand-600',
+        'has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-brand-600',
+      )}
+    >
+      <input
+        type="radio"
+        name={group}
+        value={option.id}
+        checked={selected}
+        disabled={option.disabled}
+        onChange={() => onSelect(option.id)}
+        className="sr-only"
+      />
+      <span
+        className={cn(
+          'grid size-10 shrink-0 place-items-center rounded-full transition-colors',
+          selected ? 'bg-brand-600 text-snow' : 'bg-brand-50 text-brand-600',
+        )}
+      >
+        {selected ? <Check className="size-5" strokeWidth={3} aria-hidden /> : <MapPin className="size-5" aria-hidden />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-semibold text-brand-900">{option.name}</span>
+          {option.badges.map((badge) => (
+            <span key={badge.label} className={cn('rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold', BADGE_TONE[badge.tone])}>
+              {badge.label}
+            </span>
+          ))}
+        </span>
+        {(option.distance || option.extra) && (
+          <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+            {option.distance && (
+              <span className="flex items-center gap-1 font-semibold text-brand-700">
+                <Navigation className="size-3.5" aria-hidden />
+                {option.distance}
+              </span>
+            )}
+            {option.extra && <span>{option.extra}</span>}
+          </span>
+        )}
+      </span>
+    </label>
+  );
+}
+
+/** The branch list beside the search (hidden on upright phones, which get BranchCarousel instead). */
+function BranchList({
+  options,
+  selectedId,
+  onSelect,
+}: {
+  options: BranchOptionView[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const listRef = useRef<HTMLUListElement>(null);
+  // A branch picked on the map is brought into view in the list.
+  useEffect(() => {
+    if (!selectedId) return;
+    listRef.current?.querySelector(`[data-branch="${selectedId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [selectedId]);
+  return (
+    <ul
+      ref={listRef}
+      aria-label="Branches"
+      // The one scrolling area in the setup step, with its scrollbar hidden (wheel, touch and keys still scroll it).
+      className="-mx-1 mt-3 flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto overscroll-contain px-1 py-1 [scrollbar-width:none] max-md:hidden short:flex! [&::-webkit-scrollbar]:hidden"
+    >
+      {options.map((option) => (
+        <li key={option.id} data-branch={option.id}>
+          <BranchOption option={option} group="branch" selected={option.id === selectedId} onSelect={onSelect} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Upright phones: the listed branches as a row of cards along the bottom of the map, swiped sideways and
+ * snapping to the centre; tapping one selects it. The row brings the selected card into view (e.g. after a
+ * pin is tapped) and starts over from the first card when the list changes.
+ */
+function BranchCarousel({
+  options,
+  selectedId,
+  onSelect,
+}: {
+  options: BranchOptionView[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const listRef = useRef<HTMLUListElement>(null);
+  const shown = useRef(false);
+  const listKey = options.map((option) => option.id).join(',');
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const card = selectedId ? list.querySelector<HTMLElement>(`[data-branch="${selectedId}"]`) : null;
+    const max = list.scrollWidth - list.clientWidth;
+    const left = card ? Math.min(Math.max(card.offsetLeft + card.offsetWidth / 2 - list.clientWidth / 2, 0), max) : 0;
+    const smooth = shown.current && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    shown.current = true;
+    if (Math.abs(left - list.scrollLeft) < 1) return;
+    list.scrollTo({ left, behavior: smooth ? 'smooth' : 'auto' });
+  }, [selectedId, listKey]);
+
+  return (
+    <div className="absolute inset-x-0 bottom-0 z-10 md:hidden short:hidden">
+      <ul
+        ref={listRef}
+        aria-label="Branches"
+        // relative: the cards' offsetLeft is measured from the row. Scrollbar hidden; swipes and arrow keys still scroll it.
+        className="relative flex snap-x snap-mandatory gap-2.5 overflow-x-auto overscroll-x-contain p-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {options.map((option) => (
+          <li key={option.id} data-branch={option.id} className="w-[85%] max-w-80 shrink-0 snap-center">
+            <BranchOption option={option} group="branch-card" card selected={option.id === selectedId} onSelect={onSelect} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function EmptyState({
+  image,
+  title,
+  children,
+  role,
+}: {
+  image: string;
+  title: string;
+  children: ReactNode;
+  role?: 'status';
+}) {
+  return (
+    <div role={role} className="mt-3 flex flex-1 flex-col items-center justify-center rounded-[1.5rem] bg-brand-50/60 px-6 py-6 text-center">
+      <Image src={image} alt="" width={500} height={500} sizes="112px" unoptimized className="size-24 object-contain sm:size-28" />
+      <p className="mt-2 font-semibold text-brand-900">{title}</p>
+      <div className="mt-1 max-w-xs text-sm text-slate-600">{children}</div>
+    </div>
+  );
+}
+
+function SavedStep({
+  mode,
+  storeName,
+  address,
+  openTime,
+  closeTime,
+  closed,
+  onContinue,
+  onChange,
+  children,
+}: {
+  mode: OrderMode;
+  storeName: string;
+  address?: string;
+  openTime: string;
+  closeTime: string;
+  /** The branch has stopped taking online orders for now: continuing is off until another is chosen. */
+  closed: boolean;
+  onContinue: () => void;
+  onChange: () => void;
+  children?: ReactNode;
+}) {
+  const ModeIcon = mode === 'TAKEAWAY' ? Store : Bike;
+  // One row per detail, each with its icon in the same column, so the lines align (left from sm, centred on phones).
+  const row = 'flex items-start gap-2 max-sm:justify-center';
+  const rowIcon = 'mt-0.5 size-4 shrink-0 text-brand-600';
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-6 sm:px-8 sm:pb-8 short:pb-4">
+      <div className="flex flex-col items-center gap-5 rounded-[1.5rem] bg-brand-50/70 p-6 ring-1 ring-brand-100 ring-inset sm:flex-row sm:gap-8 sm:p-8 short:py-4">
+        <Image src={MASCOT_IMAGES.welcome} alt="" width={500} height={500} sizes="144px" unoptimized className="size-28 shrink-0 object-contain sm:size-36 short:size-24" />
+        <div className="min-w-0 flex-1 max-sm:text-center">
+          <p className="text-sm font-semibold tracking-[0.12em] text-brand-600 uppercase">Your last order</p>
+          <ul className="mt-3 flex flex-col gap-2 text-slate-700">
+            <li className={row}>
+              <ModeIcon className={rowIcon} aria-hidden />
+              {mode === 'TAKEAWAY' ? (
+                <span>Pickup</span>
+              ) : (
+                <span>
+                  Delivery to <strong className="font-semibold text-brand-900">{address ? shortAddress(address) : 'your address'}</strong>
+                </span>
+              )}
+            </li>
+            <li className={row}>
+              <MapPin className={rowIcon} aria-hidden />
+              <strong className="font-semibold text-brand-900">{storeName}</strong>
+            </li>
+            <li className={cn(row, 'text-sm', closed ? 'font-semibold text-red-700' : 'text-slate-500')}>
+              <Clock className={cn(rowIcon, closed ? 'text-red-600' : 'text-slate-400')} aria-hidden />
+              {closed ? 'Closed for online orders right now' : `Open ${formatHour(openTime)} – ${formatHour(closeTime)}`}
+            </li>
+          </ul>
+        </div>
+      </div>
+      {/* Equal halves from sm; stacked on phones with the main action first. */}
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 short:mt-3">
+        <button type="button" onClick={onChange} className={cn(secondaryButton, 'w-full max-sm:order-last')}>
+          Choose a different branch
+        </button>
+        <button type="button" onClick={onContinue} disabled={closed} className={cn(primaryButton, 'w-full')}>
+          Continue to Menu
+          <ArrowRight className="size-4" aria-hidden />
+        </button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Shown instead of switching when the chosen branch can't supply some items in the cup: which ones, with the
+ * choice to remove them and switch, or go back and keep them.
+ */
+function ConflictStep({ pending, onBack, onSwitch }: { pending: PendingSwitch; onBack: () => void; onSwitch: () => void }) {
+  const count = pending.lines.length;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-6 sm:px-8 sm:pb-8 short:pb-4">
+      <div className="flex flex-col items-center gap-4 rounded-[1.5rem] bg-brand-50/70 p-5 ring-1 ring-brand-100 ring-inset sm:flex-row sm:items-start sm:gap-6 sm:p-6 short:py-4">
+        <Image src={MASCOT_IMAGES.thinkingLoading} alt="" width={500} height={500} sizes="112px" unoptimized className="size-24 shrink-0 object-contain sm:size-28 short:size-20" />
+        <div className="min-w-0 flex-1">
+          <p className="text-slate-700 max-sm:text-center">
+            <strong className="font-semibold text-brand-900">{pending.storeName}</strong> doesn&apos;t have{' '}
+            {count === 1 ? 'this item' : `these ${count} items`} from your cup right now. Switching will remove{' '}
+            {count === 1 ? 'it' : 'them'}.
+          </p>
+          <ul className="mt-3 flex flex-col gap-2">
+            {pending.lines.map((line) => {
+              const src = resolveProductImageUrl(line.product.imageUrl);
+              return (
+                <li key={line.id} className="flex items-center gap-3 rounded-[1rem] bg-white p-2 pr-3 ring-1 ring-brand-100 ring-inset">
+                  <span className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-[0.75rem] bg-brand-50">
+                    {src ? (
+                      <Image src={src} alt="" fill unoptimized sizes="44px" className="object-contain p-1" />
+                    ) : (
+                      <span aria-hidden className="text-xl">🧋</span>
+                    )}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-brand-950">{line.product.name}</span>
+                    {line.size === 'LARGE' && <span className="text-xs text-slate-500">Large</span>}
+                  </span>
+                  <span className="font-numeric shrink-0 text-sm font-semibold text-slate-500">× {line.quantity}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </div>
+      {/* Equal halves from sm; stacked on phones with the main action first. */}
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 short:mt-3">
+        <button type="button" onClick={onBack} className={cn(secondaryButton, 'w-full max-sm:order-last')}>
+          <ArrowLeft className="size-4" aria-hidden />
+          Keep my items
+        </button>
+        <button type="button" onClick={onSwitch} className={cn(primaryButton, 'w-full')}>
+          <Trash2 className="size-4" aria-hidden />
+          Remove &amp; switch
+        </button>
+      </div>
     </div>
   );
 }
