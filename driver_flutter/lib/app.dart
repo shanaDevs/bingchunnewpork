@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'core/alert_service.dart';
 import 'core/app_container.dart';
 import 'core/app_lock.dart';
+import 'core/duty_service.dart';
 import 'core/feedback.dart';
 import 'core/notifications.dart';
 import 'core/ride_alert.dart';
@@ -58,6 +59,8 @@ class _BingChunDriverAppState extends State<BingChunDriverApp> {
     if (_language == L10n.current) return;
     _language = L10n.current;
     L10n.rebuildAll();
+    // The sticky "On duty" notification lives outside the widget tree — re-translate it too.
+    DutyService.refreshLanguage();
   }
 
   @override
