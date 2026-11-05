@@ -87,24 +87,10 @@ class _JobDetailBodyState extends State<_JobDetailBody> with WidgetsBindingObser
     }
   }
 
+  /// This screen already shows the full ride, so "Claim job" claims straight away —
+  /// no second confirmation sheet. Progress and errors show on the screen itself.
   Future<void> _claim(JobDetailController vm, DeliveryJobDetail job) async {
-    await showClaimJobSheet(
-      context,
-      storeName: Format.shortBranchName(job.store.name),
-      subtitle: [
-        if (job.store.city.trim().isNotEmpty) job.store.city,
-        Format.rideIdLabel(job.rideCode, job.id),
-      ].join(' · '),
-      fee: job.totalDeliveryFees,
-      stopCount: job.orderCount,
-      distanceKm: job.estimatedDistanceKm,
-      minutes: job.estimatedMinutes,
-      pickupRadiusM: job.store.completionRadiusM,
-      onConfirm: () async {
-        final ok = await vm.claim(widget.jobId);
-        return true == ok || !vm.acting;
-      },
-    );
+    await vm.claim(widget.jobId);
     if (mounted && vm.job?.isActive == true) {
       BcFeedback.success();
       AppRoutes.openDashboard(context, widget.jobId, replace: true);
