@@ -87,11 +87,23 @@ class _AuthGate extends StatefulWidget {
 class _AuthGateState extends State<_AuthGate> {
   bool? _wasAuthed;
 
+  /// Keep the splash up for at least this long, even if the session check is faster.
+  static const _minSplash = Duration(seconds: 2);
+  bool _splashElapsed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(_minSplash, () {
+      if (mounted) setState(() => _splashElapsed = true);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthController>();
     final Widget child;
-    if (auth.checking) {
+    if (auth.checking || !_splashElapsed) {
       child = const SplashScreen(key: ValueKey('splash'));
     } else {
       final authed = auth.isAuthenticated;
