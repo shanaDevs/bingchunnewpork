@@ -26,6 +26,10 @@ export interface HomeOffer {
   /** BOGO / BXGY: units to add so the offer can validate. */
   buyQty?: number;
   getQty?: number;
+  /** The promotion's own title, description and expiry, as stored (`title` above is the formatted discount). */
+  name?: string;
+  description?: string;
+  expiresAt?: string;
 }
 
 const TONES: OfferTone[] = ['blue', 'cream', 'green'];
@@ -157,6 +161,9 @@ export function mapPromosToHomeOffers(promos: PromoCode[], href = '/promotions')
       isDirectOffer: !requiresCode,
       buyQty: typeof rules.buyQty === 'number' ? rules.buyQty : undefined,
       getQty: typeof rules.getQty === 'number' ? rules.getQty : undefined,
+      name: promo.title?.trim() || undefined,
+      description: promo.description?.trim() || undefined,
+      expiresAt: promo.expiresAt || undefined,
     };
   });
 }

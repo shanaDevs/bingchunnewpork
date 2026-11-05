@@ -138,26 +138,51 @@ export function OfferCard({ offer }: { offer: Offer }) {
           unoptimized
           data-offers-product
           className={cn(
-            "absolute w-auto drop-shadow-[0_14px_16px_rgb(15_33_71/0.25)] transition-[rotate] duration-300",
+            // Capped like the main image; cut-outs (about 0.6 wide per 1 tall) are unaffected.
+            "absolute w-auto max-w-[calc(var(--img-h)*0.5)] object-contain drop-shadow-[0_14px_16px_rgb(15_33_71/0.25)] transition-[rotate] duration-300",
             pair.second,
           )}
         />
       )}
-      {offer.image && (
-        <Image
-          src={offer.image.src}
-          alt={offer.image.alt}
-          width={offer.image.width}
-          height={offer.image.height}
-          sizes="140px"
-          unoptimized
-          data-offers-product
-          className={cn(
-            "absolute top-(--pad) right-[calc(var(--u)*6)] h-(--img-h) w-auto drop-shadow-[0_14px_16px_rgb(15_33_71/0.25)] transition-[rotate] duration-300",
-            pair.main,
-          )}
-        />
-      )}
+      {offer.image &&
+        (offer.image.wide ? (
+          // A landscape illustration fills the dashed ring (same box: top, right offset and size), vertically
+          // centred and kept to its right side, where the prototype's cut-outs sit. Its width stops at 27% of
+          // the card so that, with the 3% offset and the tilt, it stays clear of the copy, which ends 34% from
+          // the right (on phones the copy's padding already clears the whole ring).
+          <div className="pointer-events-none absolute top-[calc(var(--pad)+0.5rem)] right-[calc(var(--u)*3)] grid size-(--img-h) items-center justify-items-end">
+            <Image
+              src={offer.image.src}
+              alt={offer.image.alt}
+              width={offer.image.width}
+              height={offer.image.height}
+              sizes="160px"
+              unoptimized
+              data-offers-product
+              className={cn(
+                "h-auto max-h-full w-[min(100%,calc(var(--u)*27))] object-contain drop-shadow-[0_14px_16px_rgb(15_33_71/0.25)] transition-[rotate] duration-300",
+                pair.main,
+              )}
+            />
+          </div>
+        ) : (
+          <Image
+            src={offer.image.src}
+            alt={offer.image.alt}
+            width={offer.image.width}
+            height={offer.image.height}
+            sizes="140px"
+            unoptimized
+            data-offers-product
+            className={cn(
+              // Placed and sized as in the prototype, which was drawn for tall product cut-outs. The max width
+              // only matters for an unexpectedly wide picture: it keeps it in the ring and clear of the copy,
+              // which ends 34% from the right (6% offset + 26% leaves room for the tilt).
+              "absolute top-(--pad) right-[calc(var(--u)*6)] h-(--img-h) w-auto max-w-[min(calc(var(--img-h)*0.86),calc(var(--u)*26))] object-contain drop-shadow-[0_14px_16px_rgb(15_33_71/0.25)] transition-[rotate] duration-300",
+              pair.main,
+            )}
+          />
+        ))}
 
       {/* Right padding keeps the copy clear of the product image(s). On phones it is worked out from the image
           size (the widest pair reaches about one image height in from its right offset), and the block is
@@ -171,7 +196,7 @@ export function OfferCard({ offer }: { offer: Offer }) {
         >
           {offer.discount}
           {offer.discountSuffix && (
-            <span className="mt-[0.15em] rounded-lg bg-sun-300 px-2 py-0.5 text-[0.32em] leading-none text-brand-800">
+            <span className="mt-[0.15em] rounded-[0.5rem] bg-sun-300 px-2 py-0.5 text-[0.32em] leading-none text-brand-800">
               {offer.discountSuffix}
             </span>
           )}
@@ -184,15 +209,18 @@ export function OfferCard({ offer }: { offer: Offer }) {
             {offer.description}
           </p>
         )}
-        {/* Phones show the expiry here, beside the product, as the shorter "Ends …" so it stays on one line. */}
-        {offer.endsAt && (
-          <p className={cn("mt-1.5 flex items-center gap-1.5 text-sm sm:hidden", t.muted)}>
-            <CalendarDays className="size-4 shrink-0" aria-hidden="true" />
+        {/* Phones show the expiry here, beside the product, as the shorter "Ends …" so it stays on one line.
+            Without an expiry it says "No end date", as the promotions page does. */}
+        <p className={cn("mt-1.5 flex items-center gap-1.5 text-sm sm:hidden", t.muted)}>
+          <CalendarDays className="size-4 shrink-0" aria-hidden="true" />
+          {offer.endsAt ? (
             <span>
               Ends <time dateTime={offer.endsAt}>{formatOfferDate(offer.endsAt)}</time>
             </span>
-          </p>
-        )}
+          ) : (
+            <span>No end date</span>
+          )}
+        </p>
       </div>
 
       {/* Ticket tear line: dashed divider with notches cut into both edges (they match the white page).
@@ -212,7 +240,7 @@ export function OfferCard({ offer }: { offer: Offer }) {
               <span className="max-sm:sr-only">Use code</span>
               <span
                 className={cn(
-                  "rounded-lg border border-dashed px-2.5 py-1 font-mono text-base font-bold tracking-[0.15em] select-all max-sm:px-2 max-sm:tracking-[0.1em]",
+                  "rounded-[0.5rem] border border-dashed px-2.5 py-1 font-mono text-base font-bold tracking-[0.15em] select-all max-sm:px-2 max-sm:tracking-[0.1em]",
                   t.coupon,
                 )}
               >
@@ -221,12 +249,17 @@ export function OfferCard({ offer }: { offer: Offer }) {
               <CopyCodeButton code={offer.couponCode} className={cn("-ml-1 max-sm:size-11", t.copy)} />
             </p>
           )}
-          {offer.endsAt && (
-            <p className={cn("flex items-center gap-1.5 text-sm max-sm:hidden", t.muted)}>
-              <CalendarDays className="size-4" aria-hidden="true" />
-              Valid until <time dateTime={offer.endsAt}>{formatOfferDate(offer.endsAt)}</time>
-            </p>
-          )}
+          {/* Without an expiry: "No end date", as on the promotions page. */}
+          <p className={cn("flex items-center gap-1.5 text-sm max-sm:hidden", t.muted)}>
+            <CalendarDays className="size-4" aria-hidden="true" />
+            {offer.endsAt ? (
+              <>
+                Valid until <time dateTime={offer.endsAt}>{formatOfferDate(offer.endsAt)}</time>
+              </>
+            ) : (
+              "No end date"
+            )}
+          </p>
         </div>
         <Button
           onClick={() => void claim()}
