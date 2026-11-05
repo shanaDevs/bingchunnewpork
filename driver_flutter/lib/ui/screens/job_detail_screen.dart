@@ -511,12 +511,18 @@ class _HistoryRunBody extends StatelessWidget {
     final stops = [...job.orders]..sort((a, b) => a.sequence.compareTo(b.sequence));
     final distanceKm = job.actualDistanceKm ?? job.estimatedDistanceKm;
     final allDone = job.orderCount > 0 && job.deliveredCount == job.orderCount;
+    // Earned = fees of the stops actually delivered, i.e. the same per-stop amounts listed
+    // below. The stored ride total can be out of sync with its orders (wrong unit / stale),
+    // which showed e.g. Rs. 2 here while the stops added up to Rs. 150.
+    final earned = job.orders.isEmpty
+        ? job.totalDeliveryFees
+        : job.orders.where((o) => o.isDelivered && !o.isFailed).fold<int>(0, (s, o) => s + o.deliveryFee);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
         _EarningsBanner(
           label: tr('Earned'),
-          amount: job.totalDeliveryFees,
+          amount: earned,
           caption: job.completedAt == null ? null : tr('Completed {p1}', {'p1': Format.dateTime(job.completedAt)}),
           badge: allDone ? tr('All delivered') : null,
         ),
