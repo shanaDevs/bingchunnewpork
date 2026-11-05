@@ -1,14 +1,18 @@
 'use client';
 
-import { ChevronRight, Info } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { ChevronRight, Layers, Monitor } from 'lucide-react';
 
 import { DashSkel } from '@/components/admin/BranchDashboardSkeleton';
+import type { WalletAnalysisExcludedFees } from '@/components/admin/wallet-analysis/walletAnalysisTypes';
 import { formatMoney } from '@/lib/receipt';
 
 type Props = {
   balance: number;
+  onlineAvailableBalance?: number;
   capacity: number;
   healthPercent?: number;
+  excludedFees?: WalletAnalysisExcludedFees;
   loading?: boolean;
 };
 
@@ -17,42 +21,79 @@ function clampPercent(value: number) {
   return Math.min(100, Math.max(0, value));
 }
 
-function healthCopy(percent: number) {
-  if (percent >= 70) {
-    return {
-      label: 'Healthy',
-      title: 'Wallet is in a healthy state.',
-      detail: 'Sufficient balance to cover upcoming payouts.',
-    };
-  }
-  if (percent >= 40) {
-    return {
-      label: 'Moderate',
-      title: 'Wallet is in a moderate state.',
-      detail: 'Balance may need attention before larger payouts.',
-    };
-  }
-  return {
-    label: 'Low',
-    title: 'Wallet balance is low.',
-    detail: 'Inflow is not covering upcoming payouts.',
-  };
+function healthLabel(percent: number) {
+  if (percent >= 70) return 'Healthy';
+  if (percent >= 40) return 'Moderate';
+  return 'Low';
 }
 
 const WHITE = '#ffffff';
 const SECONDARY = 'rgba(255,255,255,0.72)';
 const MUTED = 'rgba(220,235,255,0.7)';
 
+function BlinkingStatusDot({ className = '' }: { className?: string }) {
+  return (
+    <span
+      className={`wallet-tank-blink-dot h-1.5 w-1.5 shrink-0 rounded-full ${className}`.trim()}
+      style={{ background: '#34d399' }}
+      aria-hidden
+    />
+  );
+}
+
+function BalanceMetric({
+  icon: Icon,
+  label,
+  amount,
+  footer,
+  loading,
+  blinkLabelDot = false,
+}: {
+  icon: typeof Layers;
+  label: string;
+  amount: string;
+  footer?: ReactNode;
+  loading?: boolean;
+  blinkLabelDot?: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex items-center gap-1.5">
+        <Icon size={14} strokeWidth={2.25} aria-hidden style={{ color: WHITE, opacity: 0.92 }} />
+        {blinkLabelDot ? <BlinkingStatusDot /> : null}
+        <p className="m-0 text-[11px] font-medium leading-tight" style={{ color: MUTED }}>
+          {label}
+        </p>
+      </div>
+      {loading ? (
+        <DashSkel className="branch-dash-skel--on-navy mt-2 h-7 w-full max-w-[9rem] rounded-md" />
+      ) : (
+        <p
+          className="mt-1.5 mb-0 truncate text-[19px] font-bold tabular-nums leading-tight tracking-tight sm:text-[21px]"
+          style={{ color: WHITE }}
+          title={amount}
+        >
+          {amount}
+        </p>
+      )}
+      {footer}
+    </div>
+  );
+}
+
 export default function WalletTankCard({
   balance,
+  onlineAvailableBalance = 0,
   capacity,
   healthPercent,
+  excludedFees,
   loading = false,
 }: Props) {
   const fillPercent = clampPercent(capacity > 0 ? (balance / capacity) * 100 : 0);
   const healthScore = clampPercent(healthPercent ?? fillPercent);
-  const health = healthCopy(healthScore);
   const roundedPercent = Math.round(fillPercent);
+  const deliveryFee = excludedFees?.deliveryFee ?? 0;
+  const convenienceFee = excludedFees?.convenienceFee ?? 0;
 
   return (
     <div
@@ -78,7 +119,7 @@ export default function WalletTankCard({
             className="mt-[3px] mb-0 text-[12px] leading-none"
             style={{ color: MUTED }}
           >
-            Current balance fill level
+            Total all-time available across branches
           </p>
         </div>
         {loading ? (
@@ -97,24 +138,49 @@ export default function WalletTankCard({
               style={{ background: '#34d399' }}
               aria-hidden
             />
-            {health.label}
+            {healthLabel(healthScore)}
             <ChevronRight size={12} strokeWidth={2.5} aria-hidden style={{ color: WHITE, opacity: 0.85 }} />
           </span>
         )}
       </div>
 
-      {loading ? (
-        <DashSkel className="branch-dash-skel--on-navy mt-[18px] h-8 w-48 rounded-md" />
-      ) : (
-        <p
-          className="mt-[18px] mb-0 text-[32px] font-semibold tabular-nums tracking-tight"
-          style={{ color: WHITE }}
-        >
-          {formatMoney(balance)}
-        </p>
-      )}
+      <style>{`
+        @keyframes wallet-tank-blink-dot {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.35; transform: scale(0.92); }
+        }
+        .wallet-tank-blink-dot {
+          animation: wallet-tank-blink-dot 1.15s ease-in-out infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .wallet-tank-blink-dot {
+            animation: none;
+          }
+        }
+      `}</style>
 
-      <div className="mt-[14px] flex items-center gap-3">
+      <div className="mt-[14px] flex min-h-[64px] items-stretch gap-3 pb-0">
+        <BalanceMetric
+          icon={Layers}
+          label="Total Wallet Balance"
+          amount={formatMoney(balance)}
+          loading={loading}
+        />
+        <div
+          className="w-px shrink-0 self-stretch"
+          style={{ background: 'rgba(255,255,255,0.22)' }}
+          aria-hidden
+        />
+        <BalanceMetric
+          icon={Monitor}
+          label="Online Available Balance"
+          amount={formatMoney(onlineAvailableBalance)}
+          loading={loading}
+          blinkLabelDot
+        />
+      </div>
+
+      <div className="mt-2 flex items-center gap-3">
         {loading ? (
           <>
             <DashSkel className="branch-dash-skel--on-navy h-5 min-w-0 flex-1 rounded-full" />
@@ -155,7 +221,7 @@ export default function WalletTankCard({
       </div>
 
       <div
-        className="mt-4 flex items-center gap-2.5"
+        className="mt-2.5 grid grid-cols-2 gap-2"
         style={{
           padding: '10px 12px',
           borderRadius: 12,
@@ -166,26 +232,37 @@ export default function WalletTankCard({
       >
         {loading ? (
           <>
-            <DashSkel className="branch-dash-skel--on-navy h-7 w-7 shrink-0 rounded-full" />
-            <div className="min-w-0 flex-1">
-              <DashSkel className="branch-dash-skel--on-navy h-3.5 w-40 max-w-full rounded" />
-              <DashSkel className="branch-dash-skel--on-navy mt-1.5 h-3 w-52 max-w-full rounded" />
-            </div>
+            <DashSkel className="branch-dash-skel--on-navy h-10 w-full rounded-md" />
+            <DashSkel className="branch-dash-skel--on-navy h-10 w-full rounded-md" />
           </>
         ) : (
           <>
-            <span
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
-              style={{ background: '#3da5ff' }}
-            >
-              <Info size={14} strokeWidth={2.4} aria-hidden style={{ color: WHITE }} />
-            </span>
             <div className="min-w-0">
-              <p className="m-0 text-[13px] font-semibold leading-tight" style={{ color: WHITE }}>
-                {health.title}
+              <p className="m-0 text-[11px] font-medium leading-tight" style={{ color: MUTED }}>
+                Delivery fee
               </p>
-              <p className="mt-0.5 mb-0 text-[12px] leading-tight" style={{ color: SECONDARY }}>
-                {health.detail}
+              <p
+                className="mt-1 mb-0 truncate text-[14px] font-semibold tabular-nums leading-tight"
+                style={{ color: WHITE }}
+              >
+                {formatMoney(deliveryFee)}
+              </p>
+              <p className="mt-0.5 mb-0 text-[10px] leading-tight" style={{ color: SECONDARY }}>
+                All-time · excluded from balance
+              </p>
+            </div>
+            <div className="min-w-0 border-l border-white/15 pl-3">
+              <p className="m-0 text-[11px] font-medium leading-tight" style={{ color: MUTED }}>
+                Convenience fee
+              </p>
+              <p
+                className="mt-1 mb-0 truncate text-[14px] font-semibold tabular-nums leading-tight"
+                style={{ color: WHITE }}
+              >
+                {formatMoney(convenienceFee)}
+              </p>
+              <p className="mt-0.5 mb-0 text-[10px] leading-tight" style={{ color: SECONDARY }}>
+                All-time · excluded from balance
               </p>
             </div>
           </>

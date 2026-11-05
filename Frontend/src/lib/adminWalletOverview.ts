@@ -3,6 +3,7 @@ import type { StoreWallet } from '@/components/admin/SuperAdminSystemWalletTab';
 import type { WithdrawalPagination, WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
 import { WITHDRAWAL_PAGE_SIZE } from '@/components/admin/WalletWithdrawalTable';
 import { adminAuthHeaders } from '@/lib/adminSession';
+import { normalizeStoreWalletFromApi } from '@/lib/moneyString';
 
 export type PeriodBranchReport = {
   storeId: string;
@@ -64,8 +65,9 @@ export async function fetchAdminWalletOverview(
   });
   if (!res.ok) throw new Error(await readApiError(res, 'Failed to load wallet data'));
   const json = await res.json();
+  const rawWallets = (json.data.wallets ?? []) as StoreWallet[];
   return {
-    wallets: json.data.wallets ?? [],
+    wallets: rawWallets.map((row) => normalizeStoreWalletFromApi(row)),
     summary: json.data.summary ?? null,
     dashboard: json.data.dashboard ?? null,
     periodBranchReports: isFiltered

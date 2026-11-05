@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/json.dart';
 import '../data/local/secure_store.dart';
 import '../data/models/delivery_job.dart';
+import '../data/models/driver.dart';
 import '../data/repositories/auth_repository.dart';
 import '../data/repositories/jobs_repository.dart';
 import '../tracking/delivery_socket.dart';
@@ -43,6 +44,7 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   static const _postRejectHold = Duration(seconds: 5);
   static const _cancelTone = Duration(seconds: 3);
   static const _silencedKey = 'silenced_job_ids';
+  static const _blockingJobStatuses = {'IN_PROGRESS', 'ASSIGNED', 'QUEUED'};
 
   final SecureStore store;
   final AuthRepository authRepository;
@@ -107,6 +109,7 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     socket.on('jobAssignedToDriver', _onSocketJobAssigned);
     socket.on('deliveryJobClaimed', _onSocketJobClaimed);
     socket.on('orderCancelled', _onSocketOrderCancelled);
+    _connectSocketPools();
     _cycle = 0;
     _consecutiveFailures = 0;
     _runCycle();
@@ -143,7 +146,10 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     // post the notification only once the app leaves the screen, drop it on return.
     final ringing = _ringingAlert;
     final burstActive = _ringBurstTimer?.isActive ?? false;
-    if (ringing == null || !burstActive) return;
+    if (ringing == null || !burstActive) {
+      _syncQueuedNotification(state);
+      return;
+    }
     if (state == AppLifecycleState.resumed) {
       BcNotifications.cancelJob(ringing.jobId);
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
@@ -156,18 +162,20 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _runCycle() async {
     if (!_running) return;
     try {
-      // Re-synced every cycle so a driver who just finished a delivery doesn't
-      // stay muted for up to a minute while a new job is broadcast.
-      final profile = await authRepository.getMe();
-      if (!profile.isOnline) {
-        debugPrint('Driver went off duty — stopping alert service');
-        await stop();
-        return;
+      DriverProfile? profile;
+      try {
+        profile = await authRepository.getMe();
+        if (!profile.isOnline) {
+          debugPrint('Driver went off duty — stopping alert service');
+          await stop();
+          return;
+        }
+        alertEligible = profile.alertEligible;
+      } catch (e) {
+        debugPrint('Alert loop getMe failed (continuing poll/socket): $e');
       }
-      alertEligible = profile.alertEligible;
       if (_cycle % 4 == 0) {
-        socket.connect();
-        socket.joinBranchPool(profile.poolStoreIds);
+        _connectSocketPools(profile: profile);
       }
       await _pollJobs();
       _consecutiveFailures = 0;
@@ -185,6 +193,23 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     if (failures <= 0) return _pollInterval;
     final ms = _pollInterval.inMilliseconds << failures.clamp(0, 2);
     return Duration(milliseconds: ms.clamp(0, _maxPollInterval.inMilliseconds));
+  }
+
+  Future<void> _connectSocketPools({DriverProfile? profile}) async {
+    socket.connect();
+    final ids = <String>{};
+    if (profile != null) {
+      ids.addAll(profile.poolStoreIds);
+    }
+    final session = authRepository.restore();
+    if (session?.storeId != null) ids.add(session!.storeId!);
+    try {
+      final jobs = await jobsRepository.listJobs();
+      for (final j in jobs) {
+        if (j.storeId.isNotEmpty) ids.add(j.storeId);
+      }
+    } catch (_) {}
+    if (ids.isNotEmpty) socket.joinBranchPool(ids.toList());
   }
 
   Future<void> _pollJobs() async {
@@ -381,18 +406,21 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     if (alert.jobId.isEmpty) return;
     if (_isSilenced(alert.jobId) || _activeAlerts.containsKey(alert.jobId)) return;
     if (!alertEligible) {
-      // Local flag can be up to one poll cycle stale — verify against the server.
-      authRepository
-          .getMe()
-          .then((p) {
-            if (p.alertEligible) {
+      // Local flag can be stale — verify via jobs list (GET /me often 504 on live).
+      jobsRepository
+          .listJobs()
+          .then((jobs) {
+            final blocked = jobs.any((j) => _blockingJobStatuses.contains(j.status));
+            if (!blocked) {
               alertEligible = true;
               _ringForJob(alert);
             } else {
               debugPrint('Skipping ring for ${alert.jobId} — driver not alert-eligible');
             }
           })
-          .catchError((_) {});
+          .catchError((_) {
+            _ringForJob(alert);
+          });
       return;
     }
     _ringForJob(alert);
@@ -411,7 +439,43 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     if (alert.jobId.isEmpty) return;
     _activeAlerts[alert.jobId] = alert;
     notifyListeners();
-    if (alertEligible) _promoteFrontIfNeeded();
+    if (alertEligible) {
+      _promoteFrontIfNeeded();
+    } else {
+      _notifyQueuedIfOffScreen();
+    }
+  }
+
+  /// The card the in-app overlay shows: the ringing ride, else the first queued one.
+  RideAlert? get _displayedAlert {
+    if (_ringingAlert != null) return _ringingAlert;
+    if (_isPostRejectHoldActive) return null;
+    final queued = activeAlerts;
+    return queued.isEmpty ? null : queued.first;
+  }
+
+  String? _queuedNotifiedJobId;
+
+  void _notifyQueuedIfOffScreen() {
+    if (_appInForeground || alertEligible) return;
+    final alert = _displayedAlert;
+    if (alert == null || alert.jobId == _queuedNotifiedJobId) return;
+    _queuedNotifiedJobId = alert.jobId;
+    BcNotifications.notifyNewJob(alert);
+    try {
+      FlutterForegroundTask.wakeUpScreen();
+    } catch (_) {}
+  }
+
+  /// Queued-card counterpart of the ringing hand-off in [didChangeAppLifecycleState].
+  void _syncQueuedNotification(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final shown = _queuedNotifiedJobId;
+      _queuedNotifiedJobId = null;
+      if (shown != null) BcNotifications.cancelJob(shown);
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _notifyQueuedIfOffScreen();
+    }
   }
 
   void _forceRingNow(RideAlert alert) {
@@ -429,6 +493,7 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _onAlertRemoved(String jobId) {
+    if (_queuedNotifiedJobId == jobId) _queuedNotifiedJobId = null;
     if (_ringingJobId == jobId) _pauseRingCycle();
     _promoteFrontIfNeeded();
   }

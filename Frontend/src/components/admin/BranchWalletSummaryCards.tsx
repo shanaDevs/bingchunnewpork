@@ -1,22 +1,11 @@
 'use client';
 
-import type { LucideIcon } from 'lucide-react';
-import {
-  Banknote,
-  ChevronRight,
-  CreditCard,
-  Landmark,
-  HandCoins,
-  Percent,
-  ShoppingBag,
-  TrendingDown,
-  TrendingUp,
-  Truck,
-  Wallet,
-} from 'lucide-react';
+import { BarChart3, ChevronRight, HandCoins, Wallet } from 'lucide-react';
 import { DashSkel } from '@/components/admin/BranchDashboardSkeleton';
 import { formatMoneyAmount } from '@/lib/receipt';
 import { cn } from '@/lib/utils';
+import type { PayoutPeriodExpensesCents } from '@/components/admin/payoutPeriodRowAmounts';
+import { usePaidPayoutPeriodExpenses } from '@/components/admin/usePaidPayoutPeriodExpenses';
 
 export type BranchWalletPayablesBreakdown = {
   channelRevenueCents: {
@@ -26,6 +15,7 @@ export type BranchWalletPayablesBreakdown = {
     deliveryOnlineIn: number;
   };
   totalRevenueCents: number;
+  /** Net platform amount from paid 15-day payouts (cents). */
   platformCommissionCents: number;
   deliveryCommissionCents: number;
   gatewayFeeCents: number;
@@ -56,6 +46,7 @@ function centsToMoney(cents: number): string {
 
 const ALL_TIME_HINT = 'All-time';
 const BRANCH_RECEIVABLE_HINT = 'Paid 15-day payouts';
+const PAYOUT_PERIOD_EXPENSE_HINT = 'Paid 15-day payouts';
 
 type Props = {
   dashboard: BranchWalletDashboard | null;
@@ -67,40 +58,191 @@ type Props = {
   periodTo?: string | null;
   periodLabel?: string | null;
   hideDelivery?: boolean;
+  /** When set, expenses use paid 15-day payout periods only (same query as the table). */
+  storeId?: string;
+  payoutPeriodExpenses?: PayoutPeriodExpensesCents | null;
+  payoutPeriodExpensesLoading?: boolean;
 };
 
-function PayablesMetricCard({
-  title,
-  amountCents,
+const EMPTY_PAID_PAYOUT_EXPENSES: PayoutPeriodExpensesCents = {
+  netPlatformAmountCents: 0,
+  gatewayFeeCents: 0,
+  branchReceivableCents: 0,
+  totalExpensesCents: 0,
+};
+
+function RevenueChannelKpiCard({
+  label,
+  amount,
   loading,
-  primary = false,
-  hint = ALL_TIME_HINT,
-  icon: Icon,
+  hint,
 }: {
-  title: string;
-  amountCents: number;
-  loading: boolean;
-  primary?: boolean;
+  label: string;
+  amount: string;
+  loading?: boolean;
   hint?: string;
-  icon: LucideIcon;
 }) {
   return (
-    <section
-      className={cn(
-        'branch-wallet-metric-card branch-wallet-payables__metric',
-        primary && 'branch-wallet-metric-card--primary',
-      )}
-    >
-      <div className="branch-wallet-metric-card__top">
-        <span className="branch-wallet-metric-card__icon" aria-hidden>
-          <Icon size={14} strokeWidth={2.25} />
-        </span>
-        <h2>{title}</h2>
-      </div>
-      <p className="branch-wallet-metric-card__amount">
-        {loading ? <DashSkel className="h-7 w-28" /> : centsToMoney(amountCents)}
+    <div className="branch-wallet-payables-revenue__channel min-w-0 rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm dark:border-navy-border/60 dark:bg-[var(--color-navy-card)]">
+      <p className="text-[0.78rem] font-semibold leading-[1.15] text-slate-950 dark:text-fg">
+        {label}
       </p>
-      <p className="branch-wallet-metric-card__hint">{hint}</p>
+      <p className="mt-[0.28rem] truncate text-[1rem] font-bold tabular-nums leading-[1.15] text-slate-950 dark:text-fg">
+        {loading ? <DashSkel className="h-4 w-28 max-w-full" /> : amount}
+      </p>
+      {hint ? (
+        <p className="mt-0.5 truncate text-[0.68rem] font-medium leading-[1.15] text-slate-500 dark:text-muted-fg">
+          {hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function PayablesRevenueSummaryCard({
+  totalRevenueCents,
+  deliveryOnlineCents,
+  pickupOnlineCents,
+  pickupCashCents,
+  pickupCardCents,
+  loading,
+  hideDelivery,
+}: {
+  totalRevenueCents: number;
+  deliveryOnlineCents: number;
+  pickupOnlineCents: number;
+  pickupCashCents: number;
+  pickupCardCents: number;
+  loading: boolean;
+  hideDelivery: boolean;
+}) {
+  const channelCols = hideDelivery
+    ? 'sm:grid-cols-2 lg:grid-cols-3'
+    : 'sm:grid-cols-2 lg:grid-cols-4';
+
+  return (
+    <section className="branch-wallet-payables-summary branch-wallet-payables__metric">
+      <div className="relative z-10 flex items-center gap-2">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-[#2563EB] dark:bg-[rgba(48,126,242,0.12)] dark:text-[#307ef2]">
+          <BarChart3 size={14} strokeWidth={2.3} aria-hidden />
+        </div>
+        <h2 className="m-0 text-[0.9rem] font-bold leading-[1.15] text-slate-950 dark:text-fg">
+          Revenue Summary
+        </h2>
+      </div>
+
+      <div className="mt-2 flex min-h-0 flex-1 flex-col">
+        <p className="branch-wallet-payables-summary__total m-0 tabular-nums leading-[1.05] tracking-[-0.03em] text-slate-950 dark:text-fg">
+          {loading ? <DashSkel className="h-8 w-48 max-w-full" /> : centsToMoney(totalRevenueCents)}
+        </p>
+
+        <div className={cn('mt-auto grid grid-cols-1 gap-2 pt-2', channelCols)}>
+          {!hideDelivery && (
+            <RevenueChannelKpiCard
+              label="Delivery Online Revenue"
+              amount={centsToMoney(deliveryOnlineCents)}
+              loading={loading}
+            />
+          )}
+          <RevenueChannelKpiCard
+            label="Pickup Online Revenue"
+            amount={centsToMoney(pickupOnlineCents)}
+            loading={loading}
+          />
+          <RevenueChannelKpiCard
+            label="Pickup Cash Revenue"
+            amount={centsToMoney(pickupCashCents)}
+            loading={loading}
+          />
+          <RevenueChannelKpiCard
+            label="Pickup Card Revenue"
+            amount={centsToMoney(pickupCardCents)}
+            loading={loading}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BranchReceivableCard({
+  branchReceivableCents,
+  loading,
+}: {
+  branchReceivableCents: number;
+  loading: boolean;
+}) {
+  return (
+    <section className="branch-wallet-receivable branch-wallet-payables__receivable">
+      <HandCoins
+        aria-hidden
+        size={96}
+        strokeWidth={1}
+        className="branch-wallet-receivable__art"
+      />
+      <div className="branch-wallet-receivable__icon" aria-hidden>
+        <HandCoins size={15} strokeWidth={2.25} />
+      </div>
+      <div className="branch-wallet-receivable__body">
+        <p className="branch-wallet-receivable__label">Branch Receivable</p>
+        <p className="branch-wallet-receivable__amount">
+          {loading ? (
+            <DashSkel className="h-7 w-40 max-w-full bg-blue-900/10" />
+          ) : (
+            centsToMoney(branchReceivableCents)
+          )}
+        </p>
+        <p className="branch-wallet-receivable__hint">{BRANCH_RECEIVABLE_HINT}</p>
+      </div>
+    </section>
+  );
+}
+
+function PayablesExpensesSummaryCard({
+  totalExpensesCents,
+  platformCommissionCents,
+  gatewayFeeCents,
+  loading,
+  fromPayoutPeriods,
+}: {
+  totalExpensesCents: number;
+  platformCommissionCents: number;
+  gatewayFeeCents: number;
+  loading: boolean;
+  fromPayoutPeriods?: boolean;
+}) {
+  const periodHint = fromPayoutPeriods ? PAYOUT_PERIOD_EXPENSE_HINT : undefined;
+  return (
+    <section className="branch-wallet-payables-summary branch-wallet-payables__metric">
+      <div className="relative z-10 flex items-center gap-2">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-[#2563EB] dark:bg-[rgba(48,126,242,0.12)] dark:text-[#307ef2]">
+          <BarChart3 size={14} strokeWidth={2.3} aria-hidden />
+        </div>
+        <h2 className="m-0 text-[0.9rem] font-bold leading-[1.15] text-slate-950 dark:text-fg">
+          Expenses Summary
+        </h2>
+      </div>
+
+      <div className="mt-2 flex min-h-0 flex-1 flex-col">
+        <p className="branch-wallet-payables-summary__total m-0 tabular-nums leading-[1.05] tracking-[-0.03em] text-slate-950 dark:text-fg">
+          {loading ? <DashSkel className="h-8 w-48 max-w-full" /> : centsToMoney(totalExpensesCents)}
+        </p>
+
+        <div className="mt-auto grid grid-cols-1 gap-2 pt-2 sm:grid-cols-2">
+          <RevenueChannelKpiCard
+            label="Net Platform Amount"
+            amount={centsToMoney(platformCommissionCents)}
+            loading={loading}
+            hint={periodHint}
+          />
+          <RevenueChannelKpiCard
+            label="Payment Gateway Fees"
+            amount={centsToMoney(gatewayFeeCents)}
+            loading={loading}
+            hint={periodHint}
+          />
+        </div>
+      </div>
     </section>
   );
 }
@@ -111,7 +253,19 @@ export default function BranchWalletSummaryCards({
   periodLoading = false,
   className = '',
   hideDelivery = false,
+  storeId,
+  payoutPeriodExpenses: payoutPeriodExpensesProp = null,
+  payoutPeriodExpensesLoading: payoutPeriodExpensesLoadingProp = false,
 }: Props) {
+  const { expenses: paidPeriodExpenses, loading: paidPeriodExpensesLoading } =
+    usePaidPayoutPeriodExpenses(storeId);
+  const paidPayoutExpensesOnly = Boolean(storeId);
+  const payoutPeriodExpenses =
+    payoutPeriodExpensesProp ?? (paidPayoutExpensesOnly ? paidPeriodExpenses : null);
+  const payoutPeriodExpensesLoading =
+    payoutPeriodExpensesLoadingProp ||
+    (paidPayoutExpensesOnly ? paidPeriodExpensesLoading : false);
+
   const payables = dashboard?.payablesBreakdown;
   const channels = payables?.channelRevenueCents;
   const deliveryOnlineCents = hideDelivery ? 0 : (channels?.deliveryOnlineIn ?? 0);
@@ -123,16 +277,38 @@ export default function BranchWalletSummaryCards({
     ? Math.max(0, (payables?.totalRevenueCents ?? 0) - deliveryOnlineCents)
     : (payables?.totalRevenueCents ?? 0);
 
-  const totalExpensesCents = payables?.totalExpensesCents ?? 0;
-  const availableBalanceCents = hideDelivery
-    ? totalRevenueCents - totalExpensesCents
-    : (payables?.allTimeAvailableBalanceCents ?? 0);
+  const usePayoutPeriodExpenses = paidPayoutExpensesOnly || payoutPeriodExpenses != null;
+  const resolvedPaidExpenses =
+    payoutPeriodExpenses ?? (paidPayoutExpensesOnly ? EMPTY_PAID_PAYOUT_EXPENSES : null);
+  const platformCommissionCents = usePayoutPeriodExpenses
+    ? (resolvedPaidExpenses?.netPlatformAmountCents ?? 0)
+    : (payables?.platformCommissionCents ?? 0);
+  const gatewayFeeCents = usePayoutPeriodExpenses
+    ? (resolvedPaidExpenses?.gatewayFeeCents ?? 0)
+    : (payables?.gatewayFeeCents ?? 0);
+  const branchReceivableCents = usePayoutPeriodExpenses
+    ? (resolvedPaidExpenses?.branchReceivableCents ?? 0)
+    : (payables?.branchReceivableCents ?? 0);
+  const totalExpensesCents = usePayoutPeriodExpenses
+    ? (resolvedPaidExpenses?.totalExpensesCents ?? 0)
+    : (payables?.totalExpensesCents ?? 0);
+  /** Keep in sync with expense cards (paid 15-day payouts when storeId is set). */
+  const availableBalanceCents = totalRevenueCents - totalExpensesCents;
 
-  const cardLoading = loading || periodLoading;
+  const cardLoading = loading || periodLoading || payoutPeriodExpensesLoading;
 
   return (
     <div className={cn('branch-wallet-overview branch-wallet-payables', className)}>
-      <div className="branch-wallet-payables__balance-row">
+      <div className="branch-wallet-payables__row branch-wallet-payables__row--top">
+        <PayablesRevenueSummaryCard
+          totalRevenueCents={totalRevenueCents}
+          deliveryOnlineCents={deliveryOnlineCents}
+          pickupOnlineCents={pickupOnlineCents}
+          pickupCashCents={pickupCashCents}
+          pickupCardCents={pickupCardCents}
+          loading={cardLoading}
+          hideDelivery={hideDelivery}
+        />
         <section className="branch-wallet-balance branch-wallet-payables__balance">
           <Wallet
             aria-hidden
@@ -160,68 +336,17 @@ export default function BranchWalletSummaryCards({
         </section>
       </div>
 
-      <div className="branch-wallet-payables__row">
-        <PayablesMetricCard
-          title="Total Revenue (Net)"
-          amountCents={totalRevenueCents}
-          loading={cardLoading}
-          primary
-          icon={TrendingUp}
-        />
-        {!hideDelivery && (
-          <PayablesMetricCard
-            title="Delivery Online Revenue"
-            amountCents={deliveryOnlineCents}
-            loading={cardLoading}
-            icon={Truck}
-          />
-        )}
-        <PayablesMetricCard
-          title="Pickup Online Revenue"
-          amountCents={pickupOnlineCents}
-          loading={cardLoading}
-          icon={ShoppingBag}
-        />
-        <PayablesMetricCard
-          title="Pickup Cash Revenue"
-          amountCents={pickupCashCents}
-          loading={cardLoading}
-          icon={Banknote}
-        />
-        <PayablesMetricCard
-          title="Pickup Card Revenue"
-          amountCents={pickupCardCents}
-          loading={cardLoading}
-          icon={CreditCard}
-        />
-      </div>
-
       <div className="branch-wallet-payables__row branch-wallet-payables__row--expenses">
-        <PayablesMetricCard
-          title="Total Expenses"
-          amountCents={totalExpensesCents}
+        <PayablesExpensesSummaryCard
+          totalExpensesCents={totalExpensesCents}
+          platformCommissionCents={platformCommissionCents}
+          gatewayFeeCents={gatewayFeeCents}
           loading={cardLoading}
-          primary
-          icon={TrendingDown}
+          fromPayoutPeriods={usePayoutPeriodExpenses}
         />
-        <PayablesMetricCard
-          title="Platform Commission"
-          amountCents={payables?.platformCommissionCents ?? 0}
+        <BranchReceivableCard
+          branchReceivableCents={branchReceivableCents}
           loading={cardLoading}
-          icon={Percent}
-        />
-        <PayablesMetricCard
-          title="Payment Gateway Fees"
-          amountCents={payables?.gatewayFeeCents ?? 0}
-          loading={cardLoading}
-          icon={Landmark}
-        />
-        <PayablesMetricCard
-          title="Branch Receivable"
-          amountCents={payables?.branchReceivableCents ?? 0}
-          loading={cardLoading}
-          hint={BRANCH_RECEIVABLE_HINT}
-          icon={HandCoins}
         />
       </div>
     </div>

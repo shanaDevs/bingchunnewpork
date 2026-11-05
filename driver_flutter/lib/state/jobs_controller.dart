@@ -158,6 +158,16 @@ class JobsController extends ChangeNotifier {
     _emit();
   }
 
+  /// True while the rider holds a claimed/active run — sign-out is blocked until it ends.
+  /// Asks the server so a ride claimed elsewhere still counts; falls back to the cached list offline.
+  Future<bool> hasHeldJob() async {
+    try {
+      return (await _c.jobsRepository.listJobs()).any((j) => _heldStatuses.contains(j.status));
+    } catch (_) {
+      return jobs.any((j) => _heldStatuses.contains(j.status));
+    }
+  }
+
   Future<List<BranchOption>> listStoresForBranchRequest() => _c.authRepository.listStores();
 
   Future<List<DriverBranchRequest>> listMyBranchRequests() => _c.authRepository.listBranchRequests();
@@ -231,6 +241,7 @@ class JobsController extends ChangeNotifier {
       _emit();
       if (online) {
         _ensureSocketPool(p);
+        _c.deliverySocket.goOnline();
         await _c.alertService.start();
         _c.alertService.setAlertEligible(p.alertEligible);
         await _c.locationTracker.startIdle();
@@ -368,7 +379,18 @@ class JobsController extends ChangeNotifier {
 
   void _ensureSocketPool(DriverProfile p) {
     _c.deliverySocket.connect();
-    _c.deliverySocket.joinBranchPool(p.poolStoreIds);
+    final ids = {...p.poolStoreIds};
+    _c.jobsRepository
+        .listJobs()
+        .then((jobs) {
+          for (final j in jobs) {
+            if (j.storeId.isNotEmpty) ids.add(j.storeId);
+          }
+          _c.deliverySocket.joinBranchPool(ids.toList());
+        })
+        .catchError((_) {
+          _c.deliverySocket.joinBranchPool(p.poolStoreIds);
+        });
   }
 
   @override

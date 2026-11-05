@@ -46,9 +46,9 @@ type Props = {
 };
 
 const AMOUNT_COLUMNS = [
-  'Branch payout',
+  'Branch receives',
   'Customer convenience fee',
-  'Platform commission',
+  'Net platform amount',
   'Delivery fee received',
 ] as const;
 
@@ -64,14 +64,17 @@ function statusBadgeClass(status: PayoutPeriodStatus) {
 }
 
 function previewPeriodTo(row: PayoutPeriodRow) {
-  return row.summaryThrough ?? row.periodTo;
+  const through = row.summaryThrough ?? row.periodTo;
+  // Guard inverted ranges (e.g. last-day boundary bugs) so summaries never run from > to.
+  if (through < row.periodFrom) return row.periodFrom;
+  return through;
 }
 
 function formatPayoutPeriodCell(row: PayoutPeriodRow) {
   if (row.status !== 'IN_PROGRESS') {
     return formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo);
   }
-  const through = row.summaryThrough ?? row.periodTo;
+  const through = previewPeriodTo(row);
   return (
     <span className="flex flex-col gap-0.5">
       <span>{formatBiweeklyPeriodLabel(row.periodFrom, through)}</span>
@@ -221,7 +224,7 @@ function PayoutPeriodAmountCells({
           {feeColumnsLoading && index > 0 ? (
             <Skeleton className="ml-auto inline-block h-3.5 w-16 bg-[var(--color-navy-light)]/70" />
           ) : (
-            formatAmountCell(value)
+            formatAmountCell(value ?? 0)
           )}
         </td>
       ))}

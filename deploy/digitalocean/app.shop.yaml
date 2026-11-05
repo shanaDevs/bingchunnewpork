@@ -109,7 +109,16 @@ services:
         type: SECRET
       - key: FRONTEND_URL
         scope: RUN_TIME
-        value: "https://bing-chun-ui2ow.ondigitalocean.app"
+        value: "https://bingchunsrilanka.com"
+      - key: LIVE_SHOP_URL
+        scope: RUN_TIME
+        value: "https://bingchunsrilanka.com"
+      - key: API_BASE_URL
+        scope: RUN_TIME
+        value: "https://bingchunsrilanka.com"
+      - key: WEBXPAY_RETURN_URL
+        scope: RUN_TIME
+        value: "https://bingchunsrilanka.com/api/payments/webxpay-return?returnOrigin=https%3A%2F%2Fbingchunsrilanka.com"
       # Delivery ops console calls this API cross-origin; Lax cookies would 401 every request.
       - key: ADMIN_COOKIE_SAMESITE
         scope: RUN_TIME
@@ -154,6 +163,12 @@ services:
       - key: NEXT_PUBLIC_API_URL
         scope: RUN_AND_BUILD_TIME
         value: /api
+      - key: NEXT_PUBLIC_SITE_URL
+        scope: RUN_AND_BUILD_TIME
+        value: "https://bingchunsrilanka.com"
+      - key: NEXT_PUBLIC_SOCKET_URL
+        scope: RUN_AND_BUILD_TIME
+        value: "https://bingchunsrilanka.com"
       - key: BACKEND_URL
         scope: RUN_TIME
         value: "${shop-api.PRIVATE_URL}"
@@ -165,10 +180,10 @@ services:
         value: "${shop-api.PRIVATE_URL}"
       - key: ADMIN_WEB_URL
         scope: RUN_TIME
-        value: "https://replace-admin-host.example"
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
       - key: ADMIN_API_URL
         scope: RUN_TIME
-        value: "https://replace-admin-host.example"
+        value: "https://bingchun-admin-a4ndy.ondigitalocean.app"
 workers:
   - name: shop-worker
     github:
@@ -220,6 +235,18 @@ workers:
         scope: RUN_TIME
         value: REPLACE_ME
         type: SECRET
+      - key: FRONTEND_URL
+        scope: RUN_TIME
+        value: "https://bingchunsrilanka.com"
+      - key: LIVE_SHOP_URL
+        scope: RUN_TIME
+        value: "https://bingchunsrilanka.com"
+      - key: API_BASE_URL
+        scope: RUN_TIME
+        value: "https://bingchunsrilanka.com"
+      - key: WEBXPAY_RETURN_URL
+        scope: RUN_TIME
+        value: "https://bingchunsrilanka.com/api/payments/webxpay-return?returnOrigin=https%3A%2F%2Fbingchunsrilanka.com"
 jobs:
   - name: migrate
     kind: PRE_DEPLOY
