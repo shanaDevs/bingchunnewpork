@@ -151,6 +151,16 @@ class JobsController extends ChangeNotifier {
     }
   }
 
+  /// Re-fetch just the rider profile (e.g. opening profile details). The licence image
+  /// URL is a short-lived signed link, so a profile loaded earlier may point at an
+  /// expired one. Keeps the previous profile if the request fails.
+  Future<void> refreshProfile() async {
+    try {
+      profile = await _c.authRepository.getMe();
+      _emit();
+    } catch (_) {}
+  }
+
   /// Completed runs for the History tab. Cached after the first load; pass force to refresh.
   Future<void> loadHistory({bool force = false}) async {
     if (historyLoading) return;

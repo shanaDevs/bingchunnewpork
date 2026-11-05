@@ -119,6 +119,8 @@ const Map<String, String> zhStrings = {
   'Navigate from our application': '在本应用内导航',
   'Cancel': '取消',
   'Retry': '重试',
+  "Couldn't load the license": '无法加载驾照',
+  'Loading…': '加载中…',
   'Close': '关闭',
   'Back': '返回',
   'Continue': '继续',

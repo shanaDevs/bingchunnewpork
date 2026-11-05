@@ -363,9 +363,7 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
                 icon: Icons.delivery_dining_rounded,
                 tone: BcDialogTone.brand,
                 title: tr('Finish your ride first'),
-                message: tr(
-                  'You have a claimed ride that is not finished. Complete or reject it before signing out.',
-                ),
+                message: tr('You have a claimed ride that is not finished. Complete or reject it before signing out.'),
                 confirmLabel: tr('OK'),
               );
               return;
@@ -399,6 +397,8 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
     String? meritStatus,
   ) {
     _loadBranchRequests();
+    // Fresh profile = fresh signed licence link (an earlier one may have expired).
+    vm.refreshProfile();
     showBcSheet<void>(
       context,
       builder: (_) => ChangeNotifierProvider.value(
@@ -414,6 +414,7 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
             meritStatus: meritStatus,
             branches: _branches(vm, auth),
             branchRequests: _myBranchRequests.value,
+            onRetryLicense: vm.refreshProfile,
           ),
         ),
       ),
@@ -978,7 +979,11 @@ class _ProfileDetailsSheet extends StatelessWidget {
     required this.meritStatus,
     required this.branches,
     required this.branchRequests,
+    required this.onRetryLicense,
   });
+
+  /// Re-fetches the profile so the licence gets a new signed link.
+  final Future<void> Function() onRetryLicense;
 
   final String driverName;
   final String initial;
@@ -1092,7 +1097,21 @@ class _ProfileDetailsSheet extends StatelessWidget {
               borderRadius: BorderRadius.circular(BcRadius.card),
               child: AspectRatio(
                 aspectRatio: 16 / 10,
-                child: CachedNetworkImage(imageUrl: license, fit: BoxFit.cover),
+                child: CachedNetworkImage(
+                  imageUrl: license,
+                  fit: BoxFit.cover,
+                  placeholder: (_, _) => Container(
+                    color: c.surfaceElevated,
+                    alignment: Alignment.center,
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2.5, color: c.brand),
+                    ),
+                  ),
+                  // Usually an expired signed link — fetch a new one instead of a blank box.
+                  errorWidget: (_, _, _) => _LicenseLoadError(onRetry: onRetryLicense),
+                ),
               ),
             ),
           ),
@@ -1127,6 +1146,49 @@ class _ProfileDetailsSheet extends StatelessWidget {
         ),
         secondaryLabel: tr('Close'),
         onSecondary: () => Navigator.of(ctx).pop(),
+      ),
+    );
+  }
+}
+
+/// Shown in place of the licence image when it fails to load.
+class _LicenseLoadError extends StatefulWidget {
+  const _LicenseLoadError({required this.onRetry});
+  final Future<void> Function() onRetry;
+
+  @override
+  State<_LicenseLoadError> createState() => _LicenseLoadErrorState();
+}
+
+class _LicenseLoadErrorState extends State<_LicenseLoadError> {
+  bool _retrying = false;
+
+  Future<void> _retry() async {
+    if (_retrying) return;
+    setState(() => _retrying = true);
+    await widget.onRetry();
+    if (mounted) setState(() => _retrying = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    return Container(
+      color: c.surfaceElevated,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.broken_image_outlined, color: c.textMuted, size: 28),
+          const SizedBox(height: 6),
+          Text(
+            tr("Couldn't load the license"),
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: c.textMuted),
+          ),
+          TextButton(onPressed: _retrying ? null : _retry, child: Text(_retrying ? tr('Loading…') : tr('Retry'))),
+        ],
       ),
     );
   }
