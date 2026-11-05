@@ -1,5 +1,6 @@
 import {
   computePlatformProviderReceivableLkr,
+  computePlatformProviderReceivableLkrFromBreakdownCents,
   type PlatformProviderReceivableLkr,
 } from '@bingchun/settlement';
 import { parseSharedPromoFromBreakdown } from './sharedPromoContribution';
@@ -73,8 +74,14 @@ export function combinePlatformProviderReceivableLkr(
   const paybackEnabled = breakdowns.some((b) => paybackEnabledFromBreakdown(b));
   const gatewayRatePct = periodLkrs[0]?.gatewayRatePct ?? 1.9;
 
+  const perPeriodLkrs = breakdowns.map((b) =>
+    computePlatformProviderReceivableLkrFromBreakdownCents(
+      (b ?? {}) as Parameters<typeof computePlatformProviderReceivableLkrFromBreakdownCents>[0],
+    ),
+  );
+
   const sum = (pick: (l: PlatformProviderReceivableLkr) => number) =>
-    periodLkrs.reduce((acc, l) => acc + pick(l), 0);
+    perPeriodLkrs.reduce((acc, l) => acc + pick(l), 0);
 
   return computePlatformProviderReceivableLkr({
     commissionFeeLkr: sum((l) => l.commissionFeeLkr),

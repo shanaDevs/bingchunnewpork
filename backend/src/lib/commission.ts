@@ -621,7 +621,7 @@ export function sumOnlinePaymentsCollectedFromBreakdown(
   );
 }
 
-/** Payout 1 only: pickup + delivery online subtotal before discounts (channel table Subtotal column). */
+/** Pickup + delivery online subtotal before discounts (channel table Subtotal column). */
 export function sumFirstPayoutOnlineWalletBaseFromBreakdown(
   breakdown: Record<CommissionChannel, ChannelSettlementRow>,
 ): number {

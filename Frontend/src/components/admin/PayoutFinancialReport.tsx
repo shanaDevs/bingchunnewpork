@@ -226,7 +226,7 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
                 value={plainAmount(values.onlinePaymentsCollectedLkr)}
               />
             )}
-            {hasPositiveLkr(values.priorOnlineWalletAmountLkr) && (
+            {!isFirstCyclePayout && hasPositiveLkr(values.priorOnlineWalletAmountLkr) && (
               <ReportRow
                 label="- Online Wallet Amount (Payout 1)"
                 value={signedAmount(values.priorOnlineWalletAmountLkr, '−')}

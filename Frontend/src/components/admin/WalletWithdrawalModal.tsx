@@ -21,6 +21,10 @@ import {
   parseWithdrawalBreakdown,
   parseWithdrawalBreakdownFromNetPreview,
   mergeLivePayoutPreviewIntoStoredBreakdown,
+  mergeSharedPromoContributionFieldsIntoBreakdown,
+  isWithdrawalFinancialSnapshotLocked,
+  resolveFirstPayoutGatewayBaseLkr,
+  resolveFirstPayoutBranchWalletNetLkr,
   extractSharedPromoLkrFromBreakdown,
   resolvePlatformCommissionForPeriodLkr,
   resolvePeriodNetLkrFromBreakdown,
@@ -162,7 +166,7 @@ async function fetchNetPreviewMergedSharedPromoBreakdown(
     if (!res.ok) return stored;
     const preview = parseWithdrawalBreakdownFromNetPreview(json.data);
     if (!preview) return stored;
-    return mergeLivePayoutPreviewIntoStoredBreakdown(stored, preview);
+    return mergeSharedPromoContributionFieldsIntoBreakdown(stored, preview);
   } catch {
     return stored;
   }
@@ -319,6 +323,35 @@ export default function WalletWithdrawalModal({
     const to = toDateInputValue(viewWithdrawal.periodTo);
     const parsed = parseWithdrawalBreakdown(viewWithdrawal.breakdown);
     const hasFullSnapshot = parsed != null && !!parsed.channelBreakdown;
+    const snapshotLocked = isWithdrawalFinancialSnapshotLocked(viewWithdrawal.status);
+
+    if (snapshotLocked) {
+      let cancelled = false;
+      setViewSnapshotLoading(false);
+      const qs = viewWithdrawal.storeId
+        ? `?storeId=${encodeURIComponent(viewWithdrawal.storeId)}`
+        : '';
+
+      fetch(
+        `${apiBase}/admin/wallet/withdrawals/${encodeURIComponent(viewWithdrawal.id)}${qs}`,
+        withAdminCredentials(),
+      )
+        .then(async (res) => {
+          const json = await res.json();
+          if (!res.ok || cancelled) return;
+          const fresh = json.data as WithdrawalRow | undefined;
+          if (!fresh || fresh.id !== viewWithdrawal.id) return;
+          setResolvedViewWithdrawal(fresh);
+          applyViewWithdrawalSnapshot(fresh);
+        })
+        .catch(() => {
+          // keep table-row snapshot
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
 
     if (viewPeriodOnly && hasFullSnapshot) {
       if (!from || !to || !parsed) {
@@ -693,10 +726,15 @@ export default function WalletWithdrawalModal({
             periodNetLkr: periodNetForCap,
           })
         : null;
+  const useFullPeriodBranchPayoutDisplay =
+    isViewMode &&
+    (viewPeriodOnly ||
+      (activeViewWithdrawal != null &&
+        isWithdrawalFinancialSnapshotLocked(activeViewWithdrawal.status)));
   const branchPayout = resolveBranchPayoutDisplay({
     breakdown,
     amountCents: withdrawalAmountCents,
-    ...(isViewMode && viewPeriodOnly
+    ...(useFullPeriodBranchPayoutDisplay
       ? { scope: 'fullPeriod' as const }
       : payableWalletLkr != null && payableWalletLkr > 0
         ? { scope: 'thisPayment' as const, paymentWalletRequestLkr: payableWalletLkr }
@@ -724,6 +762,14 @@ export default function WalletWithdrawalModal({
   const showBreakdownLoadingPlaceholder =
     (netLoading || viewSnapshotLoading) && !breakdownLkr;
 
+  const firstPayoutGatewayBaseLkr =
+    breakdown && breakdownLkr?.cycleStage === 'FIRST'
+      ? resolveFirstPayoutGatewayBaseLkr(breakdown)
+      : null;
+  const firstPayoutBranchWalletNetLkr =
+    breakdown && breakdownLkr?.cycleStage === 'FIRST'
+      ? resolveFirstPayoutBranchWalletNetLkr(breakdown)
+      : null;
   const payoutBreakdownPanelProps = breakdownLkr
     ? {
         preview: isViewMode ? null : channelPreview,
@@ -737,11 +783,25 @@ export default function WalletWithdrawalModal({
         paybackEnabled,
         gatewayRatePct,
         useStoredSnapshot: isViewMode,
-        snapshotGatewayFeeLkr: isViewMode ? breakdownLkr.gatewayFee : null,
+        snapshotGatewayFeeLkr:
+          isViewMode && breakdownLkr.cycleStage === 'FIRST'
+            ? null
+            : isViewMode
+              ? breakdownLkr.gatewayFee
+              : null,
         snapshotGatewayRatePct: isViewMode ? breakdownLkr.gatewayRatePct ?? gatewayRatePct : null,
-        snapshotOnlineWalletGrossLkr: isViewMode ? breakdownLkr.onlineWalletGross : null,
+        snapshotOnlineWalletGrossLkr:
+          isViewMode && firstPayoutGatewayBaseLkr != null
+            ? firstPayoutGatewayBaseLkr
+            : isViewMode
+              ? breakdownLkr.onlineWalletGross
+              : null,
         snapshotNetAmountLkr:
-          isViewMode && breakdown ? resolvePeriodNetLkrFromBreakdown(breakdown) : null,
+          isViewMode && breakdownLkr.cycleStage === 'FIRST'
+            ? firstPayoutBranchWalletNetLkr
+            : isViewMode && breakdown
+              ? resolvePeriodNetLkrFromBreakdown(breakdown)
+              : null,
         sharedPromo,
         loyaltyDiscountLkr: breakdownLkr.periodLoyaltyDiscountTotal ?? 0,
         payoutSplit,

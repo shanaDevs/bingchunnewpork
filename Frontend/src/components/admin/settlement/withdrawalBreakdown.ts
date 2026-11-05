@@ -3,8 +3,12 @@ import {
   coerceBreakdownNumber,
   hasAnyPositiveLkr,
   parseJsonObjectIfString,
+  roundLkr,
 } from './lkrUtils';
-import { normalizeSettlementBreakdown } from './channelBreakdown';
+import {
+  normalizeSettlementBreakdown,
+  sumOnlineSubtotalBeforeDiscount,
+} from './channelBreakdown';
 import type { SettlementBreakdown } from './channelBreakdown';
 
 export type WithdrawalBreakdown = {
@@ -76,6 +80,8 @@ export type WithdrawalBreakdown = {
   cycleTo?: string;
   cyclePairId?: string;
   priorOnlineWalletAmountCents?: number;
+  /** Payout 1 pickup + delivery online subtotals (cents) — display on Payout 2 reports. */
+  firstPayoutOnlineSubtotalCents?: number;
   remainingOnlineWalletCents?: number;
 };
 
@@ -124,6 +130,7 @@ const WITHDRAWAL_OPTIONAL_NUMBER_KEYS = [
   'branchOwnedPromoDiscountTotal',
   'platformOwnedPromoDiscountTotal',
   'priorOnlineWalletAmountCents',
+  'firstPayoutOnlineSubtotalCents',
   'remainingOnlineWalletCents',
 ] as const satisfies ReadonlyArray<keyof WithdrawalBreakdown>;
 
@@ -156,6 +163,50 @@ function parseWithdrawalCycleFields(
       result.priorOnlineWalletAmountCents = Math.round(priorLkr * 100);
     }
   }
+
+  const firstSubtotalCents = coerceBreakdownNumber(raw.firstPayoutOnlineSubtotalCents);
+  if (firstSubtotalCents != null) {
+    result.firstPayoutOnlineSubtotalCents = firstSubtotalCents;
+  }
+}
+
+/** Payout 1 gateway fee base — pickup + delivery online subtotal before discounts. */
+export function resolveFirstPayoutGatewayBaseLkr(
+  b: WithdrawalBreakdown | null | undefined,
+): number | null {
+  if (!b || b.cycleStage !== 'FIRST') return null;
+  if (b.channelBreakdown) {
+    const subtotalLkr = sumOnlineSubtotalBeforeDiscount(b.channelBreakdown);
+    if (subtotalLkr > 0.001) return subtotalLkr;
+  }
+  if (b.firstPayoutOnlineSubtotalCents != null && b.firstPayoutOnlineSubtotalCents > 0) {
+    return b.firstPayoutOnlineSubtotalCents / 100;
+  }
+  const gatewayBaseCents = b.gatewayBase ?? b.onlineWalletGross;
+  if (gatewayBaseCents != null && gatewayBaseCents > 0) {
+    return gatewayBaseCents / 100;
+  }
+  return null;
+}
+
+/** Payout 1 branch wallet net after gateway on online subtotal (not online net). */
+export function resolveFirstPayoutBranchWalletNetLkr(
+  b: WithdrawalBreakdown | null | undefined,
+): number | null {
+  const baseLkr = resolveFirstPayoutGatewayBaseLkr(b);
+  if (baseLkr == null || !b) return null;
+  const ratePct = b.gatewayRatePct ?? 1.9;
+  const gatewayLkr = roundLkr(baseLkr * (ratePct / 100));
+  return roundLkr(baseLkr - gatewayLkr);
+}
+
+/** Payout 2 only: “Online Wallet Amount (Payout 1)” — subtotal before discounts, not net. */
+export function resolvePriorOnlineWalletDisplayLkr(b: WithdrawalBreakdown): number {
+  if (b.cycleStage === 'FIRST') return 0;
+  if (b.firstPayoutOnlineSubtotalCents != null && b.firstPayoutOnlineSubtotalCents > 0) {
+    return b.firstPayoutOnlineSubtotalCents / 100;
+  }
+  return (b.priorOnlineWalletAmountCents ?? 0) / 100;
 }
 
 /** Payout math fields refreshed from live net preview for Payout 1 (FIRST cycle stage). */
@@ -243,6 +294,15 @@ export function resolveFinalPayoutAmountLkr(
   breakdown: WithdrawalBreakdown | null | undefined,
   branchRequestAmountCents: number,
 ): number {
+  if (breakdown?.cycleStage === 'FIRST') {
+    const firstWalletNetLkr = resolveFirstPayoutBranchWalletNetLkr(breakdown);
+    if (firstWalletNetLkr != null) {
+      return computeFinalPayoutLkr(
+        firstWalletNetLkr,
+        centsToLkrAmount(splitSharedPromoContributions(breakdown).jasonAmount),
+      );
+    }
+  }
   if (breakdown?.finalPayoutAmount != null && breakdown.finalPayoutAmount > 0) {
     return centsToLkrAmount(breakdown.finalPayoutAmount);
   }
@@ -327,6 +387,13 @@ export function mergeSharedPromoContributionFieldsIntoBreakdown(
 }
 
 /** Merge live net-preview cycle stage and Payout 1 math into a locked withdrawal snapshot. */
+/** Processed withdrawals — payout math must come from the stored breakdown only. */
+export function isWithdrawalFinancialSnapshotLocked(
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED',
+): boolean {
+  return status === 'APPROVED' || status === 'REJECTED' || status === 'CANCELLED';
+}
+
 export function mergeLivePayoutPreviewIntoStoredBreakdown(
   stored: WithdrawalBreakdown,
   preview: WithdrawalBreakdown,
@@ -341,6 +408,12 @@ export function mergeLivePayoutPreviewIntoStoredBreakdown(
   if (preview.cyclePairId) merged.cyclePairId = preview.cyclePairId;
   if (preview.priorOnlineWalletAmountCents != null) {
     merged.priorOnlineWalletAmountCents = preview.priorOnlineWalletAmountCents;
+    if (preview.cycleStage === 'SECOND') {
+      merged.firstPayoutOnlineSubtotalCents = preview.priorOnlineWalletAmountCents;
+    }
+  }
+  if (preview.firstPayoutOnlineSubtotalCents != null) {
+    merged.firstPayoutOnlineSubtotalCents = preview.firstPayoutOnlineSubtotalCents;
   }
 
   if (preview.cycleStage === 'FIRST') {
@@ -549,6 +622,10 @@ export function resolvePeriodNetLkrFromBreakdown(
   breakdown: WithdrawalBreakdown | null | undefined,
 ): number {
   if (!breakdown) return 0;
+  if (breakdown.cycleStage === 'FIRST') {
+    const firstNetLkr = resolveFirstPayoutBranchWalletNetLkr(breakdown);
+    if (firstNetLkr != null) return firstNetLkr;
+  }
   return centsToLkrAmount(breakdown.periodNetAmount ?? breakdown.netAmount);
 }
 
@@ -612,7 +689,7 @@ export function withdrawalBreakdownToLkr(b: WithdrawalBreakdown) {
     cycleStage: b.cycleStage,
     cycleFrom: b.cycleFrom,
     cycleTo: b.cycleTo,
-    priorOnlineWalletAmountLkr: (b.priorOnlineWalletAmountCents ?? 0) / 100,
+    priorOnlineWalletAmountLkr: resolvePriorOnlineWalletDisplayLkr(b),
     remainingOnlineWalletLkr: (b.remainingOnlineWalletCents ?? 0) / 100,
   };
 }

@@ -1,4 +1,9 @@
 import { prisma } from './prisma';
+import {
+  sumFirstPayoutOnlineWalletBaseFromBreakdown,
+  type ChannelSettlementRow,
+  type CommissionChannel,
+} from './commission';
 import { toUtcDateStr } from './utcDateString';
 
 export type PayoutCycleStage = 'FIRST' | 'SECOND';
@@ -22,6 +27,32 @@ export function readOnlineWalletCentsFromBreakdown(breakdown: unknown): number {
   if (typeof row.onlinePaymentsCollected === 'number') return row.onlinePaymentsCollected;
   if (typeof row.onlineWalletGross === 'number') return row.onlineWalletGross;
   return 0;
+}
+
+/**
+ * Payout 1 pickup + delivery online subtotals before discounts (channel table Subtotal column).
+ * Used as “Online Wallet Amount (Payout 1)” on Payout 2 reports.
+ */
+export function readFirstPayoutOnlineSubtotalCentsFromBreakdown(breakdown: unknown): number {
+  if (!breakdown || typeof breakdown !== 'object') return 0;
+  const row = breakdown as {
+    firstPayoutOnlineSubtotalCents?: number;
+    channelBreakdown?: Record<CommissionChannel, ChannelSettlementRow>;
+    onlinePaymentsCollected?: number;
+    onlineWalletGross?: number;
+  };
+  if (
+    typeof row.firstPayoutOnlineSubtotalCents === 'number' &&
+    Number.isFinite(row.firstPayoutOnlineSubtotalCents)
+  ) {
+    return Math.round(row.firstPayoutOnlineSubtotalCents);
+  }
+  if (row.channelBreakdown && typeof row.channelBreakdown === 'object') {
+    return Math.round(
+      sumFirstPayoutOnlineWalletBaseFromBreakdown(row.channelBreakdown) * 100,
+    );
+  }
+  return readOnlineWalletCentsFromBreakdown(breakdown);
 }
 
 /** Next payout alternates FIRST after a completed SECOND pair. */
@@ -64,7 +95,9 @@ export async function resolvePayoutCycleContext(storeId: string): Promise<Payout
     cycleStage: 'SECOND',
     cycleFrom: toUtcDateStr(pairedFirst.periodFrom),
     cyclePairId: pairedFirst.id,
-    priorOnlineWalletAmountCents: readOnlineWalletCentsFromBreakdown(pairedFirst.breakdown),
+    priorOnlineWalletAmountCents: readFirstPayoutOnlineSubtotalCentsFromBreakdown(
+      pairedFirst.breakdown,
+    ),
   };
 }
 

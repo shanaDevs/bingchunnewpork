@@ -1,6 +1,6 @@
 'use client';
 
-import { adminAuthHeaders } from '@/lib/adminSession';
+import { adminAuthHeaders, withAdminCredentials } from '@/lib/adminSession';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -25,7 +25,6 @@ import {
 import PayoutBreakdownPanel from '@/components/admin/PayoutBreakdownPanel';
 import {
   channelBreakdownHasSalesActivity,
-  computeAvailableToWithdrawFromChannelBreakdown,
   computePeriodPayoutSplitLkr,
   extractSharedPromoLkrFromBreakdown,
   hasPositiveLkr,
@@ -59,8 +58,18 @@ import {
   normalizePayoutPeriodDate,
   type BranchPayoutCompletedMeta,
 } from '@/lib/branchPayoutsDue';
+import { findPairedFirstPayoutPeriodRow } from '@/components/admin/payoutPeriodRowCycleDisplay';
+import { resolvePayoutPeriodRowDisplayAmounts } from '@/components/admin/payoutPeriodRowAmounts';
+import { resolveInitiatePayoutAvailableBalance } from '@/components/admin/initiatePayoutAvailableBalance';
+import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
+import { toDateInputValue } from '@/lib/walletUtils';
 
 type PaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CHECK' | '';
+
+type BranchWalletSummary = {
+  onlineWalletAvailableBalance?: number;
+  availableBalance?: number;
+};
 
 type Props = {
   open: boolean;
@@ -179,9 +188,9 @@ export default function AdminInitiatePayoutModal({
   const [periodInfoLoading, setPeriodInfoLoading] = useState(false);
   const [periodNet, setPeriodNet] = useState<WithdrawalBreakdown | null>(null);
   const [channelPreview, setChannelPreview] = useState<SettlementPreview | null>(null);
-  const [orderAvailableRemainingLkr, setOrderAvailableRemainingLkr] = useState<number | null>(
-    null,
-  );
+  const [walletSummary, setWalletSummary] = useState<BranchWalletSummary | null>(null);
+  const [walletSummaryLoading, setWalletSummaryLoading] = useState(false);
+  const [priorPairNetPayoutFinalPayLkr, setPriorPairNetPayoutFinalPayLkr] = useState(0);
   const [periodDays, setPeriodDays] = useState<number | null>(null);
   const [periodOptions, setPeriodOptions] = useState<RollingPeriodOption[]>([]);
   const [tierPreview, setTierPreview] = useState<{
@@ -242,7 +251,9 @@ export default function AdminInitiatePayoutModal({
       setPeriodInfoLoading(false);
       setPeriodNet(null);
       setChannelPreview(null);
-      setOrderAvailableRemainingLkr(null);
+      setWalletSummary(null);
+      setWalletSummaryLoading(false);
+      setPriorPairNetPayoutFinalPayLkr(0);
       setPeriodDays(null);
       setPeriodOptions([]);
       setTierPreview(null);
@@ -332,6 +343,86 @@ export default function AdminInitiatePayoutModal({
   }, [open, apiBase, storeId, presetPeriodFrom, presetPeriodTo, presetPeriodDays, duePeriodLocked]);
 
   useEffect(() => {
+    if (!open || !storeId) return;
+
+    let cancelled = false;
+    setWalletSummaryLoading(true);
+
+    fetch(
+      `${apiBase}/admin/wallet/summary?storeId=${encodeURIComponent(storeId)}`,
+      withAdminCredentials(),
+    )
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.message || 'Failed to load wallet summary');
+        if (!cancelled) setWalletSummary(json.data as BranchWalletSummary);
+      })
+      .catch(() => {
+        if (!cancelled) setWalletSummary(null);
+      })
+      .finally(() => {
+        if (!cancelled) setWalletSummaryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, storeId, apiBase]);
+
+  useEffect(() => {
+    if (!open || !storeId || !dateFrom || !dateTo) {
+      setPriorPairNetPayoutFinalPayLkr(0);
+      return;
+    }
+
+    let cancelled = false;
+    const qs = new URLSearchParams({
+      storeId,
+      limit: '100',
+      page: '1',
+    });
+
+    fetch(`${apiBase}/admin/wallet/withdrawals?${qs}`, withAdminCredentials())
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok || cancelled) return;
+        const rows = (json.data?.items ?? json.data?.withdrawals ?? []) as WithdrawalRow[];
+        const periodRows = rows
+          .filter((row) => row.status === 'APPROVED' || row.status === 'PENDING')
+          .map((row) => ({
+            periodFrom: toDateInputValue(row.periodFrom),
+            periodTo: toDateInputValue(row.periodTo),
+            amountCents: row.amount,
+            breakdown: row.breakdown,
+          }))
+          .filter((row) => row.periodFrom && row.periodTo);
+
+        const firstPairRow = findPairedFirstPayoutPeriodRow(periodRows, {
+          periodFrom: dateFrom,
+          periodTo: dateTo,
+        });
+        if (!firstPairRow || cancelled) {
+          setPriorPairNetPayoutFinalPayLkr(0);
+          return;
+        }
+        const amounts = resolvePayoutPeriodRowDisplayAmounts({
+          amountCents: firstPairRow.amountCents,
+          breakdown: firstPairRow.breakdown,
+          periodFrom: firstPairRow.periodFrom,
+          periodTo: firstPairRow.periodTo,
+        });
+        setPriorPairNetPayoutFinalPayLkr(amounts.branchReceives);
+      })
+      .catch(() => {
+        if (!cancelled) setPriorPairNetPayoutFinalPayLkr(0);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, storeId, apiBase, dateFrom, dateTo]);
+
+  useEffect(() => {
     if (!open) return;
 
     if (previewTimer.current) {
@@ -342,7 +433,6 @@ export default function AdminInitiatePayoutModal({
     if (periodDays == null || !isValidRange(dateFrom, dateTo)) {
       setPeriodNet(null);
       setChannelPreview(null);
-      setOrderAvailableRemainingLkr(null);
       setTierPreview(null);
       return;
     }
@@ -408,19 +498,9 @@ export default function AdminInitiatePayoutModal({
         }
 
         setChannelPreview(nextChannelPreview);
-        if (typeof json.data?.orderAvailableRemainingLkr === 'number') {
-          setOrderAvailableRemainingLkr(json.data.orderAvailableRemainingLkr);
-        } else if (nextChannelPreview?.breakdown) {
-          setOrderAvailableRemainingLkr(
-            computeAvailableToWithdrawFromChannelBreakdown(nextChannelPreview.breakdown),
-          );
-        } else {
-          setOrderAvailableRemainingLkr(null);
-        }
       } catch (err) {
         setPeriodNet(null);
         setChannelPreview(null);
-        setOrderAvailableRemainingLkr(null);
         setTierPreview(null);
         setPaybackEnabled(false);
         setError(err instanceof Error ? err.message : 'Could not calculate net amount');
@@ -437,12 +517,11 @@ export default function AdminInitiatePayoutModal({
 
   if (!portalReady || !open) return null;
 
-  const availableLkr =
-    orderAvailableRemainingLkr ??
-    (channelPreview?.breakdown != null
-      ? computeAvailableToWithdrawFromChannelBreakdown(channelPreview.breakdown)
-      : centsToLkr(availableBalance));
+  const onlineWalletAvailableCents =
+    walletSummary?.onlineWalletAvailableBalance ?? availableBalance;
+  const onlineWalletAvailableLkr = centsToLkr(onlineWalletAvailableCents);
   const periodBreakdownLkr = periodNet ? withdrawalBreakdownToLkr(periodNet) : null;
+  const payoutCycleStage = periodBreakdownLkr?.cycleStage ?? periodNet?.cycleStage;
   const rangeReady = isValidRange(dateFrom, dateTo);
   const periodInFuture = !!dateTo && dateTo > todayDateStr();
   const selectedPeriodOption =
@@ -513,14 +592,24 @@ export default function AdminInitiatePayoutModal({
     branchPayout?.periodWalletNetLkr ??
     (periodNet ? resolvePeriodNetLkrFromBreakdown(periodNet) : null) ??
     (periodNet ? periodNet.netAmount / 100 : null);
-  const payTotalLkr = branchPayout?.totalBranchPayoutLkr ?? 0;
+  const netPayoutFinalPayLkr = branchPayout?.totalBranchPayoutLkr ?? 0;
+  const payTotalLkr = netPayoutFinalPayLkr;
   const reportBranchWalletNetLkr = branchPayout?.periodWalletNetLkr ?? periodNetLkr ?? 0;
   const branchWalletNetLkr = resolveBranchWalletNetLkrForPayout(periodNet, reportBranchWalletNetLkr);
-  const availableAfterPayoutLkr =
-    branchWalletNetLkr > 0 ? Math.max(0, availableLkr - branchWalletNetLkr) : null;
+  const effectiveCycleStage =
+    payoutCycleStage ??
+    (priorPairNetPayoutFinalPayLkr > 0.001 ? ('SECOND' as const) : undefined);
+  const availableBalanceView = resolveInitiatePayoutAvailableBalance({
+    onlineWalletAvailableLkr,
+    priorPairNetPayoutFinalPayLkr,
+    cycleStage: effectiveCycleStage,
+    netPayoutFinalPayLkr,
+  });
+  const availableLkr = availableBalanceView.availableBeforePayoutLkr;
+  const availableAfterPayoutLkr = availableBalanceView.availableAfterPayoutLkr;
   const payDisabledNote = resolveInitiatePayoutPayDisabledNote({
     previewLoading,
-    finalPayLkr: branchWalletNetLkr,
+    finalPayLkr: netPayoutFinalPayLkr,
     availableLkr,
     paymentMethod,
     reviewed,
@@ -663,8 +752,8 @@ export default function AdminInitiatePayoutModal({
       toast.error(payDisabledNote);
       return;
     }
-    if (!availableCoversFinalPayout(availableLkr, branchWalletNetLkr)) {
-      toast.error('Available to withdraw must cover the branch net payout for this period');
+    if (!availableCoversFinalPayout(availableLkr, netPayoutFinalPayLkr)) {
+      toast.error('Available to withdraw must cover the branch receives amount for this payout');
       return;
     }
     if (!checkValid) {
@@ -710,9 +799,11 @@ export default function AdminInitiatePayoutModal({
               <p className="mt-1 text-[15px] font-medium text-[#64748b] dark:text-slate-400">
                 Paying {branchName} · Available to withdraw:{' '}
                 <span className="font-bold text-[#2563eb]">
-                  LKR {formatMoneyAmount(availableLkr)}
+                  {walletSummaryLoading
+                    ? '…'
+                    : `LKR ${formatMoneyAmount(availableLkr)}`}
                 </span>
-                {availableAfterPayoutLkr != null && branchWalletNetLkr > 0 && (
+                {availableAfterPayoutLkr != null && netPayoutFinalPayLkr > 0 && (
                   <>
                     {' '}
                     · After net payout:{' '}

@@ -45,6 +45,7 @@ import type { PlatformProviderReceivableLkr } from '@bingchun/settlement';
 
 type BulkResult = {
   storeId: string;
+  withdrawalId?: string;
   storeName: string;
   success: boolean;
   statementRef?: string;
@@ -654,9 +655,13 @@ export default function ProcessPaymentBulkModal({
                         <h3 className="text-sm font-semibold text-[var(--color-text)]">Results</h3>
                       </div>
                       <div className="divide-y divide-[var(--color-navy-border)]">
-                        {results.map((result) => (
+                        {results.map((result, index) => (
                           <div
-                            key={`${result.storeId}-${result.statementRef ?? result.error}`}
+                            key={
+                              result.withdrawalId ??
+                              result.settlementId ??
+                              `${result.storeId}-${result.statementRef ?? result.error}-${index}`
+                            }
                             className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"
                           >
                             <div>

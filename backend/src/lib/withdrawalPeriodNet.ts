@@ -14,7 +14,7 @@ import {
 import {
   cycleContextFromWithdrawal,
   determineNextPayoutCycleStage,
-  readOnlineWalletCentsFromBreakdown,
+  readFirstPayoutOnlineSubtotalCentsFromBreakdown,
   resolvePayoutCycleContext,
   type PayoutCycleContext,
   type PayoutBreakdownOptions,
@@ -26,7 +26,10 @@ import {
   toUtcDateStr,
 } from './utcDateString';
 import { getNextPayoutStartDate } from './withdrawalPayoutPeriod';
-import { sumBreakdownConvenienceFee } from './commission';
+import {
+  sumBreakdownConvenienceFee,
+  sumFirstPayoutOnlineWalletBaseFromBreakdown,
+} from './commission';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
 
 export type PayoutWindowBounds = { from: string; to: string };
@@ -163,10 +166,10 @@ async function liveFirstOnlineWalletCents(
   from: string,
   to: string,
 ): Promise<number> {
-  const breakdown = await computeBreakdownForPeriod(storeId, from, to, {
-    cycleStage: 'FIRST',
-  });
-  return breakdown.onlinePaymentsCollected;
+  const preview = await buildPeriodChannelPreview(storeId, from, to);
+  return Math.round(
+    sumFirstPayoutOnlineWalletBaseFromBreakdown(preview.breakdown) * 100,
+  );
 }
 
 async function findPairedFirstWithdrawalRow(storeId: string): Promise<{
@@ -197,7 +200,9 @@ async function buildSecondCycleContextFromFirstWithdrawal(
     cycleFrom: toUtcDateStr(firstRow.periodFrom),
     cycleTo: secondWindow.to,
     cyclePairId: firstRow.id,
-    priorOnlineWalletAmountCents: readOnlineWalletCentsFromBreakdown(firstRow.breakdown),
+    priorOnlineWalletAmountCents: readFirstPayoutOnlineSubtotalCentsFromBreakdown(
+      firstRow.breakdown,
+    ),
   };
 }
 
@@ -216,7 +221,9 @@ async function buildSecondCycleContext(
   let cyclePairId: string | undefined;
 
   if (firstWithdrawal) {
-    priorOnlineWalletAmountCents = readOnlineWalletCentsFromBreakdown(firstWithdrawal.breakdown);
+    priorOnlineWalletAmountCents = readFirstPayoutOnlineSubtotalCentsFromBreakdown(
+      firstWithdrawal.breakdown,
+    );
     cyclePairId = firstWithdrawal.id;
   } else {
     priorOnlineWalletAmountCents = await liveFirstOnlineWalletCents(
@@ -342,7 +349,7 @@ export async function computePeriodBreakdownForPayout(
         cyclePairId: cycle.cyclePairId ?? firstRow.id,
         priorOnlineWalletAmountCents:
           cycle.priorOnlineWalletAmountCents ??
-          readOnlineWalletCentsFromBreakdown(firstRow.breakdown),
+          readFirstPayoutOnlineSubtotalCentsFromBreakdown(firstRow.breakdown),
       };
     }
   }

@@ -162,7 +162,7 @@ export default function WalletTankCard({
       <div className="mt-[14px] flex min-h-[64px] items-stretch gap-3 pb-0">
         <BalanceMetric
           icon={Layers}
-          label="Total Wallet Balance"
+          label="All-Time Available Balance"
           amount={formatMoney(balance)}
           loading={loading}
         />
