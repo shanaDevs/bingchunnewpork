@@ -594,6 +594,13 @@ const Map<String, String> zhStrings = {
   'Android may put the app to sleep and delay new delivery jobs.': 'Android 可能会让应用休眠并延迟新配送任务。',
   'Allow background running': '允许后台运行',
   'Full-Screen Ride Alerts': '全屏行程提醒',
+  'Quick Action Bubble': '快捷悬浮球',
+  'Off. No floating Bing Chun bubble when you leave the app.': '已关闭。离开应用时不显示 Bing Chun 悬浮球。',
+  'On. When you leave the app, a floating Bing Chun bubble stays on screen. Tap it to return, drag it anywhere, or drop it on ✕ to hide it.':
+      '已开启。离开应用后，屏幕上会显示 Bing Chun 悬浮球。点按返回应用，可拖动到任意位置，拖到 ✕ 即可隐藏。',
+  'Allow "Display over other apps" so the floating Bing Chun bubble can show when you leave the app.':
+      '请允许“显示在其他应用上层”，以便离开应用时显示 Bing Chun 悬浮球。',
+  'Allow display over other apps': '允许显示在其他应用上层',
   'Allowed. Incoming jobs can ring over the lock screen immediately.': '已允许。新任务可立即在锁屏上响铃。',
   'Off. New rides will NOT show over the lock screen, only as a small notification. Turn on so you never miss a ride.': '已关闭。新订单不会在锁屏上全屏显示，只会显示为小通知。请开启，以免错过订单。',
   'Permission required to pop up incoming jobs over locked screens.': '需要权限才能在锁屏上弹出新任务。',

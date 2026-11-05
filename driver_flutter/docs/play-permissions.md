@@ -73,3 +73,5 @@ Shown in-app on the location gate (`lib/ui/components/device_lock_overlay.dart`,
 ## Other permissions (no declaration form)
 
 `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_FINE/COARSE_LOCATION` (while-in-use), `VIBRATE`, `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE`, `WAKE_LOCK`.
+
+`SYSTEM_ALERT_WINDOW` ("Display over other apps") — opt-in quick-action bubble (`QuickBubble.kt`): while the app is in the background, a floating app-logo bubble returns the rider to the app with one tap. The rider grants it from Me → Job Alerts & Reliability → Quick Action Bubble; nothing is drawn over other apps until then.

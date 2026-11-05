@@ -150,6 +150,7 @@ class _AuthGateState extends State<_AuthGate> {
       });
     }
     _wasAuthed = authed;
+    SystemSettings.setQuickBubbleSignedIn(authed);
     if (!authed) return const LoginScreen();
     // Optional app lock: verify the rider before the dashboard after every cold start.
     return lock.needsUnlock ? const AppLockScreen(key: ValueKey('app-lock')) : const HomeShell();
