@@ -1,0 +1,10 @@
+/*
+ * The Offers page's ticker ribbons (OffersTicker): the strip holds its words twice over and slides by one copy
+ * (-50%), so the loop is seamless; `reverse` for the ribbon running the other way. Reduced motion leaves it in
+ * place (theme.css cuts animations inside .home-redesign).
+ */
+@keyframes offers-ticker {
+  to {
+    translate: -50% 0;
+  }
+}

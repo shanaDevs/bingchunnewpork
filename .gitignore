@@ -97,3 +97,6 @@ deploy/digitalocean/.generated-app.delivery.yaml
 deploy/digitalocean/.generated-app.shop.yaml
 deploy/digitalocean/.generated-app.admin.yaml
 deploy/digitalocean/.live-delivery-me-audit.json
+
+# Frontend-v2 shares Frontend/public through a local link (created by `npm run setup:frontend-v2`)
+/Frontend-v2/public
