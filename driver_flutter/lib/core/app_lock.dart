@@ -41,6 +41,11 @@ class AppLock extends ChangeNotifier {
   /// Unlocked for this app run. Cold starts begin locked when a method is set.
   bool _unlocked = false;
 
+  /// Android can't tell apps which biometric is enrolled (it reports only strong/weak
+  /// classes) and its prompt accepts any of them, so fingerprint and face are offered
+  /// as one "Biometric" option there, stored as [AppLockMethod.fingerprint].
+  static bool get combinedBiometric => defaultTargetPlatform == TargetPlatform.android;
+
   bool get enabled => method != AppLockMethod.none;
   bool get needsUnlock => enabled && !_unlocked;
   bool get isBiometric => method == AppLockMethod.fingerprint || method == AppLockMethod.face;
@@ -55,6 +60,11 @@ class AppLock extends ChangeNotifier {
       failedPinAttempts = int.tryParse(await _storage.read(key: _kFails) ?? '') ?? 0;
       // A PIN lock without a stored PIN can never be opened — treat it as off.
       if (method == AppLockMethod.pin && (_pinHash == null || _pinSalt == null)) method = AppLockMethod.none;
+      // Older Android builds offered a separate face option — fold it into the one biometric option.
+      if (combinedBiometric && method == AppLockMethod.face) {
+        method = AppLockMethod.fingerprint;
+        await _storage.write(key: _kMethod, value: method.name);
+      }
     } catch (_) {
       method = AppLockMethod.none;
     }
@@ -97,20 +107,22 @@ class AppLock extends ChangeNotifier {
 
   // ---------------- Biometrics ----------------
 
-  /// Fingerprint / face availability. Android often reports only a strength
-  /// class (strong/weak) instead of the sensor kind: strong → fingerprint,
-  /// weak → face unlock, which is how most Android phones classify them.
+  /// Which biometrics are actually enrolled on this phone right now.
+  ///
+  /// iOS reports the exact kind (Face ID / Touch ID), and only once enrolled.
+  /// Android usually reports just a strength class, and a fingerprint-only phone
+  /// still reports "weak", so face can't be detected reliably there. On Android
+  /// [BiometricSupport.fingerprint] means "any biometric enrolled" and face is never offered.
   Future<BiometricSupport> biometricSupport() async {
     try {
       if (!await _auth.isDeviceSupported() || !await _auth.canCheckBiometrics) {
         return (fingerprint: false, face: false);
       }
       final types = await _auth.getAvailableBiometrics();
-      final android = defaultTargetPlatform == TargetPlatform.android;
+      if (combinedBiometric) return (fingerprint: types.isNotEmpty, face: false);
       return (
-        fingerprint:
-            types.contains(BiometricType.fingerprint) || (android && types.contains(BiometricType.strong)),
-        face: types.contains(BiometricType.face) || (android && types.contains(BiometricType.weak)),
+        fingerprint: types.contains(BiometricType.fingerprint),
+        face: types.contains(BiometricType.face),
       );
     } catch (_) {
       return (fingerprint: false, face: false);

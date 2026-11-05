@@ -303,6 +303,8 @@ class _MeBodyState extends State<_MeBody> with WidgetsBindingObserver {
               title: tr('App lock'),
               subtitle: lock.enabled
                   ? tr('On · {method}', {'method': appLockLabel(lock.method)})
+                  : AppLock.combinedBiometric
+                  ? tr('PIN or biometric')
                   : tr('PIN, fingerprint or Face ID'),
               trailing: Icon(Icons.chevron_right_rounded, color: c.textMuted),
               onTap: () {
