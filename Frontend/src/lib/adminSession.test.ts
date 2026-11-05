@@ -42,9 +42,9 @@ function stubBrowserStorage() {
 }
 
 describe('getIdleTimeoutMs', () => {
-  it('applies 15 minute idle limit for HQ roles only', () => {
-    expect(getIdleTimeoutMs('SYSTEM_ADMIN')).toBe(15 * 60 * 1000);
-    expect(getIdleTimeoutMs('DELIVERY_ADMIN')).toBe(15 * 60 * 1000);
+  it('disables idle auto-logout for all admin roles', () => {
+    expect(getIdleTimeoutMs('SYSTEM_ADMIN')).toBeNull();
+    expect(getIdleTimeoutMs('DELIVERY_ADMIN')).toBeNull();
     expect(getIdleTimeoutMs('STORE_MANAGER')).toBeNull();
     expect(getIdleTimeoutMs('CASHIER')).toBeNull();
   });

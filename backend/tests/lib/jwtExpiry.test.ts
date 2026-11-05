@@ -4,6 +4,8 @@ import { config } from '../../src/config';
 import {
   accessExpiresAtMsFromToken,
   adminAccessTokenMaxAgeMs,
+  customerAccessTokenMaxAgeMs,
+  customerRefreshTokenMaxAgeMs,
   jwtDurationToMs,
 } from '../../src/lib/jwtExpiry';
 import { signToken } from '../../src/middleware/auth';
@@ -22,5 +24,7 @@ describe('jwtExpiry', () => {
 
   it('aligns cookie max age with configured JWT expiry', () => {
     expect(adminAccessTokenMaxAgeMs()).toBe(jwtDurationToMs(config.jwtExpiresIn));
+    expect(customerAccessTokenMaxAgeMs()).toBe(jwtDurationToMs(config.jwtUserExpiresIn));
+    expect(customerRefreshTokenMaxAgeMs()).toBe(jwtDurationToMs(config.jwtUserRefreshExpiresIn));
   });
 });

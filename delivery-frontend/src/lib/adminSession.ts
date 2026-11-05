@@ -5,7 +5,8 @@ import { getAdminSession } from './adminAuth';
 import { getApiBaseUrl } from './apiBase';
 import { getDeliveryApiBaseUrl } from './deliveryApi';
 
-export const ADMIN_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+/** Idle auto-logout disabled — sessions stay alive via access/refresh token rotation. */
+export const ADMIN_IDLE_TIMEOUT_MS: number | null = null;
 export const ADMIN_ACCESS_REFRESH_BUFFER_MS = 2 * 60 * 1000;
 const ADMIN_ACCESS_EXP_KEY = 'bc_admin_access_exp';
 const ADMIN_CSRF_STORAGE_KEY = 'bc_admin_csrf';
@@ -93,9 +94,8 @@ export function withAdminCredentials(init: RequestInit = {}): RequestInit {
   return { ...init, credentials: 'include', headers };
 }
 
-export function getIdleTimeoutMs(role?: string): number | null {
-  if (role === 'SYSTEM_ADMIN' || role === 'DELIVERY_ADMIN') return ADMIN_IDLE_TIMEOUT_MS;
-  return null;
+export function getIdleTimeoutMs(_role?: string): number | null {
+  return ADMIN_IDLE_TIMEOUT_MS;
 }
 
 function isAdminIdleExceeded(): boolean {

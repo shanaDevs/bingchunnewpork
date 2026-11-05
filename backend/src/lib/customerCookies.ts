@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { config } from '../config';
-import { adminAccessTokenMaxAgeMs, adminRefreshTokenMaxAgeMs } from './jwtExpiry';
+import { customerAccessTokenMaxAgeMs, customerRefreshTokenMaxAgeMs } from './jwtExpiry';
 import { ADMIN_CSRF_COOKIE, assertAdminCsrf } from './adminCookies';
 import { randomBytes } from 'crypto';
 
@@ -23,23 +23,25 @@ function base() {
 export function setCustomerAuthCookies(res: Response, accessToken: string, refreshToken: string): void {
   const shared = base();
   const csrf = randomBytes(24).toString('base64url');
+  const accessMaxAge = customerAccessTokenMaxAgeMs();
+  const refreshMaxAge = customerRefreshTokenMaxAgeMs();
   res.cookie(CUSTOMER_ACCESS_COOKIE, accessToken, {
     ...shared,
     httpOnly: true,
     path: '/',
-    maxAge: adminAccessTokenMaxAgeMs(),
+    maxAge: accessMaxAge,
   });
   res.cookie(CUSTOMER_REFRESH_COOKIE, refreshToken, {
     ...shared,
     httpOnly: true,
     path: '/api/auth',
-    maxAge: adminRefreshTokenMaxAgeMs(),
+    maxAge: refreshMaxAge,
   });
   res.cookie(ADMIN_CSRF_COOKIE, csrf, {
     ...shared,
     httpOnly: false,
     path: '/',
-    maxAge: adminRefreshTokenMaxAgeMs(),
+    maxAge: refreshMaxAge,
   });
 }
 
