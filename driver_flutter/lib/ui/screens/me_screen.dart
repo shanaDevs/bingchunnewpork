@@ -1208,6 +1208,8 @@ class _BranchRequestRow extends StatelessWidget {
       'PENDING' => (tr('Pending'), c.brand),
       _ => (s.isEmpty ? s : s[0] + s.substring(1).toLowerCase(), c.brand),
     };
+    final note = req.reviewNote?.trim();
+    final rejectionReason = s == 'REJECTED' && note != null && note.isNotEmpty ? note : null;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: BcSheetCard(
@@ -1231,6 +1233,14 @@ class _BranchRequestRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(Format.jobDateTime(req.createdAt), style: TextStyle(fontSize: 11.5, color: c.textMuted)),
+                  // The admin's note is optional — only shown when they left one on a rejection.
+                  if (rejectionReason != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      tr('Reason: {reason}', {'reason': rejectionReason}),
+                      style: TextStyle(fontSize: 12.5, height: 1.35, color: c.danger),
+                    ),
+                  ],
                 ],
               ),
             ),
