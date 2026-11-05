@@ -13,8 +13,15 @@ import {
   platformItemSalesLkr,
 } from './walletRevenue';
 import { buildPeriodChannelPreview, channelPreviewFromPeriodBreakdown } from './periodChannelPreview';
-import { computePeriodBreakdownForPayout } from './withdrawalPeriodNet';
-import { resolvePayoutCycleContext } from './payoutCycle';
+import {
+  computePeriodBreakdownForPayout,
+  resolveCycleContextsForWindows,
+  resolveCycleContextForWindow,
+  resolveSecondPayoutTableAllocationCents,
+  payoutWindowKey,
+  type PayoutWindowBounds,
+} from './withdrawalPeriodNet';
+import type { PayoutCycleContext } from './payoutCycle';
 import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import {
   computeBreakdownForPeriod,
@@ -234,12 +241,13 @@ export const PAYOUT_PERIOD_LIST_SELECT = {
 } as const;
 
 /** Table-row summary: merged period net/orderCount without channel snapshot extras. */
-export async function computeMergedPeriodSummary(storeId: string, from: string, to: string) {
-  const [sharedPromo, breakdown] = await Promise.all([
-    computeSharedPromoContribution(storeId, from, to),
-    computeBreakdownForPeriod(storeId, from, to),
-  ]);
-  return mergeSharedPromoIntoBreakdown(breakdown, sharedPromo);
+export async function computeMergedPeriodSummary(
+  storeId: string,
+  from: string,
+  to: string,
+  cycleCtx?: PayoutCycleContext,
+) {
+  return computePeriodBreakdownForPayout(storeId, from, to, cycleCtx);
 }
 
 export const PAYOUT_PERIODS_CACHE_TTL_MS = 45_000;
@@ -293,6 +301,31 @@ export async function loadPayoutPeriodItems(storeId: string) {
     (window) => !covered.has(periodKey(window.from, window.to)),
   );
 
+  const openWindow = await resolveOpenRollingPayoutWindow(storeId, FIXED_PAYOUT_PERIOD_DAYS);
+  let inProgressIdealTo: string | null = null;
+  if (openWindow?.capped && openWindow.from <= openWindow.to) {
+    inProgressIdealTo = addDaysToDateStr(openWindow.from, FIXED_PAYOUT_PERIOD_DAYS - 1);
+  }
+
+  const windowsForCycleContext: PayoutWindowBounds[] = uncoveredWindows.map((window) => ({
+    from: window.from,
+    to: window.to,
+  }));
+  if (openWindow && inProgressIdealTo) {
+    const inProgressKey = periodKey(openWindow.from, inProgressIdealTo);
+    const pendingKeysPreview = new Set(
+      uncoveredWindows.map((w) => periodKey(w.from, w.to)),
+    );
+    if (!covered.has(inProgressKey) && !pendingKeysPreview.has(inProgressKey)) {
+      windowsForCycleContext.push({ from: openWindow.from, to: inProgressIdealTo });
+    }
+  }
+
+  const cycleContextsByWindow = await resolveCycleContextsForWindows(
+    storeId,
+    windowsForCycleContext,
+  );
+
   const pendingWindows: Array<{
     key: string;
     periodFrom: string;
@@ -305,7 +338,11 @@ export async function loadPayoutPeriodItems(storeId: string) {
   }> = [];
 
   for (const window of uncoveredWindows) {
-    const merged = await computeMergedPeriodSummary(storeId, window.from, window.to);
+    const cycleCtx =
+      cycleContextsByWindow.get(payoutWindowKey(window.from, window.to)) ?? {
+        cycleStage: 'FIRST' as const,
+      };
+    const merged = await computeMergedPeriodSummary(storeId, window.from, window.to, cycleCtx);
     if (merged.netAmount <= 0) continue;
     pendingWindows.push({
       key: `period-${window.from}-${window.to}`,
@@ -321,26 +358,29 @@ export async function loadPayoutPeriodItems(storeId: string) {
 
   items.push(...pendingWindows);
 
-  const openWindow = await resolveOpenRollingPayoutWindow(storeId, FIXED_PAYOUT_PERIOD_DAYS);
-  if (openWindow?.capped && openWindow.from <= openWindow.to) {
-    const idealTo = addDaysToDateStr(openWindow.from, FIXED_PAYOUT_PERIOD_DAYS - 1);
-    const inProgressKey = periodKey(openWindow.from, idealTo);
+  if (openWindow?.capped && openWindow.from <= openWindow.to && inProgressIdealTo) {
+    const inProgressKey = periodKey(openWindow.from, inProgressIdealTo);
     const pendingKeys = new Set(
       pendingWindows.map((w) => periodKey(w.periodFrom, w.periodTo)),
     );
     if (!covered.has(inProgressKey) && !pendingKeys.has(inProgressKey)) {
       const summaryThrough =
         openWindow.to < openWindow.from ? openWindow.from : openWindow.to;
+      const cycleCtx =
+        cycleContextsByWindow.get(payoutWindowKey(openWindow.from, inProgressIdealTo)) ?? {
+          cycleStage: 'FIRST' as const,
+        };
       const merged = await computeMergedPeriodSummary(
         storeId,
         openWindow.from,
         summaryThrough,
+        cycleCtx,
       );
       // Visibility only — same summary helpers; show open cycle even when net is still zero.
       items.push({
-        key: `period-in-progress-${openWindow.from}-${idealTo}`,
+        key: `period-in-progress-${openWindow.from}-${inProgressIdealTo}`,
         periodFrom: openWindow.from,
-        periodTo: idealTo,
+        periodTo: inProgressIdealTo,
         summaryThrough,
         status: 'IN_PROGRESS',
         amountCents: merged.netAmount,
@@ -614,29 +654,6 @@ export async function resolveNetPreviewPeriodBounds(
   return { from, to };
 }
 
-/** Build the API channelPreview shape from a period breakdown's reused channel rows. */
-export function channelPreviewFromPeriodBreakdown(
-  from: string,
-  to: string,
-  period: PeriodBreakdown,
-): PeriodChannelPreview {
-  const breakdown = period.channelBreakdown;
-  const monthlyBaseLkr = period.windowBase / 100;
-  return {
-    period: { from, to },
-    breakdown,
-    totalCommission: sumBreakdownCommission(breakdown),
-    totalProviderFee: sumBreakdownProviderFee(breakdown),
-    orderCount: sumBreakdownOrderCount(breakdown),
-    storeDiscountsTotal: period.periodDiscountsTotal / 100,
-    slabInfo: {
-      monthlyBase: monthlyBaseLkr,
-      effectiveRate: period.commissionRate,
-      slabIndex: getSlabIndex(monthlyBaseLkr),
-    },
-  };
-}
-
 export async function buildNetPreviewResponseData(storeId: string, from: string, to: string) {
   const loadStorePaybackFlag = () =>
     prisma.store.findUnique({
@@ -644,7 +661,7 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
       select: { platformDiscountPaybackEnabled: true },
     });
 
-  const cycle = await resolvePayoutCycleContext(storeId);
+  const cycle = await resolveCycleContextForWindow(storeId, from, to);
 
   const [periodBreakdown, orderAvailable, storeRow] = await Promise.all([
     computePeriodBreakdownForPayout(storeId, from, to, cycle),
@@ -682,17 +699,34 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
       ? `Payout 2 · cycle ${periodBreakdown.cycleFrom ?? from} – ${to}`
       : 'Payout 1';
 
+  const cycleStage = periodBreakdown.cycleStage ?? cycle.cycleStage;
+  let tableAllocationConvenienceFee = periodBreakdown.convenienceFee;
+  let tableAllocationDeliveryFee = periodBreakdown.deliveryFee;
+  if (cycleStage === 'SECOND') {
+    const cycleFrom = periodBreakdown.cycleFrom ?? cycle.cycleFrom ?? from;
+    const cycleTo = periodBreakdown.cycleTo ?? to;
+    const tableAlloc = await resolveSecondPayoutTableAllocationCents(
+      storeId,
+      cycleFrom,
+      cycleTo,
+    );
+    tableAllocationConvenienceFee = tableAlloc.convenienceFee;
+    tableAllocationDeliveryFee = tableAlloc.deliveryFee;
+  }
+
   return {
     ...periodBreakdown,
     from,
     to,
     durationDays,
     cycleLabel,
-    cycleStage: periodBreakdown.cycleStage ?? cycle.cycleStage,
+    cycleStage,
     cycleFrom: periodBreakdown.cycleFrom ?? cycle.cycleFrom,
     cycleTo: periodBreakdown.cycleTo ?? to,
     payoutWindowFrom: periodBreakdown.payoutWindowFrom ?? from,
     payoutWindowTo: periodBreakdown.payoutWindowTo ?? to,
+    tableAllocationConvenienceFee,
+    tableAllocationDeliveryFee,
     priorOnlineWalletAmountLkr: (periodBreakdown.priorOnlineWalletAmountCents ?? 0) / 100,
     remainingOnlineWalletLkr: (periodBreakdown.remainingOnlineWalletCents ?? 0) / 100,
     platformDiscountPaybackEnabled: storeRow?.platformDiscountPaybackEnabled ?? false,
@@ -837,12 +871,26 @@ async function buildStorePayoutsDueRows(
     PAYOUTS_DUE_UNPAID_WINDOW_MAX,
   ).filter((window) => !covered.has(periodKey(window.from, window.to)));
 
+  const cycleContextsByWindow = await resolveCycleContextsForWindows(
+    storeId,
+    unpaidWindows.map((window) => ({ from: window.from, to: window.to })),
+  );
+
   // Period breakdown is expensive — run a few at a time, not serially forever.
   const windowRows = await promiseAllLimited(
     Math.min(2, getPrismaFanOutLimit()),
     unpaidWindows.map(
       (window) => async (): Promise<SuperAdminPayoutDueItem | null> => {
-        const merged = await computeMergedPeriodSummary(storeId, window.from, window.to);
+        const cycleCtx =
+          cycleContextsByWindow.get(payoutWindowKey(window.from, window.to)) ?? {
+            cycleStage: 'FIRST' as const,
+          };
+        const merged = await computeMergedPeriodSummary(
+          storeId,
+          window.from,
+          window.to,
+          cycleCtx,
+        );
         if (merged.netAmount <= 0) return null;
         return {
           storeId,

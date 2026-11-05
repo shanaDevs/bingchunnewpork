@@ -293,6 +293,7 @@ async function resolveLinkedWithdrawalRecord(
       status: true,
       periodFrom: true,
       periodTo: true,
+      cycleStage: true,
     },
   });
 
@@ -311,6 +312,23 @@ async function resolveLinkedWithdrawalRecord(
   }
   if (!withdrawal.periodFrom || !withdrawal.periodTo) {
     throw new AppError('Withdrawal payout period is not set', 400);
+  }
+
+  if (withdrawal.cycleStage === 'FIRST') {
+    const pairedSecond = await prisma.storeWithdrawal.findFirst({
+      where: {
+        cycleStage: 'SECOND',
+        cyclePairId: withdrawal.id,
+        status: 'APPROVED',
+      },
+      select: { id: true },
+    });
+    if (!pairedSecond) {
+      throw new AppError(
+        'Platform provider payment becomes available only after the second 15-day payout in this cycle is completed.',
+        400,
+      );
+    }
   }
 
   return {

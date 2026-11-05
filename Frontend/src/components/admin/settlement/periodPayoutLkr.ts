@@ -1,5 +1,9 @@
 import type { SettlementPreview } from './settlementModels';
-import { sumOnlineRevenueSubtotals } from './channelBreakdown';
+import {
+  sumOnlineRevenueSubtotals,
+  sumOnlineSubtotalBeforeDiscount,
+  type SettlementBreakdown,
+} from './channelBreakdown';
 import { resolveTotalPlatformCommissionDisplayLkr } from './platformCommissionLkr';
 
 /** Total customer convenience fee for payout allocation (order + retained refund fees). */
@@ -56,8 +60,11 @@ export function computePeriodPayoutNetFromPreview(params: {
     netPlatformEarning?: number;
     sharedPromoPlatformContributionLkr?: number;
     onlineWalletGross?: number;
+    gatewayBase?: number;
     convenienceFee?: number;
     deliveryFee?: number;
+    cycleStage?: 'FIRST' | 'SECOND';
+    channelBreakdown?: SettlementBreakdown;
     cancelledByBranchGatewayFee?: number;
     customerLateCancelNetAmount?: number;
     rejectedRefundNetAmount?: number;
@@ -73,8 +80,14 @@ export function computePeriodPayoutNetFromPreview(params: {
   const preview = params.preview;
   const period = params.periodBreakdownLkr;
   const onlinePaymentsCollectedLkr = preview
-    ? sumOnlineRevenueSubtotals(preview.breakdown)
-    : (period.onlineWalletGross ?? 0);
+    ? period.cycleStage === 'FIRST'
+      ? sumOnlineSubtotalBeforeDiscount(preview.breakdown)
+      : sumOnlineRevenueSubtotals(preview.breakdown)
+    : period.cycleStage === 'FIRST' && period.channelBreakdown
+      ? sumOnlineSubtotalBeforeDiscount(period.channelBreakdown)
+      : period.cycleStage === 'FIRST'
+        ? (period.gatewayBase ?? period.onlineWalletGross ?? 0)
+        : (period.onlineWalletGross ?? 0);
   const commissionLkr = preview?.totalCommission ?? period.commissionFee;
   const sharedPromoPlatformLkr =
     params.sharedPromoPlatformLkr ?? period.sharedPromoPlatformContributionLkr ?? 0;

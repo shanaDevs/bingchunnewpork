@@ -38,6 +38,7 @@ import { toUtcDateStr, todayUtcDateStr } from './utcDateString';
 import {
   computePeriodBreakdownForPayout,
   computePeriodNetAmountCents,
+  resolveCycleContextForWindow,
 } from './withdrawalPeriodNet';
 import { runWithdrawalApprovalSideEffects } from './withdrawalApprovalSideEffects';
 import {
@@ -47,7 +48,6 @@ import {
   PAYOUT_PERIOD_DAYS,
   resolvePayoutPeriod,
   type PayoutPeriodDays,
-  resolvePayoutCycleContext,
 } from './withdrawalPayoutPeriod';
 
 export {
@@ -345,7 +345,7 @@ export async function validatePayoutRequest(
   }
 
   const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
-  const cycle = await resolvePayoutCycleContext(storeId);
+  const cycle = await resolveCycleContextForWindow(storeId, fromStr, toStr);
 
   const [orderAvailable, periodWithDiscountReport] = await Promise.all([
     computePeriodOrderAvailableCents(storeId, fromStr, toStr, cycle),

@@ -13,7 +13,7 @@ export type PayoutCycleContext = {
 
 export type PayoutBreakdownOptions = PayoutCycleContext;
 
-function readOnlineWalletCentsFromBreakdown(breakdown: unknown): number {
+export function readOnlineWalletCentsFromBreakdown(breakdown: unknown): number {
   if (!breakdown || typeof breakdown !== 'object') return 0;
   const row = breakdown as {
     onlinePaymentsCollected?: number;

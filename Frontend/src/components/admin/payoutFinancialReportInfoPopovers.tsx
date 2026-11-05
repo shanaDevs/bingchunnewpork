@@ -10,7 +10,14 @@ import {
   ReportRow,
   SectionInfoPopover,
 } from '@/components/admin/payoutFinancialReportUi';
-import { PAYOUT_FIRST_CYCLE_BODY } from '@/components/admin/payoutFirstCycleCopy';
+import {
+  PAYOUT_FIRST_CYCLE_BODY,
+  PAYOUT_FIRST_ONLINE_COLLECTIONS_SECTION_HINT,
+  PAYOUT_FIRST_ONLINE_COLLECTIONS_TITLE,
+  PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL,
+  PAYOUT_FIRST_ONLINE_DELIVERY_SUBTOTAL_LABEL,
+  PAYOUT_FIRST_ONLINE_PICKUP_SUBTOTAL_LABEL,
+} from '@/components/admin/payoutFirstCycleCopy';
 
 export function DiscountDetailsInfoPopover({ values }: { values: PayoutReportValues }) {
   return (
@@ -136,6 +143,38 @@ export function TotalSaleInfoPopover({ values }: { values: PayoutReportValues })
 export function OnlineWalletInfoPopover({ values }: { values: PayoutReportValues }) {
   const pickupNetLkr = values.onlinePickupNetLkr;
   const deliveryNetLkr = values.onlineDeliveryNetLkr;
+  const isFirstCyclePayout = values.cycleStage === 'FIRST';
+
+  if (isFirstCyclePayout) {
+    return (
+      <SectionInfoPopover ariaLabel="Online order subtotal calculation details">
+        <InfoPopoverHeader
+          title={PAYOUT_FIRST_ONLINE_COLLECTIONS_TITLE}
+          description={PAYOUT_FIRST_ONLINE_COLLECTIONS_SECTION_HINT}
+        />
+        <InfoFormulaLine>
+          {PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL} = {PAYOUT_FIRST_ONLINE_PICKUP_SUBTOTAL_LABEL}{' '}
+          + {PAYOUT_FIRST_ONLINE_DELIVERY_SUBTOTAL_LABEL} = {plainAmount(pickupNetLkr)} +{' '}
+          {plainAmount(deliveryNetLkr)} = {plainAmount(values.onlinePaymentsCollectedLkr)}
+        </InfoFormulaLine>
+        <div className="space-y-2 border-t border-[#e2e8f0] pt-2.5 dark:border-slate-700">
+          <ReportRow
+            label={PAYOUT_FIRST_ONLINE_PICKUP_SUBTOTAL_LABEL}
+            value={plainAmount(pickupNetLkr)}
+          />
+          <ReportRow
+            label={PAYOUT_FIRST_ONLINE_DELIVERY_SUBTOTAL_LABEL}
+            value={plainAmount(deliveryNetLkr)}
+          />
+          <ReportRow
+            label={PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL}
+            value={plainAmount(values.onlinePaymentsCollectedLkr)}
+            bold
+          />
+        </div>
+      </SectionInfoPopover>
+    );
+  }
 
   return (
     <SectionInfoPopover ariaLabel="Online Wallet Amount calculation details">
@@ -282,6 +321,37 @@ export function NetBranchPayoutInfoPopover({ values }: { values: PayoutReportVal
   const jasonLkr = values.jasonDiscountsLkr;
   const walletPlusJasonLkr = roundLkr(walletLkr + jasonLkr);
   const gatewayRatePct = values.gatewayRatePct;
+  const isFirstCyclePayout = values.cycleStage === 'FIRST';
+  const walletLabel = isFirstCyclePayout
+    ? PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL
+    : 'Online Wallet Amount';
+
+  if (isFirstCyclePayout) {
+    return (
+      <SectionInfoPopover ariaLabel="Net Branch Payout calculation details">
+        <InfoPopoverHeader
+          title="Net Branch Payout"
+          description="Payout 1: your online order subtotal minus the payment gateway fee. Commission and discounts are settled in Payout 2."
+        />
+        <div className="space-y-2">
+          <ReportRow label={walletLabel} value={plainAmount(walletLkr)} />
+          {hasPositiveLkr(values.gatewayLkr) ? (
+            <>
+              <InfoFormulaLine>
+                Payment Gateway Fee = {walletLabel} × {gatewayRatePct}% ={' '}
+                {plainAmount(walletLkr)} × {gatewayRatePct}% = {plainAmount(values.gatewayLkr)}
+              </InfoFormulaLine>
+              <ReportRow
+                label="− Payment Gateway Fee"
+                value={signedAmount(values.gatewayLkr, '−')}
+                valueTone="red"
+              />
+            </>
+          ) : null}
+        </div>
+      </SectionInfoPopover>
+    );
+  }
 
   return (
     <SectionInfoPopover ariaLabel="Net Branch Payout calculation details">

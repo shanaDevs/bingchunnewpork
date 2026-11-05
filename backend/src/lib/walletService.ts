@@ -14,6 +14,7 @@ import {
   accumulateSettlementBreakdown,
   emptySettlementBreakdown,
   sumOnlinePaymentsCollectedFromBreakdown,
+  sumFirstPayoutOnlineWalletBaseFromBreakdown,
   type ChannelSettlementRow,
   type CommissionChannel,
 } from './commission';
@@ -1566,7 +1567,9 @@ export async function computeBreakdownForPeriodOrders(
     commissionSlabs,
   );
   const onlinePaymentsCollected = Math.round(
-    sumOnlinePaymentsCollectedFromBreakdown(channelBreakdown) * 100,
+    (cycleStage === 'FIRST'
+      ? sumFirstPayoutOnlineWalletBaseFromBreakdown(channelBreakdown)
+      : sumOnlinePaymentsCollectedFromBreakdown(channelBreakdown)) * 100,
   );
 
   let netPlatformEarning = storePaybackEnabled
@@ -1604,12 +1607,15 @@ export async function computeBreakdownForPeriodOrders(
     (order) => orderCommissionChannel(order.orderMode, order.paymentMethod) != null,
   ).length;
 
+  const onlineWalletGrossForSnapshot =
+    cycleStage === 'FIRST' ? onlinePaymentsCollected : onlineWalletGross;
+
   return {
     grossAmount,
     windowBase: Math.round(windowBase * 100),
     commissionRate,
     tierLabel,
-    onlineWalletGross,
+    onlineWalletGross: onlineWalletGrossForSnapshot,
     onlinePaymentsCollected,
     deliveryFee,
     commissionFee,

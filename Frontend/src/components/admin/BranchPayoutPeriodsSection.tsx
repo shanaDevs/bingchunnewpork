@@ -13,9 +13,20 @@ import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   fetchPayoutPeriodNetPreview,
+  payoutPeriodRowNeedsLiveNetPreview,
   resolvePayoutPeriodRowDisplayAmounts,
 } from '@/components/admin/payoutPeriodRowAmounts';
-import { syntheticPeriodViewWithdrawal } from '@/components/admin/payoutPeriodView';
+import type { PeriodPayoutCardAmounts } from '@/components/admin/periodPayoutSplitDisplay';
+import {
+  applyFirstCycleTableDisplayMask,
+  readPayoutCycleStage,
+  shouldHideFirstCyclePlatformColumns,
+} from '@/components/admin/payoutPeriodRowCycleDisplay';
+import {
+  dueFocusToPeriodView,
+  syntheticPeriodViewWithdrawal,
+  type DuePeriodFocus,
+} from '@/components/admin/payoutPeriodView';
 
 export type PayoutPeriodStatus = 'PAID' | 'PENDING' | 'IN_PROGRESS';
 
@@ -43,6 +54,8 @@ type Props = {
   highlightPeriod?: { periodFrom: string; periodTo: string } | null;
   /** Open the oldest unpaid period from the full list, ignoring the wallet date filter. */
   focusOldestPending?: boolean;
+  /** When auto-opening from Payouts Due, use this if the period row is not in the table yet. */
+  autoOpenDuePeriod?: DuePeriodFocus | null;
 };
 
 const AMOUNT_COLUMNS = [
@@ -181,30 +194,36 @@ function periodToViewRow(row: PayoutPeriodRow, storeId?: string): {
   });
 }
 
-function formatAmountCell(value: number) {
+function formatAmountCell(value: number | null) {
+  if (value == null) return '—';
   return formatMoneyAmount(value);
+}
+
+function resolveRowBaseDisplayAmounts(
+  row: PayoutPeriodRow,
+  previewByKey: Map<string, Record<string, unknown>>,
+): PeriodPayoutCardAmounts {
+  const preview = previewByKey.get(row.key);
+  return resolvePayoutPeriodRowDisplayAmounts({
+    amountCents: row.amountCents,
+    breakdown: row.breakdown,
+    periodFrom: row.periodFrom,
+    periodTo: previewPeriodTo(row),
+    netPreviewData: preview,
+  });
 }
 
 function PayoutPeriodAmountCells({
   row,
-  netPreviewData,
+  amounts,
   previewLoading,
-  previewPeriodTo: summaryTo,
+  needsPreview,
 }: {
   row: PayoutPeriodRow;
-  netPreviewData?: Record<string, unknown>;
+  amounts: PeriodPayoutCardAmounts;
   previewLoading: boolean;
-  previewPeriodTo: string;
+  needsPreview: boolean;
 }) {
-  const needsPreview = !row.breakdown;
-  const amounts = resolvePayoutPeriodRowDisplayAmounts({
-    amountCents: row.amountCents,
-    breakdown: row.breakdown,
-    periodFrom: row.periodFrom,
-    periodTo: summaryTo,
-    netPreviewData: needsPreview ? netPreviewData : undefined,
-  });
-
   const feeColumnsLoading = needsPreview && previewLoading;
 
   const values = [
@@ -224,7 +243,7 @@ function PayoutPeriodAmountCells({
           {feeColumnsLoading && index > 0 ? (
             <Skeleton className="ml-auto inline-block h-3.5 w-16 bg-[var(--color-navy-light)]/70" />
           ) : (
-            formatAmountCell(value ?? 0)
+            formatAmountCell(value)
           )}
         </td>
       ))}
@@ -249,6 +268,7 @@ export default function BranchPayoutPeriodsSection({
   periodSort = 'newest',
   highlightPeriod = null,
   focusOldestPending = false,
+  autoOpenDuePeriod = null,
 }: Props) {
   const apiBase = getApiBaseUrl();
   const highlightRowRef = useRef<HTMLTableRowElement | null>(null);
@@ -276,7 +296,12 @@ export default function BranchPayoutPeriodsSection({
 
   const rowsNeedingPreview = useMemo(
     () =>
-      rows.filter((row) => !row.breakdown && row.periodFrom && previewPeriodTo(row)),
+      rows.filter(
+        (row) =>
+          row.periodFrom &&
+          previewPeriodTo(row) &&
+          payoutPeriodRowNeedsLiveNetPreview(row.breakdown),
+      ),
     [rows],
   );
 
@@ -321,13 +346,45 @@ export default function BranchPayoutPeriodsSection({
     [rows, periodSort, focusOldestPending],
   );
 
+  const displayAmountsByKey = useMemo(() => {
+    const baseByKey = new Map<string, PeriodPayoutCardAmounts>();
+    for (const row of rows) {
+      baseByKey.set(row.key, resolveRowBaseDisplayAmounts(row, previewByKey));
+    }
+
+    const displayByKey = new Map<string, PeriodPayoutCardAmounts>();
+    for (const row of rows) {
+      const windowAmounts = baseByKey.get(row.key)!;
+      const stage = readPayoutCycleStage(row.breakdown, previewByKey.get(row.key));
+      if (shouldHideFirstCyclePlatformColumns(stage, rows, row, windowAmounts)) {
+        displayByKey.set(row.key, applyFirstCycleTableDisplayMask(windowAmounts));
+      } else {
+        displayByKey.set(row.key, windowAmounts);
+      }
+    }
+    return displayByKey;
+  }, [rows, previewByKey]);
+
   const oldestPending = useMemo(
     () => (focusOldestPending ? displayRows.find((row) => row.status === 'PENDING') ?? null : null),
     [displayRows, focusOldestPending],
   );
 
-  const activeHighlight = oldestPending
-    ? { periodFrom: oldestPending.periodFrom, periodTo: oldestPending.periodTo }
+  const highlightedPeriodRow = useMemo(() => {
+    if (!highlightPeriod) return null;
+    return (
+      displayRows.find(
+        (row) =>
+          row.periodFrom === highlightPeriod.periodFrom &&
+          row.periodTo === highlightPeriod.periodTo,
+      ) ?? null
+    );
+  }, [displayRows, highlightPeriod]);
+
+  const periodRowToAutoOpen = highlightedPeriodRow ?? oldestPending;
+
+  const activeHighlight = periodRowToAutoOpen
+    ? { periodFrom: periodRowToAutoOpen.periodFrom, periodTo: periodRowToAutoOpen.periodTo }
     : highlightPeriod;
 
   useEffect(() => {
@@ -335,10 +392,25 @@ export default function BranchPayoutPeriodsSection({
   }, [storeId]);
 
   useEffect(() => {
-    if (!focusOldestPending || periodsLoading || openedOldestPending.current || !oldestPending) return;
-    openedOldestPending.current = true;
-    setViewRow(periodToViewRow(oldestPending, storeId));
-  }, [focusOldestPending, periodsLoading, oldestPending, storeId]);
+    if (!focusOldestPending || periodsLoading || openedOldestPending.current) return;
+
+    if (periodRowToAutoOpen) {
+      openedOldestPending.current = true;
+      setViewRow(periodToViewRow(periodRowToAutoOpen, storeId));
+      return;
+    }
+
+    if (autoOpenDuePeriod) {
+      openedOldestPending.current = true;
+      setViewRow(dueFocusToPeriodView(autoOpenDuePeriod));
+    }
+  }, [
+    focusOldestPending,
+    periodsLoading,
+    periodRowToAutoOpen,
+    storeId,
+    autoOpenDuePeriod,
+  ]);
 
   useEffect(() => {
     if (!activeHighlight || periodsLoading) return;
@@ -405,9 +477,12 @@ export default function BranchPayoutPeriodsSection({
                   </td>
                   <PayoutPeriodAmountCells
                     row={row}
-                    netPreviewData={previewByKey.get(row.key)}
+                    amounts={
+                      displayAmountsByKey.get(row.key) ??
+                      resolveRowBaseDisplayAmounts(row, previewByKey)
+                    }
                     previewLoading={previewLoadingByKey.get(row.key) ?? false}
-                    previewPeriodTo={previewPeriodTo(row)}
+                    needsPreview={payoutPeriodRowNeedsLiveNetPreview(row.breakdown)}
                   />
                   <td className="px-3 py-3">
                     <span className={cn('admin-status-badge', statusBadgeClass(row.status))}>

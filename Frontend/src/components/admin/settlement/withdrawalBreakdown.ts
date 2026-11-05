@@ -608,6 +608,7 @@ export function withdrawalBreakdownToLkr(b: WithdrawalBreakdown) {
     orderCount: b.orderCount,
     commissionRate: b.commissionRate,
     gatewayRatePct: b.gatewayRatePct,
+    channelBreakdown: b.channelBreakdown,
     cycleStage: b.cycleStage,
     cycleFrom: b.cycleFrom,
     cycleTo: b.cycleTo,

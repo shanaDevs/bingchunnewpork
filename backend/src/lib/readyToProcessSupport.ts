@@ -109,8 +109,33 @@ export async function loadEnrichedApprovedUnsettledWithdrawals(): Promise<
     }
   }
 
+  const firstIds = rows
+    .filter(({ withdrawal: w }) => w.cycleStage === 'FIRST')
+    .map(({ withdrawal: w }) => w.id);
+
+  const completedFirstPairIds = new Set<string>();
+  if (firstIds.length > 0) {
+    const pairedSeconds = await prisma.storeWithdrawal.findMany({
+      where: {
+        cycleStage: 'SECOND',
+        cyclePairId: { in: firstIds },
+        status: 'APPROVED',
+      },
+      select: { cyclePairId: true },
+    });
+    for (const row of pairedSeconds) {
+      if (row.cyclePairId) completedFirstPairIds.add(row.cyclePairId);
+    }
+  }
+
+  const eligibleRows = rows.filter(({ withdrawal: w }) => {
+    if (w.cycleStage === 'SECOND') return true;
+    if (w.cycleStage === 'FIRST') return completedFirstPairIds.has(w.id);
+    return true;
+  });
+
   return Promise.all(
-    rows.map(async ({ storeId, withdrawal: w }) => {
+    eligibleRows.map(async ({ storeId, withdrawal: w }) => {
       const platformProviderReceivable = w.breakdown
         ? await resolveStoredPlatformProviderReceivable(w.breakdown)
         : await resolveStoredPlatformProviderReceivable({});

@@ -58,7 +58,7 @@ export function aggregatePaidPayoutPeriodExpensesCents(
       periodTo,
     });
 
-    netPlatformAmountCents += lkrToExpenseCents(amounts.commissionLkr);
+    netPlatformAmountCents += lkrToExpenseCents(amounts.commissionLkr ?? 0);
     branchReceivableCents += lkrToExpenseCents(amounts.branchReceives);
 
     const parsed = parseWithdrawalBreakdown(row.breakdown);
@@ -104,6 +104,13 @@ function netPreviewToChannelPreview(
   };
 }
 
+/** Live net-preview drives Payout 2 table columns; locked snapshots alone miss window delivery & current net. */
+export function payoutPeriodRowNeedsLiveNetPreview(breakdown: unknown): boolean {
+  if (breakdown == null) return true;
+  const parsed = parseWithdrawalBreakdown(breakdown);
+  return parsed?.cycleStage === 'SECOND';
+}
+
 /** Same allocation fields as payout modals / PeriodPayoutSplitCards (display only). */
 export function resolvePayoutPeriodRowDisplayAmounts(params: {
   amountCents: number;
@@ -113,12 +120,22 @@ export function resolvePayoutPeriodRowDisplayAmounts(params: {
   netPreviewData?: Record<string, unknown> | null;
 }): PeriodPayoutCardAmounts {
   let parsed = parseWithdrawalBreakdown(params.breakdown);
+  const previewParsed = params.netPreviewData
+    ? parseWithdrawalBreakdownFromNetPreview(params.netPreviewData)
+    : null;
+
+  if (!parsed && previewParsed) {
+    parsed = previewParsed;
+  } else if (previewParsed?.cycleStage === 'SECOND') {
+    parsed = previewParsed;
+  }
+
   let channelPreview: SettlementPreview | null = null;
   let paybackEnabled = paybackEnabledFromBreakdown(parsed);
 
-  if (!parsed && params.netPreviewData) {
+  if (params.netPreviewData && (!params.breakdown || previewParsed?.cycleStage === 'SECOND')) {
     paybackEnabled = Boolean(params.netPreviewData.platformDiscountPaybackEnabled);
-    parsed = parseWithdrawalBreakdownFromNetPreview(params.netPreviewData);
+    if (!parsed) parsed = previewParsed;
     channelPreview = netPreviewToChannelPreview(
       params.netPreviewData.channelPreview as Parameters<typeof netPreviewToChannelPreview>[0],
       params.periodFrom,
@@ -136,10 +153,19 @@ export function resolvePayoutPeriodRowDisplayAmounts(params: {
   }
 
   const branchPayout = resolveBranchPayoutDisplay({
-    breakdown: params.breakdown,
-    amountCents: params.amountCents,
+    breakdown:
+      previewParsed?.cycleStage === 'SECOND' ? null : params.breakdown,
+    amountCents:
+      previewParsed?.cycleStage === 'SECOND'
+        ? (previewParsed?.netAmount ?? params.amountCents)
+        : params.amountCents,
     netPreviewData: params.netPreviewData,
   });
+
+  function readPreviewLkr(data: Record<string, unknown>, key: string): number | null {
+    const value = data[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  }
 
   if (!parsed) {
     return {
@@ -151,6 +177,17 @@ export function resolvePayoutPeriodRowDisplayAmounts(params: {
   }
 
   const breakdownLkr = withdrawalBreakdownToLkr(parsed);
+  if (parsed.cycleStage === 'SECOND' && params.netPreviewData) {
+    const previewRaw = params.netPreviewData;
+    const tableConv = previewRaw.tableAllocationConvenienceFee;
+    if (typeof tableConv === 'number' && Number.isFinite(tableConv)) {
+      breakdownLkr.convenienceFee = tableConv / 100;
+    }
+    const tableDelivery = previewRaw.tableAllocationDeliveryFee;
+    if (typeof tableDelivery === 'number' && Number.isFinite(tableDelivery)) {
+      breakdownLkr.deliveryFee = tableDelivery / 100;
+    }
+  }
   const deliveryFeeForPeriodLkr = resolveTotalDeliveryFeeForAllocationLkr({
     periodDeliveryFeeLkr: breakdownLkr.deliveryFee,
     refundDeliveryFeeLkr: breakdownLkr.refundDeliveryFee ?? 0,
@@ -172,9 +209,23 @@ export function resolvePayoutPeriodRowDisplayAmounts(params: {
     sharedPromoPlatformLkr: breakdownLkr.sharedPromoPlatformContributionLkr ?? 0,
   });
 
+  let branchReceivesLkr = branchPayout.totalBranchPayoutLkr;
+  if (parsed.cycleStage === 'SECOND') {
+    const previewRaw = params.netPreviewData;
+    const finalFromPreview =
+      previewRaw && typeof previewRaw === 'object'
+        ? readPreviewLkr(previewRaw as Record<string, unknown>, 'finalPayoutAmountLkr')
+        : null;
+    if (finalFromPreview != null && finalFromPreview > 0) {
+      branchReceivesLkr = finalFromPreview;
+    } else if (parsed.finalPayoutAmount != null && parsed.finalPayoutAmount > 0) {
+      branchReceivesLkr = parsed.finalPayoutAmount / 100;
+    }
+  }
+
   return resolvePeriodPayoutCardAmounts({
     payoutSplit,
-    branchReceivesLkr: branchPayout.totalBranchPayoutLkr,
+    branchReceivesLkr,
     platformCommissionLkr: netPlatformAmountLkr,
     periodNetLkr: branchPayout.periodWalletNetLkr,
     deliveryFeeLkr: deliveryFeeForPeriodLkr,

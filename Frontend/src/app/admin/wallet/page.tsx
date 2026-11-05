@@ -303,16 +303,9 @@ function WalletOverviewPageContent() {
   };
 
   const handleViewDuePayout = (row: PayoutDueRow) => {
-    const oldest =
-      duePayouts
-        .filter((item) => item.storeId === row.storeId)
-        .sort(
-          (a, b) =>
-            a.periodTo.localeCompare(b.periodTo) || a.periodFrom.localeCompare(b.periodFrom),
-        )[0] ?? row;
     setAutoInitiatePayout(false);
-    setDuePeriodFocus(duePeriodFocusFromRow(oldest));
-    setBranchWalletTarget(walletFromDueRow(oldest));
+    setDuePeriodFocus(duePeriodFocusFromRow(row));
+    setBranchWalletTarget(walletFromDueRow(row));
   };
 
   const handleReviewDuePayout = (row: PayoutDueRow) => {

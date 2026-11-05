@@ -621,6 +621,18 @@ export function sumOnlinePaymentsCollectedFromBreakdown(
   );
 }
 
+/** Payout 1 only: pickup + delivery online subtotal before discounts (channel table Subtotal column). */
+export function sumFirstPayoutOnlineWalletBaseFromBreakdown(
+  breakdown: Record<CommissionChannel, ChannelSettlementRow>,
+): number {
+  const pickup = breakdown.pickupOnline;
+  const delivery = breakdown.deliveryOnline;
+  return (
+    (pickup.subtotalBeforeDiscount ?? pickup.revenueSubtotal ?? 0) +
+    (delivery.subtotalBeforeDiscount ?? delivery.revenueSubtotal ?? 0)
+  );
+}
+
 export type OrderPlatformPaybackUsage = {
   ownership?: string | null;
   platformShareAmount?: number;

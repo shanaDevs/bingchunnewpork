@@ -317,6 +317,32 @@ export function formatOnlinePaymentsCollectedHint(
   return `(Pickup online ${amt(components.pickupRevenueLkr)} + Delivery online ${amt(components.deliveryRevenueLkr)})`;
 }
 
+/** Pickup online + delivery online subtotal before discounts (Payout 1 channel table Subtotal column). */
+export function sumOnlineSubtotalBeforeDiscount(breakdown: SettlementBreakdown): number {
+  const pickup = breakdown.pickupOnline;
+  const delivery = breakdown.deliveryOnline;
+  return (
+    (pickup.subtotalBeforeDiscount ?? pickup.revenueSubtotal ?? 0) +
+    (delivery.subtotalBeforeDiscount ?? delivery.revenueSubtotal ?? 0)
+  );
+}
+
+export function resolveFirstPayoutOnlineSubtotalComponents(
+  breakdown: SettlementBreakdown,
+): { pickupSubtotalLkr: number; deliverySubtotalLkr: number; totalLkr: number } {
+  const pickupSubtotalLkr =
+    breakdown.pickupOnline.subtotalBeforeDiscount ?? breakdown.pickupOnline.revenueSubtotal ?? 0;
+  const deliverySubtotalLkr =
+    breakdown.deliveryOnline.subtotalBeforeDiscount ??
+    breakdown.deliveryOnline.revenueSubtotal ??
+    0;
+  return {
+    pickupSubtotalLkr,
+    deliverySubtotalLkr,
+    totalLkr: pickupSubtotalLkr + deliverySubtotalLkr,
+  };
+}
+
 /** Pickup online + delivery online revenue subtotals only (excludes delivery & convenience fees). */
 export function sumOnlineRevenueSubtotals(breakdown: SettlementBreakdown): number {
   const components = resolveOnlinePaymentsCollectedComponents(breakdown);

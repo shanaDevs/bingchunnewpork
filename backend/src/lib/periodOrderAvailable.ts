@@ -1,5 +1,5 @@
 import { prisma } from './prisma';
-import { sumOnlinePaymentsCollectedFromBreakdown } from './commission';
+import { sumOnlinePaymentsCollectedFromBreakdown, sumFirstPayoutOnlineWalletBaseFromBreakdown } from './commission';
 import {
   buildPeriodChannelPreview,
   type PeriodChannelPreview,
@@ -70,14 +70,25 @@ export async function computePeriodOrderAvailableCents(
   const cycle = cycleCtx ?? (await resolvePayoutCycleContext(storeId));
   const orderFrom = cycle.cycleStage === 'SECOND' && cycle.cycleFrom ? cycle.cycleFrom : fromStr;
   const channelPreview = await buildPeriodChannelPreview(storeId, orderFrom, toStr);
-  let fromOrdersCents = Math.round(
-    sumOnlinePaymentsCollectedFromBreakdown(channelPreview.breakdown) * 100,
-  );
+  const sumOnlineCollected = (breakdown: PeriodChannelPreview['breakdown']) =>
+    Math.round(
+      (cycle.cycleStage === 'FIRST'
+        ? sumFirstPayoutOnlineWalletBaseFromBreakdown(breakdown)
+        : sumOnlinePaymentsCollectedFromBreakdown(breakdown)) * 100,
+    );
+
+  const fromOrdersCents = sumOnlineCollected(channelPreview.breakdown);
+  let adjustedFromOrdersCents = fromOrdersCents;
   if (cycle.cycleStage === 'SECOND') {
-    fromOrdersCents = Math.max(
+    adjustedFromOrdersCents = Math.max(
       0,
       fromOrdersCents - (cycle.priorOnlineWalletAmountCents ?? 0),
     );
   }
-  return periodOrderAvailableFromOnlineCollectedCents(storeId, fromStr, toStr, fromOrdersCents);
+  return periodOrderAvailableFromOnlineCollectedCents(
+    storeId,
+    fromStr,
+    toStr,
+    adjustedFromOrdersCents,
+  );
 }

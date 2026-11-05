@@ -25,6 +25,11 @@ import {
   PAYOUT_FIRST_CYCLE_BODY,
   PAYOUT_FIRST_CYCLE_DEFERRED_SECTION,
   PAYOUT_FIRST_CYCLE_HEADLINE,
+  PAYOUT_FIRST_ONLINE_COLLECTIONS_SECTION_HINT,
+  PAYOUT_FIRST_ONLINE_COLLECTIONS_TITLE,
+  PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL,
+  PAYOUT_FIRST_ONLINE_DELIVERY_SUBTOTAL_LABEL,
+  PAYOUT_FIRST_ONLINE_PICKUP_SUBTOTAL_LABEL,
 } from '@/components/admin/payoutFirstCycleCopy';
 
 type Props = {
@@ -81,7 +86,9 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
         info={<TotalSaleInfoPopover values={values} />}
       />
       <ReportSection
-        title="Online Wallet Amount"
+        title={
+          isFirstCyclePayout ? PAYOUT_FIRST_ONLINE_COLLECTIONS_TITLE : 'Online Wallet Amount'
+        }
         amount={plainAmount(values.onlinePaymentsCollectedLkr)}
         info={<OnlineWalletInfoPopover values={values} />}
       />
@@ -211,7 +218,11 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
           <>
             {hasPositiveLkr(values.onlinePaymentsCollectedLkr) && (
               <ReportRow
-                label="Online Wallet Amount"
+                label={
+                  isFirstCyclePayout
+                    ? PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL
+                    : 'Online Wallet Amount'
+                }
                 value={plainAmount(values.onlinePaymentsCollectedLkr)}
               />
             )}

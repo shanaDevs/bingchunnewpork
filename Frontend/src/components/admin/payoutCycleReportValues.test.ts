@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolvePayoutReportValues } from '@/components/admin/resolvePayoutReportValues';
+import {
+  resolveFinalNetPayoutPayLkr,
+  resolvePayoutReportValues,
+} from '@/components/admin/resolvePayoutReportValues';
 
 describe('resolvePayoutReportValues two-stage cycle', () => {
   it('zeros commission, discounts, and net platform on FIRST payout', () => {
@@ -61,5 +64,82 @@ describe('resolvePayoutReportValues two-stage cycle', () => {
 
     expect(values?.priorOnlineWalletAmountLkr).toBe(1_000_000);
     expect(values?.commissionLkr).toBe(193000);
+    expect(values?.branchNetPayoutLkr).toBeCloseTo(979_580, 2);
+  });
+
+  it('SECOND payout net matches visible breakdown lines (full cycle wallet minus payout 1)', () => {
+    const values = resolvePayoutReportValues({
+      preview: null,
+      periodBreakdownLkr: {
+        grossAmount: 39_953,
+        orderCount: 20,
+        commissionFee: 1_840.95,
+        gatewayFee: 350.8,
+        gatewayBase: 18_463,
+        gatewayRatePct: 1.9,
+        onlineWalletGross: 39_953,
+        onlinePaymentsCollected: 39_953,
+        netAmount: 16_271.25,
+        netPlatformEarning: 1_840.95,
+        platformPaybackTotal: 0,
+        periodDiscountsTotal: 508,
+        periodLoyaltyDiscountTotal: 0,
+        cycleStage: 'SECOND',
+        priorOnlineWalletAmountLkr: 21_490,
+        remainingOnlineWalletLkr: 18_463,
+      },
+      onlineOrderSubtotalLkr: 39_953,
+      convenienceFeeLkr: 0,
+      paybackEnabled: false,
+      sharedPromo: {
+        totalDiscountLkr: 508,
+        branchContributionLkr: 0,
+        branchContributionPct: 0,
+        platformContributionLkr: 0,
+        platformContributionPct: 0,
+        jasonContributionLkr: 508,
+        jasonContributionPct: 100,
+        finalPayoutLkr: 16_779.25,
+      },
+    });
+
+    expect(values?.branchNetPayoutLkr).toBeCloseTo(16_271.25, 2);
+    expect(resolveFinalNetPayoutPayLkr(values!)).toBeCloseTo(16_779.25, 2);
+  });
+
+  it('matches spec SECOND-stage net payout (30-day combined cycle)', () => {
+    const values = resolvePayoutReportValues({
+      preview: null,
+      periodBreakdownLkr: {
+        grossAmount: 500_000,
+        orderCount: 50,
+        commissionFee: 19_500,
+        gatewayFee: 5_700,
+        gatewayBase: 300_000,
+        gatewayRatePct: 1.9,
+        onlineWalletGross: 500_000,
+        onlinePaymentsCollected: 500_000,
+        netAmount: 279_800,
+        netPlatformEarning: 19_500,
+        platformPaybackTotal: 0,
+        periodDiscountsTotal: 0,
+        periodLoyaltyDiscountTotal: 0,
+        cycleStage: 'SECOND',
+        priorOnlineWalletAmountLkr: 200_000,
+        remainingOnlineWalletLkr: 300_000,
+        customerLateCancelNetAmount: 5_000,
+      },
+      onlineOrderSubtotalLkr: 500_000,
+      convenienceFeeLkr: 0,
+      paybackEnabled: false,
+      useStoredSnapshot: true,
+      snapshotNetAmountLkr: 279_800,
+      snapshotGatewayFeeLkr: 5_700,
+    });
+
+    expect(values?.cycleStage).toBe('SECOND');
+    expect(values?.priorOnlineWalletAmountLkr).toBe(200_000);
+    expect(values?.commissionLkr).toBe(19_500);
+    expect(values?.branchNetPayoutLkr).toBeCloseTo(279_800, 2);
   });
 });

@@ -685,6 +685,15 @@ export default function BranchWalletDetail({
             }
             periodSort={duePeriodFocus ? 'oldest' : 'newest'}
             focusOldestPending={!!duePeriodFocus}
+            highlightPeriod={
+              duePeriodFocus
+                ? {
+                    periodFrom: duePeriodFocus.periodFrom,
+                    periodTo: duePeriodFocus.periodTo,
+                  }
+                : null
+            }
+            autoOpenDuePeriod={duePeriodFocus}
           />
         </div>
       )}
