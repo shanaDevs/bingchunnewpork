@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { replaceAdminWalletQuery } from '@/components/admin/replaceAdminWalletQuery';
 
 /** Shared trigger styles for System / Platform / Payouts Due wallet tabs. */
 export const WALLET_TAB_TRIGGER_CLASS =
@@ -15,9 +16,15 @@ export function useAdminWalletTab<T extends string>(parseTab: (value: string | n
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const activeTab = parseTab(tabParam);
+  const urlTab = parseTab(tabParam);
+  const [activeTab, setActiveTabState] = useState(urlTab);
 
-  const [visitedTabs, setVisitedTabs] = useState<Set<T>>(() => new Set([activeTab]));
+  // Keep local highlight in sync when URL changes from elsewhere (links, period race recovery).
+  useEffect(() => {
+    setActiveTabState(urlTab);
+  }, [urlTab]);
+
+  const [visitedTabs, setVisitedTabs] = useState<Set<T>>(() => new Set([urlTab]));
 
   useEffect(() => {
     setVisitedTabs((prev) => {
@@ -31,26 +38,23 @@ export function useAdminWalletTab<T extends string>(parseTab: (value: string | n
   const setActiveTab = useCallback(
     (value: string) => {
       const tab = parseTab(value);
-      const params = new URLSearchParams(searchParams.toString());
-      if (tab === 'system') {
-        params.delete('tab');
-      } else {
-        params.set('tab', tab);
-      }
-      const qs = params.toString();
-      router.replace(qs ? `/admin/wallet?${qs}` : '/admin/wallet', { scroll: false });
+      setActiveTabState(tab);
+      replaceAdminWalletQuery(router, (params) => {
+        if (tab === 'system') {
+          params.delete('tab');
+        } else {
+          params.set('tab', tab);
+        }
+      });
     },
-    [parseTab, router, searchParams],
+    [parseTab, router],
   );
 
   const replaceQuery = useCallback(
     (mutate: (params: URLSearchParams) => void) => {
-      const params = new URLSearchParams(searchParams.toString());
-      mutate(params);
-      const qs = params.toString();
-      router.replace(qs ? `/admin/wallet?${qs}` : '/admin/wallet', { scroll: false });
+      replaceAdminWalletQuery(router, mutate);
     },
-    [router, searchParams],
+    [router],
   );
 
   return { activeTab, tabParam, visitedTabs, setActiveTab, replaceQuery };

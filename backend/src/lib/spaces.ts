@@ -285,8 +285,13 @@ export async function viewableLicenseImageUrl(
   stored: string | null | undefined,
 ): Promise<string | null> {
   if (!stored) return null;
-  const signed = await createSignedProofAccessFromStoredUrl(stored);
-  return signed?.url ?? stored;
+  try {
+    const signed = await createSignedProofAccessFromStoredUrl(stored);
+    return signed?.url ?? stored;
+  } catch (err) {
+    logger.warn('Licence presign skipped for rider profile', err);
+    return null;
+  }
 }
 
 /** Avoid blocking rider profile on slow Spaces presign (e.g. go-online refresh). */

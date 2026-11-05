@@ -42,6 +42,9 @@ class DriverProfile {
   /// False once the driver already holds a run plus a queued-next job.
   final bool canClaimMore;
 
+  /// Socket branch-pool rooms from PATCH /delivery/me/duty when GET /me is unavailable.
+  final List<String> branchPoolStoreIds;
+
   const DriverProfile({
     required this.id,
     required this.name,
@@ -67,6 +70,7 @@ class DriverProfile {
     this.alertEligible = true,
     this.activeRidePhase = 'NONE',
     this.canClaimMore = true,
+    this.branchPoolStoreIds = const [],
   });
 
   factory DriverProfile.fromJson(Json j) {
@@ -96,7 +100,14 @@ class DriverProfile {
       alertEligible: boolOf(j, 'alertEligible', true),
       activeRidePhase: str(j, 'activeRidePhase', 'NONE'),
       canClaimMore: boolOf(j, 'canClaimMore', true),
+      branchPoolStoreIds: DriverProfile.parseStringList(j, 'branchPoolStoreIds'),
     );
+  }
+
+  static List<String> parseStringList(Json j, String key) {
+    final raw = j[key];
+    if (raw is! List) return const [];
+    return raw.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList();
   }
 
   bool get isOnline => dutyStatus == 'ONLINE' || dutyStatus == 'ON_DELIVERY';
@@ -106,6 +117,7 @@ class DriverProfile {
     bool? alertEligible,
     String? activeRidePhase,
     bool? canClaimMore,
+    List<String>? branchPoolStoreIds,
   }) {
     return DriverProfile(
       id: id,
@@ -132,6 +144,7 @@ class DriverProfile {
       alertEligible: alertEligible ?? this.alertEligible,
       activeRidePhase: activeRidePhase ?? this.activeRidePhase,
       canClaimMore: canClaimMore ?? this.canClaimMore,
+      branchPoolStoreIds: branchPoolStoreIds ?? this.branchPoolStoreIds,
     );
   }
 
@@ -140,6 +153,7 @@ class DriverProfile {
     if (storeId != null) storeId!,
     if (store != null) store!.id,
     ...accessibleStores.map((s) => s.id),
+    ...branchPoolStoreIds,
   }.where((id) => id.trim().isNotEmpty).toList();
 }
 

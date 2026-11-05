@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/painting.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vibration/vibration.dart';
 
 import 'ride_alert.dart';
+import 'runtime_config.dart';
 import '../l10n/l10n.dart';
 
 /// Taps and action buttons on our notifications, delivered to the app.
@@ -38,6 +41,30 @@ class OpenJobsTab extends NotificationTap {
   const OpenJobsTab();
 }
 
+/// Decline on the ride notification. Runs in a separate isolate: remember the job so it
+/// doesn't ring again after a restart, and hand it to the running app to stop the ring.
+/// Always saved: the port can outlive its isolate (activity destroyed, process kept).
+/// Top-level, not a static method: native code may only call annotated top-level functions
+/// (a static needs its class annotated too, or the VM refuses the lookup and nothing runs).
+@pragma('vm:entry-point')
+Future<void> bcNotificationBackgroundResponse(NotificationResponse response) async {
+  final tap = BcNotifications._parse(response);
+  if (tap is! SilenceRide || tap.jobId.isEmpty) return;
+  IsolateNameServer.lookupPortByName(BcNotifications._actionPortName)?.send(tap.jobId);
+  try {
+    DartPluginRegistrant.ensureInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    final ids = List<String>.of(prefs.getStringList(BcNotifications.silencedJobsKey) ?? const []);
+    if (!ids.contains(tap.jobId)) {
+      ids.add(tap.jobId);
+      if (ids.length > 500) ids.removeAt(0);
+      await prefs.setStringList(BcNotifications.silencedJobsKey, ids);
+    }
+  } catch (e) {
+    debugPrint('Could not save declined ride: $e');
+  }
+}
+
 /// System notification channels + builders — port of BcNotifications.kt.
 ///
 /// Channel ids are versioned because Android freezes a channel's sound and
@@ -56,6 +83,12 @@ class BcNotifications {
 
   static const _actionAccept = 'accept_ride';
   static const _actionSilence = 'silence_ride';
+
+  /// Job ids the rider silenced on this phone (read by AlertService).
+  static const silencedJobsKey = 'silenced_job_ids';
+
+  /// Port the main isolate listens on for Decline taps handled in the background isolate.
+  static const _actionPortName = 'bc_notification_actions';
 
   static final Int64List cancelVibratePattern = Int64List.fromList([0, 250, 150, 250]);
   static final Int64List _newJobVibratePattern = Int64List.fromList([0, 350, 200, 350, 200, 500]);
@@ -80,7 +113,12 @@ class BcNotifications {
         requestSoundPermission: false,
       ),
     );
-    await plugin.initialize(settings: settings, onDidReceiveNotificationResponse: _onResponse);
+    await plugin.initialize(
+      settings: settings,
+      onDidReceiveNotificationResponse: _onResponse,
+      // Decline has no UI, so Android delivers it to a background isolate.
+      onDidReceiveBackgroundNotificationResponse: bcNotificationBackgroundResponse,
+    );
     await _ensureChannels();
     try {
       final launch = await plugin.getNotificationAppLaunchDetails();
@@ -159,6 +197,16 @@ class BcNotifications {
     if (tap != null) _taps.add(tap);
   }
 
+  /// Main isolate only: receive Decline taps relayed from [bcNotificationBackgroundResponse].
+  static void listenForBackgroundActions(void Function(String jobId) onDecline) {
+    final port = ReceivePort();
+    IsolateNameServer.removePortNameMapping(_actionPortName);
+    IsolateNameServer.registerPortWithName(port.sendPort, _actionPortName);
+    port.listen((jobId) {
+      if (jobId is String && jobId.isNotEmpty) onDecline(jobId);
+    });
+  }
+
   static NotificationTap? _parse(NotificationResponse response) {
     final payload = response.payload;
     if (payload == null || payload.isEmpty) return const OpenJobsTab();
@@ -181,6 +229,7 @@ class BcNotifications {
 
   /// Loud heads-up / full-screen alert for a new delivery ride.
   static Future<void> notifyNewJob(RideAlert alert) async {
+    final fullScreen = await RuntimeConfig.readFullScreenAlertsEnabled();
     final android = AndroidNotificationDetails(
       channelNewJob,
       tr('New delivery jobs'),
@@ -188,13 +237,16 @@ class BcNotifications {
       importance: Importance.max,
       priority: Priority.max,
       category: AndroidNotificationCategory.call,
-      fullScreenIntent: true,
+      fullScreenIntent: fullScreen,
       ongoing: true,
       autoCancel: false,
       onlyAlertOnce: true,
       playSound: false,
       vibrationPattern: _newJobVibratePattern,
       ticker: alert.notificationTitle,
+      // Own group per ride: otherwise Android auto-bundles it with "On duty", where it
+      // stays collapsed — no heads-up of its own and Accept/Decline hidden behind two expands.
+      groupKey: 'bc_ride_${alert.jobId}',
       // Brand look: blue accent, app logo as the large icon, rich expanded text.
       color: const Color(0xFF1A5CD4),
       largeIcon: const DrawableResourceAndroidBitmap('splash_icon'),

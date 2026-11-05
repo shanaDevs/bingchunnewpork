@@ -4,6 +4,8 @@ export type OrderSummaryChartPoint = {
   pickupCash: number;
   pickupOnline: number;
   pickupCard: number;
+  /** Product sales in period (excludes delivery & convenience fees). */
+  productSales?: number;
 };
 
 export type RefundByMonthRow = {
@@ -37,6 +39,9 @@ export type BranchGrossRevenueBreakdown = {
 };
 
 function sumOrderSummaryRevenue(point: OrderSummaryChartPoint, pickupOnly: boolean): number {
+  if (typeof point.productSales === 'number') {
+    return point.productSales;
+  }
   return (
     (pickupOnly ? 0 : point.delivery) +
     point.pickupCash +
@@ -95,18 +100,34 @@ export function buildSalesVsDiscountSeries(
   }));
 }
 
+export function branchProductGrossSales(kpi: {
+  productGrossSales?: number;
+  grossSales: number;
+  totalDeliveryRevenue: number;
+  totalConvenienceRevenue: number;
+}): number {
+  if (typeof kpi.productGrossSales === 'number') {
+    return kpi.productGrossSales;
+  }
+  const gross = kpi.grossSales ?? 0;
+  const delivery = kpi.totalDeliveryRevenue ?? 0;
+  const convenience = kpi.totalConvenienceRevenue ?? 0;
+  return Math.max(0, gross - delivery - convenience);
+}
+
 export function buildBranchGrossRevenueBreakdown(
   kpi: {
+    productGrossSales?: number;
     grossSales: number;
     totalDeliveryRevenue: number;
     totalConvenienceRevenue: number;
   },
   pickupOnly: boolean,
 ): BranchGrossRevenueBreakdown {
+  const productSales = branchProductGrossSales(kpi);
   const gross = kpi.grossSales ?? 0;
   const delivery = pickupOnly ? 0 : (kpi.totalDeliveryRevenue ?? 0);
   const convenience = kpi.totalConvenienceRevenue ?? 0;
-  const productSales = Math.max(0, gross - delivery - convenience);
   const other = Math.max(0, gross - productSales - delivery - convenience);
   return { productSales, delivery, convenience, other };
 }

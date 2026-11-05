@@ -35,6 +35,7 @@ import {
   resolveFinalPayoutAmountFromBreakdown,
 } from './sharedPromoContribution';
 import { attachPromoOwnershipTotals, loadPromoOwnershipTotalsForPeriod } from './promoOwnershipTotals';
+import { resolveNetPlatformAmountCentsFromWithdrawalBreakdown } from './invoice/payoutStatement';
 import { Prisma } from '@prisma/client';
 import { centsToDecimal, parseDecimalFromDb } from './moneyDecimal';
 import {
@@ -96,6 +97,7 @@ export type BranchWalletPayablesBreakdown = {
     deliveryOnlineIn: number;
   };
   totalRevenueCents: number;
+  /** Sum of net platform amount from paid 15-day payout snapshots (cents). */
   platformCommissionCents: number;
   deliveryCommissionCents: number;
   gatewayFeeCents: number;
@@ -224,7 +226,7 @@ function buildBranchPayablesBreakdown(
     channels.deliveryOnlineIn;
   const deliveryCommissionCents = Math.round(toDeliveryLkr * 100);
   const totalExpensesCents =
-    platformCommissionCents + gatewayFeeCents + deliveryCommissionCents;
+    platformCommissionCents + gatewayFeeCents + branchReceivableCents;
 
   return {
     channelRevenueCents: { ...channels },
@@ -238,39 +240,12 @@ function buildBranchPayablesBreakdown(
   };
 }
 
-export async function getBranchWalletDashboard(
+/** All-time payables breakdown (matches branch wallet detail “All-Time Available Balance”). */
+export async function computeBranchPayablesBreakdown(
   storeId: string,
-  period?: WalletDashboardPeriod,
-): Promise<BranchWalletDashboard> {
-  const wallet = await getOrCreateWallet(storeId);
-  const dateFilter = periodCreatedAtFilter(period);
-
-  const [
-    revenue,
-    payablesRevenue,
-    toBranchAgg,
-    toPlatformAgg,
-    approvedDeliveryPayouts,
-    payablesToPlatformAgg,
-    payablesDeliveryPayouts,
-    paidPayoutWithdrawals,
-    refundsLkr,
-  ] = await Promise.all([
-    fetchSummarizedPaidOrderRevenue({ storeId, ...dateFilter }),
+): Promise<BranchWalletPayablesBreakdown> {
+  const [payablesRevenue, payablesDeliveryPayouts, paidPayoutWithdrawals] = await Promise.all([
     fetchSummarizedPaidOrderRevenue({ storeId }),
-    prisma.storeWithdrawal.aggregate({
-      _sum: { amount: true },
-      where: { storeId, status: 'APPROVED', ...dateFilter },
-    }),
-    prisma.commissionSettlement.aggregate({
-      _sum: { totalCommission: true },
-      where: { storeId, status: 'VERIFIED', ...dateFilter },
-    }),
-    fetchApprovedDeliveryPayoutBreakdowns(period),
-    prisma.commissionSettlement.aggregate({
-      _sum: { totalCommission: true },
-      where: { storeId, status: 'VERIFIED' },
-    }),
     fetchApprovedDeliveryPayoutBreakdowns(),
     prisma.storeWithdrawal.findMany({
       where: {
@@ -281,16 +256,7 @@ export async function getBranchWalletDashboard(
       },
       select: { breakdown: true, amount: true },
     }),
-    computeBranchRefundsRetainedLkr(storeId),
   ]);
-
-  const pickupOnlineIn = revenue.pickupOnlineIn;
-  const deliveryOnlineIn = revenue.deliveryCardIn;
-
-  const toDeliveryLkr = approvedDeliveryPayouts.reduce(
-    (sum, row) => sum + branchNetForDeliveryFromPayoutBreakdown(row.breakdown, storeId),
-    0,
-  );
 
   const payablesToDeliveryLkr = payablesDeliveryPayouts.reduce(
     (sum, row) => sum + branchNetForDeliveryFromPayoutBreakdown(row.breakdown, storeId),
@@ -309,12 +275,49 @@ export async function getBranchWalletDashboard(
     0,
   );
 
-  const payablesBreakdown = buildBranchPayablesBreakdown(
+  const paidNetPlatformAmountCents = paidPayoutWithdrawals.reduce(
+    (sum, row) => sum + resolveNetPlatformAmountCentsFromWithdrawalBreakdown(row.breakdown),
+    0,
+  );
+
+  return buildBranchPayablesBreakdown(
     payablesRevenue,
-    decimalFieldToCentsNumber(payablesToPlatformAgg._sum.totalCommission),
+    paidNetPlatformAmountCents,
     payablesToDeliveryLkr,
     paidPayoutGatewayFeeCents,
     paidBranchReceivableCents,
+  );
+}
+
+export async function getBranchWalletDashboard(
+  storeId: string,
+  period?: WalletDashboardPeriod,
+): Promise<BranchWalletDashboard> {
+  const wallet = await getOrCreateWallet(storeId);
+  const dateFilter = periodCreatedAtFilter(period);
+
+  const [revenue, toBranchAgg, toPlatformAgg, approvedDeliveryPayouts, payablesBreakdown, refundsLkr] =
+    await Promise.all([
+      fetchSummarizedPaidOrderRevenue({ storeId, ...dateFilter }),
+      prisma.storeWithdrawal.aggregate({
+        _sum: { amount: true },
+        where: { storeId, status: 'APPROVED', ...dateFilter },
+      }),
+      prisma.commissionSettlement.aggregate({
+        _sum: { totalCommission: true },
+        where: { storeId, status: 'VERIFIED', ...dateFilter },
+      }),
+      fetchApprovedDeliveryPayoutBreakdowns(period),
+      computeBranchPayablesBreakdown(storeId),
+      computeBranchRefundsRetainedLkr(storeId),
+    ]);
+
+  const pickupOnlineIn = revenue.pickupOnlineIn;
+  const deliveryOnlineIn = revenue.deliveryCardIn;
+
+  const toDeliveryLkr = approvedDeliveryPayouts.reduce(
+    (sum, row) => sum + branchNetForDeliveryFromPayoutBreakdown(row.breakdown, storeId),
+    0,
   );
 
   return {
@@ -1679,6 +1682,65 @@ export function enrichWalletRow<T extends StoreWallet>(
     currentBalance: walletBalanceCents(wallet),
     availableBalance: Math.max(0, remainingNet - pendingWithdrawalTotal),
   };
+}
+
+export type DashboardWalletAvailableSummary = {
+  totalCents: number;
+  branchesWithPayable: number;
+};
+
+export type BranchPayablesSummary = {
+  totalRemaining: number;
+  branchesWithPayable: number;
+};
+
+/** Maps dashboard wallet KPI cents to branch payables fields used on admin dashboards. */
+export function branchPayablesFromDashboardWalletKpi(
+  kpi: DashboardWalletAvailableSummary,
+): BranchPayablesSummary {
+  return {
+    totalRemaining: kpi.totalCents,
+    branchesWithPayable: kpi.branchesWithPayable,
+  };
+}
+
+/**
+ * Dashboard wallet KPI: net branch available balance excluding convenience and delivery fees.
+ * Matches System Wallet Overview branch cards (`allTimeAvailableBalanceCents`).
+ */
+export async function computeDashboardWalletAvailableCents(
+  storeId?: string,
+): Promise<DashboardWalletAvailableSummary> {
+  if (storeId) {
+    const breakdown = await computeBranchPayablesBreakdown(storeId);
+    const totalCents = breakdown.allTimeAvailableBalanceCents;
+    return {
+      totalCents,
+      branchesWithPayable: totalCents > 0 ? 1 : 0,
+    };
+  }
+
+  const wallets = await prisma.storeWallet.findMany({
+    where: { store: { isActive: true } },
+    select: { storeId: true },
+  });
+  if (wallets.length === 0) {
+    return { totalCents: 0, branchesWithPayable: 0 };
+  }
+
+  const breakdowns = await promiseAllLimited(
+    getPrismaFanOutLimit(),
+    wallets.map((w) => () => computeBranchPayablesBreakdown(w.storeId)),
+  );
+
+  let totalCents = 0;
+  let branchesWithPayable = 0;
+  for (const breakdown of breakdowns) {
+    const cents = breakdown.allTimeAvailableBalanceCents;
+    totalCents += cents;
+    if (cents > 0) branchesWithPayable += 1;
+  }
+  return { totalCents, branchesWithPayable };
 }
 
 /** Total remaining payable to branches (available balance after withdrawals & pending requests). */

@@ -610,16 +610,14 @@ export default function WalletWithdrawalModal({
   const convenienceFeeLkr =
     breakdownLkr?.convenienceFee ?? resolvePreviewConvenienceFeeLkr(channelPreview);
   const deliveryFeeLkr = breakdownLkr?.deliveryFee ?? 0;
-  const deliveryFeeForPeriodLkr = isViewMode
-    ? resolveTotalDeliveryFeeForAllocationLkr({
-        periodDeliveryFeeLkr: deliveryFeeLkr,
-        refundDeliveryFeeLkr: breakdownLkr?.refundDeliveryFee ?? 0,
-        rejectedRefundDeliveryFeeLkr: breakdownLkr?.rejectedRefundDeliveryFee ?? 0,
-      })
-    : resolvePeriodDeliveryFeeLkr({
-        channelBreakdown: channelPreview?.breakdown,
-        periodDeliveryFeeLkr: deliveryFeeLkr,
-      });
+  const deliveryFeeForPeriodLkr = resolveTotalDeliveryFeeForAllocationLkr({
+    periodDeliveryFeeLkr: resolvePeriodDeliveryFeeLkr({
+      channelBreakdown: channelPreview?.breakdown,
+      periodDeliveryFeeLkr: deliveryFeeLkr,
+    }),
+    refundDeliveryFeeLkr: breakdownLkr?.refundDeliveryFee ?? 0,
+    rejectedRefundDeliveryFeeLkr: breakdownLkr?.rejectedRefundDeliveryFee ?? 0,
+  });
   const payoutSplit = breakdownLkr
     ? computePeriodPayoutSplitLkr({
         netAmount: breakdownLkr.netAmount,
@@ -726,6 +724,7 @@ export default function WalletWithdrawalModal({
   const payoutBreakdownPanelProps = breakdownLkr
     ? {
         preview: isViewMode ? null : channelPreview,
+        channelBreakdown: channelTableBreakdown,
         periodBreakdownLkr: breakdownLkr,
         onlineOrderSubtotalLkr,
         convenienceFeeLkr,

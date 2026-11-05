@@ -452,8 +452,9 @@ async function zeroConvenienceFeeForOrder(orderId: string): Promise<number> {
   return total;
 }
 
-function takeawayScheduling(): { scheduleMode: 15; scheduledAt: string } {
-  const scheduledAt = new Date(Date.now() + 25 * 60 * 1000).toISOString();
+function takeawayScheduling(at?: Date): { scheduleMode: 15; scheduledAt: string } {
+  const base = at ?? new Date();
+  const scheduledAt = new Date(base.getTime() + 30 * 60 * 1000).toISOString();
   return { scheduleMode: 15, scheduledAt };
 }
 
@@ -466,6 +467,8 @@ async function placeOnlineOrder(input: {
   quantity: number;
   note: string;
   promoCode?: string;
+  /** Use backdated slot for takeaway (avoids failing when seed runs after branch close). */
+  takeawayAt?: Date;
 }): Promise<{
   id: string;
   orderNumber: string;
@@ -475,7 +478,8 @@ async function placeOnlineOrder(input: {
   userId: string | null;
   paymentMethod: PaymentMethod;
 }> {
-  const { store, actors, orderMode, paymentMethod, product, quantity, note, promoCode } = input;
+  const { store, actors, orderMode, paymentMethod, product, quantity, note, promoCode, takeawayAt } =
+    input;
   const items = [{ productId: product.productId, size: 'REGULAR' as const, toppingIds: [] as string[], quantity }];
 
   const body: Record<string, unknown> = {
@@ -490,7 +494,7 @@ async function placeOnlineOrder(input: {
   };
   if (promoCode) body.promoCode = promoCode;
   if (orderMode === 'TAKEAWAY') {
-    Object.assign(body, takeawayScheduling());
+    Object.assign(body, takeawayScheduling(takeawayAt));
   }
   if (orderMode === 'DELIVERY') {
     const [addr, user] = await Promise.all([
@@ -864,6 +868,7 @@ async function seedDeliveredGmv(ctx: {
         quantity,
         note,
         promoCode,
+        takeawayAt: orderMode === 'TAKEAWAY' ? placedAt : undefined,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -902,6 +907,18 @@ async function seedDeliveredGmv(ctx: {
           product,
           quantity,
           note,
+          takeawayAt: orderMode === 'TAKEAWAY' ? placedAt : undefined,
+        });
+      } else if (msg.includes('pickup slot')) {
+        order = await placeOnlineOrder({
+          store,
+          actors,
+          orderMode: 'DELIVERY',
+          paymentMethod,
+          product,
+          quantity,
+          note,
+          promoCode,
         });
       } else {
         throw err;
