@@ -7,8 +7,6 @@ import { getAdminSession } from '@/lib/adminAuth';
 import {
   ensureAdminAccessToken,
   forceAdminLogout,
-  getAdminLastActivity,
-  getIdleTimeoutMs,
   registerAdminForceLogoutHandler,
   touchAdminActivity,
 } from '@/lib/adminSession';
@@ -26,7 +24,7 @@ export function useAdminSessionGuard(enabled = true) {
       router.replace('/admin/login');
     });
 
-    const logoutIdle = (message: string) => {
+    const logoutExpired = (message: string) => {
       forceAdminLogout(message);
     };
 
@@ -39,19 +37,10 @@ export function useAdminSessionGuard(enabled = true) {
     const tick = async () => {
       if (!getAdminSession()) return;
 
-      const session = getAdminSession();
-      const limit = session ? getIdleTimeoutMs(session.role) : null;
-      if (limit) {
-        const lastActivity = getAdminLastActivity();
-        if (lastActivity && Date.now() - lastActivity > limit) {
-          logoutIdle('Session expired after 15 minutes of inactivity. Please sign in again.');
-          return;
-        }
-      }
-
+      // Keep access cookie/JWT fresh via refresh token — no idle auto-logout.
       const ok = await ensureAdminAccessToken();
       if (!ok && getAdminSession()) {
-        logoutIdle('Session expired. Please sign in again.');
+        logoutExpired('Session expired. Please sign in again.');
       }
     };
 
