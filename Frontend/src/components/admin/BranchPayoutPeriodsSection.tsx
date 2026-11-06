@@ -23,6 +23,10 @@ import {
   shouldHideFirstCyclePlatformColumns,
 } from '@/components/admin/payoutPeriodRowCycleDisplay';
 import {
+  resolveSecondCycleFullDisplayRange,
+  secondCycleFullDisplayRangeFallback,
+} from '@/components/admin/payoutSecondCycleDisplayRange';
+import {
   dueFocusToPeriodView,
   syntheticPeriodViewWithdrawal,
   type DuePeriodFocus,
@@ -83,19 +87,35 @@ function previewPeriodTo(row: PayoutPeriodRow) {
   return through;
 }
 
-function formatPayoutPeriodCell(row: PayoutPeriodRow) {
-  if (row.status !== 'IN_PROGRESS') {
-    return formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo);
-  }
-  const through = previewPeriodTo(row);
-  return (
-    <span className="flex flex-col gap-0.5">
-      <span>{formatBiweeklyPeriodLabel(row.periodFrom, through)}</span>
-      <span className="text-[10px] font-normal text-[var(--color-text-muted)]">
-        15-day cycle closes {row.periodTo}
+function rowBreakdownForStage(row: PayoutPeriodRow): unknown {
+  return row.breakdown ?? row.withdrawal?.breakdown;
+}
+
+function formatPayoutPeriodCell(
+  row: PayoutPeriodRow,
+  allRows: PayoutPeriodRow[],
+  netPreviewByKey: Map<string, Record<string, unknown>>,
+) {
+  if (row.status === 'IN_PROGRESS') {
+    const through = previewPeriodTo(row);
+    return (
+      <span className="flex flex-col gap-0.5">
+        <span>{formatBiweeklyPeriodLabel(row.periodFrom, through)}</span>
+        <span className="text-[10px] font-normal text-[var(--color-text-muted)]">
+          15-day cycle closes {row.periodTo}
+        </span>
       </span>
-    </span>
-  );
+    );
+  }
+
+  const stage = readPayoutCycleStage(rowBreakdownForStage(row), netPreviewByKey.get(row.key));
+  if (stage === 'SECOND') {
+    const resolved =
+      resolveSecondCycleFullDisplayRange(allRows, row) ?? secondCycleFullDisplayRangeFallback(row);
+    return formatBiweeklyPeriodLabel(resolved.displayFrom, resolved.displayTo);
+  }
+
+  return formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo);
 }
 
 function asIsoDate(value: unknown): string | null {
@@ -173,25 +193,57 @@ function PayoutPeriodsTableSkeleton() {
   );
 }
 
-function periodToViewRow(row: PayoutPeriodRow, storeId?: string): {
+function periodToViewRow(
+  row: PayoutPeriodRow,
+  allRows: PayoutPeriodRow[],
+  netPreviewByKey: Map<string, Record<string, unknown>>,
+  storeId?: string,
+): {
   withdrawal: WithdrawalRow;
   viewPeriodOnly: boolean;
 } {
+  const stage = readPayoutCycleStage(rowBreakdownForStage(row), netPreviewByKey.get(row.key));
+  let periodFrom = row.periodFrom;
+  let periodTo = previewPeriodTo(row);
+  if (stage === 'SECOND') {
+    const resolved =
+      resolveSecondCycleFullDisplayRange(allRows, row) ?? secondCycleFullDisplayRangeFallback(row);
+    periodFrom = resolved.displayFrom;
+    periodTo = resolved.displayTo;
+  }
+
   if (row.withdrawal) {
+    const base = toWithdrawalRow(row.withdrawal, storeId ?? row.withdrawal.storeId);
     return {
-      withdrawal: toWithdrawalRow(row.withdrawal, storeId ?? row.withdrawal.storeId),
+      withdrawal: {
+        ...base,
+        periodFrom,
+        periodTo,
+      },
       viewPeriodOnly: false,
     };
   }
 
   return syntheticPeriodViewWithdrawal({
     key: row.key,
-    periodFrom: row.periodFrom,
-    periodTo: previewPeriodTo(row),
+    periodFrom,
+    periodTo,
     amountCents: row.amountCents,
     storeId,
     breakdown: row.breakdown,
   });
+}
+
+function viewPeriodDisplayForModal(
+  row: PayoutPeriodRow,
+  allRows: PayoutPeriodRow[],
+  netPreviewByKey: Map<string, Record<string, unknown>>,
+): { from: string; to: string; days: number } | undefined {
+  const stage = readPayoutCycleStage(rowBreakdownForStage(row), netPreviewByKey.get(row.key));
+  if (stage !== 'SECOND') return undefined;
+  const resolved =
+    resolveSecondCycleFullDisplayRange(allRows, row) ?? secondCycleFullDisplayRangeFallback(row);
+  return { from: resolved.displayFrom, to: resolved.displayTo, days: 30 };
 }
 
 function formatAmountCell(value: number | null) {
@@ -276,6 +328,7 @@ export default function BranchPayoutPeriodsSection({
   const [viewRow, setViewRow] = useState<{
     withdrawal: WithdrawalRow;
     viewPeriodOnly: boolean;
+    periodDisplay?: { from: string; to: string; days: number };
   } | null>(null);
 
   const {
@@ -396,7 +449,10 @@ export default function BranchPayoutPeriodsSection({
 
     if (periodRowToAutoOpen) {
       openedOldestPending.current = true;
-      setViewRow(periodToViewRow(periodRowToAutoOpen, storeId));
+      setViewRow({
+        ...periodToViewRow(periodRowToAutoOpen, rows, previewByKey, storeId),
+        periodDisplay: viewPeriodDisplayForModal(periodRowToAutoOpen, rows, previewByKey),
+      });
       return;
     }
 
@@ -410,6 +466,8 @@ export default function BranchPayoutPeriodsSection({
     periodRowToAutoOpen,
     storeId,
     autoOpenDuePeriod,
+    rows,
+    previewByKey,
   ]);
 
   useEffect(() => {
@@ -473,7 +531,7 @@ export default function BranchPayoutPeriodsSection({
                   )}
                 >
                   <td className="px-3 py-3 whitespace-nowrap text-[var(--color-text)]">
-                    {formatPayoutPeriodCell(row)}
+                    {formatPayoutPeriodCell(row, rows, previewByKey)}
                   </td>
                   <PayoutPeriodAmountCells
                     row={row}
@@ -492,7 +550,12 @@ export default function BranchPayoutPeriodsSection({
                   <td className="px-3 py-3 text-right">
                     <button
                       type="button"
-                      onClick={() => setViewRow(periodToViewRow(row, storeId))}
+                      onClick={() =>
+                        setViewRow({
+                          ...periodToViewRow(row, rows, previewByKey, storeId),
+                          periodDisplay: viewPeriodDisplayForModal(row, rows, previewByKey),
+                        })
+                      }
                       className={cn(
                         'inline-flex items-center rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5',
                         'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
@@ -514,6 +577,7 @@ export default function BranchPayoutPeriodsSection({
         onClose={() => setViewRow(null)}
         viewWithdrawal={viewRow?.withdrawal ?? null}
         viewPeriodOnly={viewRow?.viewPeriodOnly ?? false}
+        viewPeriodDisplay={viewRow?.periodDisplay}
         walletBalance={walletBalance}
         availableBalance={availableBalance}
         storeId={storeId ?? viewRow?.withdrawal.storeId}

@@ -4,6 +4,7 @@ import {
   type ChannelSettlementRow,
   type CommissionChannel,
 } from './commission';
+import { resolveNetPayoutFinalPayCentsFromWithdrawalBreakdown } from './payoutWithdrawalAmounts';
 import { toUtcDateStr } from './utcDateString';
 
 export type PayoutCycleStage = 'FIRST' | 'SECOND';
@@ -30,8 +31,7 @@ export function readOnlineWalletCentsFromBreakdown(breakdown: unknown): number {
 }
 
 /**
- * Payout 1 pickup + delivery online subtotals before discounts (channel table Subtotal column).
- * Used as “Online Wallet Amount (Payout 1)” on Payout 2 reports.
+ * Payout 1 pickup + delivery online revenue after discounts (gateway fee base).
  */
 export function readFirstPayoutOnlineSubtotalCentsFromBreakdown(breakdown: unknown): number {
   if (!breakdown || typeof breakdown !== 'object') return 0;
@@ -53,6 +53,12 @@ export function readFirstPayoutOnlineSubtotalCentsFromBreakdown(breakdown: unkno
     );
   }
   return readOnlineWalletCentsFromBreakdown(breakdown);
+}
+
+/** Payout 2 prior deduction — net payout (final pay amount) from the paired Payout 1 withdrawal. */
+export function readFirstPayoutPriorDeductionCentsFromBreakdown(breakdown: unknown): number {
+  const fallbackCents = readFirstPayoutOnlineSubtotalCentsFromBreakdown(breakdown);
+  return resolveNetPayoutFinalPayCentsFromWithdrawalBreakdown(breakdown, fallbackCents);
 }
 
 /** Next payout alternates FIRST after a completed SECOND pair. */
@@ -95,7 +101,7 @@ export async function resolvePayoutCycleContext(storeId: string): Promise<Payout
     cycleStage: 'SECOND',
     cycleFrom: toUtcDateStr(pairedFirst.periodFrom),
     cyclePairId: pairedFirst.id,
-    priorOnlineWalletAmountCents: readFirstPayoutOnlineSubtotalCentsFromBreakdown(
+    priorOnlineWalletAmountCents: readFirstPayoutPriorDeductionCentsFromBreakdown(
       pairedFirst.breakdown,
     ),
   };

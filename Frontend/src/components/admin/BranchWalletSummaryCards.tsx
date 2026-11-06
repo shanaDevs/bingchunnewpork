@@ -69,6 +69,7 @@ const EMPTY_PAID_PAYOUT_EXPENSES: PayoutPeriodExpensesCents = {
   gatewayFeeCents: 0,
   branchReceivableCents: 0,
   totalExpensesCents: 0,
+  allTimeExpenseDeductionCents: 0,
 };
 
 function RevenueChannelKpiCard({
@@ -292,8 +293,8 @@ export default function BranchWalletSummaryCards({
   const onlineRevenueCents = pickupOnlineCents + deliveryOnlineCents;
   const expensesSummaryTotalCents =
     platformCommissionCents + gatewayFeeCents + branchReceivableCents;
-  /** Pickup + delivery online revenue minus full expenses summary (platform + gateway + branch). */
-  const availableBalanceCents = onlineRevenueCents - expensesSummaryTotalCents;
+  /** Pickup + delivery online minus branch receivable (matches wallet API / Branch Payables). */
+  const availableBalanceCents = Math.max(0, onlineRevenueCents - branchReceivableCents);
 
   const cardLoading = loading || periodLoading || payoutPeriodExpensesLoading;
 

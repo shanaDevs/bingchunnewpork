@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { withAdminCredentials } from '@/lib/adminSession';
 
@@ -66,6 +66,8 @@ type Props = {
   viewWithdrawal?: WithdrawalRow | null;
   /** Synthetic 15-day period view: skip refetch by id and show Pending (not Pending Approval). */
   viewPeriodOnly?: boolean;
+  /** Override displayed date range / day count (e.g. full 30-day window for second-cycle payout view). */
+  viewPeriodDisplay?: { from: string; to: string; days: number } | null;
 };
 
 function withdrawalStatusLabel(status: WithdrawalRow['status']) {
@@ -183,6 +185,7 @@ export default function WalletWithdrawalModal({
   showGatewayFees = false,
   viewWithdrawal = null,
   viewPeriodOnly = false,
+  viewPeriodDisplay = null,
 }: Props) {
   const isViewMode = viewWithdrawal != null;
   const [portalReady, setPortalReady] = useState(false);
@@ -687,6 +690,21 @@ export default function WalletWithdrawalModal({
   const showAdvance = advanceAmountLkr > 0;
   const isAdvance = showAdvance;
   const rangeReady = isValidRange(dateFrom, dateTo);
+  const displayDateFrom = viewPeriodDisplay?.from ?? dateFrom;
+  const displayDateTo = viewPeriodDisplay?.to ?? dateTo;
+  const displayPeriodDays = viewPeriodDisplay?.days ?? periodDays;
+  const displayRangeReady = isValidRange(displayDateFrom, displayDateTo);
+  const breakdownPanelRangeReady = isViewMode ? displayRangeReady : rangeReady;
+  let periodPillLabel: string | null = null;
+  if (isViewMode) {
+    if (displayRangeReady) {
+      const range = formatBiweeklyPeriodLabel(displayDateFrom, displayDateTo);
+      periodPillLabel = displayPeriodDays != null ? `${range} · ${displayPeriodDays} days` : range;
+    }
+  } else if (rangeReady) {
+    const range = formatBiweeklyPeriodLabel(dateFrom, dateTo);
+    periodPillLabel = periodDays != null ? `${range} · ${periodDays} days` : range;
+  }
   const periodInFuture = !!dateTo && dateTo > todayDateStr();
   const selectedPeriodOption =
     periodDays != null ? periodOptions.find((opt) => opt.days === periodDays) ?? null : null;
@@ -696,7 +714,8 @@ export default function WalletWithdrawalModal({
       ? addDaysToDateStr(selectedPeriodOption.from, selectedPeriodOption.days - 1)
       : null;
   const slabRatePct = resolveSlabRatePctFromPreview(channelPreview);
-  const periodLabel = dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : null;
+  const periodLabel =
+    displayDateFrom && displayDateTo ? `${displayDateFrom} → ${displayDateTo}` : null;
   const withdrawalAmountCents =
     isViewMode && activeViewWithdrawal
       ? activeViewWithdrawal.amount
@@ -808,8 +827,8 @@ export default function WalletWithdrawalModal({
         branchReceivesLkr: branchPayout.totalBranchPayoutLkr,
         platformCommissionLkr,
         periodNetLkr: branchPayout.periodWalletNetLkr,
-        dateFrom,
-        dateTo,
+        dateFrom: displayDateFrom,
+        dateTo: displayDateTo,
         showAdvance,
         advanceAmountLkr,
         branchPayout,
@@ -956,13 +975,11 @@ export default function WalletWithdrawalModal({
                   </span>
                 </p>
               )}
-              {rangeReady && (
+              {periodPillLabel && (
                 <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] font-medium text-[#475569] dark:text-slate-300">
                   <div className="flex items-center gap-2 rounded-full border border-[#cbd5e1] dark:border-slate-600 bg-[#f8fafc] dark:bg-slate-800 px-3 py-1.5">
                     <CalendarRange size={16} className="text-[#3b82f6]" />
-                    <span>
-                      {formatBiweeklyPeriodLabel(dateFrom, dateTo)} · {periodDays} days
-                    </span>
+                    <span>{periodPillLabel}</span>
                   </div>
                   {tierPreview && (
                     <div className="flex items-center gap-2 rounded-full border border-[#cbd5e1] dark:border-slate-600 bg-[#f8fafc] dark:bg-slate-800 px-3 py-1.5">
@@ -1059,7 +1076,8 @@ export default function WalletWithdrawalModal({
                 <ChannelSalesTable breakdown={channelTableBreakdown} className="mb-4" />
               )}
 
-              {payoutBreakdownPanelProps && (isViewMode || rangeReady) && (
+              {payoutBreakdownPanelProps &&
+                (isViewMode ? breakdownPanelRangeReady : rangeReady) && (
                   <PayoutBreakdownPanel {...payoutBreakdownPanelProps} className="mb-4" />
                 )}
 

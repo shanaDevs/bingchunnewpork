@@ -3,7 +3,7 @@ import type { StoreWallet } from '@/components/admin/SuperAdminSystemWalletTab';
 import type { WithdrawalPagination, WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
 import { WITHDRAWAL_PAGE_SIZE } from '@/components/admin/WalletWithdrawalTable';
 import { adminAuthHeaders } from '@/lib/adminSession';
-import { normalizeStoreWalletFromApi } from '@/lib/moneyString';
+import { normalizeStoreWalletFromApi, normalizeWalletSummaryFromApi } from '@/lib/moneyString';
 
 export type PeriodBranchReport = {
   storeId: string;
@@ -23,6 +23,8 @@ export interface WalletSummary {
   totalWithdrawn: number;
   pendingWithdrawalTotal: number;
   availableBalance: number;
+  onlineWalletAvailableBalance?: number;
+  allTimeAvailableBalanceCents?: number;
 }
 
 export type AdminWalletOverviewData = {
@@ -68,7 +70,9 @@ export async function fetchAdminWalletOverview(
   const rawWallets = (json.data.wallets ?? []) as StoreWallet[];
   return {
     wallets: rawWallets.map((row) => normalizeStoreWalletFromApi(row)),
-    summary: json.data.summary ?? null,
+    summary: json.data.summary
+      ? normalizeWalletSummaryFromApi(json.data.summary)
+      : null,
     dashboard: json.data.dashboard ?? null,
     periodBranchReports: isFiltered
       ? ((json.data.periodBranchReports ?? []) as PeriodBranchReport[])

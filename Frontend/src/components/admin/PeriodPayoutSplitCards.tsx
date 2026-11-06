@@ -33,6 +33,24 @@ type Props = {
 
 type MetricCardVariant = 'platform' | 'neutral';
 
+const METRIC_CARD_VARIANT_STYLES: Record<
+  MetricCardVariant,
+  { shell: string; iconRing: string; titleClass: string; amountClass: string }
+> = {
+  platform: {
+    shell: 'border-[#fecaca] bg-[#fef2f2] dark:border-red-900/50 dark:bg-red-950/20',
+    iconRing: 'border-red-500 text-red-500',
+    titleClass: 'text-red-500',
+    amountClass: 'text-red-500',
+  },
+  neutral: {
+    shell: 'border-[#e2e8f0] bg-white dark:border-slate-700 dark:bg-slate-900',
+    iconRing: 'border-[#cbd5e1] text-[#64748b]',
+    titleClass: 'text-[#64748b] dark:text-slate-400',
+    amountClass: 'text-[#1e293b] dark:text-slate-100',
+  },
+};
+
 function PayoutMetricCard({
   icon: Icon,
   title,
@@ -48,18 +66,7 @@ function PayoutMetricCard({
   subtitle: string;
   variant: MetricCardVariant;
 }) {
-  const shell =
-    variant === 'platform'
-      ? 'border-[#fecaca] bg-[#fef2f2] dark:border-red-900/50 dark:bg-red-950/20'
-      : 'border-[#e2e8f0] bg-white dark:border-slate-700 dark:bg-slate-900';
-
-  const iconRing =
-    variant === 'platform' ? 'border-red-500 text-red-500' : 'border-[#cbd5e1] text-[#64748b]';
-
-  const titleClass = variant === 'platform' ? 'text-red-500' : 'text-[#64748b] dark:text-slate-400';
-
-  const amountClass =
-    variant === 'platform' ? 'text-red-500' : 'text-[#1e293b] dark:text-slate-100';
+  const { shell, iconRing, titleClass, amountClass } = METRIC_CARD_VARIANT_STYLES[variant];
 
   return (
     <div className={`flex gap-4 rounded-xl border p-4 ${shell}`}>
@@ -97,12 +104,12 @@ export default function PeriodPayoutSplitCards({
   const isFirstCyclePayout = cycleStage === 'FIRST';
   const { branchReceives, commissionLkr, orderConvenienceFeeLkr, deliveryFee } =
     resolvePeriodPayoutCardAmounts({
-    payoutSplit,
-    branchReceivesLkr,
-    platformCommissionLkr: isFirstCyclePayout ? 0 : platformCommissionLkr,
-    periodNetLkr,
-    deliveryFeeLkr,
-  });
+      payoutSplit,
+      branchReceivesLkr,
+      platformCommissionLkr: isFirstCyclePayout ? 0 : platformCommissionLkr,
+      periodNetLkr,
+      deliveryFeeLkr,
+    });
 
   const branchDisplay = coalesceBranchPayoutDisplay({
     branchPayout,

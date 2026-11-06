@@ -58,16 +58,17 @@ import {
   normalizePayoutPeriodDate,
   type BranchPayoutCompletedMeta,
 } from '@/lib/branchPayoutsDue';
-import { findPairedFirstPayoutPeriodRow } from '@/components/admin/payoutPeriodRowCycleDisplay';
-import { resolvePayoutPeriodRowDisplayAmounts } from '@/components/admin/payoutPeriodRowAmounts';
 import { resolveInitiatePayoutAvailableBalance } from '@/components/admin/initiatePayoutAvailableBalance';
-import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
+import { resolvePayoutCycleDisplayRange } from '@/components/admin/payoutSecondCycleDisplayRange';
 import { toDateInputValue } from '@/lib/walletUtils';
+import { normalizeWalletSummaryFromApi } from '@/lib/moneyString';
 
 type PaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CHECK' | '';
 
 type BranchWalletSummary = {
   onlineWalletAvailableBalance?: number;
+  allTimeAvailableBalanceCents?: number;
+  pendingWithdrawalTotal?: number;
   availableBalance?: number;
 };
 
@@ -190,7 +191,6 @@ export default function AdminInitiatePayoutModal({
   const [channelPreview, setChannelPreview] = useState<SettlementPreview | null>(null);
   const [walletSummary, setWalletSummary] = useState<BranchWalletSummary | null>(null);
   const [walletSummaryLoading, setWalletSummaryLoading] = useState(false);
-  const [priorPairNetPayoutFinalPayLkr, setPriorPairNetPayoutFinalPayLkr] = useState(0);
   const [periodDays, setPeriodDays] = useState<number | null>(null);
   const [periodOptions, setPeriodOptions] = useState<RollingPeriodOption[]>([]);
   const [tierPreview, setTierPreview] = useState<{
@@ -253,7 +253,6 @@ export default function AdminInitiatePayoutModal({
       setChannelPreview(null);
       setWalletSummary(null);
       setWalletSummaryLoading(false);
-      setPriorPairNetPayoutFinalPayLkr(0);
       setPeriodDays(null);
       setPeriodOptions([]);
       setTierPreview(null);
@@ -355,7 +354,9 @@ export default function AdminInitiatePayoutModal({
       .then(async (res) => {
         const json = await res.json();
         if (!res.ok) throw new Error(json.message || 'Failed to load wallet summary');
-        if (!cancelled) setWalletSummary(json.data as BranchWalletSummary);
+        if (!cancelled) {
+          setWalletSummary(normalizeWalletSummaryFromApi(json.data as BranchWalletSummary));
+        }
       })
       .catch(() => {
         if (!cancelled) setWalletSummary(null);
@@ -368,59 +369,6 @@ export default function AdminInitiatePayoutModal({
       cancelled = true;
     };
   }, [open, storeId, apiBase]);
-
-  useEffect(() => {
-    if (!open || !storeId || !dateFrom || !dateTo) {
-      setPriorPairNetPayoutFinalPayLkr(0);
-      return;
-    }
-
-    let cancelled = false;
-    const qs = new URLSearchParams({
-      storeId,
-      limit: '100',
-      page: '1',
-    });
-
-    fetch(`${apiBase}/admin/wallet/withdrawals?${qs}`, withAdminCredentials())
-      .then(async (res) => {
-        const json = await res.json();
-        if (!res.ok || cancelled) return;
-        const rows = (json.data?.items ?? json.data?.withdrawals ?? []) as WithdrawalRow[];
-        const periodRows = rows
-          .filter((row) => row.status === 'APPROVED' || row.status === 'PENDING')
-          .map((row) => ({
-            periodFrom: toDateInputValue(row.periodFrom),
-            periodTo: toDateInputValue(row.periodTo),
-            amountCents: row.amount,
-            breakdown: row.breakdown,
-          }))
-          .filter((row) => row.periodFrom && row.periodTo);
-
-        const firstPairRow = findPairedFirstPayoutPeriodRow(periodRows, {
-          periodFrom: dateFrom,
-          periodTo: dateTo,
-        });
-        if (!firstPairRow || cancelled) {
-          setPriorPairNetPayoutFinalPayLkr(0);
-          return;
-        }
-        const amounts = resolvePayoutPeriodRowDisplayAmounts({
-          amountCents: firstPairRow.amountCents,
-          breakdown: firstPairRow.breakdown,
-          periodFrom: firstPairRow.periodFrom,
-          periodTo: firstPairRow.periodTo,
-        });
-        setPriorPairNetPayoutFinalPayLkr(amounts.branchReceives);
-      })
-      .catch(() => {
-        if (!cancelled) setPriorPairNetPayoutFinalPayLkr(0);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, storeId, apiBase, dateFrom, dateTo]);
 
   useEffect(() => {
     if (!open) return;
@@ -517,12 +465,27 @@ export default function AdminInitiatePayoutModal({
 
   if (!portalReady || !open) return null;
 
-  const onlineWalletAvailableCents =
-    walletSummary?.onlineWalletAvailableBalance ?? availableBalance;
-  const onlineWalletAvailableLkr = centsToLkr(onlineWalletAvailableCents);
+  const withdrawablePoolCents = (() => {
+    if (walletSummary) {
+      const allTime = walletSummary.allTimeAvailableBalanceCents ?? 0;
+      const pending = walletSummary.pendingWithdrawalTotal ?? 0;
+      return Math.max(0, allTime - pending);
+    }
+    return availableBalance;
+  })();
+  const withdrawablePoolLkr = centsToLkr(withdrawablePoolCents);
   const periodBreakdownLkr = periodNet ? withdrawalBreakdownToLkr(periodNet) : null;
-  const payoutCycleStage = periodBreakdownLkr?.cycleStage ?? periodNet?.cycleStage;
   const rangeReady = isValidRange(dateFrom, dateTo);
+  const displayRange = resolvePayoutCycleDisplayRange({
+    cycleStage: periodBreakdownLkr?.cycleStage ?? periodNet?.cycleStage,
+    cycleFrom: periodBreakdownLkr?.cycleFrom ?? periodNet?.cycleFrom,
+    periodFrom: dateFrom,
+    periodTo: dateTo,
+    periodDays,
+  });
+  const displayDateFrom = displayRange.displayFrom;
+  const displayDateTo = displayRange.displayTo;
+  const displayPeriodDays = displayRange.displayDays;
   const periodInFuture = !!dateTo && dateTo > todayDateStr();
   const selectedPeriodOption =
     periodDays != null ? periodOptions.find((opt) => opt.days === periodDays) ?? null : null;
@@ -548,7 +511,8 @@ export default function AdminInitiatePayoutModal({
     rejectedRefundDeliveryFeeLkr: periodBreakdownLkr?.rejectedRefundDeliveryFee ?? 0,
   });
   const slabRatePct = resolveSlabRatePctFromPreview(channelPreview);
-  const periodLabel = dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : null;
+  const periodLabel =
+    displayDateFrom && displayDateTo ? `${displayDateFrom} → ${displayDateTo}` : null;
   const payoutSplit = periodBreakdownLkr
     ? computePeriodPayoutSplitLkr({
         netAmount: periodBreakdownLkr.netAmount,
@@ -596,13 +560,8 @@ export default function AdminInitiatePayoutModal({
   const payTotalLkr = netPayoutFinalPayLkr;
   const reportBranchWalletNetLkr = branchPayout?.periodWalletNetLkr ?? periodNetLkr ?? 0;
   const branchWalletNetLkr = resolveBranchWalletNetLkrForPayout(periodNet, reportBranchWalletNetLkr);
-  const effectiveCycleStage =
-    payoutCycleStage ??
-    (priorPairNetPayoutFinalPayLkr > 0.001 ? ('SECOND' as const) : undefined);
   const availableBalanceView = resolveInitiatePayoutAvailableBalance({
-    onlineWalletAvailableLkr,
-    priorPairNetPayoutFinalPayLkr,
-    cycleStage: effectiveCycleStage,
+    withdrawablePoolLkr,
     netPayoutFinalPayLkr,
   });
   const availableLkr = availableBalanceView.availableBeforePayoutLkr;
@@ -625,8 +584,8 @@ export default function AdminInitiatePayoutModal({
           branchReceivesLkr: branchPayout.totalBranchPayoutLkr,
           platformCommissionLkr,
           periodNetLkr: branchPayout.periodWalletNetLkr,
-          dateFrom,
-          dateTo,
+          dateFrom: displayDateFrom,
+          dateTo: displayDateTo,
           showAdvance: false,
           advanceAmountLkr: 0,
           branchPayout,
@@ -731,10 +690,10 @@ export default function AdminInitiatePayoutModal({
     const confirmed = await confirmDialog({
       title: 'Initiate payout?',
       message: showJasonTopUp
-        ? `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${dateFrom} → ${dateTo}? Jason's balance will be reduced by ${formatMoney(sharedPromo.jasonContributionLkr)} for the shared promotion contribution.`
+        ? `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${displayDateFrom} → ${displayDateTo}? Jason's balance will be reduced by ${formatMoney(sharedPromo.jasonContributionLkr)} for the shared promotion contribution.`
         : showPlatformContributionBanner
-          ? `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${dateFrom} → ${dateTo}? Platform commission will be reduced by ${formatMoney(sharedPromo.platformContributionLkr)} for the shared promotion contribution.`
-          : `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${dateFrom} → ${dateTo}?`,
+          ? `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${displayDateFrom} → ${displayDateTo}? Platform commission will be reduced by ${formatMoney(sharedPromo.platformContributionLkr)} for the shared promotion contribution.`
+          : `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${displayDateFrom} → ${displayDateTo}?`,
       confirmLabel: 'Yes, pay',
       cancelLabel: 'Cancel',
     });
@@ -818,7 +777,7 @@ export default function AdminInitiatePayoutModal({
                   <div className="flex items-center gap-2 rounded-full border border-[#cbd5e1] dark:border-slate-600 bg-[#f8fafc] dark:bg-slate-800 px-3 py-1.5">
                     <CalendarRange size={16} className="text-[#3b82f6]" />
                     <span>
-                      {formatBiweeklyPeriodLabel(dateFrom, dateTo)} · {periodDays} days
+                      {formatBiweeklyPeriodLabel(displayDateFrom, displayDateTo)} · {displayPeriodDays} days
                       {duePeriodLocked ? ' · from Payouts Due' : ''}
                     </span>
                   </div>

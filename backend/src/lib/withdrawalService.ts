@@ -4,6 +4,7 @@ import { AppError } from '../middleware/errorHandler';
 import {
   getOrCreateWallet,
   getWalletSummary,
+  withdrawableAllTimeBalanceCents,
   type PeriodBreakdown,
 } from './walletService';
 import { creditPlatformEarning } from './platformEarningsService';
@@ -264,8 +265,14 @@ export async function buildStoredWithdrawalBreakdown(
 ): Promise<StoredWithdrawalBreakdown> {
   assertWithdrawalBreakdownSnapshot(period);
   const branchRequestAmountCents = opts?.branchRequestAmountCents ?? period.netAmount;
+  /**
+   * Net payout (final pay) for payables / branch receivable must follow the server period
+   * breakdown — especially `period.netAmount` after `refreshSecondPayoutGatewayAndNet` — plus
+   * Jason top-up. Do not derive this from the client-submitted wallet-debit (`branchRequest`);
+   * Initiate Payout can send a rounded branch-wallet line that is not identical to stored net.
+   */
   const finalPayoutAmount = computeFinalPayoutAmountCents(
-    branchRequestAmountCents,
+    Math.round(period.netAmount),
     period.sharedPromoJasonContributionAmount ?? 0,
   );
   const platformProviderReceivable = await resolvePlatformProviderReceivableFromBreakdown(period);
@@ -365,7 +372,10 @@ export async function validatePayoutRequest(
     fromStr,
     toStr,
   );
-  const remainingAvailableCents = walletSummary.onlineWalletAvailableBalance;
+  const remainingAvailableCents = withdrawableAllTimeBalanceCents(
+    walletSummary.allTimeAvailableBalanceCents,
+    walletSummary.pendingWithdrawalTotal,
+  );
   if (amount > remainingAvailableCents) {
     throw new AppError(
       `Insufficient available balance. Available: LKR ${(remainingAvailableCents / 100).toFixed(2)}`,

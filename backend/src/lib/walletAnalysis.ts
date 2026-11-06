@@ -17,7 +17,12 @@ import {
   loadRefundPenaltyTotalsByChartBuckets,
   loadRefundPenaltyTotalsByStore,
 } from './walletService';
-import { analyticsCacheKey, withAnalyticsCache, getAnalyticsCacheTtlMs } from './analyticsResponseCache';
+import {
+  analyticsCacheKey,
+  invalidateAnalyticsCacheByPrefix,
+  withAnalyticsCache,
+  getAnalyticsCacheTtlMs,
+} from './analyticsResponseCache';
 import { getGatewayFeeRate } from './appSchema';
 import { getDeliveryWalletNetByBucket, getDeliveryWalletSummary } from './deliveryWalletService';
 import { ensureJasonLedgerSchema } from './jasonLedgerSchema';
@@ -175,29 +180,6 @@ function branchDisplayName(name: string): string {
 
 function nonZeroFlows(rows: WalletAnalysisFlowPoint[]): WalletAnalysisFlowPoint[] {
   return rows.filter((r) => r.amount > 0);
-}
-
-async function sumAllTimeRefundsRetainedLkr(storeId: string | null): Promise<number> {
-  const agg = await prisma.refund.aggregate({
-    where: {
-      status: { in: ['COMPLETE', 'REJECTED'] },
-      ...(storeId ? { order: { is: { storeId } } } : {}),
-    },
-    _sum: { notReturningSubtotal: true },
-  });
-  return agg._sum.notReturningSubtotal ?? 0;
-}
-
-function sumOnlineChannelCentsFromPayables(
-  breakdowns: Awaited<ReturnType<typeof computeBranchPayablesBreakdown>>[],
-): number {
-  return breakdowns.reduce(
-    (sum, breakdown) =>
-      sum +
-      breakdown.channelRevenueCents.pickupOnlineIn +
-      breakdown.channelRevenueCents.deliveryOnlineIn,
-    0,
-  );
 }
 
 function roundLkr(amount: number): number {
@@ -635,6 +617,11 @@ export async function getWalletAnalysis(params: {
   );
 }
 
+/** Call after branch payout approve/initiate so System Wallet “All-Time Available Balance” refreshes. */
+export function invalidateWalletAnalysisCache(): void {
+  invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-analysis']));
+}
+
 async function computeWalletAnalysis(params: {
   monthKey: string;
   storeId?: string | null;
@@ -655,7 +642,7 @@ async function computeWalletAnalysis(params: {
     status: { not: 'CANCELLED' as const },
   };
 
-  const [payablesBreakdowns, allTimeFeeAgg, refundsRetainedLkr] = await Promise.all([
+  const [payablesBreakdowns, allTimeFeeAgg] = await Promise.all([
     storeIds.length > 0
       ? promiseAllLimited(
           getPrismaFanOutLimit(),
@@ -668,12 +655,7 @@ async function computeWalletAnalysis(params: {
           _sum: { deliveryFee: true, convenientFee: true },
         })
       : Promise.resolve({ _sum: { deliveryFee: null, convenientFee: null } }),
-    sumAllTimeRefundsRetainedLkr(storeId),
   ]);
-
-  const onlineAvailableBalance = roundLkr(
-    centsToLkr(sumOnlineChannelCentsFromPayables(payablesBreakdowns)) + refundsRetainedLkr,
-  );
 
   const excludedFees: WalletAnalysisExcludedFees = {
     deliveryFee: roundLkr(allTimeFeeAgg._sum.deliveryFee ?? 0),
@@ -684,6 +666,7 @@ async function computeWalletAnalysis(params: {
     (sum, breakdown) => sum + breakdown.allTimeAvailableBalanceCents,
     0,
   );
+  const onlineAvailableBalance = roundLkr(centsToLkr(balanceCents));
 
   if (storeIds.length === 0) {
     const emptyTrend = padDailyTrend(lastDay, new Map());

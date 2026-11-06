@@ -1,6 +1,6 @@
 /**
- * Running "Available to withdraw" for Initiate Payout — online wallet pool minus
- * prior net payouts (final pay amount) in the same cycle pair.
+ * Running "Available to withdraw" for Initiate Payout — all-time pickup + delivery
+ * online minus branch receivable (pending holds applied upstream), minus net payout for "after".
  */
 export type InitiatePayoutAvailableBalance = {
   onlinePoolLkr: number;
@@ -10,20 +10,12 @@ export type InitiatePayoutAvailableBalance = {
 };
 
 export function resolveInitiatePayoutAvailableBalance(params: {
-  /** Current wallet summary (already reduced by approved net payouts). */
-  onlineWalletAvailableLkr: number;
-  /** Payout 1 net payout (final pay amount) in this cycle pair. */
-  priorPairNetPayoutFinalPayLkr: number;
-  cycleStage: 'FIRST' | 'SECOND' | undefined;
+  /** LKR pool: all-time online revenue − branch receivable (− pending if already deducted). */
+  withdrawablePoolLkr: number;
   /** This period's net payout (final pay amount) from the financial report. */
   netPayoutFinalPayLkr: number;
 }): InitiatePayoutAvailableBalance {
-  const prior = Math.max(0, params.priorPairNetPayoutFinalPayLkr);
-  const onlinePoolLkr = Math.max(0, params.onlineWalletAvailableLkr + prior);
-  const availableBeforePayoutLkr =
-    params.cycleStage === 'SECOND'
-      ? Math.max(0, onlinePoolLkr - prior)
-      : onlinePoolLkr;
+  const availableBeforePayoutLkr = Math.max(0, params.withdrawablePoolLkr);
   const netPayoutFinalPay = Math.max(0, params.netPayoutFinalPayLkr);
   const availableAfterPayoutLkr =
     netPayoutFinalPay > 0.001
@@ -31,8 +23,8 @@ export function resolveInitiatePayoutAvailableBalance(params: {
       : null;
 
   return {
-    onlinePoolLkr,
-    priorPairNetPayoutFinalPayLkr: prior,
+    onlinePoolLkr: availableBeforePayoutLkr,
+    priorPairNetPayoutFinalPayLkr: 0,
     availableBeforePayoutLkr,
     availableAfterPayoutLkr,
   };

@@ -619,7 +619,12 @@ export default function BranchWalletDetail({
           <BranchWalletSummaryCards
             dashboard={walletDashboard}
             loading={loading}
-            allTimeBalanceCents={wallet?.currentBalance ?? wallet?.balance}
+            allTimeBalanceCents={
+              wallet?.allTimeAvailableBalanceCents ??
+              walletDashboard?.payablesBreakdown?.allTimeAvailableBalanceCents ??
+              wallet?.currentBalance ??
+              wallet?.balance
+            }
             periodFrom={periodFrom}
             periodTo={periodTo}
             periodLabel={periodLabel}

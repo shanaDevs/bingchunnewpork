@@ -18,7 +18,7 @@ vi.mock('../../src/lib/prisma', () => ({
     order: { findMany: vi.fn() },
     commissionSettlement: { findMany: vi.fn() },
     promotionUsage: { aggregate: vi.fn() },
-    storeWithdrawal: { findMany: vi.fn() },
+    storeWithdrawal: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -53,12 +53,19 @@ describe('getPaymentHistory payout list', () => {
         periodFrom?: { lte: Date };
         periodTo?: { gte: Date };
         status?: { not: string };
+        OR?: Array<{ periodFrom?: { lte: Date }; periodTo?: { gte: Date } }>;
       };
       if (where?.status?.not === 'REJECTED') {
         return allTimeRows as never;
       }
-      if (where?.periodFrom && where?.periodTo) {
-        overlapCalls.push(where);
+      const periodOverlap =
+        where?.OR?.[0]?.periodFrom && where?.OR?.[0]?.periodTo
+          ? where.OR[0]
+          : where?.periodFrom && where?.periodTo
+            ? where
+            : null;
+      if (periodOverlap) {
+        overlapCalls.push(periodOverlap);
         return [
           {
             id: 'settle-oct',

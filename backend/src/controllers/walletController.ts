@@ -28,7 +28,7 @@ import {
   listWithdrawalsUnsettledForDartCodes,
 } from '../lib/settlementWithdrawalQuery';
 import { fetchSummarizedPaidOrderRevenue } from '../lib/walletRevenue';
-import { getWalletAnalysis } from '../lib/walletAnalysis';
+import { getWalletAnalysis, invalidateWalletAnalysisCache } from '../lib/walletAnalysis';
 import { recalculateWalletBalance, syncMissingWalletPayments } from '../lib/walletSync';
 import {
   centsToDecimal,
@@ -78,6 +78,7 @@ import {
   analyticsCacheKey,
   invalidateAnalyticsCache,
   invalidateAnalyticsCacheByPrefix,
+  invalidateDashboardStatsCache,
   withAnalyticsCache,
 } from '../lib/analyticsResponseCache';
 import {
@@ -270,6 +271,12 @@ export async function getPayoutPeriodInfoHandler(req: Request, res: Response, ne
 // ──────────────────────────────────────────────────────────────────────────────
 function invalidateWalletPayoutsDueCache(): void {
   invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-payouts-due']));
+}
+
+function invalidateBranchPayablesBalanceCaches(storeId: string): void {
+  invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
+  invalidateWalletAnalysisCache();
+  invalidateDashboardStatsCache();
 }
 
 export async function getPayoutsDueHandler(req: Request, res: Response, next: NextFunction) {
@@ -578,7 +585,7 @@ export async function requestWithdrawalHandler(req: Request, res: Response, next
       withdrawalId: withdrawal.id,
     });
 
-    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
+    invalidateBranchPayablesBalanceCaches(storeId);
     invalidateWalletPayoutsDueCache();
 
     res.status(201).json({ success: true, data: serializeWithdrawal(withdrawal) });
@@ -682,7 +689,7 @@ export async function approveWithdrawalHandler(req: Request, res: Response, next
       withdrawalId: withdrawal.id,
     });
 
-    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', withdrawal.storeId]));
+    invalidateBranchPayablesBalanceCaches(withdrawal.storeId);
     invalidateWalletPayoutsDueCache();
 
     res.json({ success: true, data: serializeWithdrawal(final) });
@@ -769,7 +776,7 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
       withdrawalId: updated.id,
     });
 
-    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
+    invalidateBranchPayablesBalanceCaches(storeId);
     invalidateWalletPayoutsDueCache();
 
     // Respond as soon as the payout is committed. Spaces proof + invoice PDF must not
@@ -843,7 +850,7 @@ export async function rejectWithdrawalHandler(req: Request, res: Response, next:
       reason: data.reason,
     });
 
-    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', withdrawal.storeId]));
+    invalidateBranchPayablesBalanceCaches(withdrawal.storeId);
     invalidateWalletPayoutsDueCache();
 
     res.json({ success: true, data: serializeWithdrawal(withdrawal) });
@@ -874,7 +881,7 @@ export async function cancelWithdrawalHandler(req: Request, res: Response, next:
       withdrawalId: withdrawal.id,
     });
 
-    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', withdrawal.storeId]));
+    invalidateBranchPayablesBalanceCaches(withdrawal.storeId);
     invalidateWalletPayoutsDueCache();
 
     res.json({ success: true, data: serializeWithdrawal(withdrawal) });
@@ -1630,7 +1637,7 @@ export async function syncWallets(req: Request, res: Response, next: NextFunctio
 
     const result = await syncMissingWalletPayments(scopeStoreId);
     if (scopeStoreId) {
-      invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', scopeStoreId]));
+      invalidateBranchPayablesBalanceCaches(scopeStoreId);
     } else {
       invalidateWalletPayoutsDueCache();
     }

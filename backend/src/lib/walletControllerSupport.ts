@@ -23,6 +23,7 @@ import {
 } from './withdrawalPeriodNet';
 import type { PayoutCycleContext } from './payoutCycle';
 import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
+import { invalidateWalletAnalysisCache } from './walletAnalysis';
 import {
   computeBreakdownForPeriod,
   computeBranchPayablesBreakdown,
@@ -69,6 +70,8 @@ import {
 import { dayAfterUtcDateStr, toUtcDateStr } from './utcDateString';
 import {
   analyticsCacheKey,
+  invalidateAnalyticsCache,
+  invalidateDashboardStatsCache,
   withAnalyticsCache,
 } from './analyticsResponseCache';
 import { resolveBranchStoreId } from '../middleware/auth';
@@ -1159,7 +1162,7 @@ export async function loadAdminWalletListPayload(
   }
 
   const allTimeAvailableByStore = new Map<string, number>();
-  if (isSuper && storeIds.length > 0) {
+  if (storeIds.length > 0) {
     const rows: Array<{ storeId: string; cents: number }> = await promiseAllLimited(
       getPrismaFanOutLimit(),
       storeIds.map(
@@ -1210,7 +1213,12 @@ export async function loadAdminWalletListPayload(
     systemTotals = {
       totalIn: String(decimalFieldToCentsNumber(aggIn._sum.amount)),
       totalOut: String(Math.abs(decimalFieldToCentsNumber(aggOut._sum.amount))),
-      totalBalance: String(wallets.reduce((s, w) => s + walletBalanceCents(w), 0)),
+      totalBalance: String(
+        wallets.reduce(
+          (s, w) => s + (allTimeAvailableByStore.get(w.storeId) ?? walletBalanceCents(w)),
+          0,
+        ),
+      ),
     };
   }
 
@@ -1405,7 +1413,7 @@ export async function finalizeWithdrawalWithInvoice(input: WithdrawalInvoiceFina
   });
 
   try {
-    return await prisma.storeWithdrawal.update({
+    const finalized = await prisma.storeWithdrawal.update({
       where: { id: updated.id },
       data: {
         invoiceRef: invoice.invoiceRef,
@@ -1413,9 +1421,16 @@ export async function finalizeWithdrawalWithInvoice(input: WithdrawalInvoiceFina
         invoiceData: invoice.invoiceData as object,
       },
     });
+    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
+    invalidateWalletAnalysisCache();
+    invalidateDashboardStatsCache();
+    return finalized;
   } catch (err) {
     // Payout already succeeded; invoice metadata is best-effort. Don't fail the HTTP request.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+      invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
+      invalidateWalletAnalysisCache();
+      invalidateDashboardStatsCache();
       return updated;
     }
     throw err;

@@ -73,5 +73,40 @@ describe('resolvePayoutPeriodRowDisplayAmounts', () => {
     expect(totals.gatewayFeeCents).toBe(2000);
     expect(totals.branchReceivableCents).toBe(100000);
     expect(totals.totalExpensesCents).toBe(112000);
+    expect(totals.allTimeExpenseDeductionCents).toBe(112000);
+  });
+
+  it('uses branch-only deduction for paid payout 2 rows', () => {
+    const totals = aggregatePaidPayoutPeriodExpensesCents([
+      {
+        status: 'PAID',
+        amountCents: 2_931_400,
+        periodFrom: '2026-09-01',
+        periodTo: '2026-09-15',
+        breakdown: {
+          cycleStage: 'FIRST',
+          grossAmount: 3_000_000,
+          commissionFee: 0,
+          gatewayFee: 50_000,
+          netAmount: 2_931_400,
+        },
+      },
+      {
+        status: 'PAID',
+        amountCents: 980_445,
+        periodFrom: '2026-09-16',
+        periodTo: '2026-09-30',
+        breakdown: {
+          cycleStage: 'SECOND',
+          priorOnlineWalletAmountCents: 2_931_400,
+          grossAmount: 3_000_000,
+          commissionFee: 100_155,
+          gatewayFee: 18_945,
+          netAmount: 980_445,
+        },
+      },
+    ]);
+
+    expect(totals.allTimeExpenseDeductionCents).toBe(2_931_400 + 50_000 + 980_445);
   });
 });

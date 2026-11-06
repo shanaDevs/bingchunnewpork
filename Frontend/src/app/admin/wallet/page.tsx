@@ -172,6 +172,9 @@ function WalletOverviewPageContent() {
     void queryClient.invalidateQueries({ queryKey: ['admin-wallet-overview'] });
     void queryClient.invalidateQueries({ queryKey: ['admin-wallet-withdrawals'] });
     void queryClient.invalidateQueries({ queryKey: ['payout-periods'] });
+    void queryClient.invalidateQueries({ queryKey: ['wallet-analysis'] });
+    void queryClient.invalidateQueries({ queryKey: ['admin-stats'] });
+    void queryClient.invalidateQueries({ queryKey: ['admin-dashboard'] });
   }, [queryClient]);
 
   const superAdminSession = admin != null && isSuperAdmin(admin);
@@ -262,6 +265,12 @@ function WalletOverviewPageContent() {
   const superAdmin = isSuperAdmin(admin);
   const pickupOnly = isPickupOnlyBranchAdmin(admin);
 
+  const branchAllTimeAvailableCents =
+    walletSummary?.allTimeAvailableBalanceCents ??
+    wallets[0]?.allTimeAvailableBalanceCents ??
+    walletDashboard?.payablesBreakdown?.allTimeAvailableBalanceCents ??
+    null;
+
   const branchSummary: WalletSummary | null =
     walletSummary ??
     (wallets[0]
@@ -275,6 +284,9 @@ function WalletOverviewPageContent() {
             .filter((w) => w.storeId === wallets[0].storeId || !w.storeId)
             .reduce((s, w) => s + w.amount, 0),
           availableBalance: wallets[0].availableBalance ?? wallets[0].balance,
+          allTimeAvailableBalanceCents:
+            wallets[0].allTimeAvailableBalanceCents ??
+            walletDashboard?.payablesBreakdown?.allTimeAvailableBalanceCents,
         }
       : null);
 
@@ -395,7 +407,11 @@ function WalletOverviewPageContent() {
             dashboard={walletDashboard}
             loading={loading && !branchSummary}
             periodLoading={dashboardLoading}
-            allTimeBalanceCents={branchSummary?.currentBalance}
+            allTimeBalanceCents={
+              branchAllTimeAvailableCents ??
+              branchSummary?.allTimeAvailableBalanceCents ??
+              undefined
+            }
             periodFrom={periodFrom}
             periodTo={periodTo}
             periodLabel={periodLabel}

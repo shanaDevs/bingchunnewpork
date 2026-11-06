@@ -45,6 +45,8 @@ const WALLET_SUMMARY_CENT_FIELDS = [
   'totalWithdrawn',
   'pendingWithdrawalTotal',
   'availableBalance',
+  'onlineWalletAvailableBalance',
+  'allTimeAvailableBalanceCents',
 ] as const;
 
 function centsFieldToNumber(value: CentsField): number {

@@ -621,15 +621,35 @@ export function sumOnlinePaymentsCollectedFromBreakdown(
   );
 }
 
-/** Pickup + delivery online subtotal before discounts (channel table Subtotal column). */
+/** Payout 1 gateway fee base — pickup + delivery online revenue after discounts. */
 export function sumFirstPayoutOnlineWalletBaseFromBreakdown(
   breakdown: Record<CommissionChannel, ChannelSettlementRow>,
 ): number {
-  const pickup = breakdown.pickupOnline;
-  const delivery = breakdown.deliveryOnline;
-  return (
-    (pickup.subtotalBeforeDiscount ?? pickup.revenueSubtotal ?? 0) +
-    (delivery.subtotalBeforeDiscount ?? delivery.revenueSubtotal ?? 0)
+  return sumOnlinePaymentsCollectedFromBreakdown(breakdown);
+}
+
+/** Payout 2 — branch wallet before PayHere gateway fee (cents). Matches admin report walkthrough. */
+export function computeBranchWalletBeforeGatewayCents(params: {
+  onlinePaymentsCollectedCents: number;
+  priorOnlineWalletAmountCents: number;
+  netPlatformEarningCents: number;
+  jasonContributionCents?: number;
+  nonReturningRefundsBranchGrossCents?: number;
+}): number {
+  const {
+    onlinePaymentsCollectedCents,
+    priorOnlineWalletAmountCents,
+    netPlatformEarningCents,
+    jasonContributionCents = 0,
+    nonReturningRefundsBranchGrossCents = 0,
+  } = params;
+  return Math.max(
+    0,
+    onlinePaymentsCollectedCents +
+      jasonContributionCents -
+      priorOnlineWalletAmountCents +
+      nonReturningRefundsBranchGrossCents -
+      netPlatformEarningCents,
   );
 }
 

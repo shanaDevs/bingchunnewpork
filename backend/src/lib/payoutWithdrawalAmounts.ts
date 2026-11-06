@@ -1,5 +1,5 @@
 import {
-  sumFirstPayoutOnlineWalletBaseFromBreakdown,
+  sumOnlinePaymentsCollectedFromBreakdown,
   type ChannelSettlementRow,
   type CommissionChannel,
 } from './commission';
@@ -33,7 +33,7 @@ export function readWithdrawalCycleStage(
   return null;
 }
 
-/** Pickup + delivery online subtotal before discounts (cents), from a stored withdrawal snapshot. */
+/** Pickup + delivery online revenue after discounts (cents), from a stored withdrawal snapshot. */
 export function resolveFirstPayoutOnlineSubtotalCentsFromStoredBreakdown(
   raw: Record<string, unknown>,
 ): number | null {
@@ -43,7 +43,7 @@ export function resolveFirstPayoutOnlineSubtotalCentsFromStoredBreakdown(
   const channel = raw.channelBreakdown;
   if (channel && typeof channel === 'object') {
     return Math.round(
-      sumFirstPayoutOnlineWalletBaseFromBreakdown(
+      sumOnlinePaymentsCollectedFromBreakdown(
         channel as Record<CommissionChannel, ChannelSettlementRow>,
       ) * 100,
     );
@@ -79,15 +79,15 @@ export function resolveNetPayoutFinalPayCentsFromWithdrawalBreakdown(
 
   const jasonCents = readJasonContributionCents(raw);
 
+  const finalAmount = finiteAmount(raw.finalPayoutAmount);
+  if (finalAmount > 0) return Math.round(finalAmount);
+
   if (readWithdrawalCycleStage(raw) === 'FIRST') {
     const firstWalletNetCents = resolveFirstPayoutBranchWalletNetCentsFromStoredBreakdown(raw);
     if (firstWalletNetCents != null) {
       return computeFinalPayoutAmountCents(firstWalletNetCents, jasonCents);
     }
   }
-
-  const finalAmount = finiteAmount(raw.finalPayoutAmount);
-  if (finalAmount > 0) return Math.round(finalAmount);
 
   const branchRequestRaw = finiteAmount(raw.branchRequestNetAmount);
   const branchRequestCents =

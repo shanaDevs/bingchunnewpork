@@ -1,4 +1,9 @@
 import { resolveBranchPayoutDisplay } from '@/components/admin/branchPayoutDisplay';
+import {
+  buildPayoutBreakdownDisplayInput,
+  resolvePayoutReportValues,
+  resolveReportNetPayoutFinalPayLkr,
+} from '@/components/admin/resolvePayoutReportValues';
 import { paybackEnabledFromBreakdown } from '@/lib/walletUtils';
 import {
   resolvePeriodPayoutCardAmounts,
@@ -7,14 +12,22 @@ import {
 import {
   buildSettlementPreviewFromChannelBreakdown,
   computePeriodPayoutSplitLkr,
+  extractSharedPromoLkrFromBreakdown,
   parseWithdrawalBreakdown,
   parseWithdrawalBreakdownFromNetPreview,
   resolveNetPlatformAmountForPeriodLkr,
   resolveTotalDeliveryFeeForAllocationLkr,
+  sumAllRevenueSubtotal,
   type SettlementPreview,
+  type WithdrawalBreakdown,
   withdrawalBreakdownToLkr,
+  type PayoutFormulaBreakdownLkr,
 } from '@/components/admin/settlementTypes';
 import { withAdminCredentials } from '@/lib/adminSession';
+import {
+  paidPayoutAllTimeExpenseDeductionCents,
+  readPayoutCycleStageFromBreakdown,
+} from '@/components/admin/paidPayoutAllTimeDeduction';
 
 type PayoutPeriodExpenseRow = {
   status: 'PAID' | 'PENDING' | 'IN_PROGRESS';
@@ -30,10 +43,19 @@ export type PayoutPeriodExpensesCents = {
   gatewayFeeCents: number;
   branchReceivableCents: number;
   totalExpensesCents: number;
+  allTimeExpenseDeductionCents: number;
 };
 
 function lkrToExpenseCents(lkr: number): number {
   return Math.round(lkr * 100);
+}
+
+function gatewayFeeCentsFromBreakdown(breakdown: unknown): number {
+  if (!breakdown || typeof breakdown !== 'object') return 0;
+  const gatewayFee = (breakdown as Record<string, unknown>).gatewayFee;
+  return typeof gatewayFee === 'number' && Number.isFinite(gatewayFee)
+    ? Math.round(gatewayFee)
+    : 0;
 }
 
 /**
@@ -46,6 +68,7 @@ export function aggregatePaidPayoutPeriodExpensesCents(
   let netPlatformAmountCents = 0;
   let gatewayFeeCents = 0;
   let branchReceivableCents = 0;
+  let allTimeExpenseDeductionCents = 0;
 
   for (const row of rows) {
     if (row.status !== 'PAID') continue;
@@ -58,13 +81,22 @@ export function aggregatePaidPayoutPeriodExpensesCents(
       periodTo,
     });
 
-    netPlatformAmountCents += lkrToExpenseCents(amounts.commissionLkr ?? 0);
-    branchReceivableCents += lkrToExpenseCents(amounts.branchReceives);
+    const rowNetPlatform = lkrToExpenseCents(amounts.commissionLkr ?? 0);
+    const rowBranchDisplay = lkrToExpenseCents(amounts.branchReceives);
+    const rowGateway = gatewayFeeCentsFromBreakdown(row.breakdown);
+    const cycleStage = readPayoutCycleStageFromBreakdown(row.breakdown);
+    const rowBranchForAllTime =
+      cycleStage === 'FIRST' ? row.amountCents : rowBranchDisplay;
 
-    const parsed = parseWithdrawalBreakdown(row.breakdown);
-    if (parsed?.gatewayFee != null && Number.isFinite(parsed.gatewayFee)) {
-      gatewayFeeCents += Math.round(parsed.gatewayFee);
-    }
+    netPlatformAmountCents += rowNetPlatform;
+    branchReceivableCents += rowBranchDisplay;
+    gatewayFeeCents += rowGateway;
+    allTimeExpenseDeductionCents += paidPayoutAllTimeExpenseDeductionCents({
+      cycleStage,
+      netPlatformAmountCents: rowNetPlatform,
+      gatewayFeeCents: rowGateway,
+      branchReceivableCents: rowBranchForAllTime,
+    });
   }
 
   return {
@@ -73,6 +105,7 @@ export function aggregatePaidPayoutPeriodExpensesCents(
     branchReceivableCents,
     totalExpensesCents:
       netPlatformAmountCents + gatewayFeeCents + branchReceivableCents,
+    allTimeExpenseDeductionCents,
   };
 }
 
@@ -102,6 +135,45 @@ function netPreviewToChannelPreview(
       slabIndex: 0,
     },
   };
+}
+
+/** Same “Net payout (final pay amount)” as Initiate Payout financial report. */
+function resolveBranchReceivesFromPayoutReport(params: {
+  parsed: WithdrawalBreakdown;
+  breakdownLkr: PayoutFormulaBreakdownLkr;
+  channelPreview: SettlementPreview | null;
+  paybackEnabled: boolean;
+  amountCents: number;
+}): number | null {
+  const { parsed, breakdownLkr, channelPreview, paybackEnabled, amountCents } = params;
+  if (breakdownLkr.orderCount <= 0) return null;
+
+  const sharedPromo = extractSharedPromoLkrFromBreakdown(parsed, amountCents);
+  const onlineOrderSubtotalLkr = channelPreview
+    ? sumAllRevenueSubtotal(channelPreview)
+    : breakdownLkr.grossAmount;
+  const deliveryFeeForPeriodLkr = resolveTotalDeliveryFeeForAllocationLkr({
+    periodDeliveryFeeLkr: breakdownLkr.deliveryFee,
+    refundDeliveryFeeLkr: breakdownLkr.refundDeliveryFee ?? 0,
+    rejectedRefundDeliveryFeeLkr: breakdownLkr.rejectedRefundDeliveryFee ?? 0,
+  });
+
+  const reportValues = resolvePayoutReportValues(
+    buildPayoutBreakdownDisplayInput({
+      preview: channelPreview,
+      channelBreakdown: parsed.channelBreakdown ?? channelPreview?.breakdown ?? null,
+      periodBreakdownLkr: breakdownLkr,
+      onlineOrderSubtotalLkr,
+      convenienceFeeLkr: breakdownLkr.convenienceFee,
+      deliveryFeeLkr: deliveryFeeForPeriodLkr,
+      paybackEnabled,
+      gatewayRatePct: breakdownLkr.gatewayRatePct ?? 1.9,
+      sharedPromo,
+    }),
+  );
+
+  if (!reportValues) return null;
+  return resolveReportNetPayoutFinalPayLkr(reportValues);
 }
 
 /** Live net-preview drives Payout 2 table columns; locked snapshots alone miss window delivery & current net. */
@@ -209,8 +281,16 @@ export function resolvePayoutPeriodRowDisplayAmounts(params: {
     sharedPromoPlatformLkr: breakdownLkr.sharedPromoPlatformContributionLkr ?? 0,
   });
 
-  let branchReceivesLkr = branchPayout.totalBranchPayoutLkr;
-  if (parsed.cycleStage === 'SECOND') {
+  let branchReceivesLkr =
+    resolveBranchReceivesFromPayoutReport({
+      parsed,
+      breakdownLkr,
+      channelPreview,
+      paybackEnabled,
+      amountCents: params.amountCents,
+    }) ?? branchPayout.totalBranchPayoutLkr;
+
+  if (branchReceivesLkr <= 0 && parsed.cycleStage === 'SECOND') {
     const previewRaw = params.netPreviewData;
     const finalFromPreview =
       previewRaw && typeof previewRaw === 'object'

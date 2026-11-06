@@ -13,7 +13,7 @@ import {
   paymentMethodLabel,
 } from './format';
 import { collectPdfBuffer } from './parsing';
-import { resolvePayoutStatement } from './payoutStatement';
+import { enrichWithdrawalInvoiceInputForRender, resolvePayoutStatement } from './payoutStatement';
 import { withdrawalInvoiceRef } from './refs';
 import type { GenerateWithdrawalInvoiceInput, InvoicePageLayout } from './types';
 import {
@@ -48,10 +48,31 @@ function statusLabel(input: GenerateWithdrawalInvoiceInput): string {
   return `Paid  \u2022  ${paymentMethodLabel(input.paymentMethod)}`;
 }
 
+export type RenderWithdrawalInvoiceOptions = {
+  /** Live withdrawal snapshot — backfills Payout 1 wallet on Payout 2 invoices when missing from invoiceData. */
+  withdrawalBreakdown?: unknown;
+  cycleStage?: string | null;
+};
+
 /** Render the 2-page WD-INV payout invoice from stored input. */
 export async function renderWithdrawalInvoiceToBuffer(
   input: GenerateWithdrawalInvoiceInput,
+  renderOpts?: RenderWithdrawalInvoiceOptions,
 ): Promise<Buffer> {
+  const enriched =
+    renderOpts?.withdrawalBreakdown != null
+      ? enrichWithdrawalInvoiceInputForRender(input, {
+          breakdown: renderOpts.withdrawalBreakdown,
+          cycleStage: renderOpts.cycleStage,
+        })
+      : input;
+  const statementOpts =
+    renderOpts?.withdrawalBreakdown != null
+      ? {
+          withdrawalBreakdown: renderOpts.withdrawalBreakdown,
+          cycleStage: renderOpts.cycleStage,
+        }
+      : undefined;
   const invoiceRef = withdrawalInvoiceRef(input.withdrawalId);
   const branchName = branchDisplayName(input.storeName);
   const dateLabel = formatInvoiceDate(input.approvedAt);
@@ -95,7 +116,7 @@ export async function renderWithdrawalInvoiceToBuffer(
   );
   y += WD_LAYOUT.sectionGap;
 
-  const summaryRows = buildInvoiceSummaryRows(input);
+  const summaryRows = buildInvoiceSummaryRows(enriched, statementOpts);
   const notesBlockH = measureNotesBlockHeight(doc, contentW);
   const summaryRowH = resolvePage1SummaryRowH(pageH, y, summaryRows, notesBlockH);
 
@@ -119,7 +140,7 @@ export async function renderWithdrawalInvoiceToBuffer(
   y = WD_LAYOUT.contentTop - 6;
   y = drawPage2Pill(doc, layout, y);
 
-  const statement = resolvePayoutStatement(input);
+  const statement = resolvePayoutStatement(enriched, statementOpts);
   const sections = buildPage2PayoutSections(statement);
   for (const section of sections) {
     y = drawSectionTitle(doc, marginX, y, contentW, section.title, true);

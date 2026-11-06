@@ -28,12 +28,12 @@ describe('sumOnlineSubtotalBeforeDiscount', () => {
     } as SettlementBreakdown;
 
     expect(sumOnlineSubtotalBeforeDiscount(breakdown)).toBe(1200 + 9000);
-    expect(resolveFirstPayoutOnlineSubtotalComponents(breakdown).totalLkr).toBe(10200);
+    expect(resolveFirstPayoutOnlineSubtotalComponents(breakdown).totalLkr).toBe(9790);
   });
 });
 
 describe('Payout 1 gateway base', () => {
-  it('uses online subtotal before discounts, not online net', () => {
+  it('uses pickup + delivery online revenue after discounts', () => {
     const channelBreakdown = {
       pickupOnline: { revenueSubtotal: 19199, subtotalBeforeDiscount: 21490 },
       deliveryOnline: { revenueSubtotal: 0, subtotalBeforeDiscount: 0 },
@@ -46,7 +46,7 @@ describe('Payout 1 gateway base', () => {
       channelBreakdown,
     } as WithdrawalBreakdown;
 
-    expect(resolveFirstPayoutGatewayBaseLkr(breakdown)).toBe(21490);
-    expect(resolveFirstPayoutBranchWalletNetLkr(breakdown)).toBe(21081.69);
+    expect(resolveFirstPayoutGatewayBaseLkr(breakdown)).toBe(19199);
+    expect(resolveFirstPayoutBranchWalletNetLkr(breakdown)).toBe(18834.22);
   });
 });

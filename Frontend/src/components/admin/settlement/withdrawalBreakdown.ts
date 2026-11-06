@@ -7,7 +7,7 @@ import {
 } from './lkrUtils';
 import {
   normalizeSettlementBreakdown,
-  sumOnlineSubtotalBeforeDiscount,
+  sumOnlineRevenueSubtotals,
 } from './channelBreakdown';
 import type { SettlementBreakdown } from './channelBreakdown';
 
@@ -170,13 +170,13 @@ function parseWithdrawalCycleFields(
   }
 }
 
-/** Payout 1 gateway fee base — pickup + delivery online subtotal before discounts. */
+/** Payout 1 gateway fee base — pickup + delivery online revenue after discounts. */
 export function resolveFirstPayoutGatewayBaseLkr(
   b: WithdrawalBreakdown | null | undefined,
 ): number | null {
   if (!b || b.cycleStage !== 'FIRST') return null;
   if (b.channelBreakdown) {
-    const subtotalLkr = sumOnlineSubtotalBeforeDiscount(b.channelBreakdown);
+    const subtotalLkr = sumOnlineRevenueSubtotals(b.channelBreakdown);
     if (subtotalLkr > 0.001) return subtotalLkr;
   }
   if (b.firstPayoutOnlineSubtotalCents != null && b.firstPayoutOnlineSubtotalCents > 0) {
@@ -189,7 +189,7 @@ export function resolveFirstPayoutGatewayBaseLkr(
   return null;
 }
 
-/** Payout 1 branch wallet net after gateway on online subtotal (not online net). */
+/** Payout 1 branch wallet net after gateway on online revenue (after discounts). */
 export function resolveFirstPayoutBranchWalletNetLkr(
   b: WithdrawalBreakdown | null | undefined,
 ): number | null {
@@ -200,12 +200,9 @@ export function resolveFirstPayoutBranchWalletNetLkr(
   return roundLkr(baseLkr - gatewayLkr);
 }
 
-/** Payout 2 only: “Online Wallet Amount (Payout 1)” — subtotal before discounts, not net. */
+/** Payout 2 only: net payout (final pay amount) already paid in Payout 1. */
 export function resolvePriorOnlineWalletDisplayLkr(b: WithdrawalBreakdown): number {
   if (b.cycleStage === 'FIRST') return 0;
-  if (b.firstPayoutOnlineSubtotalCents != null && b.firstPayoutOnlineSubtotalCents > 0) {
-    return b.firstPayoutOnlineSubtotalCents / 100;
-  }
   return (b.priorOnlineWalletAmountCents ?? 0) / 100;
 }
 

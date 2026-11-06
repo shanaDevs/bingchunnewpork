@@ -1,3 +1,4 @@
+import { readFirstPayoutOnlineSubtotalCentsFromBreakdown } from '../payoutCycle';
 import type {
   GenerateWithdrawalInvoiceInput,
   InvoicePayoutStatement,
@@ -41,7 +42,43 @@ const EMPTY_STATEMENT: InvoicePayoutStatement = {
   bankPenaltyOrderCount: 0,
   jasonPayoutTopUpCents: 0,
   branchNetPayoutCents: 0,
+  priorOnlineWalletAmountCents: 0,
 };
+
+/** Payout 2 invoice line — matches Financial Report prior online wallet (cents). */
+export function resolvePriorOnlineWalletAmountCentsFromBreakdown(
+  breakdown: unknown,
+  cycleStage?: string | null,
+): number {
+  if (!breakdown || typeof breakdown !== 'object') return 0;
+  const o = breakdown as Record<string, unknown>;
+  const stage = cycleStage ?? o.cycleStage;
+  if (stage === 'FIRST') return 0;
+
+  const priorCents = num(o, 'priorOnlineWalletAmountCents');
+  if (priorCents > 0) return priorCents;
+
+  const isSecondPayout =
+    stage === 'SECOND' ||
+    (stage == null && num(o, 'commissionFee') > 0 && num(o, 'firstPayoutOnlineSubtotalCents') > 0);
+  if (!isSecondPayout) return 0;
+
+  const firstSubtotal = num(o, 'firstPayoutOnlineSubtotalCents');
+  if (firstSubtotal > 0) return firstSubtotal;
+
+  const fromChannels = readFirstPayoutOnlineSubtotalCentsFromBreakdown(breakdown);
+  if (fromChannels > 0) return fromChannels;
+
+  const priorLkr = o.priorOnlineWalletAmountLkr;
+  if (typeof priorLkr === 'number' && Number.isFinite(priorLkr) && priorLkr > 0) {
+    return Math.round(priorLkr * 100);
+  }
+  return 0;
+}
+
+function resolvePriorOnlineWalletAmountCents(o: Record<string, unknown>): number {
+  return resolvePriorOnlineWalletAmountCentsFromBreakdown(o);
+}
 
 function paybackEnabledFromWithdrawalBreakdown(o: Record<string, unknown>): boolean {
   if (typeof o.platformDiscountPaybackEnabled === 'boolean') {
@@ -122,6 +159,7 @@ export function buildPayoutStatementFromBreakdown(
     bankPenaltyOrderCount: num(o, 'cancelledByBranchOrderCount'),
     jasonPayoutTopUpCents: sharedJason,
     branchNetPayoutCents: requestedCents,
+    priorOnlineWalletAmountCents: resolvePriorOnlineWalletAmountCents(o),
   };
 }
 
@@ -147,20 +185,64 @@ function fallbackFromPeriod(
 }
 
 /** Prefer stored snapshot; fall back to period/promo fields for legacy invoiceData. */
-export function resolvePayoutStatement(input: GenerateWithdrawalInvoiceInput): InvoicePayoutStatement {
+export function resolvePayoutStatement(
+  input: GenerateWithdrawalInvoiceInput,
+  opts?: { withdrawalBreakdown?: unknown; cycleStage?: string | null },
+): InvoicePayoutStatement {
+  let statement: InvoicePayoutStatement;
   if (input.payoutStatement) {
-    return {
+    statement = {
       ...EMPTY_STATEMENT,
       ...input.payoutStatement,
       branchNetPayoutCents: input.payoutStatement.branchNetPayoutCents || input.requestedCents,
     };
+  } else {
+    statement = fallbackFromPeriod(
+      input.periodBreakdown,
+      input.requestedCents,
+      input.promoSummary?.platformPaybackCents ?? 0,
+      input.gatewayRatePct ?? 1.9,
+    );
   }
-  return fallbackFromPeriod(
-    input.periodBreakdown,
-    input.requestedCents,
-    input.promoSummary?.platformPaybackCents ?? 0,
-    input.gatewayRatePct ?? 1.9,
+
+  if (statement.priorOnlineWalletAmountCents > 0) {
+    return statement;
+  }
+
+  const priorFromBreakdown = resolvePriorOnlineWalletAmountCentsFromBreakdown(
+    opts?.withdrawalBreakdown,
+    opts?.cycleStage,
   );
+  if (priorFromBreakdown > 0) {
+    return { ...statement, priorOnlineWalletAmountCents: priorFromBreakdown };
+  }
+
+  return statement;
+}
+
+/** Backfill payout-1 wallet on stored invoiceData when rendering PDF (display only). */
+export function enrichWithdrawalInvoiceInputForRender(
+  input: GenerateWithdrawalInvoiceInput,
+  withdrawal: { breakdown: unknown; cycleStage?: string | null },
+): GenerateWithdrawalInvoiceInput {
+  const prior = resolvePriorOnlineWalletAmountCentsFromBreakdown(
+    withdrawal.breakdown,
+    withdrawal.cycleStage,
+  );
+  if (prior <= 0) return input;
+
+  const base =
+    input.payoutStatement ??
+    resolvePayoutStatement(input, {
+      withdrawalBreakdown: withdrawal.breakdown,
+      cycleStage: withdrawal.cycleStage,
+    });
+  if (base.priorOnlineWalletAmountCents > 0) return input;
+
+  return {
+    ...input,
+    payoutStatement: { ...base, priorOnlineWalletAmountCents: prior },
+  };
 }
 
 export function parsePayoutStatement(value: unknown): InvoicePayoutStatement | null {
@@ -197,5 +279,6 @@ export function parsePayoutStatement(value: unknown): InvoicePayoutStatement | n
     bankPenaltyOrderCount: num(o, 'bankPenaltyOrderCount'),
     jasonPayoutTopUpCents: num(o, 'jasonPayoutTopUpCents'),
     branchNetPayoutCents: num(o, 'branchNetPayoutCents'),
+    priorOnlineWalletAmountCents: num(o, 'priorOnlineWalletAmountCents'),
   };
 }

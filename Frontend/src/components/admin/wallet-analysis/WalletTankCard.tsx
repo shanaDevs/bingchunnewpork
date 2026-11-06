@@ -162,9 +162,10 @@ export default function WalletTankCard({
       <div className="mt-[14px] flex min-h-[64px] items-stretch gap-3 pb-0">
         <BalanceMetric
           icon={Layers}
-          label="All-Time Available Balance"
+          label="Online Available Balance"
           amount={formatMoney(balance)}
           loading={loading}
+          blinkLabelDot
         />
         <div
           className="w-px shrink-0 self-stretch"
@@ -173,10 +174,9 @@ export default function WalletTankCard({
         />
         <BalanceMetric
           icon={Monitor}
-          label="Online Available Balance"
+          label="All-Time Available Balance"
           amount={formatMoney(onlineAvailableBalance)}
           loading={loading}
-          blinkLabelDot
         />
       </div>
 

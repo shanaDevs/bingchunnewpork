@@ -20,7 +20,7 @@ export interface StoreWallet {
   totalWithdrawn?: number;
   currentBalance?: number;
   availableBalance?: number;
-  /** Matches branch detail “All-Time Available Balance” (net revenue − paid payout expenses). */
+  /** Matches branch detail “All-Time Available Balance” (online revenue − branch receivable). */
   allTimeAvailableBalanceCents?: number;
   updatedAt: string;
   store: { id: string; name: string; city: string; isActive: boolean };

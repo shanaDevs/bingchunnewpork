@@ -6,8 +6,10 @@ import PayoutBreakdownTabs from '@/components/admin/PayoutBreakdownTabs';
 import PayoutFinancialReport from '@/components/admin/PayoutFinancialReport';
 import {
   resolvePayoutBreakdownBundle,
+  resolveReportNetPayoutFinalPayLkr,
   type PayoutBreakdownDisplayInput,
 } from '@/components/admin/resolvePayoutReportValues';
+import { branchPayoutDisplayFromReportValues } from '@/components/admin/branchPayoutDisplay';
 import type {
   BranchPayoutDisplay,
   BranchReceiveDifference,
@@ -46,19 +48,21 @@ export default function PayoutBreakdownPanel({
   if (!bundle) return null;
 
   const { breakdownProps, reportValues } = bundle;
+  const netPayoutFinalPayLkr = resolveReportNetPayoutFinalPayLkr(reportValues);
+  const branchPayoutFromReport = branchPayoutDisplayFromReportValues(reportValues);
 
   const renderPayoutAllocationCards = () => (
     <PeriodPayoutSplitCards
       payoutSplit={payoutSplit}
-      branchReceivesLkr={branchReceivesLkr}
+      branchReceivesLkr={netPayoutFinalPayLkr}
       platformCommissionLkr={platformCommissionLkr}
-      periodNetLkr={periodNetLkr}
+      periodNetLkr={branchPayoutFromReport.periodWalletNetLkr}
       deliveryFeeLkr={breakdownInput.deliveryFeeLkr}
       dateFrom={dateFrom}
       dateTo={dateTo}
       showAdvance={showAdvance}
       advanceAmountLkr={advanceAmountLkr}
-      branchPayout={branchPayout}
+      branchPayout={branchPayoutFromReport}
       branchReceiveDifference={branchReceiveDifference}
       cycleStage={reportValues.cycleStage}
       className="mb-4"

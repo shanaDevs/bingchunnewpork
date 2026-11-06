@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  resolveBranchWalletBeforeGatewayLkr,
   resolveFinalNetPayoutPayLkr,
   resolvePayoutReportValues,
+  resolveReportNetPayoutFinalPayLkr,
+  resolveSecondCycleDisplayFinalPayLkr,
 } from '@/components/admin/resolvePayoutReportValues';
 
 describe('resolvePayoutReportValues two-stage cycle', () => {
@@ -85,8 +88,8 @@ describe('resolvePayoutReportValues two-stage cycle', () => {
         periodDiscountsTotal: 508,
         periodLoyaltyDiscountTotal: 0,
         cycleStage: 'SECOND',
-        priorOnlineWalletAmountLkr: 21_490,
-        remainingOnlineWalletLkr: 18_463,
+        priorOnlineWalletAmountLkr: 21_081.69,
+        remainingOnlineWalletLkr: 18_871.31,
       },
       onlineOrderSubtotalLkr: 39_953,
       convenienceFeeLkr: 0,
@@ -103,8 +106,16 @@ describe('resolvePayoutReportValues two-stage cycle', () => {
       },
     });
 
-    expect(values?.branchNetPayoutLkr).toBeCloseTo(16_271.25, 2);
-    expect(resolveFinalNetPayoutPayLkr(values!)).toBeCloseTo(16_779.25, 2);
+    const beforeGateway = resolveBranchWalletBeforeGatewayLkr(values!);
+    const displayFinal = resolveSecondCycleDisplayFinalPayLkr(values!);
+    expect(beforeGateway).not.toBeNull();
+    expect(values!.gatewayLkr).toBeCloseTo((beforeGateway ?? 0) * 0.019, 2);
+    expect(displayFinal).toBeCloseTo(
+      (beforeGateway ?? 0) - (values!.gatewayLkr + values!.cancelledByBranchGatewayFeeLkr),
+      2,
+    );
+    expect(resolveFinalNetPayoutPayLkr(values!)).toBe(displayFinal);
+    expect(resolveReportNetPayoutFinalPayLkr(values!)).toBe(displayFinal);
   });
 
   it('matches spec SECOND-stage net payout (30-day combined cycle)', () => {

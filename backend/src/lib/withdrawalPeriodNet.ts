@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import {
   computeBreakdownForPeriod,
+  refreshSecondPayoutGatewayAndNet,
   type PeriodBreakdown,
 } from './walletService';
 import {
@@ -14,7 +15,7 @@ import {
 import {
   cycleContextFromWithdrawal,
   determineNextPayoutCycleStage,
-  readFirstPayoutOnlineSubtotalCentsFromBreakdown,
+  readFirstPayoutPriorDeductionCentsFromBreakdown,
   resolvePayoutCycleContext,
   type PayoutCycleContext,
   type PayoutBreakdownOptions,
@@ -26,9 +27,10 @@ import {
   toUtcDateStr,
 } from './utcDateString';
 import { getNextPayoutStartDate } from './withdrawalPayoutPeriod';
+import { getGatewayFeeRate } from './appSchema';
 import {
   sumBreakdownConvenienceFee,
-  sumFirstPayoutOnlineWalletBaseFromBreakdown,
+  sumOnlinePaymentsCollectedFromBreakdown,
 } from './commission';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
 
@@ -161,15 +163,20 @@ export async function resolveSecondPayoutTableAllocationCents(
   };
 }
 
-async function liveFirstOnlineWalletCents(
+async function liveFirstPayoutPriorDeductionCents(
   storeId: string,
   from: string,
   to: string,
 ): Promise<number> {
-  const preview = await buildPeriodChannelPreview(storeId, from, to);
-  return Math.round(
-    sumFirstPayoutOnlineWalletBaseFromBreakdown(preview.breakdown) * 100,
+  const [preview, gatewayFeeRate] = await Promise.all([
+    buildPeriodChannelPreview(storeId, from, to),
+    getGatewayFeeRate(),
+  ]);
+  const baseCents = Math.round(
+    sumOnlinePaymentsCollectedFromBreakdown(preview.breakdown) * 100,
   );
+  const gatewayCents = Math.round(baseCents * gatewayFeeRate);
+  return Math.max(0, baseCents - gatewayCents);
 }
 
 async function findPairedFirstWithdrawalRow(storeId: string): Promise<{
@@ -200,7 +207,7 @@ async function buildSecondCycleContextFromFirstWithdrawal(
     cycleFrom: toUtcDateStr(firstRow.periodFrom),
     cycleTo: secondWindow.to,
     cyclePairId: firstRow.id,
-    priorOnlineWalletAmountCents: readFirstPayoutOnlineSubtotalCentsFromBreakdown(
+    priorOnlineWalletAmountCents: readFirstPayoutPriorDeductionCentsFromBreakdown(
       firstRow.breakdown,
     ),
   };
@@ -221,12 +228,12 @@ async function buildSecondCycleContext(
   let cyclePairId: string | undefined;
 
   if (firstWithdrawal) {
-    priorOnlineWalletAmountCents = readFirstPayoutOnlineSubtotalCentsFromBreakdown(
+    priorOnlineWalletAmountCents = readFirstPayoutPriorDeductionCentsFromBreakdown(
       firstWithdrawal.breakdown,
     );
     cyclePairId = firstWithdrawal.id;
   } else {
-    priorOnlineWalletAmountCents = await liveFirstOnlineWalletCents(
+    priorOnlineWalletAmountCents = await liveFirstPayoutPriorDeductionCents(
       storeId,
       pairedFirstWindow.from,
       pairedFirstWindow.to,
@@ -349,7 +356,7 @@ export async function computePeriodBreakdownForPayout(
         cyclePairId: cycle.cyclePairId ?? firstRow.id,
         priorOnlineWalletAmountCents:
           cycle.priorOnlineWalletAmountCents ??
-          readFirstPayoutOnlineSubtotalCentsFromBreakdown(firstRow.breakdown),
+          readFirstPayoutPriorDeductionCentsFromBreakdown(firstRow.breakdown),
       };
     }
   }
@@ -367,9 +374,11 @@ export async function computePeriodBreakdownForPayout(
     computeSharedPromoContribution(storeId, promoFrom, toStr),
     loadPromoOwnershipTotalsForPeriod(storeId, promoFrom, toStr),
   ]);
-  return attachPromoOwnershipTotals(
-    mergeSharedPromoIntoBreakdown(breakdown, sharedPromo),
-    promoOwnership,
+  return refreshSecondPayoutGatewayAndNet(
+    attachPromoOwnershipTotals(
+      mergeSharedPromoIntoBreakdown(breakdown, sharedPromo),
+      promoOwnership,
+    ),
   );
 }
 

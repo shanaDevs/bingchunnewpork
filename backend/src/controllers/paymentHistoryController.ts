@@ -69,7 +69,16 @@ import {
   loadEnrichedApprovedUnsettledWithdrawals,
   sumSharedPromoPlatformLkrFromBreakdowns,
 } from '../lib/readyToProcessSupport';
-import { loadSettlementPlatformReceivableDetail } from '../lib/settlementPlatformReceivable';
+import {
+  loadPlatformPayoutReceivableDetail,
+  loadSettlementPlatformReceivableDetail,
+} from '../lib/settlementPlatformReceivable';
+import {
+  fetchApprovedBranchPayoutWithdrawals,
+  mapApprovedWithdrawalToBranchPayoutRow,
+  mapApprovedWithdrawalToPlatformPayoutRow,
+  mergeBranchPayoutHistoryRows,
+} from '../lib/paymentHistoryBranchPayouts';
 import { platformProviderSettlementInvoiceApiPath } from '../lib/invoice/refs';
 import {
   computeNetCommissionSettlementDebitCents,
@@ -786,6 +795,7 @@ function mapSettlementToPayout(
 
   return {
     id: settlement.id,
+    payoutSource: 'commissionSettlement' as const,
     statementRef: settlement.statementRef,
     paidAt: settlement.createdAt.toISOString(),
     amount: netAmountLkr,
@@ -913,7 +923,8 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
     const { fromDate, toDate } = periodQueryToUtcBounds(from, to);
     const includePlatformPayoutHistory = req.user?.role === 'SYSTEM_ADMIN';
 
-    const [paidOrders, periodSettlements, allTimeSettlementRows] = await Promise.all([
+    const [paidOrders, periodSettlements, allTimeSettlementRows, approvedWithdrawals] =
+      await Promise.all([
       prisma.order.findMany({
         where: { storeId: { in: storeIds }, paymentStatus: 'PAID' },
         select: COMMISSION_ORDER_SELECT,
@@ -942,6 +953,7 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
         where: { storeId: { in: storeIds }, status: { not: 'REJECTED' } },
         select: { totalCommission: true, platformPaybackAmount: true },
       }),
+      fetchApprovedBranchPayoutWithdrawals(storeIds, fromDate, toDate),
     ]);
 
     const settlements = periodSettlements;
@@ -1000,14 +1012,33 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
             })),
           });
 
-    const payouts = settlements.map((s) => mapSettlementToPayout(s, advanceByWithdrawalId));
+    const settlementPayouts = settlements.map((s) => mapSettlementToPayout(s, advanceByWithdrawalId));
+    const linkedSettlementWithdrawalIds = new Set(
+      settlements
+        .map((s) => s.storeWithdrawalId)
+        .filter((id): id is string => !!id),
+    );
+    const withdrawalBranchPayouts = approvedWithdrawals.map(mapApprovedWithdrawalToBranchPayoutRow);
+    const payouts = mergeBranchPayoutHistoryRows(
+      settlementPayouts,
+      withdrawalBranchPayouts,
+      linkedSettlementWithdrawalIds,
+    );
 
     const platformPayouts = includePlatformPayoutHistory
-      ? (
-          await Promise.all(
-            settlements.map((s) => mapSettlementToPlatformPayout(s, advanceByWithdrawalId)),
-          )
-        ).filter((row): row is NonNullable<typeof row> => row != null)
+      ? mergeBranchPayoutHistoryRows(
+          (
+            await Promise.all(
+              settlements.map((s) => mapSettlementToPlatformPayout(s, advanceByWithdrawalId)),
+            )
+          ).filter((row): row is NonNullable<typeof row> => row != null),
+          (
+            await Promise.all(
+              approvedWithdrawals.map((w) => mapApprovedWithdrawalToPlatformPayoutRow(w)),
+            )
+          ).filter((row): row is NonNullable<typeof row> => row != null),
+          linkedSettlementWithdrawalIds,
+        )
       : [];
 
     res.json({
@@ -1526,7 +1557,7 @@ export async function getSettlementPlatformReceivable(
     const id = z.string().uuid().parse(req.params.id);
     const storeIds = await resolveStoreIds(req);
 
-    const data = await loadSettlementPlatformReceivableDetail(id, storeIds);
+    const data = await loadPlatformPayoutReceivableDetail(id, storeIds);
     res.json({ success: true, data });
   } catch (err) {
     next(err);
