@@ -1684,6 +1684,65 @@ export function enrichWalletRow<T extends StoreWallet>(
   };
 }
 
+export type DashboardWalletAvailableSummary = {
+  totalCents: number;
+  branchesWithPayable: number;
+};
+
+export type BranchPayablesSummary = {
+  totalRemaining: number;
+  branchesWithPayable: number;
+};
+
+/** Maps dashboard wallet KPI cents to branch payables fields used on admin dashboards. */
+export function branchPayablesFromDashboardWalletKpi(
+  kpi: DashboardWalletAvailableSummary,
+): BranchPayablesSummary {
+  return {
+    totalRemaining: kpi.totalCents,
+    branchesWithPayable: kpi.branchesWithPayable,
+  };
+}
+
+/**
+ * Dashboard wallet KPI: net branch available balance excluding convenience and delivery fees.
+ * Matches System Wallet Overview branch cards (`allTimeAvailableBalanceCents`).
+ */
+export async function computeDashboardWalletAvailableCents(
+  storeId?: string,
+): Promise<DashboardWalletAvailableSummary> {
+  if (storeId) {
+    const breakdown = await computeBranchPayablesBreakdown(storeId);
+    const totalCents = breakdown.allTimeAvailableBalanceCents;
+    return {
+      totalCents,
+      branchesWithPayable: totalCents > 0 ? 1 : 0,
+    };
+  }
+
+  const wallets = await prisma.storeWallet.findMany({
+    where: { store: { isActive: true } },
+    select: { storeId: true },
+  });
+  if (wallets.length === 0) {
+    return { totalCents: 0, branchesWithPayable: 0 };
+  }
+
+  const breakdowns = await promiseAllLimited(
+    getPrismaFanOutLimit(),
+    wallets.map((w) => () => computeBranchPayablesBreakdown(w.storeId)),
+  );
+
+  let totalCents = 0;
+  let branchesWithPayable = 0;
+  for (const breakdown of breakdowns) {
+    const cents = breakdown.allTimeAvailableBalanceCents;
+    totalCents += cents;
+    if (cents > 0) branchesWithPayable += 1;
+  }
+  return { totalCents, branchesWithPayable };
+}
+
 /** Total remaining payable to branches (available balance after withdrawals & pending requests). */
 export async function computeBranchPayablesSummary(storeId?: string): Promise<{
   totalRemaining: number;

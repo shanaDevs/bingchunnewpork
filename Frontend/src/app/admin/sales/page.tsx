@@ -47,6 +47,7 @@ import ProductImage from '@/components/ui/ProductImage';
 import { getAdminSession, isBranchScoped, isPickupOnlyBranchAdmin, type AdminSession } from '@/lib/adminAuth';
 import { BRAND_ACCENT_LINK_CLASS } from '@/lib/brandSalesChartColors';
 import {
+  branchProductGrossSales,
   buildBranchGrossRevenueBreakdown,
   buildBranchSalesOverviewPoints,
   buildSalesVsDiscountSeries,
@@ -62,6 +63,7 @@ type BranchAnalytics = {
   period: DashboardPeriod;
   kpiCards: {
     grossSales: number;
+    productGrossSales?: number;
     totalOrders: number;
     totalDeliveryRevenue: number;
     totalConvenienceRevenue: number;
@@ -220,7 +222,7 @@ export default function BranchSalesPage() {
     if (!data) return;
     const rows = [
       ['Metric', 'Value'],
-      ['Gross Sales', data.kpiCards.grossSales],
+      ['Gross Sales (products)', branchProductGrossSales(data.kpiCards)],
       ['Total Orders', data.kpiCards.totalOrders],
       ...(!pickupOnly
         ? [['Delivery Revenue', data.kpiCards.totalDeliveryRevenue] as [string, number]]
@@ -289,7 +291,7 @@ export default function BranchSalesPage() {
         <BrandCommandKpiCard
           icon={TrendingUp}
           title="Total Gross Sales"
-          value={data ? formatMoney(data.kpiCards.grossSales) : '—'}
+          value={data ? formatMoney(branchProductGrossSales(data.kpiCards)) : '—'}
           loading={chartsLoading}
         />
         <BrandCommandKpiCard

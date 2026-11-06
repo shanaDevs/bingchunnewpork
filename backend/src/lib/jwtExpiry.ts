@@ -30,6 +30,14 @@ export function adminRefreshTokenMaxAgeMs(): number {
   return jwtDurationToMs(config.jwtRefreshExpiresIn);
 }
 
+export function customerAccessTokenMaxAgeMs(): number {
+  return jwtDurationToMs(config.jwtUserExpiresIn);
+}
+
+export function customerRefreshTokenMaxAgeMs(): number {
+  return jwtDurationToMs(config.jwtUserRefreshExpiresIn);
+}
+
 /** Epoch ms when a signed access JWT expires (from `exp` claim). */
 export function accessExpiresAtMsFromToken(token: string): number | null {
   const decoded = jwt.decode(token) as { exp?: number } | null;

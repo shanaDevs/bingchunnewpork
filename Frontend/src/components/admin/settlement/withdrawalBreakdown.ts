@@ -526,6 +526,7 @@ export function withdrawalBreakdownToLkr(b: WithdrawalBreakdown) {
     rejectedRefundConvenienceFee: (b.rejectedRefundConvenienceFee ?? 0) / 100,
     rejectedRefundDeliveryFee: (b.rejectedRefundDeliveryFee ?? 0) / 100,
     orderCount: b.orderCount,
+    commissionRate: b.commissionRate,
     gatewayRatePct: b.gatewayRatePct,
   };
 }

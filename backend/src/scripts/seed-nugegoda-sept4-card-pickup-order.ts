@@ -10,7 +10,7 @@ import path from 'path';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import type { OrderMode, PaymentMethod } from '@prisma/client';
-import { placeOrder } from '../controllers/orderController';
+import { completeTakeawayPickup, placeOrder } from '../controllers/orderController';
 import { markOnlineOrderPaid } from '../lib/onlineOrderPayment';
 import { updatePaymentSettings } from '../lib/paymentSettings';
 import { prisma } from '../lib/prisma';
@@ -47,6 +47,7 @@ type ProductPick = { productId: string; name: string; basePrice: number };
 
 type Actors = {
   customer: HarnessUser & { type: 'user' };
+  branchStaff: HarnessUser & { type: 'admin' };
 };
 
 const storeSelect = {
@@ -142,7 +143,7 @@ async function resolveNugegoda(): Promise<StoreRow> {
   return store;
 }
 
-async function ensureActors(): Promise<Actors> {
+async function ensureActors(store: StoreRow): Promise<Actors> {
   const seedPhone = normalizePhone(WALK_IN_PHONE);
   const email = 'seed.nuge.sept4@bingchun-test.lk';
   let user = await prisma.user.findFirst({ where: { OR: [{ phone: seedPhone }, { email }] } });
@@ -157,7 +158,28 @@ async function ensureActors(): Promise<Actors> {
       },
     });
   }
-  return { customer: { sub: user.id, type: 'user' } };
+
+  let cashier = await prisma.adminUser.findFirst({
+    where: { storeId: store.id, isActive: true, role: { name: 'CASHIER' } },
+    select: { id: true },
+  });
+  if (!cashier) {
+    cashier = await prisma.adminUser.findFirst({
+      where: { storeId: store.id, isActive: true, role: { name: 'STORE_MANAGER' } },
+      select: { id: true },
+    });
+  }
+  if (!cashier) throw new Error('No branch staff at Nugegoda — run prisma:seed');
+
+  return {
+    customer: { sub: user.id, type: 'user' },
+    branchStaff: {
+      sub: cashier.id,
+      type: 'admin',
+      role: 'CASHIER',
+      storeId: store.id,
+    },
+  };
 }
 
 function batchDateKey(date = new Date()): string {
@@ -356,6 +378,21 @@ async function placeCardPickupOrder(input: {
   });
 }
 
+async function completePickup(
+  orderId: string,
+  staff: HarnessUser & { type: 'admin' },
+): Promise<void> {
+  await runHandler(completeTakeawayPickup, {
+    method: 'POST',
+    params: { id: orderId },
+    user: staff,
+    body: {
+      collectPayment: false,
+      note: `${SEED_NOTE}picked up (card prepaid)`,
+    },
+  });
+}
+
 async function shiftTimelines(orderId: string, targetPlacedAt: Date): Promise<void> {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
@@ -364,6 +401,7 @@ async function shiftTimelines(orderId: string, targetPlacedAt: Date): Promise<vo
       updatedAt: true,
       cancelWindowStartsAt: true,
       scheduledPickupAt: true,
+      processedAt: true,
     },
   });
   if (!order) return;
@@ -381,6 +419,7 @@ async function shiftTimelines(orderId: string, targetPlacedAt: Date): Promise<vo
       scheduledPickupAt: order.scheduledPickupAt
         ? new Date(order.scheduledPickupAt.getTime() + delta)
         : undefined,
+      processedAt: order.processedAt ? new Date(order.processedAt.getTime() + delta) : undefined,
     },
   });
 
@@ -474,12 +513,13 @@ async function main() {
   await ensureOnlineCheckoutEnabled();
   await ensurePlatformPromo();
   await restockStore(store);
-  const actors = await ensureActors();
+  const actors = await ensureActors(store);
   const product = await loadProduct(store.id);
   const quantity = quantityForPromo(product.basePrice);
   console.log(`Product: ${product.name} (x${quantity})\n`);
 
   const placed = await placeCardPickupOrder({ store, actors, product, quantity, note });
+  await completePickup(placed.id, actors.branchStaff);
   await shiftTimelines(placed.id, placedAt);
   await prisma.order.update({
     where: { id: placed.id },

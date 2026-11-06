@@ -16,8 +16,6 @@
     "dev:all": "node init && concurrently -n backend,frontend,delivery,orders,payments,notify -c blue,green,magenta,yellow,cyan,red \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:delivery\" \"npm run dev:orders\" \"npm run dev:payments\" \"npm run dev:notify\"",
     "dev:backend": "node init && npm run dev -w @bingchun/backend",
     "dev:frontend": "node init && npm run dev -w @bingchun/frontend",
-    "dev:frontend-v2": "node init && npm run dev --prefix Frontend-v2",
-    "setup:frontend-v2": "npm run setup --prefix Frontend-v2",
     "dev:delivery": "node init && cross-env DELIVERY_LOAD_BACKEND_ENV=true DELIVERY_PORT=4100 npm run dev -w @bingchun/delivery-service",
     "dev:delivery-frontend": "node init && npm run dev -w @bingchun/delivery-frontend",
     "dev:orders": "node init && npm run dev -w @bingchun/order-service",

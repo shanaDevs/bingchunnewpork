@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/feedback.dart';
 import '../../core/format.dart';
+import '../../core/runtime_config.dart';
 import '../../core/system_settings.dart';
 import '../../data/models/driver.dart';
 import '../components/buttons.dart';
@@ -199,6 +200,7 @@ class _JobAlertsSheet extends StatefulWidget {
 class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObserver {
   bool _batteryUnrestricted = false;
   bool _canFsi = true;
+  bool _fsiOn = RuntimeConfig.instance.fullScreenAlertsEnabled;
 
   @override
   void initState() {
@@ -265,12 +267,23 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
             iconBg: dark ? const Color(0xFF1E293B) : const Color(0xFFE0EDFD),
             iconTint: dark ? const Color(0xFF60A5FA) : const Color(0xFF1D4ED8),
             title: tr('Full-Screen Ride Alerts'),
-            subtitle: _canFsi
+            subtitle: !_fsiOn
+                ? tr('Off. New rides will NOT show over the lock screen, only as a small notification. Turn on so you never miss a ride.')
+                : _canFsi
                 ? tr('Allowed. Incoming jobs can ring over the lock screen immediately.')
                 : tr('Permission required to pop up incoming jobs over locked screens.'),
-            done: _canFsi,
-            actionLabel: _canFsi ? tr('Enabled') : tr('Allow full-screen alerts'),
-            actionEnabled: !_canFsi,
+            // Off counts as a problem: locked phones then get no ride screen.
+            done: _fsiOn && _canFsi,
+            trailing: BcSwitch(
+              value: _fsiOn,
+              onChanged: (v) {
+                BcFeedback.tap();
+                RuntimeConfig.instance.fullScreenAlertsEnabled = v;
+                setState(() => _fsiOn = v);
+              },
+            ),
+            // Only needed when the rider wants full-screen alerts but Android hasn't allowed them.
+            actionLabel: _fsiOn && !_canFsi ? tr('Allow full-screen alerts') : null,
             onAction: () async {
               BcFeedback.tap();
               await SystemSettings.openFullScreenIntentSettings();
@@ -348,8 +361,8 @@ class _AlertOptionCard extends StatelessWidget {
     required this.done,
     required this.actionLabel,
     required this.onAction,
-    this.actionEnabled = true,
     this.showStatus = true,
+    this.trailing,
   });
 
   final IconData icon;
@@ -358,10 +371,11 @@ class _AlertOptionCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final bool done;
-  final String actionLabel;
+  /// No button is shown when null.
+  final String? actionLabel;
   final VoidCallback onAction;
-  final bool actionEnabled;
   final bool showStatus;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -400,14 +414,39 @@ class _AlertOptionCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (trailing != null) ...[const SizedBox(width: 8), trailing!],
             ],
           ),
-          const SizedBox(height: 14),
-          done
-              ? BcOutlineButton(label: actionLabel, expand: true, enabled: actionEnabled, onPressed: onAction)
-              : BcGradientButton(label: actionLabel, enabled: actionEnabled, onPressed: onAction),
+          if (actionLabel case final label?) ...[
+            const SizedBox(height: 14),
+            done
+                ? BcOutlineButton(label: label, expand: true, onPressed: onAction)
+                : BcGradientButton(label: label, onPressed: onAction),
+          ],
         ],
       ),
+    );
+  }
+}
+
+/// Brand-styled on/off switch shared by the profile and job-alert settings.
+class BcSwitch extends StatelessWidget {
+  const BcSwitch({super.key, required this.value, required this.onChanged});
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final dark = c.isDark;
+    return Switch(
+      value: value,
+      onChanged: onChanged,
+      activeThumbColor: Colors.white,
+      activeTrackColor: dark ? c.brand : c.brandDark,
+      inactiveThumbColor: dark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+      inactiveTrackColor: dark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+      trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
     );
   }
 }

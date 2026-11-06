@@ -187,9 +187,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
     } else if (listed.isEmpty) {
       children.add(
         _HistoryEmpty(
-          title: _filter == _HistoryFilter.allTime
-              ? tr('No completed runs yet')
-              : tr('No runs for {p1}', {'p1': tr(_filter.label).toLowerCase()}),
+          title: switch (_outcome) {
+            _Outcome.cancelled => tr('No cancelled runs'),
+            _Outcome.vehicleFailure => tr('No vehicle failures'),
+            _ when _filter != _HistoryFilter.allTime => tr('No runs for {p1}', {
+              'p1': tr(_filter.label).toLowerCase(),
+            }),
+            _ => tr('No completed runs yet'),
+          },
           onViewJobs: widget.onViewJobs,
         ),
       );
@@ -214,21 +219,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
           children.add(
             _HistoryItemCard(
               run: run,
-              onTap: () {
-                BcFeedback.tap();
-                widget.onOpenJob(
-                  JobSummary(
-                    id: run.id,
-                    title: run.title,
-                    status: run.status,
-                    scheduledAt: run.scheduledAt,
-                    storeName: run.storeName,
-                    storeCity: run.storeCity,
-                    orderCount: run.orderCount,
-                    rideCode: run.rideCode,
-                  ),
-                );
-              },
+              // A cancelled run has gone back to the branch pool — there is no ride left to open.
+              onTap: _isCancelled(run)
+                  ? null
+                  : () {
+                      BcFeedback.tap();
+                      widget.onOpenJob(
+                        JobSummary(
+                          id: run.id,
+                          title: run.title,
+                          status: run.status,
+                          scheduledAt: run.scheduledAt,
+                          storeName: run.storeName,
+                          storeCity: run.storeCity,
+                          orderCount: run.orderCount,
+                          rideCode: run.rideCode,
+                        ),
+                      );
+                    },
             ),
           );
         }
@@ -758,10 +766,10 @@ class _EmptyScenePainter extends CustomPainter {
 }
 
 class _HistoryItemCard extends StatelessWidget {
-  const _HistoryItemCard({required this.run, required this.onTap});
+  const _HistoryItemCard({required this.run, this.onTap});
 
   final JobHistoryItem run;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -844,13 +852,21 @@ class _HistoryItemCard extends StatelessWidget {
                               style: TextStyle(fontSize: 12, color: c.textMuted),
                             ),
                             const SizedBox(height: 2),
-                            Text(
-                              tr('{deliveredCount}/{orderCount} delivered', {
-                                'deliveredCount': run.deliveredCount,
-                                'orderCount': run.orderCount,
-                              }),
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: c.text),
-                            ),
+                            if (cancelled && (run.cancelReason?.trim().isNotEmpty ?? false))
+                              Text(
+                                tr('Reason: {reason}', {'reason': run.cancelReason!.trim()}),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: c.danger),
+                              )
+                            else
+                              Text(
+                                tr('{deliveredCount}/{orderCount} delivered', {
+                                  'deliveredCount': run.deliveredCount,
+                                  'orderCount': run.orderCount,
+                                }),
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: c.text),
+                              ),
                           ],
                         ),
                       ),
@@ -867,8 +883,10 @@ class _HistoryItemCard extends StatelessWidget {
                         Format.money(run.deliveredTotal),
                         style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.brand),
                       ),
-                      const SizedBox(width: 4),
-                      Icon(Icons.arrow_forward_ios, size: 12, color: c.textMuted),
+                      if (onTap != null) ...[
+                        const SizedBox(width: 4),
+                        Icon(Icons.arrow_forward_ios, size: 12, color: c.textMuted),
+                      ],
                     ],
                   ),
                 ],
