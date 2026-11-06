@@ -23,6 +23,7 @@ import AdminComplaintDetailModal from '@/components/admin/AdminComplaintDetailMo
 import AdminBranchRequestReviewModal, {
   type AdminDriverBranchRequest,
   branchRequestCopy,
+  branchRequestRejectionReason,
   branchRequestStatusLabel,
   branchRequestStatusVariant,
   branchRequestTypeLabel,
@@ -536,7 +537,7 @@ export default function AdminDriverOpsPanel({
                 <th className="whitespace-nowrap px-4 py-2">Driver</th>
                 <th className="whitespace-nowrap px-4 py-2">Type</th>
                 <th className="min-w-[12rem] px-4 py-2">Branch</th>
-                <th className="min-w-[12rem] px-4 py-2">Reason</th>
+                <th className="min-w-[12rem] px-4 py-2">Driver reason</th>
                 <th className="whitespace-nowrap px-4 py-2">Requested</th>
                 <th className="whitespace-nowrap px-4 py-2">Status</th>
                 <th className="whitespace-nowrap px-4 py-2" />
@@ -567,6 +568,7 @@ export default function AdminDriverOpsPanel({
               ) : (
                 rows.map((row) => {
                   const copy = branchRequestCopy(row);
+                  const rejectionReason = branchRequestRejectionReason(row);
                   return (
                   <tr
                     key={row.id}
@@ -583,10 +585,18 @@ export default function AdminDriverOpsPanel({
                       {row.reason?.trim() || '—'}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2">{formatDateTime(row.createdAt)}</td>
-                    <td className="whitespace-nowrap px-4 py-2">
+                    <td className="whitespace-nowrap px-4 py-2 align-top">
                       <span className={adminBadgeClass(branchRequestStatusVariant(row.status))}>
                         {branchRequestStatusLabel(row.status)}
                       </span>
+                      {rejectionReason && (
+                        <p
+                          className="mt-1 max-w-xs text-xs text-muted break-words"
+                          title={rejectionReason}
+                        >
+                          {rejectionReason}
+                        </p>
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2">
                       <div className="flex gap-2">
@@ -745,6 +755,8 @@ export default function AdminDriverOpsPanel({
                           </>
                         ) : status === 'done' ? (
                           <span className={adminBadgeClass('teal')}>Completed</span>
+                        ) : status === 'not_reassignable' ? (
+                          <span className="text-muted">—</span>
                         ) : (
                           <span className={adminBadgeClass('orange')}>Needs rider</span>
                         )}

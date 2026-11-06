@@ -745,6 +745,8 @@ export default function AdminDriverOpsPanel({
                           </>
                         ) : status === 'done' ? (
                           <span className={adminBadgeClass('teal')}>Completed</span>
+                        ) : status === 'not_reassignable' ? (
+                          <span className="text-muted">—</span>
                         ) : (
                           <span className={adminBadgeClass('orange')}>Needs rider</span>
                         )}

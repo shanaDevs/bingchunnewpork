@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { Socket } from 'socket.io-client';
-import { Loader2, MapPin, Truck, X } from 'lucide-react';
+import { Loader2, MapPin, Search, Truck, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { getAdminSession } from '@/lib/adminAuth';
@@ -24,7 +24,12 @@ const AdminLiveDriversMap = dynamic(() => import('@/components/admin/AdminLiveDr
   ),
 });
 
-export type FailureReassignmentStatus = 'needs_assignment' | 'ringing' | 'assigned' | 'done';
+export type FailureReassignmentStatus =
+  | 'needs_assignment'
+  | 'ringing'
+  | 'assigned'
+  | 'done'
+  | 'not_reassignable';
 
 export type AdminForwardOrder = {
   orderId: string;
@@ -165,6 +170,18 @@ export function assignRideLabel(orderCount: number, riderCount = 1): string {
   return 'Ring rider';
 }
 
+export function filterRankedDriversBySearch<
+  T extends { name: string; storeName?: string | null },
+>(drivers: T[], query: string): T[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return drivers;
+  return drivers.filter(
+    (d) =>
+      d.name.toLowerCase().includes(q) ||
+      (d.storeName?.toLowerCase().includes(q) ?? false),
+  );
+}
+
 function buildAssignments(
   orderAssignments: Record<string, string>,
 ): Array<{ driverId: string; orderIds: string[] }> {
@@ -217,6 +234,7 @@ export default function AdminReassignFailedOrderModal({
   const [driverPositions, setDriverPositions] = useState<
     Record<string, { lat: number; lng: number; updatedAt?: string }>
   >({});
+  const [riderSearchQuery, setRiderSearchQuery] = useState('');
 
   const isVehicleFailure = failure?.outcome === 'VEHICLE_FAILURE';
   const breakdownLat = failure?.lat ?? null;
@@ -233,9 +251,11 @@ export default function AdminReassignFailedOrderModal({
     if (!failure) {
       setSelectedDriverIds([]);
       setOrderAssignments({});
+      setRiderSearchQuery('');
       return;
     }
     setSelectedDriverIds([]);
+    setRiderSearchQuery('');
     const defaults: Record<string, string> = {};
     for (const stop of forward) {
       defaults[stop.orderId] = '';
@@ -385,6 +405,11 @@ export default function AdminReassignFailedOrderModal({
       });
   }, [poolQuery.data, liveDriversQuery.data, driverPositions, dropLat, dropLng, failure?.driverId]);
 
+  const visibleDrivers = useMemo(
+    () => filterRankedDriversBySearch(rankedDrivers, riderSearchQuery),
+    [rankedDrivers, riderSearchQuery],
+  );
+
   const storeMarkers: LiveStoreMarker[] = useMemo(() => {
     const store = failure?.order?.store;
     if (!store) return [];
@@ -457,6 +482,11 @@ export default function AdminReassignFailedOrderModal({
     selectedDriverIds.length > 0 &&
     forward.every((stop) => orderAssignments[stop.orderId] && selectedDriverIds.includes(orderAssignments[stop.orderId]));
   const submitAssignments = buildAssignments(orderAssignments);
+  const riderSearchTrimmed = riderSearchQuery.trim();
+  const ridersCountLabel =
+    riderSearchTrimmed && visibleDrivers.length !== rankedDrivers.length
+      ? `${visibleDrivers.length} of ${rankedDrivers.length}`
+      : String(rankedDrivers.length);
 
   return createPortal(
     <AnimatePresence>
@@ -562,11 +592,36 @@ export default function AdminReassignFailedOrderModal({
 
             <div className="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(16rem,20rem)_1fr]">
               <div className="flex min-h-0 flex-col border-b border-navy-border lg:border-b-0 lg:border-r">
-                <div className="border-b border-navy-border px-4 py-3">
-                  <h3 className="text-sm font-bold text-fg">Riders ({rankedDrivers.length})</h3>
-                  <p className="mt-0.5 text-xs text-muted">
-                    Select one or more riders. With multiple riders, assign each stop below.
-                  </p>
+                <div className="border-b border-navy-border px-4 py-3 space-y-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-fg">Riders ({ridersCountLabel})</h3>
+                    <p className="mt-0.5 text-xs text-muted">
+                      Select one or more riders. With multiple riders, assign each stop below.
+                    </p>
+                  </div>
+                  <div
+                    className={`input-icon-wrap w-full${riderSearchQuery ? ' input-icon-wrap--end' : ''}`}
+                  >
+                    <Search size={14} className="input-icon" aria-hidden />
+                    <input
+                      type="text"
+                      value={riderSearchQuery}
+                      onChange={(e) => setRiderSearchQuery(e.target.value)}
+                      placeholder="Search by rider name…"
+                      aria-label="Search riders"
+                      className="input-field text-sm w-full"
+                    />
+                    {riderSearchQuery ? (
+                      <button
+                        type="button"
+                        onClick={() => setRiderSearchQuery('')}
+                        className="input-action p-1 text-muted hover:text-fg"
+                        aria-label="Clear search"
+                      >
+                        <X size={14} />
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="flex-1 overflow-y-auto divide-y divide-navy-border">
                   {poolQuery.isLoading ? (
@@ -578,8 +633,10 @@ export default function AdminReassignFailedOrderModal({
                       <Truck size={28} className="mx-auto mb-2 opacity-40" />
                       No riders available for this branch.
                     </div>
+                  ) : visibleDrivers.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-muted">No riders match your search.</div>
                   ) : (
-                    rankedDrivers.map((driver) => {
+                    visibleDrivers.map((driver) => {
                       const selected = selectedDriverIds.includes(driver.driverId);
                       return (
                         <button

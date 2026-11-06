@@ -8,8 +8,6 @@ import {
   Car,
   CreditCard,
   ExternalLink,
-  Eye,
-  EyeOff,
   IdCard,
   Loader2,
   MessageSquareHeart,
@@ -42,7 +40,6 @@ export type DriverEditFormState = {
   phone: string;
   nicNumber: string;
   vehicleNumber: string;
-  pin: string;
   branchIds: string[];
   profilePhoto: File | null;
   licenseImage: File | null;
@@ -90,7 +87,6 @@ function editFormFromDriver(driver: Driver): DriverEditFormState {
     phone: driver.phone ?? '',
     nicNumber: driver.nicNumber ?? '',
     vehicleNumber: driver.vehicleNumber ?? '',
-    pin: '',
     branchIds: driverBranchIds(driver),
     profilePhoto: null,
     licenseImage: null,
@@ -194,14 +190,12 @@ export default function AdminDriverDetailSheet({
   const [branchSearch, setBranchSearch] = useState('');
   const [profilePreview, setProfilePreview] = useState<string | null>(null);
   const [licensePreview, setLicensePreview] = useState<string | null>(null);
-  const [showPin, setShowPin] = useState(false);
 
   useEffect(() => {
     if (!open) {
       setIsEditing(false);
       setEditForm(null);
       setBranchSearch('');
-      setShowPin(false);
       setProfilePreview((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return null;
@@ -268,7 +262,6 @@ export default function AdminDriverDetailSheet({
     setIsEditing(false);
     setEditForm(null);
     setBranchSearch('');
-    setShowPin(false);
     if (profilePreview) URL.revokeObjectURL(profilePreview);
     if (licensePreview) URL.revokeObjectURL(licensePreview);
     setProfilePreview(null);
@@ -281,7 +274,6 @@ export default function AdminDriverDetailSheet({
     setIsEditing(false);
     setEditForm(null);
     setBranchSearch('');
-    setShowPin(false);
     if (profilePreview) URL.revokeObjectURL(profilePreview);
     if (licensePreview) URL.revokeObjectURL(licensePreview);
     setProfilePreview(null);
@@ -450,34 +442,6 @@ export default function AdminDriverDetailSheet({
                           onChange={(e) => setEditForm({ ...editForm, vehicleNumber: e.target.value })}
                           className="input-field w-full text-sm uppercase tracking-wide"
                         />
-                      </div>
-                      <div>
-                        <FieldLabel>New PIN (optional)</FieldLabel>
-                        <div className="input-icon-wrap w-full input-icon-wrap--end">
-                          <input
-                            type={showPin ? 'text' : 'password'}
-                            inputMode="numeric"
-                            pattern="\d*"
-                            maxLength={12}
-                            placeholder="Leave blank to keep current PIN"
-                            value={editForm.pin}
-                            onChange={(e) =>
-                              setEditForm({ ...editForm, pin: e.target.value.replace(/\D/g, '').slice(0, 12) })
-                            }
-                            className="input-field w-full text-sm"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowPin((v) => !v)}
-                            className="input-action p-1 text-muted hover:text-fg"
-                            aria-label={showPin ? 'Hide PIN' : 'Show PIN'}
-                          >
-                            {showPin ? <EyeOff size={14} /> : <Eye size={14} />}
-                          </button>
-                        </div>
-                        <p className="text-[11px] text-muted mt-1">
-                          Required only if you remove the rider&apos;s current primary branch from their pool.
-                        </p>
                       </div>
                     </div>
                   </section>

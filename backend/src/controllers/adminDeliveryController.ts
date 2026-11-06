@@ -45,7 +45,10 @@ import {
   driverInternalEmail,
   driverPinLookup,
   hashDriverPin,
+  hashDriverPlaceholderPassword,
 } from '../lib/driverPin';
+import { assertDriverPhoneAvailable, parseDriverPhone } from '../lib/driverPhone';
+import { phoneLookupVariants } from '../utils/phone';
 import { uploadDriverAsset, viewableLicenseImageUrl, viewableLicenseImageUrlWithTimeout } from '../lib/spaces';
 import { retryOnceOnDisconnect } from '../utils/prismaErrors';
 import { DriverDutyStatus, DeliveryDomainState, Prisma } from '@prisma/client';
@@ -65,6 +68,7 @@ import {
 import {
   collectForwardOrders,
   deriveFailureReassignment,
+  failureOutcomeAllowsRiderReassignment,
   reassignFailedDeliveryOrders,
   REDELIVERY_JOB_STATUSES,
 } from '../lib/deliveryFailureReassign';
@@ -659,7 +663,7 @@ const createDriverSchema = z.object({
   vehicleColor: z.string().max(40).optional(),
   licenseNumber: z.string().max(40).optional(),
   disabilities: z.string().max(300).optional(),
-  pin: z.string().regex(/^\d{3,12}$/, 'PIN must be 3–12 digits'),
+  pin: z.string().regex(/^\d{3,12}$/, 'PIN must be 3–12 digits').optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -1012,12 +1016,28 @@ async function findDriverCommittedForPin(
   });
 }
 
+/** Retry after insert committed for OTP-only riders (no pinLookup). */
+async function findDriverCommittedForPhone(
+  primaryStoreId: string,
+  phone: string,
+): Promise<CreatedDriver | null> {
+  const canonical = parseDriverPhone(phone);
+  return prisma.adminUser.findFirst({
+    where: {
+      storeId: primaryStoreId,
+      phone: { in: phoneLookupVariants(canonical) },
+      role: { name: 'DELIVERY_DRIVER' },
+    },
+    select: createdDriverSelect,
+  });
+}
+
 async function insertDeliveryDriver(args: {
   body: z.infer<typeof createDriverSchema>;
   branchIds: string[];
   primaryStoreId: string;
   passwordHash: string;
-  pinLookup: string;
+  pinLookup: string | null;
   profilePhotoUrl?: string;
   licenseImageUrl: string;
   replay: boolean;
@@ -1031,21 +1051,26 @@ async function insertDeliveryDriver(args: {
   }
 
   if (args.replay) {
-    const existing = await findDriverCommittedForPin(args.primaryStoreId, args.pinLookup);
+    const existing = args.pinLookup
+      ? await findDriverCommittedForPin(args.primaryStoreId, args.pinLookup)
+      : await findDriverCommittedForPhone(args.primaryStoreId, args.body.phone);
     if (existing) {
       await syncRiderProfileFromAdminUser(existing.id);
       return existing;
     }
   }
 
-  await assertDriverPinAvailable(args.primaryStoreId, args.body.pin);
+  const phone = await assertDriverPhoneAvailable(args.body.phone);
+  if (args.body.pin) {
+    await assertDriverPinAvailable(args.primaryStoreId, args.body.pin);
+  }
   const driver = await prisma.adminUser.create({
     data: {
       name: args.body.name,
       email: driverInternalEmail(),
       passwordHash: args.passwordHash,
       pinLookup: args.pinLookup,
-      phone: args.body.phone,
+      phone,
       nicNumber: args.body.nicNumber,
       address: args.body.address,
       vehicleType: args.body.vehicleType,
@@ -1089,8 +1114,10 @@ export async function createDeliveryDriver(req: Request, res: Response, next: Ne
     }
 
     const primaryStoreId = branchIds[0];
-    const passwordHash = await hashDriverPin(body.pin);
-    const pinLookup = driverPinLookup(primaryStoreId, body.pin);
+    const passwordHash = body.pin
+      ? await hashDriverPin(body.pin)
+      : await hashDriverPlaceholderPassword();
+    const pinLookup = body.pin ? driverPinLookup(primaryStoreId, body.pin) : null;
 
     const files = req.files as { profilePhoto?: Express.Multer.File[]; licenseImage?: Express.Multer.File[] } | undefined;
     if (!files?.licenseImage?.[0]) {
@@ -1125,13 +1152,11 @@ export async function createDeliveryDriver(req: Request, res: Response, next: Ne
       });
     }, reconnectPrisma);
 
-    // Echo plaintext PIN once so admin UI can show a one-time confirmation dialog.
     return success(
       res,
       {
         ...driver,
         licenseImageUrl: await viewableLicenseImageUrlWithTimeout(driver.licenseImageUrl),
-        pin: body.pin,
       },
       201,
     );
@@ -1176,14 +1201,16 @@ export async function updateDeliveryDriver(req: Request, res: Response, next: Ne
 
     const existing = await prisma.adminUser.findFirst({
       where: { id: driverId, role: { name: 'DELIVERY_DRIVER' } },
-      select: { id: true, isActive: true, storeId: true },
+      select: { id: true, isActive: true, storeId: true, pinLookup: true },
     });
     if (!existing) throw new AppError('Driver not found', 404);
 
     const data: Record<string, unknown> = {};
 
     if (body.name !== undefined) data.name = body.name;
-    if (body.phone !== undefined) data.phone = body.phone;
+    if (body.phone !== undefined) {
+      data.phone = await assertDriverPhoneAvailable(body.phone, driverId);
+    }
     if (body.nicNumber !== undefined) data.nicNumber = body.nicNumber;
     if (body.address !== undefined) data.address = body.address;
     if (body.vehicleType !== undefined) data.vehicleType = body.vehicleType;
@@ -1212,8 +1239,8 @@ export async function updateDeliveryDriver(req: Request, res: Response, next: Ne
         primaryStoreId = existing.storeId;
       } else {
         primaryStoreId = branchIds[0];
-        if (!body.pin) {
-          throw new AppError('PIN is required when changing primary branch', 400);
+        if (!body.pin && existing.pinLookup) {
+          data.pinLookup = null;
         }
       }
 
@@ -1493,6 +1520,7 @@ async function buildDeliveryFailuresPayload(
         orderStatus: row.order.status,
         originalJobId: row.jobId,
         jobsForOrder: linksByOrder.get(row.orderId) ?? [],
+        attemptOutcome: row.outcome,
       });
       const customerName = resolveCustomerDisplayName({
         guestName: row.order.guestName,
@@ -1515,7 +1543,10 @@ async function buildDeliveryFailuresPayload(
         customerName,
         reassignmentStatus: derived.reassignmentStatus,
         activeRedeliveryJob: derived.activeRedeliveryJob,
-        canAssign: derived.reassignmentStatus === 'needs_assignment' && isLatestForOrder,
+        canAssign:
+          failureOutcomeAllowsRiderReassignment(row.outcome) &&
+          derived.reassignmentStatus === 'needs_assignment' &&
+          isLatestForOrder,
         forwardOrders,
       };
     });

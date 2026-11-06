@@ -17,7 +17,17 @@ import { lkrToDecimal } from './moneyDecimal';
 /** Jobs that count as an in-flight redelivery (original failed job is excluded separately). */
 export const REDELIVERY_JOB_STATUSES = ['SCHEDULED', 'ASSIGNED', 'QUEUED', 'IN_PROGRESS'] as const;
 
-export type FailureReassignmentStatus = 'needs_assignment' | 'ringing' | 'assigned' | 'done';
+export type FailureReassignmentStatus =
+  | 'needs_assignment'
+  | 'ringing'
+  | 'assigned'
+  | 'done'
+  | 'not_reassignable';
+
+/** Only mid-route vehicle breakdowns may be reassigned to another rider from the delivery portal. */
+export function failureOutcomeAllowsRiderReassignment(outcome: string): boolean {
+  return outcome === 'VEHICLE_FAILURE';
+}
 
 export type ActiveRedeliveryJobSummary = {
   id: string;
@@ -83,6 +93,7 @@ export function deriveFailureReassignment(input: {
   orderStatus: string;
   originalJobId: string;
   jobsForOrder: JobLinkForReassignment[];
+  attemptOutcome: string;
 }): {
   reassignmentStatus: FailureReassignmentStatus;
   activeRedeliveryJob: ActiveRedeliveryJobSummary | null;
@@ -112,7 +123,10 @@ export function deriveFailureReassignment(input: {
   }
 
   if (input.orderStatus === 'READY' || input.orderStatus === 'OUT_FOR_DELIVERY') {
-    return { reassignmentStatus: 'needs_assignment', activeRedeliveryJob: null };
+    if (failureOutcomeAllowsRiderReassignment(input.attemptOutcome)) {
+      return { reassignmentStatus: 'needs_assignment', activeRedeliveryJob: null };
+    }
+    return { reassignmentStatus: 'not_reassignable', activeRedeliveryJob: null };
   }
 
   return { reassignmentStatus: 'done', activeRedeliveryJob: null };
@@ -289,6 +303,9 @@ async function loadFailureReassignmentContext(params: {
   if (attempt.outcome === 'DELIVERED') {
     throw new AppError('This attempt was a successful delivery', 400);
   }
+  if (!failureOutcomeAllowsRiderReassignment(attempt.outcome)) {
+    throw new AppError('Only vehicle failures can be reassigned to another rider', 400);
+  }
 
   const failedOrder = attempt.order;
   if (params.allowedStoreId && failedOrder.storeId !== params.allowedStoreId) {
@@ -376,6 +393,7 @@ async function loadFailureReassignmentContext(params: {
       orderStatus: originalStops.find((s) => s.orderId === orderId)?.order.status ?? 'OUT_FOR_DELIVERY',
       originalJobId: attempt.jobId,
       jobsForOrder: existingLinks.filter((link) => link.orderId === orderId),
+      attemptOutcome: attempt.outcome,
     });
     if (
       (derived.reassignmentStatus === 'assigned' || derived.reassignmentStatus === 'ringing') &&

@@ -46,6 +46,11 @@ export async function hashDriverPin(pin: string): Promise<string> {
   return bcrypt.hash(pin, 12);
 }
 
+/** Random bcrypt hash for OTP-only riders (no admin-assigned PIN). */
+export async function hashDriverPlaceholderPassword(): Promise<string> {
+  return bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+}
+
 /**
  * PIN must be unique across all active delivery drivers (not just one branch).
  * A single driver account can still serve multiple branches via accessibleStores.

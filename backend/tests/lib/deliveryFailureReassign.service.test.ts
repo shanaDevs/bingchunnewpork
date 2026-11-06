@@ -42,7 +42,12 @@ vi.mock('../../src/lib/roadRouting', () => ({
 
 import { prisma } from '../../src/lib/prisma';
 import { getDriverAccessibleStoreIds } from '../../src/lib/driverAccess';
-import { reassignFailedDeliveryOrder, reassignFailedDeliveryOrders } from '../../src/lib/deliveryFailureReassign';
+import {
+  deriveFailureReassignment,
+  failureOutcomeAllowsRiderReassignment,
+  reassignFailedDeliveryOrder,
+  reassignFailedDeliveryOrders,
+} from '../../src/lib/deliveryFailureReassign';
 import { sendPushToDriver } from '../../src/lib/driverPush';
 import { broadcastJobAssignedToDriver } from '../../src/lib/socket';
 import { maybeEnterReturningPhase } from '../../src/lib/deliveryJobHelpers';
@@ -51,7 +56,7 @@ const attemptBase = {
   id: 'att-1',
   jobId: 'job-orig',
   orderId: 'ord-1',
-  outcome: 'CUSTOMER_UNREACHABLE',
+  outcome: 'VEHICLE_FAILURE',
   order: {
     id: 'ord-1',
     orderNumber: '1042',
@@ -252,64 +257,18 @@ describe('reassignFailedDeliveryOrder', () => {
     );
   });
 
-  it('reassigns the failed order plus every other undelivered order even for driver error (Other)', async () => {
+  it('rejects non-vehicle failure outcomes such as driver error (Other)', async () => {
     vi.mocked(prisma.deliveryAttempt.findUnique).mockResolvedValue({
       ...attemptBase,
       outcome: 'OTHER',
     } as never);
-    vi.mocked(prisma.adminUser.findFirst).mockResolvedValue({
-      id: 'd2',
-      name: 'Nimal',
-      isActive: true,
-      dutyStatus: 'ONLINE',
-    } as never);
-    mockJobOrderLookups([
-      failedStop,
-      {
-        orderId: 'ord-2',
-        sequence: 3,
-        order: orderRow({ id: 'ord-2', orderNumber: '1043', lat: 6.92, lng: 79.87 }),
-      },
-    ]);
 
-    const deleteMany = vi.fn();
-    const create = vi.fn().mockResolvedValue({
-      id: 'job-new',
-      status: 'SCHEDULED',
-      rideCode: 'RIDE-2001',
-      title: 'Redelivery #1042 + 1 more',
+    await expect(
+      reassignFailedDeliveryOrder({ attemptId: 'att-1', driverId: 'd2' }),
+    ).rejects.toMatchObject({
+      message: 'Only vehicle failures can be reassigned to another rider',
+      statusCode: 400,
     });
-    vi.mocked(prisma.$transaction).mockImplementation(async (fn: unknown) => {
-      const tx = {
-        deliveryJob: { create },
-        deliveryJobOrder: { deleteMany },
-        order: { update: vi.fn(), updateMany: vi.fn() },
-        orderStatusEvent: { create: vi.fn(), createMany: vi.fn() },
-        deliveryEvent: { create: vi.fn(), createMany: vi.fn() },
-        adminUser: { update: vi.fn() },
-      };
-      return (fn as (t: typeof tx) => Promise<unknown>)(tx);
-    });
-
-    const result = await reassignFailedDeliveryOrder({ attemptId: 'att-1', driverId: 'd2' });
-
-    expect(result.orderIds).toEqual(['ord-1', 'ord-2']);
-    expect(result.orderCount).toBe(2);
-    expect(deleteMany).toHaveBeenCalledWith({
-      where: { jobId: 'job-orig', orderId: { in: ['ord-2'] } },
-    });
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          jobOrders: {
-            create: expect.arrayContaining([
-              expect.objectContaining({ orderId: 'ord-1' }),
-              expect.objectContaining({ orderId: 'ord-2' }),
-            ]),
-          },
-        }),
-      }),
-    );
   });
 
   it('rejects when a later order is already on a redelivery job', async () => {
@@ -515,49 +474,20 @@ describe('reassignFailedDeliveryOrder', () => {
     );
   });
 
-  it('leaves the pickup override null for non-vehicle-failure outcomes', async () => {
+  it('rejects customer-side failure outcomes even when GPS is present', async () => {
     vi.mocked(prisma.deliveryAttempt.findUnique).mockResolvedValue({
       ...attemptBase,
       outcome: 'CUSTOMER_UNREACHABLE',
       lat: 6.905,
       lng: 79.855,
     } as never);
-    vi.mocked(prisma.adminUser.findFirst).mockResolvedValue({
-      id: 'd2',
-      name: 'Nimal',
-      isActive: true,
-      dutyStatus: 'ONLINE',
-    } as never);
 
-    const create = vi.fn().mockResolvedValue({
-      id: 'job-new',
-      status: 'SCHEDULED',
-      rideCode: 'RIDE-2001',
-      title: 'Redelivery #1042',
+    await expect(
+      reassignFailedDeliveryOrder({ attemptId: 'att-1', driverId: 'd2' }),
+    ).rejects.toMatchObject({
+      message: 'Only vehicle failures can be reassigned to another rider',
+      statusCode: 400,
     });
-    vi.mocked(prisma.$transaction).mockImplementation(async (fn: unknown) => {
-      const tx = {
-        deliveryJob: { create },
-        deliveryJobOrder: { deleteMany: vi.fn() },
-        order: { update: vi.fn(), updateMany: vi.fn() },
-        orderStatusEvent: { create: vi.fn(), createMany: vi.fn() },
-        deliveryEvent: { create: vi.fn(), createMany: vi.fn() },
-        adminUser: { update: vi.fn() },
-      };
-      return (fn as (t: typeof tx) => Promise<unknown>)(tx);
-    });
-
-    await reassignFailedDeliveryOrder({ attemptId: 'att-1', driverId: 'd2' });
-
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          pickupLat: null,
-          pickupLng: null,
-          pickupLabel: null,
-        }),
-      }),
-    );
   });
 
   it('schedules a job for an off-duty rider without flipping them to on delivery', async () => {
@@ -624,5 +554,37 @@ describe('reassignFailedDeliveryOrder', () => {
     const result = await reassignFailedDeliveryOrder({ attemptId: 'att-1', driverId: 'd2' });
     expect(result.status).toBe('SCHEDULED');
     expect(dutyUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('failureOutcomeAllowsRiderReassignment', () => {
+  it('allows only VEHICLE_FAILURE', () => {
+    expect(failureOutcomeAllowsRiderReassignment('VEHICLE_FAILURE')).toBe(true);
+    expect(failureOutcomeAllowsRiderReassignment('CUSTOMER_UNREACHABLE')).toBe(false);
+    expect(failureOutcomeAllowsRiderReassignment('OTHER')).toBe(false);
+  });
+});
+
+describe('deriveFailureReassignment', () => {
+  it('returns needs_assignment for vehicle failure with an active order and no redelivery', () => {
+    expect(
+      deriveFailureReassignment({
+        orderStatus: 'OUT_FOR_DELIVERY',
+        originalJobId: 'job-orig',
+        jobsForOrder: [],
+        attemptOutcome: 'VEHICLE_FAILURE',
+      }),
+    ).toEqual({ reassignmentStatus: 'needs_assignment', activeRedeliveryJob: null });
+  });
+
+  it('returns not_reassignable for non-vehicle failures with an active order', () => {
+    expect(
+      deriveFailureReassignment({
+        orderStatus: 'OUT_FOR_DELIVERY',
+        originalJobId: 'job-orig',
+        jobsForOrder: [],
+        attemptOutcome: 'CUSTOMER_UNREACHABLE',
+      }),
+    ).toEqual({ reassignmentStatus: 'not_reassignable', activeRedeliveryJob: null });
   });
 });

@@ -8,18 +8,16 @@ import {
   Camera,
   Check,
   CreditCard,
-  Eye,
-  EyeOff,
   FileImage,
   Loader2,
   Phone,
-  ShieldCheck,
   User,
   UserPlus,
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { validateImageFile } from '@/lib/imageUpload';
+import { formatPhoneInput, isValidSriLankanPhone } from '@/lib/phone';
 
 export type DriverRegistrationFormState = {
   name: string;
@@ -31,7 +29,6 @@ export type DriverRegistrationFormState = {
   vehicleColor: string;
   licenseNumber: string;
   disabilities: string;
-  pin: string;
   isActive: boolean;
   branchIds: string[];
   profilePhoto: File | null;
@@ -189,7 +186,6 @@ export default function AdminDriverRegistrationModal({
 }: Props) {
   const [portalReady, setPortalReady] = useState(false);
   const [branchSearch, setBranchSearch] = useState('');
-  const [showPin, setShowPin] = useState(false);
   const onCloseRef = useRef(onClose);
 
   useEffect(() => {
@@ -220,13 +216,14 @@ export default function AdminDriverRegistrationModal({
     return stores.filter((s) => formatBranchName(s.name).toLowerCase().includes(q));
   }, [stores, branchSearch]);
 
+  const phoneInvalid = form.phone.trim().length > 0 && !isValidSriLankanPhone(form.phone);
+
   const canSubmit =
     form.branchIds.length > 0 &&
     form.name.trim() &&
-    form.phone.trim() &&
+    isValidSriLankanPhone(form.phone) &&
     form.nicNumber.trim() &&
     form.vehicleNumber.trim() &&
-    form.pin.length >= 3 &&
     !!form.licenseImage;
 
   if (!portalReady) return null;
@@ -266,7 +263,7 @@ export default function AdminDriverRegistrationModal({
                       Register new driver
                     </h2>
                     <p className="text-xs text-muted mt-1 leading-relaxed max-w-md">
-                      Create a delivery driver profile, assign branch pools, and set their mobile login PIN.
+                      Create a delivery driver profile, assign branch pools, and enable mobile OTP sign-in.
                     </p>
                   </div>
                 </div>
@@ -344,11 +341,18 @@ export default function AdminDriverRegistrationModal({
                         <input
                           placeholder="077 123 4567"
                           value={form.phone}
-                          onChange={(e) => onFormChange((f) => ({ ...f, phone: e.target.value }))}
+                          onChange={(e) =>
+                            onFormChange((f) => ({ ...f, phone: formatPhoneInput(e.target.value) }))
+                          }
                           className="input-field w-full pl-9"
+                          inputMode="tel"
+                          autoComplete="tel"
                           required
                         />
                       </div>
+                      {phoneInvalid && (
+                        <p className="text-[11px] text-red-400 mt-1">Use a valid mobile number (07XXXXXXXX).</p>
+                      )}
                     </div>
                     <div>
                       <FieldLabel required>NIC / ID number</FieldLabel>
@@ -499,67 +503,34 @@ export default function AdminDriverRegistrationModal({
                   )}
                 </SectionCard>
 
-                {/* Account & documents row */}
+                {/* Account status & documents */}
                 <div className="grid lg:grid-cols-2 gap-5">
                   <SectionCard
-                    icon={ShieldCheck}
-                    title="Mobile login PIN"
-                    description="3–12 digit PIN the driver uses on the delivery app."
+                    icon={User}
+                    title="Account status"
+                    description="Riders sign in on the delivery app with their registered mobile number."
                   >
-                    <div className="space-y-3">
+                    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-navy-border bg-navy-light/30 px-4 py-3">
                       <div>
-                        <FieldLabel required>PIN code</FieldLabel>
-                        <div className="relative">
-                          <input
-                            type={showPin ? 'text' : 'password'}
-                            inputMode="numeric"
-                            pattern="\d{3,12}"
-                            maxLength={12}
-                            placeholder="Enter PIN"
-                            value={form.pin}
-                            onChange={(e) =>
-                              onFormChange((f) => ({
-                                ...f,
-                                pin: e.target.value.replace(/\D/g, '').slice(0, 12),
-                              }))
-                            }
-                            className="input-field w-full pr-10 font-mono tracking-[0.3em] text-center text-lg"
-                            minLength={3}
-                            required
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowPin((v) => !v)}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-muted hover:text-fg rounded-md"
-                            aria-label={showPin ? 'Hide PIN' : 'Show PIN'}
-                          >
-                            {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
-                          </button>
-                        </div>
+                        <p className="text-sm font-medium text-fg">Active on registration</p>
+                        <p className="text-xs text-muted mt-0.5">Driver can sign in immediately after creation</p>
                       </div>
-
-                      <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-navy-border bg-navy-light/30 px-4 py-3">
-                        <div>
-                          <p className="text-sm font-medium text-fg">Active on registration</p>
-                          <p className="text-xs text-muted mt-0.5">Driver can sign in immediately after creation</p>
-                        </div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={form.isActive}
-                          onClick={() => onFormChange((f) => ({ ...f, isActive: !f.isActive }))}
-                          className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-                            form.isActive ? 'bg-brand' : 'bg-navy-border'
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={form.isActive}
+                        onClick={() => onFormChange((f) => ({ ...f, isActive: !f.isActive }))}
+                        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                          form.isActive ? 'bg-brand' : 'bg-navy-border'
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                            form.isActive ? 'translate-x-5' : 'translate-x-0'
                           }`}
-                        >
-                          <span
-                            className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                              form.isActive ? 'translate-x-5' : 'translate-x-0'
-                            }`}
-                          />
-                        </button>
-                      </label>
-                    </div>
+                        />
+                      </button>
+                    </label>
                   </SectionCard>
 
                   <SectionCard
