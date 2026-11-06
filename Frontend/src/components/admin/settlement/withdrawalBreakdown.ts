@@ -5,10 +5,7 @@ import {
   parseJsonObjectIfString,
   roundLkr,
 } from './lkrUtils';
-import {
-  normalizeSettlementBreakdown,
-  sumOnlineRevenueSubtotals,
-} from './channelBreakdown';
+import { normalizeSettlementBreakdown, sumOnlineRevenueSubtotals } from './channelBreakdown';
 import type { SettlementBreakdown } from './channelBreakdown';
 
 export type WithdrawalBreakdown = {

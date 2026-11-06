@@ -50,3 +50,22 @@ describe('Payout 1 gateway base', () => {
     expect(resolveFirstPayoutBranchWalletNetLkr(breakdown)).toBe(18834.22);
   });
 });
+
+describe('Payout 1 gateway base', () => {
+  it('uses online subtotal before discounts, not online net', () => {
+    const channelBreakdown = {
+      pickupOnline: { revenueSubtotal: 19199, subtotalBeforeDiscount: 21490 },
+      deliveryOnline: { revenueSubtotal: 0, subtotalBeforeDiscount: 0 },
+    } as SettlementBreakdown;
+    const breakdown = {
+      cycleStage: 'FIRST',
+      gatewayRatePct: 1.9,
+      gatewayFee: 36478,
+      netAmount: 1883422,
+      channelBreakdown,
+    } as WithdrawalBreakdown;
+
+    expect(resolveFirstPayoutGatewayBaseLkr(breakdown)).toBe(21490);
+    expect(resolveFirstPayoutBranchWalletNetLkr(breakdown)).toBe(21081.69);
+  });
+});

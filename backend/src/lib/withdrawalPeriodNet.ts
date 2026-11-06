@@ -28,10 +28,7 @@ import {
 } from './utcDateString';
 import { getNextPayoutStartDate } from './withdrawalPayoutPeriod';
 import { getGatewayFeeRate } from './appSchema';
-import {
-  sumBreakdownConvenienceFee,
-  sumOnlinePaymentsCollectedFromBreakdown,
-} from './commission';
+import { sumBreakdownConvenienceFee, sumOnlinePaymentsCollectedFromBreakdown } from './commission';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
 
 export type PayoutWindowBounds = { from: string; to: string };

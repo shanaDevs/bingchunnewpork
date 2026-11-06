@@ -1,8 +1,4 @@
-import {
-  sumOnlinePaymentsCollectedFromBreakdown,
-  type ChannelSettlementRow,
-  type CommissionChannel,
-} from './commission';
+import { sumOnlinePaymentsCollectedFromBreakdown, type ChannelSettlementRow, type CommissionChannel } from './commission';
 function computeFinalPayoutAmountCents(
   branchRequestCents: number,
   jasonContributionCents = 0,
