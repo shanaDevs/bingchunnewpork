@@ -42,8 +42,7 @@ dependencies:
   geolocator: ^14.0.1
   flutter_secure_storage: ^11.2.0
   shared_preferences: ^2.5.6
-  flutter_map: ^8.3.2
-  latlong2: ^0.10.1
+  google_maps_flutter: ^2.19.0
   url_launcher: ^6.3.3
   flutter_local_notifications: ^22.3.2
   audioplayers: ^6.8.1
@@ -93,6 +92,8 @@ flutter:
   assets:
     - assets/images/
     - assets/sounds/
+    # GOOGLE_MAPS_API_KEY: read natively by ios/Runner/AppDelegate.swift (Android reads it in Gradle).
+    - .env
 
   # Brand display font (SIL Open Font License). Latin subset — Chinese falls back
   # to the system font automatically.

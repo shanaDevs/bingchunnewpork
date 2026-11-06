@@ -69,6 +69,11 @@
             android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
             android:exported="false" />
 
+        <!-- Google Maps SDK key, from GOOGLE_MAPS_API_KEY in driver_flutter/.env (see app/build.gradle.kts). -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${GOOGLE_MAPS_API_KEY}" />
+
         <!-- Small icon for the on-duty notification (white delivery truck). -->
         <meta-data
             android:name="lk.bingchun.delivery.DUTY_ICON"
