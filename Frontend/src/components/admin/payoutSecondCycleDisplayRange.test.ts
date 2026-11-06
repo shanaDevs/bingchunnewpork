@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   FULL_CYCLE_INCLUSIVE_DAYS,
+  resolveListedPayoutPeriodDisplay,
   resolvePayoutCycleDisplayRange,
   resolveSecondCycleFullDisplayRange,
   secondCycleFullDisplayRangeFallback,
@@ -80,6 +81,56 @@ describe('resolveSecondCycleFullDisplayRange', () => {
     expect(resolveSecondCycleFullDisplayRange(rows, rows[1])).toEqual({
       displayFrom: '2026-09-06',
       displayTo: '2026-10-05',
+    });
+  });
+});
+
+describe('resolveListedPayoutPeriodDisplay', () => {
+  const first = { periodFrom: '2026-09-06', periodTo: '2026-09-20' };
+  const second = { periodFrom: '2026-09-21', periodTo: '2026-10-05' };
+
+  it('keeps FIRST on Sep 6–20 (15 days)', () => {
+    expect(
+      resolveListedPayoutPeriodDisplay({
+        row: first,
+        rows: [first, second],
+        cycleStage: 'FIRST',
+        periodDays: 15,
+      }),
+    ).toEqual({
+      displayFrom: '2026-09-06',
+      displayTo: '2026-09-20',
+      displayDays: 15,
+    });
+  });
+
+  it('shows SECOND as Sep 6–Oct 5 (30 days) using the paired first row', () => {
+    expect(
+      resolveListedPayoutPeriodDisplay({
+        row: second,
+        rows: [first, second],
+        cycleStage: 'SECOND',
+        periodDays: 15,
+      }),
+    ).toEqual({
+      displayFrom: '2026-09-06',
+      displayTo: '2026-10-05',
+      displayDays: 30,
+    });
+  });
+
+  it('falls back to 30 days ending at the second window when the first row is absent', () => {
+    expect(
+      resolveListedPayoutPeriodDisplay({
+        row: second,
+        rows: [second],
+        cycleStage: 'SECOND',
+        periodDays: 15,
+      }),
+    ).toEqual({
+      displayFrom: '2026-09-06',
+      displayTo: '2026-10-05',
+      displayDays: 30,
     });
   });
 });

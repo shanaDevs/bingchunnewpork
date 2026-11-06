@@ -19,7 +19,6 @@ import {
   listWalletSecurityAuditLogs,
   parseWalletSecurityAuditListQuery,
 } from '../lib/walletSecurityAuditSchema';
-import { z } from 'zod';
 import { resolveBranchCancellationGatewayFeeLkr } from '../lib/refundPaymentStructure';
 import { isWalletCreditPaymentMethod } from '../lib/orderPayment';
 import { ensureWalletSettlementColumns } from '../lib/walletSchema';
@@ -35,7 +34,6 @@ import {
   decimalFieldToCentsNumber,
   lkrToCents,
   parseDecimalFromDb,
-  zLkrToCentsInput,
 } from '../lib/moneyDecimal';
 import { insertWalletLedgerRow } from '../lib/walletTransactionInsert';
 import { parseLockedStoreWallet, walletDataAfterBalanceDelta, walletDataAfterDebit } from '../lib/walletStoreUpdates';
@@ -104,128 +102,34 @@ import {
   toDateStr,
 } from '../lib/walletControllerSupport';
 import type { WithdrawalStatus } from '@prisma/client';
+import { ensureBranchPayoutReviewSchema } from '../lib/payoutReviewSchema';
+import {
+  loadReviewStoreNames,
+  renderBranchPayoutReviewInvoice,
+  renderBranchPayoutReviewZip,
+  type PayoutReviewPeriodRef,
+} from '../lib/payoutReviewInvoice';
 import {
   walletAnalysisQuerySchema,
   walletReportQuerySchema,
   walletTransactionsQuerySchema,
   walletWithdrawalsListQuerySchema,
 } from '../lib/httpSchemas';
-
-const adjustSchema = z.object({
-  type: z.enum(['ADJUSTMENT', 'PAYOUT', 'REFUND', 'CREDIT', 'DEBIT']),
-  amount: z.number().int().positive(),
-  description: z.string().trim().min(1, 'A reason is required').max(500),
-  reference: z.string().max(255).optional(),
-  isCredit: z.boolean().optional(),
-  direction: z.enum(['IN', 'OUT']).optional(),
-  password: z.string().min(1, 'PIN is required'),
-});
-
-const settleRangeSchema = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  description: z.string().max(500).optional(),
-});
-
-const adminPinField = z.string().min(1, 'PIN is required');
-
-const walletPinSchema = z.object({
-  password: adminPinField,
-});
-
-const withdrawalRequestSchema = z.object({
-  amount: zLkrToCentsInput(z).pipe(z.number().int().positive()),
-  periodDays: z.coerce.number().refine((n) => (PAYOUT_PERIOD_DAYS as readonly number[]).includes(n), {
-    message: `periodDays must be one of: ${PAYOUT_PERIOD_DAYS.join(', ')}`,
-  }),
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  remarks: z.string().max(500).optional(),
-  isAdvance: z.boolean().optional().default(false),
-  /** Admin password (PIN) — required to initiate a payout request. */
-  password: adminPinField,
-});
-
-const withdrawalRejectSchema = z.object({
-  reason: z.string().max(500).optional(),
-});
-
-const netPreviewQuerySchema = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  periodDays: z.coerce.number().optional(),
-  storeId: z.string().min(1).optional(),
-});
-
-const approveWithdrawalBodySchema = z
-  .object({
-    paymentMethod: z.enum(['BANK_TRANSFER', 'CASH', 'CHECK']),
-    checkNumber: z.string().max(64).optional(),
-    checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    /** Admin password (PIN) — required to approve a payout request. */
-    password: adminPinField,
-  })
-  .superRefine((data, ctx) => {
-    if (data.paymentMethod !== 'CHECK') return;
-    if (!data.checkNumber?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Check number is required',
-        path: ['checkNumber'],
-      });
-    }
-    if (!data.checkDate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Check date is required',
-        path: ['checkDate'],
-      });
-    }
-  });
-
-const initiatePayoutBodySchema = z
-  .object({
-    amount: zLkrToCentsInput(z).pipe(z.number().int().positive()),
-    periodDays: z.coerce.number().refine((n) => (PAYOUT_PERIOD_DAYS as readonly number[]).includes(n), {
-      message: `periodDays must be one of: ${PAYOUT_PERIOD_DAYS.join(', ')}`,
-    }),
-    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    remarks: z.string().max(500).optional(),
-    isAdvance: z
-      .union([z.boolean(), z.enum(['true', 'false'])])
-      .optional()
-      .transform((v) => v === true || v === 'true'),
-    paymentMethod: z.enum(['BANK_TRANSFER', 'CASH', 'CHECK']),
-    checkNumber: z.string().max(64).optional(),
-    checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    /** Admin password (PIN) — required to initiate a direct branch payout. */
-    password: adminPinField,
-    /**
-     * Preferred proof transport: base64 JSON (multipart to App Platform was returning
-     * edge 504 before the handler ran).
-     */
-    proofBase64: z.string().min(8).max(6_000_000).optional(),
-    proofFileName: z.string().min(1).max(255).optional(),
-    proofMimeType: z.string().min(3).max(100).optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.paymentMethod !== 'CHECK') return;
-    if (!data.checkNumber?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Check number is required',
-        path: ['checkNumber'],
-      });
-    }
-    if (!data.checkDate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Check date is required',
-        path: ['checkDate'],
-      });
-    }
-  });
+import {
+  adjustSchema,
+  approveWithdrawalBodySchema,
+  attachWithdrawalProofBodySchema,
+  initiatePayoutBodySchema,
+  netPreviewQuerySchema,
+  payoutReviewPeriodSchema,
+  payoutReviewZipSchema,
+  settleRangeSchema,
+  settleWalletBodySchema,
+  setPayoutReviewSchema,
+  walletPinSchema,
+  withdrawalRejectSchema,
+  withdrawalRequestSchema,
+} from '../lib/walletControllerSchemas';
 
 export async function listWallets(req: Request, res: Response) {
   await ensureWithdrawalSchema();
@@ -459,13 +363,6 @@ export async function getWithdrawalProofUrlHandler(req: Request, res: Response, 
     next(err);
   }
 }
-
-const attachWithdrawalProofBodySchema = z.object({
-  password: adminPinField,
-  proofBase64: z.string().min(8).max(6_000_000),
-  proofFileName: z.string().min(1).max(255).optional(),
-  proofMimeType: z.string().min(3).max(100).optional(),
-});
 
 /** Attach / replace settlement proof on an already-approved payout (JSON base64). */
 export async function attachWithdrawalProofHandler(req: Request, res: Response, next: NextFunction) {
@@ -1187,9 +1084,8 @@ export async function settleWallet(req: Request, res: Response, next: NextFuncti
     await ensureWalletSettlementColumns();
 
     const storeId = resolveStoreId(req);
-    const data = settleRangeSchema.parse(req.body ?? {});
-    const pin = z.object({ password: adminPinField }).parse(req.body ?? {});
-    await verifyAdminPin(user.sub, pin.password);
+    const data = settleWalletBodySchema.parse(req.body ?? {});
+    await verifyAdminPin(user.sub, data.password);
 
     const wallet = await getOrCreateWallet(storeId);
     assertRangeAfterLastSettled(wallet.lastSettledAt ?? null, data.from);
@@ -1656,6 +1552,145 @@ export async function syncWallets(req: Request, res: Response, next: NextFunctio
           : 'Wallet is already up to date',
       data: result,
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+function reviewPeriodDate(ymd: string): Date {
+  return new Date(`${ymd}T00:00:00.000Z`);
+}
+
+function assertPayoutReviewAdmin(req: Request): void {
+  if (req.user?.role !== 'SYSTEM_ADMIN') throw new AppError('Forbidden', 403);
+}
+
+function rethrowPayoutReviewStorage(err: unknown): never {
+  if (
+    err instanceof Prisma.PrismaClientKnownRequestError &&
+    (err.code === 'P2021' || err.code === 'P2022')
+  ) {
+    throw new AppError('Payout review storage is not ready. Apply the latest database migration.', 503);
+  }
+  throw err;
+}
+
+function attachmentDisposition(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+function sendAttachment(res: Response, buffer: Buffer, contentType: string, filename: string): void {
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Disposition', attachmentDisposition(filename));
+  res.setHeader('Content-Length', buffer.length);
+  res.send(buffer);
+}
+
+// GET /admin/wallet/payout-reviews
+export async function listPayoutReviewsHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    assertPayoutReviewAdmin(req);
+    await ensureBranchPayoutReviewSchema();
+    const rows = await prisma.branchPayoutReview.findMany({
+      select: { storeId: true, periodFrom: true, periodTo: true },
+    });
+    res.json({
+      success: true,
+      data: rows.map((row) => ({
+        storeId: row.storeId,
+        periodFrom: toDateStr(row.periodFrom),
+        periodTo: toDateStr(row.periodTo),
+      })),
+    });
+  } catch (err) {
+    try {
+      rethrowPayoutReviewStorage(err);
+    } catch (mapped) {
+      next(mapped);
+    }
+  }
+}
+
+// PUT /admin/wallet/payout-reviews
+export async function setPayoutReviewHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    assertPayoutReviewAdmin(req);
+    const body = setPayoutReviewSchema.parse(req.body);
+    if (body.periodFrom > body.periodTo) throw new AppError('Invalid payout period', 400);
+    await ensureBranchPayoutReviewSchema();
+    const periodFrom = reviewPeriodDate(body.periodFrom);
+    const periodTo = reviewPeriodDate(body.periodTo);
+    if (body.inReview) {
+      await prisma.branchPayoutReview.upsert({
+        where: {
+          storeId_periodFrom_periodTo: {
+            storeId: body.storeId,
+            periodFrom,
+            periodTo,
+          },
+        },
+        create: {
+          storeId: body.storeId,
+          periodFrom,
+          periodTo,
+          markedById: req.user!.sub,
+        },
+        update: { markedById: req.user!.sub },
+      });
+    } else {
+      await prisma.branchPayoutReview.deleteMany({
+        where: { storeId: body.storeId, periodFrom, periodTo },
+      });
+    }
+    res.json({ success: true, data: { ...body } });
+  } catch (err) {
+    try {
+      rethrowPayoutReviewStorage(err);
+    } catch (mapped) {
+      next(mapped);
+    }
+  }
+}
+
+async function resolveReviewItems(items: PayoutReviewPeriodRef[]) {
+  for (const item of items) {
+    if (item.periodFrom > item.periodTo) throw new AppError('Invalid payout period', 400);
+  }
+  const names = await loadReviewStoreNames(items.map((item) => item.storeId));
+  return items.map((item) => {
+    const storeName = names.get(item.storeId);
+    if (!storeName) throw new AppError('Branch not found', 404);
+    return { ...item, storeName };
+  });
+}
+
+// GET /admin/wallet/payout-review-invoice
+export async function getPayoutReviewInvoiceHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    assertPayoutReviewAdmin(req);
+    const query = payoutReviewPeriodSchema.parse({
+      storeId: req.query.storeId,
+      periodFrom: req.query.periodFrom,
+      periodTo: req.query.periodTo,
+    });
+    const [item] = await resolveReviewItems([query]);
+    const file = await renderBranchPayoutReviewInvoice(item!);
+    sendAttachment(res, file.buffer, 'application/pdf', file.filename);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// POST /admin/wallet/payout-review-zip
+export async function downloadPayoutReviewZipHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    assertPayoutReviewAdmin(req);
+    const body = payoutReviewZipSchema.parse(req.body);
+    const items = await resolveReviewItems(body.items);
+    const zip = await renderBranchPayoutReviewZip(items);
+    const stamp = new Date().toISOString().slice(0, 10);
+    sendAttachment(res, zip, 'application/zip', `branch-payouts-${stamp}.zip`);
   } catch (err) {
     next(err);
   }

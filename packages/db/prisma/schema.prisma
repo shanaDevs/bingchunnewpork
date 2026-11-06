@@ -384,6 +384,7 @@ model Store {
   wallet                 StoreWallet?
   walletTransactions     WalletTransaction[]
   storeWithdrawals       StoreWithdrawal[]
+  branchPayoutReviews    BranchPayoutReview[]
   commissionSettlements  CommissionSettlement[]
   platformEarnings       PlatformEarning[]
   promotionUsages        PromotionUsage[]
@@ -1431,6 +1432,24 @@ model StoreWallet {
   @@schema("public")
 
   @@map("store_wallets")
+}
+
+model BranchPayoutReview {
+  id         String   @id @default(uuid())
+  storeId    String
+  periodFrom DateTime
+  periodTo   DateTime
+  markedById String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, periodFrom, periodTo], map: "branch_payout_review_period")
+  @@index([storeId])
+  @@schema("public")
+
+  @@map("branch_payout_reviews")
 }
 
 model StoreWithdrawal {

@@ -20,8 +20,10 @@ export interface StoreWallet {
   totalWithdrawn?: number;
   currentBalance?: number;
   availableBalance?: number;
-  /** Matches branch detail “All-Time Available Balance” (online revenue − branch receivable). */
+  /** Remaining online wallet after payouts (Online Available Balance). */
   allTimeAvailableBalanceCents?: number;
+  /** Cumulative pickup + delivery online from day one (All-Time Available Balance). */
+  allTimeOnlineWalletCents?: number;
   updatedAt: string;
   store: { id: string; name: string; city: string; isActive: boolean };
   _count: { transactions: number };

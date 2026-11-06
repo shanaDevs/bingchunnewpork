@@ -8,9 +8,10 @@ export const PAYOUTS_DUE_ALLOCATION_COLUMNS = [
   'Delivery fee received',
 ] as const;
 
-export const PAYOUTS_DUE_TABLE_COL_COUNT = 3 + PAYOUTS_DUE_ALLOCATION_COLUMNS.length + 2;
+export const PAYOUTS_DUE_TABLE_COL_COUNT = 4 + PAYOUTS_DUE_ALLOCATION_COLUMNS.length + 3;
 
 const PAYOUTS_DUE_SKELETON_WIDTHS = [
+  'w-4',
   'w-28',
   'w-36',
   'w-10',
@@ -18,6 +19,7 @@ const PAYOUTS_DUE_SKELETON_WIDTHS = [
   'w-16',
   'w-16',
   'w-16',
+  'w-14',
   'w-14',
   'w-20',
 ] as const;
@@ -32,6 +34,9 @@ export function PayoutsDueTableHead() {
   return (
     <thead>
       <tr className={TABLE_HEAD_ROW_CLASS}>
+        <th scope="col" className={TH_BASE}>
+          In review
+        </th>
         <th scope="col" className={TH_BASE}>
           Branch
         </th>
@@ -48,6 +53,9 @@ export function PayoutsDueTableHead() {
         ))}
         <th scope="col" className={TH_RIGHT}>
           Wallet view
+        </th>
+        <th scope="col" className={TH_RIGHT}>
+          PDF
         </th>
         <th scope="col" className={TH_RIGHT}>
           Action
@@ -68,7 +76,7 @@ export function PayoutsDueTableSkeleton({ rows = 6 }: { rows?: number }) {
         <Skeleton className="h-8 w-full max-w-[220px] rounded-[12px] bg-[var(--color-navy-light)]/70 sm:w-[220px]" />
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1100px] text-left text-xs">
+        <table className="w-full min-w-[1240px] text-left text-xs">
           <PayoutsDueTableHead />
           <tbody>
             {Array.from({ length: rows }).map((_, row) => (
@@ -79,14 +87,14 @@ export function PayoutsDueTableSkeleton({ rows = 6 }: { rows?: number }) {
                 {Array.from({ length: PAYOUTS_DUE_TABLE_COL_COUNT }).map((__, col) => (
                   <td
                     key={col}
-                    className={col >= 2 && col <= 6 ? 'px-3 py-3 text-right' : 'px-3 py-3'}
+                    className={col >= 3 && col <= 7 ? 'px-3 py-3 text-right' : 'px-3 py-3'}
                   >
                     <Skeleton
                       className={cn(
                         'h-3.5 bg-[var(--color-navy-light)]/70',
                         PAYOUTS_DUE_SKELETON_WIDTHS[col] ?? 'w-20',
-                        col >= 2 && col <= 6 && 'ml-auto',
-                        col >= 7 && 'ml-auto inline-block',
+                        col >= 3 && col <= 7 && 'ml-auto',
+                        col >= 8 && 'ml-auto inline-block',
                       )}
                     />
                   </td>

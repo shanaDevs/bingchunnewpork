@@ -16,7 +16,6 @@ import {
   SectionInfoPopover,
 } from '@/components/admin/payoutFinancialReportUi';
 import {
-  PAYOUT_FIRST_CYCLE_BODY,
   PAYOUT_FIRST_ONLINE_COLLECTIONS_SECTION_HINT,
   PAYOUT_FIRST_ONLINE_COLLECTIONS_TITLE,
   PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL,
@@ -276,10 +275,7 @@ export function NetPlatformAmountInfoPopover({ values }: { values: PayoutReportV
   if (values.cycleStage === 'FIRST') {
     return (
       <SectionInfoPopover ariaLabel="Net Platform Amount — Payout 1">
-        <InfoPopoverHeader
-          title="Net Platform Amount"
-          description={PAYOUT_FIRST_CYCLE_BODY}
-        />
+        <InfoPopoverHeader title="Net Platform Amount" />
       </SectionInfoPopover>
     );
   }

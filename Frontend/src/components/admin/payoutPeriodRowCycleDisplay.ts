@@ -10,6 +10,12 @@ export function readPayoutCycleStage(
   if (parsed?.cycleStage === 'FIRST' || parsed?.cycleStage === 'SECOND') {
     return parsed.cycleStage;
   }
+  if (breakdown && typeof breakdown === 'object') {
+    const rawStage = (breakdown as Record<string, unknown>).cycleStage;
+    if (rawStage === 'FIRST' || rawStage === 'SECOND') {
+      return rawStage;
+    }
+  }
   const previewStage = netPreview?.cycleStage;
   if (previewStage === 'FIRST' || previewStage === 'SECOND') {
     return previewStage;

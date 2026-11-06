@@ -39,6 +39,8 @@
     "seed:nuge-sept4-card-pickup": "ts-node --transpile-only src/scripts/seed-nugegoda-sept4-card-pickup-order.ts",
     "seed:nuge-45day-delivery": "ts-node --transpile-only src/scripts/seed-nugegoda-45-day-delivery-orders.ts",
     "seed:nuge-sep6-45-mixed": "ts-node --transpile-only src/scripts/seed-nugegoda-sep6-45-mixed-orders.ts",
+    "seed:nuge-sep620-15-mixed": "ts-node --transpile-only src/scripts/seed-nugegoda-sep620-15-mixed-orders.ts",
+    "seed:nuge-sep21-15-mixed": "ts-node --transpile-only src/scripts/seed-nugegoda-sep21-15-mixed-orders.ts",
     "seed:nuge-sept1-15-delivery": "ts-node --transpile-only src/scripts/seed-nugegoda-sept1-15-delivery-promos.ts",
     "seed:nuge-sept5-15-delivery": "ts-node --transpile-only src/scripts/seed-nugegoda-sept5-15-delivery-promos.ts",
     "seed:nuge-sept16-30-delivery": "ts-node --transpile-only src/scripts/seed-nugegoda-sept16-30-delivery-orders.ts",

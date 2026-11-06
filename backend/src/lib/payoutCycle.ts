@@ -5,7 +5,62 @@ import {
   type CommissionChannel,
 } from './commission';
 import { resolveNetPayoutFinalPayCentsFromWithdrawalBreakdown } from './payoutWithdrawalAmounts';
-import { toUtcDateStr } from './utcDateString';
+import {
+  addDaysToUtcDateStr,
+  dayAfterUtcDateStr,
+  toUtcDateStr,
+} from './utcDateString';
+
+const ROLLING_PAYOUT_HALF_CYCLE_DAYS = 15;
+
+async function getEarliestPaidOrderDateStr(storeId: string): Promise<string | null> {
+  const earliest = await prisma.order.findFirst({
+    where: { storeId, paymentStatus: 'PAID' },
+    orderBy: { createdAt: 'asc' },
+    select: { createdAt: true },
+  });
+  if (!earliest) return null;
+  return toUtcDateStr(earliest.createdAt);
+}
+
+/**
+ * Steps along the rolling 15-day payout grid from `origin` (first window start, usually first paid order day).
+ * Returns -1 if `targetFrom` is not on the grid (should not happen for valid payout windows).
+ */
+export function rollingPayoutWindowIndexFromOrigin(
+  origin: string,
+  targetFrom: string,
+): number {
+  if (targetFrom < origin) return -1;
+  let from = origin;
+  for (let i = 0; i < 512; i++) {
+    if (from === targetFrom) return i;
+    const to = addDaysToUtcDateStr(from, ROLLING_PAYOUT_HALF_CYCLE_DAYS - 1);
+    from = dayAfterUtcDateStr(to);
+  }
+  return -1;
+}
+
+/** FIRST on even 15-day windows from origin, SECOND on odd — independent of whether Payout 1 is paid. */
+export function cycleStageForRollingWindowFrom(
+  origin: string,
+  windowFrom: string,
+): PayoutCycleStage {
+  const index = rollingPayoutWindowIndexFromOrigin(origin, windowFrom);
+  if (index < 0) return 'FIRST';
+  return index % 2 === 0 ? 'FIRST' : 'SECOND';
+}
+
+/** Contiguous prior 15-day half that pairs with a SECOND window starting on `secondFrom`. */
+export function pairedFirstWindowForSecondFrom(secondFrom: string): { from: string; to: string } {
+  const to = addDaysToUtcDateStr(secondFrom, -1);
+  const from = addDaysToUtcDateStr(to, -(ROLLING_PAYOUT_HALF_CYCLE_DAYS - 1));
+  return { from, to };
+}
+
+export async function getStorePayoutCycleOrigin(storeId: string): Promise<string | null> {
+  return getEarliestPaidOrderDateStr(storeId);
+}
 
 export type PayoutCycleStage = 'FIRST' | 'SECOND';
 
@@ -61,8 +116,17 @@ export function readFirstPayoutPriorDeductionCentsFromBreakdown(breakdown: unkno
   return resolveNetPayoutFinalPayCentsFromWithdrawalBreakdown(breakdown, fallbackCents);
 }
 
-/** Next payout alternates FIRST after a completed SECOND pair. */
+/**
+ * Stage for the **next** unpaid 15-day window (same basis as `listElapsedPayoutWindows`: starts at
+ * `dayAfter(latest.periodTo)` when a payout exists, otherwise the first paid order day).
+ *
+ * Older withdrawals may omit `cycleStage`; we derive FIRST/SECOND from the window's index on the rolling 15-day grid
+ * from the store's first paid order day so Payout 2 is not treated as Payout 1.
+ */
 export async function determineNextPayoutCycleStage(storeId: string): Promise<PayoutCycleStage> {
+  const earliestOrder = await getEarliestPaidOrderDateStr(storeId);
+  if (!earliestOrder) return 'FIRST';
+
   const latest = await prisma.storeWithdrawal.findFirst({
     where: {
       storeId,
@@ -70,10 +134,21 @@ export async function determineNextPayoutCycleStage(storeId: string): Promise<Pa
       periodTo: { not: null },
     },
     orderBy: { periodTo: 'desc' },
-    select: { cycleStage: true },
+    select: { cycleStage: true, periodTo: true },
   });
-  if (!latest?.cycleStage || latest.cycleStage === 'SECOND') return 'FIRST';
-  return 'SECOND';
+
+  const nextWindowFrom = latest?.periodTo
+    ? dayAfterUtcDateStr(toUtcDateStr(latest.periodTo))
+    : earliestOrder;
+
+  const windowIndex = rollingPayoutWindowIndexFromOrigin(earliestOrder, nextWindowFrom);
+  if (windowIndex >= 0) {
+    return windowIndex % 2 === 0 ? 'FIRST' : 'SECOND';
+  }
+
+  if (latest?.cycleStage === 'FIRST') return 'SECOND';
+  if (latest?.cycleStage === 'SECOND') return 'FIRST';
+  return 'FIRST';
 }
 
 export async function resolvePayoutCycleContext(storeId: string): Promise<PayoutCycleContext> {
@@ -82,28 +157,49 @@ export async function resolvePayoutCycleContext(storeId: string): Promise<Payout
     return { cycleStage: 'FIRST' };
   }
 
+  const origin = await getEarliestPaidOrderDateStr(storeId);
+  const latest = await prisma.storeWithdrawal.findFirst({
+    where: {
+      storeId,
+      status: { in: ['PENDING', 'APPROVED'] },
+      periodTo: { not: null },
+    },
+    orderBy: { periodTo: 'desc' },
+    select: { periodTo: true },
+  });
+  const secondFrom = latest?.periodTo
+    ? dayAfterUtcDateStr(toUtcDateStr(latest.periodTo))
+    : origin
+      ? dayAfterUtcDateStr(
+          addDaysToUtcDateStr(origin, ROLLING_PAYOUT_HALF_CYCLE_DAYS - 1),
+        )
+      : null;
+
   const pairedFirst = await prisma.storeWithdrawal.findFirst({
     where: {
       storeId,
       status: { in: ['PENDING', 'APPROVED'] },
-      cycleStage: 'FIRST',
       periodFrom: { not: null },
     },
     orderBy: { periodTo: 'desc' },
-    select: { id: true, periodFrom: true, breakdown: true },
+    select: { id: true, periodFrom: true, breakdown: true, cycleStage: true },
   });
+  const firstByStage =
+    pairedFirst?.cycleStage === 'FIRST' || pairedFirst?.cycleStage == null ? pairedFirst : null;
 
-  if (!pairedFirst?.periodFrom) {
-    return { cycleStage: 'FIRST' };
-  }
+  const cycleFrom = firstByStage?.periodFrom
+    ? toUtcDateStr(firstByStage.periodFrom)
+    : secondFrom
+      ? pairedFirstWindowForSecondFrom(secondFrom).from
+      : origin ?? undefined;
 
   return {
     cycleStage: 'SECOND',
-    cycleFrom: toUtcDateStr(pairedFirst.periodFrom),
-    cyclePairId: pairedFirst.id,
-    priorOnlineWalletAmountCents: readFirstPayoutPriorDeductionCentsFromBreakdown(
-      pairedFirst.breakdown,
-    ),
+    cycleFrom,
+    cyclePairId: firstByStage?.id,
+    priorOnlineWalletAmountCents: firstByStage
+      ? readFirstPayoutPriorDeductionCentsFromBreakdown(firstByStage.breakdown)
+      : undefined,
   };
 }
 

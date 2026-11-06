@@ -45,7 +45,7 @@ import {
   paybackEnabledFromBreakdown,
   toDateInputValue,
 } from '@/lib/walletUtils';
-import { formatBiweeklyPeriodLabel, inclusiveDateRangeDays } from '@/lib/biweeklyPeriods';
+import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
 import { confirmDialog } from '@/store/confirmStore';
 import type { WithdrawalRow } from './WalletWithdrawalTable';
 

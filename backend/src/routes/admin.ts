@@ -263,6 +263,30 @@ router.get(
   walletController.getPayoutsDueHandler,
 );
 router.get(
+  '/wallet/payout-reviews',
+  requireSystemAdmin,
+  requirePermission('WALLET', 'read'),
+  walletController.listPayoutReviewsHandler,
+);
+router.put(
+  '/wallet/payout-reviews',
+  requireSystemAdmin,
+  requirePermission('WALLET', 'update'),
+  walletController.setPayoutReviewHandler,
+);
+router.get(
+  '/wallet/payout-review-invoice',
+  requireSystemAdmin,
+  requirePermission('WALLET', 'read'),
+  walletController.getPayoutReviewInvoiceHandler,
+);
+router.post(
+  '/wallet/payout-review-zip',
+  requireSystemAdmin,
+  requirePermission('WALLET', 'read'),
+  walletController.downloadPayoutReviewZipHandler,
+);
+router.get(
   '/wallet/payout-periods',
   requirePermission('WALLET', 'read'),
   walletController.getPayoutPeriodsHandler,

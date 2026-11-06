@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueries } from '@tanstack/react-query';
-import { CalendarRange } from 'lucide-react';
+import { CalendarRange, FileText } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { adminAuthHeaders } from '@/lib/adminSession';
 import { formatMoneyAmount } from '@/lib/receipt';
@@ -10,6 +11,8 @@ import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
 import { cn } from '@/lib/utils';
 import WalletWithdrawalModal from '@/components/admin/WalletWithdrawalModal';
 import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
+import { hasWithdrawalInvoice } from '@/components/admin/settlementTypes';
+import { openWithdrawalInvoice } from '@/lib/adminProtectedFile';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   fetchPayoutPeriodNetPreview,
@@ -195,39 +198,22 @@ function PayoutPeriodsTableSkeleton() {
 
 function periodToViewRow(
   row: PayoutPeriodRow,
-  allRows: PayoutPeriodRow[],
-  netPreviewByKey: Map<string, Record<string, unknown>>,
   storeId?: string,
 ): {
   withdrawal: WithdrawalRow;
   viewPeriodOnly: boolean;
 } {
-  const stage = readPayoutCycleStage(rowBreakdownForStage(row), netPreviewByKey.get(row.key));
-  let periodFrom = row.periodFrom;
-  let periodTo = previewPeriodTo(row);
-  if (stage === 'SECOND') {
-    const resolved =
-      resolveSecondCycleFullDisplayRange(allRows, row) ?? secondCycleFullDisplayRangeFallback(row);
-    periodFrom = resolved.displayFrom;
-    periodTo = resolved.displayTo;
-  }
-
   if (row.withdrawal) {
-    const base = toWithdrawalRow(row.withdrawal, storeId ?? row.withdrawal.storeId);
     return {
-      withdrawal: {
-        ...base,
-        periodFrom,
-        periodTo,
-      },
+      withdrawal: toWithdrawalRow(row.withdrawal, storeId ?? row.withdrawal.storeId),
       viewPeriodOnly: false,
     };
   }
 
   return syntheticPeriodViewWithdrawal({
     key: row.key,
-    periodFrom,
-    periodTo,
+    periodFrom: row.periodFrom,
+    periodTo: previewPeriodTo(row),
     amountCents: row.amountCents,
     storeId,
     breakdown: row.breakdown,
@@ -450,7 +436,7 @@ export default function BranchPayoutPeriodsSection({
     if (periodRowToAutoOpen) {
       openedOldestPending.current = true;
       setViewRow({
-        ...periodToViewRow(periodRowToAutoOpen, rows, previewByKey, storeId),
+        ...periodToViewRow(periodRowToAutoOpen, storeId),
         periodDisplay: viewPeriodDisplayForModal(periodRowToAutoOpen, rows, previewByKey),
       });
       return;
@@ -548,21 +534,40 @@ export default function BranchPayoutPeriodsSection({
                     </span>
                   </td>
                   <td className="px-3 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setViewRow({
-                          ...periodToViewRow(row, rows, previewByKey, storeId),
-                          periodDisplay: viewPeriodDisplayForModal(row, rows, previewByKey),
-                        })
-                      }
-                      className={cn(
-                        'inline-flex items-center rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5',
-                        'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
+                    <div className="inline-flex items-center justify-end gap-1.5">
+                      {row.status === 'PAID' && hasWithdrawalInvoice(row.withdrawal?.invoiceUrl) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void openWithdrawalInvoice(row.withdrawal?.invoiceUrl).catch(() => {
+                              toast.error('Could not open the payout invoice');
+                            });
+                          }}
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded-lg border border-[var(--color-brand)] px-3 py-1.5',
+                            'text-xs font-semibold text-[var(--color-brand)] transition-colors hover:bg-[var(--color-brand-subtle)]',
+                          )}
+                        >
+                          <FileText size={12} />
+                          Invoice
+                        </button>
                       )}
-                    >
-                      View
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewRow({
+                            ...periodToViewRow(row, storeId),
+                            periodDisplay: viewPeriodDisplayForModal(row, rows, previewByKey),
+                          })
+                        }
+                        className={cn(
+                          'inline-flex items-center rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5',
+                          'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
+                        )}
+                      >
+                        View
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

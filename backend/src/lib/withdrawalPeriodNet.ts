@@ -14,7 +14,9 @@ import {
 } from './promoOwnershipTotals';
 import {
   cycleContextFromWithdrawal,
-  determineNextPayoutCycleStage,
+  cycleStageForRollingWindowFrom,
+  getStorePayoutCycleOrigin,
+  pairedFirstWindowForSecondFrom,
   readFirstPayoutPriorDeductionCentsFromBreakdown,
   resolvePayoutCycleContext,
   type PayoutCycleContext,
@@ -26,7 +28,6 @@ import {
   dayAfterUtcDateStr,
   toUtcDateStr,
 } from './utcDateString';
-import { getNextPayoutStartDate } from './withdrawalPayoutPeriod';
 import { getGatewayFeeRate } from './appSchema';
 import { sumBreakdownConvenienceFee, sumOnlinePaymentsCollectedFromBreakdown } from './commission';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
@@ -34,6 +35,17 @@ import { buildPeriodChannelPreview } from './periodChannelPreview';
 export type PayoutWindowBounds = { from: string; to: string };
 
 export const PAYOUT_WINDOW_DAYS = 15;
+const FULL_CYCLE_INCLUSIVE_DAYS = 30;
+
+function inclusiveUtcDays(from: string, to: string): number {
+  return (
+    Math.floor(
+      (new Date(`${to}T00:00:00.000Z`).getTime() -
+        new Date(`${from}T00:00:00.000Z`).getTime()) /
+        (24 * 60 * 60 * 1000),
+    ) + 1
+  );
+}
 
 export function payoutWindowKey(from: string, to: string): string {
   return `${from}|${to}`;
@@ -71,18 +83,6 @@ export function buildWindowsFromAnchorThroughStart(
     from = dayAfterUtcDateStr(to);
   }
   return windows;
-}
-
-async function getPayoutSequenceAnchorFrom(storeId: string): Promise<string | null> {
-  const next = await getNextPayoutStartDate(storeId);
-  if (next) return next;
-  const earliest = await prisma.order.findFirst({
-    where: { storeId, paymentStatus: 'PAID' },
-    orderBy: { createdAt: 'asc' },
-    select: { createdAt: true },
-  });
-  if (!earliest) return null;
-  return toUtcDateStr(earliest.createdAt);
 }
 
 async function findWithdrawalForWindow(
@@ -176,21 +176,40 @@ async function liveFirstPayoutPriorDeductionCents(
   return Math.max(0, baseCents - gatewayCents);
 }
 
-async function findPairedFirstWithdrawalRow(storeId: string): Promise<{
+async function findPairedFirstWithdrawalRow(
+  storeId: string,
+  pairedFirstWindow?: PayoutWindowBounds,
+): Promise<{
   id: string;
   periodFrom: Date;
   breakdown: unknown;
 } | null> {
+  if (pairedFirstWindow) {
+    const byWindow = await findWithdrawalForWindow(
+      storeId,
+      pairedFirstWindow.from,
+      pairedFirstWindow.to,
+    );
+    if (byWindow?.periodFrom) {
+      return {
+        id: byWindow.id,
+        periodFrom: byWindow.periodFrom,
+        breakdown: byWindow.breakdown,
+      };
+    }
+  }
   const row = await prisma.storeWithdrawal.findFirst({
     where: {
       storeId,
       status: { in: ['PENDING', 'APPROVED'] },
-      cycleStage: 'FIRST',
       periodFrom: { not: null },
     },
     orderBy: { periodTo: 'desc' },
-    select: { id: true, periodFrom: true, breakdown: true },
+    select: { id: true, periodFrom: true, breakdown: true, cycleStage: true },
   });
+  if (row?.cycleStage === 'SECOND') {
+    return null;
+  }
   if (!row?.periodFrom) return null;
   return { id: row.id, periodFrom: row.periodFrom, breakdown: row.breakdown };
 }
@@ -246,6 +265,17 @@ async function buildSecondCycleContext(
   };
 }
 
+async function secondCycleContextForWindow(
+  storeId: string,
+  secondWindow: PayoutWindowBounds,
+): Promise<PayoutCycleContext> {
+  return buildSecondCycleContext(
+    storeId,
+    secondWindow,
+    pairedFirstWindowForSecondFrom(secondWindow.from),
+  );
+}
+
 /** Resolve FIRST/SECOND context per window for preview/list paths (batch). */
 export async function resolveCycleContextsForWindows(
   storeId: string,
@@ -254,69 +284,73 @@ export async function resolveCycleContextsForWindows(
   const map = new Map<string, PayoutCycleContext>();
   if (windows.length === 0) return map;
 
+  const origin = await getStorePayoutCycleOrigin(storeId);
   const sorted = [...windows].sort(
     (a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to),
   );
-  const anchorStage = await determineNextPayoutCycleStage(storeId);
-  const stages = computeWindowStageSequence(anchorStage, sorted);
 
-  for (let i = 0; i < sorted.length; i++) {
-    const window = sorted[i]!;
-    const stage = stages[i]!;
+  for (const window of sorted) {
     const key = payoutWindowKey(window.from, window.to);
+    const stage = origin
+      ? cycleStageForRollingWindowFrom(origin, window.from)
+      : 'FIRST';
 
     if (stage === 'FIRST') {
       map.set(key, { cycleStage: 'FIRST' });
       continue;
     }
 
-    const pairedFirstWindow = sorted[i - 1];
-    if (pairedFirstWindow) {
-      map.set(key, await buildSecondCycleContext(storeId, window, pairedFirstWindow));
-      continue;
-    }
-
-    const firstRow = await findPairedFirstWithdrawalRow(storeId);
-    if (firstRow) {
-      map.set(key, await buildSecondCycleContextFromFirstWithdrawal(window, firstRow));
-    } else {
-      map.set(key, { cycleStage: 'FIRST' });
-    }
+    map.set(key, await secondCycleContextForWindow(storeId, window));
   }
 
   return map;
 }
 
-/** Cycle context for a specific payout window (net-preview, validation). */
+/**
+ * Cycle context for a specific payout window (net-preview, validation).
+ * Identifies FIRST vs SECOND from the rolling 15-day grid, even when Payout 1 is still unpaid
+ * and even when the client sends the full 30-day SECOND display range.
+ */
 export async function resolveCycleContextForWindow(
   storeId: string,
   from: string,
   to: string,
 ): Promise<PayoutCycleContext> {
-  const windowFrom = from;
-  const windowTo = canonicalPayoutWindowEnd(from);
+  const origin = await getStorePayoutCycleOrigin(storeId);
+  const spanDays = inclusiveUtcDays(from, to);
 
-  const stored = await findWithdrawalForWindow(storeId, windowFrom, windowTo);
-  if (stored?.cycleStage) {
+  let windowFrom = from;
+  let windowTo = canonicalPayoutWindowEnd(from);
+
+  if (
+    origin &&
+    spanDays === FULL_CYCLE_INCLUSIVE_DAYS &&
+    cycleStageForRollingWindowFrom(origin, from) === 'FIRST'
+  ) {
+    windowFrom = addDaysToUtcDateStr(from, PAYOUT_WINDOW_DAYS);
+    windowTo = to;
+  }
+
+  const stored = await findWithdrawalForWindow(
+    storeId,
+    windowFrom,
+    canonicalPayoutWindowEnd(windowFrom),
+  );
+  const gridStage = origin
+    ? cycleStageForRollingWindowFrom(origin, windowFrom)
+    : undefined;
+  if (
+    (stored?.cycleStage === 'FIRST' || stored?.cycleStage === 'SECOND') &&
+    (gridStage == null || stored.cycleStage === gridStage)
+  ) {
     return cycleContextFromWithdrawal(stored);
   }
 
-  const anchorFrom = await getPayoutSequenceAnchorFrom(storeId);
-  if (!anchorFrom) {
+  if (!origin || gridStage === 'FIRST') {
     return { cycleStage: 'FIRST' };
   }
 
-  if (windowFrom < anchorFrom) {
-    return resolvePayoutCycleContext(storeId);
-  }
-
-  const windows = buildWindowsFromAnchorThroughStart(anchorFrom, windowFrom);
-  const contexts = await resolveCycleContextsForWindows(storeId, windows);
-  return (
-    contexts.get(payoutWindowKey(windowFrom, windowTo)) ?? {
-      cycleStage: 'FIRST' as const,
-    }
-  );
+  return secondCycleContextForWindow(storeId, { from: windowFrom, to: windowTo });
 }
 
 function applyFirstCycleFinancialPolicy(period: PeriodBreakdown): PeriodBreakdown {
@@ -345,7 +379,8 @@ export async function computePeriodBreakdownForPayout(
   let cycle = cycleCtx ?? (await resolvePayoutCycleContext(storeId));
 
   if (cycle.cycleStage === 'SECOND' && !cycle.cycleFrom) {
-    const firstRow = await findPairedFirstWithdrawalRow(storeId);
+    const paired = pairedFirstWindowForSecondFrom(fromStr);
+    const firstRow = await findPairedFirstWithdrawalRow(storeId, paired);
     if (firstRow?.periodFrom) {
       cycle = {
         ...cycle,
@@ -354,6 +389,14 @@ export async function computePeriodBreakdownForPayout(
         priorOnlineWalletAmountCents:
           cycle.priorOnlineWalletAmountCents ??
           readFirstPayoutPriorDeductionCentsFromBreakdown(firstRow.breakdown),
+      };
+    } else {
+      cycle = {
+        ...cycle,
+        cycleFrom: paired.from,
+        priorOnlineWalletAmountCents:
+          cycle.priorOnlineWalletAmountCents ??
+          (await liveFirstPayoutPriorDeductionCents(storeId, paired.from, paired.to)),
       };
     }
   }

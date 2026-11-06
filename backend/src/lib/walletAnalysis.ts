@@ -70,7 +70,7 @@ export type WalletAnalysisResult = {
   from: string;
   to: string;
   tank: { balance: number; capacity: number };
-  /** Pickup online + delivery online + all-time retained refunds (LKR). */
+  /** Cumulative pickup + delivery online from day one, LKR (not reduced by payouts). */
   onlineAvailableBalance: number;
   health: { percent: number; slices: WalletAnalysisHealthSlice[] };
   /** All-time fee totals for scoped branches (LKR). */
@@ -617,7 +617,7 @@ export async function getWalletAnalysis(params: {
   );
 }
 
-/** Call after branch payout approve/initiate so System Wallet “All-Time Available Balance” refreshes. */
+/** Call after branch payout approve/initiate so System Wallet “Online Available Balance” refreshes. */
 export function invalidateWalletAnalysisCache(): void {
   invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-analysis']));
 }
@@ -666,7 +666,11 @@ async function computeWalletAnalysis(params: {
     (sum, breakdown) => sum + breakdown.allTimeAvailableBalanceCents,
     0,
   );
-  const onlineAvailableBalance = roundLkr(centsToLkr(balanceCents));
+  const allTimeOnlineWalletCents = payablesBreakdowns.reduce(
+    (sum, breakdown) => sum + breakdown.allTimeOnlineWalletCents,
+    0,
+  );
+  const onlineAvailableBalance = roundLkr(centsToLkr(allTimeOnlineWalletCents));
 
   if (storeIds.length === 0) {
     const emptyTrend = padDailyTrend(lastDay, new Map());

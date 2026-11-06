@@ -97,8 +97,10 @@ export type WalletSummary = {
   availableBalance: number;
   /** Pickup + delivery online net (after discounts), all-time, minus payables expenses and pending payouts. */
   onlineWalletAvailableBalance: number;
-  /** Branch Payables “All-Time Available Balance” (pickup + delivery online − branch receivable). */
+  /** Remaining online wallet after paid branch payouts (Jason excluded). */
   allTimeAvailableBalanceCents: number;
+  /** Cumulative pickup + delivery online from day one (not reduced by payouts). */
+  allTimeOnlineWalletCents: number;
 };
 
 export type BranchWalletPayablesBreakdown = {
@@ -116,7 +118,10 @@ export type BranchWalletPayablesBreakdown = {
   /** Sum of branch payout amounts from paid 15-day cycles (cents). */
   branchReceivableCents: number;
   totalExpensesCents: number;
+  /** Remaining online wallet after paid branch payouts (Jason excluded). */
   allTimeAvailableBalanceCents: number;
+  /** Cumulative pickup + delivery online from day one (not reduced by payouts). */
+  allTimeOnlineWalletCents: number;
 };
 
 export type BranchWalletDashboard = {
@@ -223,13 +228,28 @@ async function fetchApprovedDeliveryPayoutBreakdowns(
   );
 }
 
-/** Pickup + delivery online revenue minus paid branch payout receivable (Branch Payables hero balance). */
+/** Cumulative pickup + delivery online wallet from day one — never reduced by branch payouts. */
+export function computeAllTimeOnlineWalletCents(
+  pickupOnlineIn: number,
+  deliveryOnlineIn: number,
+): number {
+  return Math.max(0, pickupOnlineIn + deliveryOnlineIn);
+}
+
+/**
+ * Remaining online wallet after paid branch payouts (Jason's investment excluded).
+ * Super Admin “Online Available Balance”.
+ */
 export function computeAllTimeAvailableBalanceCents(
   pickupOnlineIn: number,
   deliveryOnlineIn: number,
-  branchReceivableCents: number,
+  branchReceivableExcludingJasonCents: number,
 ): number {
-  return Math.max(0, pickupOnlineIn + deliveryOnlineIn - branchReceivableCents);
+  return Math.max(
+    0,
+    computeAllTimeOnlineWalletCents(pickupOnlineIn, deliveryOnlineIn) -
+      branchReceivableExcludingJasonCents,
+  );
 }
 
 /** All-time available minus pending withdrawal holds (Initiate Payout / withdrawal caps). */
@@ -246,6 +266,7 @@ function buildBranchPayablesBreakdown(
   toDeliveryLkr: number,
   gatewayFeeCents: number,
   branchReceivableCents: number,
+  branchReceivableExcludingJasonCents = branchReceivableCents,
 ): BranchWalletPayablesBreakdown {
   const channels = payablesRevenue.commissionChannelRevenue.channelRevenueCents;
   const totalRevenueCents =
@@ -256,7 +277,10 @@ function buildBranchPayablesBreakdown(
   const deliveryCommissionCents = Math.round(toDeliveryLkr * 100);
   const totalExpensesCents =
     platformCommissionCents + gatewayFeeCents + branchReceivableCents;
-  const onlineRevenueCents = channels.pickupOnlineIn + channels.deliveryOnlineIn;
+  const allTimeOnlineWalletCents = computeAllTimeOnlineWalletCents(
+    channels.pickupOnlineIn,
+    channels.deliveryOnlineIn,
+  );
 
   return {
     channelRevenueCents: { ...channels },
@@ -266,15 +290,16 @@ function buildBranchPayablesBreakdown(
     gatewayFeeCents,
     branchReceivableCents,
     totalExpensesCents,
+    allTimeOnlineWalletCents,
     allTimeAvailableBalanceCents: computeAllTimeAvailableBalanceCents(
       channels.pickupOnlineIn,
       channels.deliveryOnlineIn,
-      branchReceivableCents,
+      branchReceivableExcludingJasonCents,
     ),
   };
 }
 
-/** All-time payables breakdown (matches branch wallet detail “All-Time Available Balance”). */
+/** All-time payables breakdown (cumulative online wallet + remaining after payouts). */
 export async function computeBranchPayablesBreakdown(
   storeId: string,
 ): Promise<BranchWalletPayablesBreakdown> {
@@ -310,6 +335,7 @@ export async function computeBranchPayablesBreakdown(
     payablesToDeliveryLkr,
     paidExpenses.gatewayFeeCents,
     paidExpenses.branchReceivableCents,
+    paidExpenses.branchReceivableExcludingJasonCents,
   );
 }
 
@@ -1819,6 +1845,7 @@ export async function getWalletSummary(storeId: string): Promise<WalletSummary> 
   const onlineWalletGrossCents = onlineWalletAvailableFromPayablesBreakdown(payablesBreakdown);
 
   const allTimeAvailableBalanceCents = payablesBreakdown.allTimeAvailableBalanceCents;
+  const allTimeOnlineWalletCents = payablesBreakdown.allTimeOnlineWalletCents;
 
   return {
     storeId,
@@ -1831,6 +1858,7 @@ export async function getWalletSummary(storeId: string): Promise<WalletSummary> 
     availableBalance: Math.max(0, remainingNet - pendingWithdrawalTotal),
     onlineWalletAvailableBalance: Math.max(0, onlineWalletGrossCents - pendingWithdrawalTotal),
     allTimeAvailableBalanceCents,
+    allTimeOnlineWalletCents,
   };
 }
 
@@ -1872,8 +1900,7 @@ export function branchPayablesFromDashboardWalletKpi(
 }
 
 /**
- * Dashboard wallet KPI: pickup + delivery online revenue minus branch receivable (all-time).
- * Matches System Wallet Overview branch cards (`allTimeAvailableBalanceCents`).
+ * Dashboard wallet KPI: remaining online wallet after paid branch payouts.
  */
 export async function computeDashboardWalletAvailableCents(
   storeId?: string,

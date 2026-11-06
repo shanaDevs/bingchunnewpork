@@ -23,7 +23,6 @@ import {
   ReportTotalRow,
 } from '@/components/admin/payoutFinancialReportUi';
 import {
-  PAYOUT_FIRST_CYCLE_BODY,
   PAYOUT_FIRST_CYCLE_DEFERRED_SECTION,
   PAYOUT_FIRST_CYCLE_HEADLINE,
   PAYOUT_FIRST_ONLINE_COLLECTIONS_SECTION_HINT,
@@ -78,9 +77,6 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
         <div className="border-b border-[#e2e8f0] bg-[#eff6ff] px-4 py-3 dark:border-slate-700 dark:bg-blue-950/30">
           <p className="text-[13px] font-bold text-[#1e40af] dark:text-blue-300">
             {PAYOUT_FIRST_CYCLE_HEADLINE}
-          </p>
-          <p className="mt-1.5 text-[12px] font-medium leading-relaxed text-[#475569] dark:text-slate-300">
-            {PAYOUT_FIRST_CYCLE_BODY}
           </p>
         </div>
       ) : null}

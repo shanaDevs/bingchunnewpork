@@ -9849,6 +9849,15 @@
     margin-top: 0.2rem;
   }
 
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__split {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__split-amount {
+    font-size: 1.15rem;
+  }
+
   .branch-wallet-page .branch-wallet-payables .branch-wallet-balance__go {
     bottom: 0.7rem;
     right: 0.85rem;
@@ -10033,6 +10042,44 @@
 
   .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__hint {
     margin-top: 0.2rem;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.55rem 0.75rem;
+    margin-top: 0.65rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid color-mix(in srgb, #93c5fd 55%, transparent);
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__split-item {
+    min-width: 0;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__split-label,
+  .branch-wallet-page .branch-wallet-receivable__split-amount {
+    margin: 0;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__split-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #1e3a8a;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__split-amount {
+    margin-top: 0.28rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+    color: #0f172a;
   }
 
   .branch-wallet-page .branch-wallet-page__tabs {

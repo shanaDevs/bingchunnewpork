@@ -49,6 +49,8 @@ interface WalletInfo {
   id: string;
   storeId: string;
   balance: number;
+  /** All-time net payable to branch (cents); prefer over legacy balance fields when present. */
+  allTimeAvailableBalanceCents?: number;
   totalEarnings?: number;
   netTransferableEarnings?: number;
   totalWithdrawn?: number;

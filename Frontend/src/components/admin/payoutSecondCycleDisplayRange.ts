@@ -65,3 +65,51 @@ export function resolvePayoutCycleDisplayRange(params: {
     displayDays: FULL_CYCLE_INCLUSIVE_DAYS,
   };
 }
+
+function cycleFromFromBreakdown(breakdown: unknown): string | null {
+  if (!breakdown || typeof breakdown !== 'object') return null;
+  const value = (breakdown as Record<string, unknown>).cycleFrom;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/**
+ * Table label for a listed 15-day payout row. SECOND shows the full 30-day calculation
+ * window; settlement still uses the row's `periodFrom`/`periodTo`.
+ */
+export function resolveListedPayoutPeriodDisplay<T extends { periodFrom: string; periodTo: string }>(params: {
+  row: T;
+  rows: T[];
+  cycleStage?: 'FIRST' | 'SECOND' | null;
+  cycleFrom?: string | null;
+  breakdown?: unknown;
+  periodDays?: number | null;
+}): { displayFrom: string; displayTo: string; displayDays: number } {
+  const { row, rows, periodDays } = params;
+  const cycleFrom = params.cycleFrom ?? cycleFromFromBreakdown(params.breakdown);
+  const pairedFirst = findPairedFirstPayoutPeriodRow(rows, row);
+  const isSecond = params.cycleStage === 'SECOND' || (params.cycleStage !== 'FIRST' && pairedFirst != null);
+
+  if (!isSecond) {
+    return {
+      displayFrom: row.periodFrom,
+      displayTo: row.periodTo,
+      displayDays: periodDays ?? 15,
+    };
+  }
+
+  if (pairedFirst) {
+    return {
+      displayFrom: pairedFirst.periodFrom,
+      displayTo: row.periodTo,
+      displayDays: FULL_CYCLE_INCLUSIVE_DAYS,
+    };
+  }
+
+  return resolvePayoutCycleDisplayRange({
+    cycleStage: 'SECOND',
+    cycleFrom,
+    periodFrom: row.periodFrom,
+    periodTo: row.periodTo,
+    periodDays,
+  });
+}

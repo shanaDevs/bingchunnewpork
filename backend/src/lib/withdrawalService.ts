@@ -248,6 +248,19 @@ const WITHDRAWAL_SNAPSHOT_NUMERIC_KEYS = [
   'periodLoyaltyDiscountTotal',
 ] as const satisfies readonly (keyof PeriodBreakdown)[];
 
+/** Jason discounts are funded by Jason's investment — do not debit them from the branch online wallet. */
+function onlineWalletDebitCentsFromRequestedAmount(
+  amountCents: number,
+  periodNetCents: number,
+  jasonCents: number,
+): number {
+  const jason = Math.max(0, jasonCents);
+  if (jason > 0 && Math.abs(amountCents - periodNetCents) <= 1) {
+    return Math.max(0, amountCents - jason);
+  }
+  return amountCents;
+}
+
 function assertWithdrawalBreakdownSnapshot(period: PeriodBreakdown): void {
   for (const key of WITHDRAWAL_SNAPSHOT_NUMERIC_KEYS) {
     const value = period[key];
@@ -271,10 +284,13 @@ export async function buildStoredWithdrawalBreakdown(
    * Jason top-up. Do not derive this from the client-submitted wallet-debit (`branchRequest`);
    * Initiate Payout can send a rounded branch-wallet line that is not identical to stored net.
    */
-  const finalPayoutAmount = computeFinalPayoutAmountCents(
-    Math.round(period.netAmount),
-    period.sharedPromoJasonContributionAmount ?? 0,
-  );
+  const netCents = Math.round(period.netAmount);
+  const jasonCents = period.sharedPromoJasonContributionAmount ?? 0;
+  /** Payout 2 period net already includes Jason in the walkthrough — do not add it again. */
+  const finalPayoutAmount =
+    period.cycleStage === 'SECOND'
+      ? netCents
+      : computeFinalPayoutAmountCents(netCents, jasonCents);
   const platformProviderReceivable = await resolvePlatformProviderReceivableFromBreakdown(period);
   const { channelBreakdown: _ignoredChannelBreakdown, ...periodFields } = period;
   const firstPayoutOnlineSubtotalCents =
@@ -376,14 +392,19 @@ export async function validatePayoutRequest(
     walletSummary.allTimeAvailableBalanceCents,
     walletSummary.pendingWithdrawalTotal,
   );
-  if (amount > remainingAvailableCents) {
+  const periodNet = periodWithDiscountReport.netAmount;
+  const jasonCents = periodWithDiscountReport.sharedPromoJasonContributionAmount ?? 0;
+  const onlineWalletDebitCents = onlineWalletDebitCentsFromRequestedAmount(
+    amount,
+    periodNet,
+    jasonCents,
+  );
+  if (onlineWalletDebitCents > remainingAvailableCents) {
     throw new AppError(
       `Insufficient available balance. Available: LKR ${(remainingAvailableCents / 100).toFixed(2)}`,
       400,
     );
   }
-
-  const periodNet = periodWithDiscountReport.netAmount;
 
   const PAYOUT_AMOUNT_TOLERANCE_CENTS = 1;
   if (!isAdvance && amount > periodNet + PAYOUT_AMOUNT_TOLERANCE_CENTS) {
@@ -449,6 +470,11 @@ export async function initiateAndApproveWithdrawal(
   const sppc = parseSharedPromoFromBreakdown(breakdown);
   const sppcJasonCents = sppc.sharedPromoJasonContributionAmount;
   const paymentCents = resolveFinalPayoutAmountFromBreakdown(breakdown, amount);
+  const onlineWalletDebitCents = onlineWalletDebitCentsFromRequestedAmount(
+    amount,
+    breakdown.netAmount,
+    sppcJasonCents,
+  );
   const jasonNet = await computeJasonNetBalance();
   assertJasonBalanceCoversContribution(jasonNet, sppcJasonCents);
 
@@ -464,13 +490,13 @@ export async function initiateAndApproveWithdrawal(
   const availableCents = remainingAvailableCents;
   const approvedWithdrawal = await prisma.$transaction(async (tx) => {
     const locked = await lockStoreWallet(tx, storeId);
-    if (amount > availableCents) {
+    if (onlineWalletDebitCents > availableCents) {
       throw new AppError(
         `Insufficient available balance. Available: LKR ${(availableCents / 100).toFixed(2)}`,
         400,
       );
     }
-    const afterDebit = walletDataAfterDebit(locked, amount);
+    const afterDebit = walletDataAfterDebit(locked, onlineWalletDebitCents);
     const lockedBalance = Number(afterDebit.balance.toFixed(0));
 
     await createApprovalWalletLedgerEntries(tx, {

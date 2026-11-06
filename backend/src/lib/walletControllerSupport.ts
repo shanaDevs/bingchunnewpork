@@ -336,7 +336,7 @@ export async function loadPayoutPeriodItems(storeId: string) {
     status: 'PENDING';
     amountCents: number;
     orderCount: number;
-    breakdown: null;
+    breakdown: unknown;
     withdrawal: null;
   }> = [];
 
@@ -354,7 +354,11 @@ export async function loadPayoutPeriodItems(storeId: string) {
       status: 'PENDING',
       amountCents: merged.netAmount,
       orderCount: merged.orderCount,
-      breakdown: null,
+      breakdown: {
+        cycleStage: merged.cycleStage ?? cycleCtx.cycleStage,
+        cycleFrom: merged.cycleFrom ?? cycleCtx.cycleFrom,
+        cycleTo: merged.cycleTo ?? cycleCtx.cycleTo ?? window.to,
+      },
       withdrawal: null,
     });
   }
@@ -388,7 +392,11 @@ export async function loadPayoutPeriodItems(storeId: string) {
         status: 'IN_PROGRESS',
         amountCents: merged.netAmount,
         orderCount: merged.orderCount,
-        breakdown: null,
+        breakdown: {
+          cycleStage: merged.cycleStage ?? cycleCtx.cycleStage,
+          cycleFrom: merged.cycleFrom ?? cycleCtx.cycleFrom,
+          cycleTo: merged.cycleTo ?? cycleCtx.cycleTo ?? inProgressIdealTo,
+        },
         withdrawal: null,
       });
     }
@@ -903,8 +911,11 @@ async function buildStorePayoutsDueRows(
           days: inclusivePeriodDays(window.from, window.to),
           netAmountCents: merged.netAmount,
           orderCount: merged.orderCount,
-          // Panel lazy-loads detail when null; skip shipping huge breakdown JSON.
-          breakdown: null,
+          breakdown: {
+            cycleStage: merged.cycleStage ?? cycleCtx.cycleStage,
+            cycleFrom: merged.cycleFrom ?? cycleCtx.cycleFrom,
+            cycleTo: merged.cycleTo ?? cycleCtx.cycleTo ?? window.to,
+          },
         };
       },
     ),
@@ -1162,19 +1173,30 @@ export async function loadAdminWalletListPayload(
   }
 
   const allTimeAvailableByStore = new Map<string, number>();
+  const allTimeOnlineWalletByStore = new Map<string, number>();
   if (storeIds.length > 0) {
-    const rows: Array<{ storeId: string; cents: number }> = await promiseAllLimited(
+    const rows: Array<{
+      storeId: string;
+      remainingCents: number;
+      allTimeOnlineWalletCents: number;
+    }> = await promiseAllLimited(
       getPrismaFanOutLimit(),
       storeIds.map(
-        (id) => (): Promise<{ storeId: string; cents: number }> =>
+        (id) => (): Promise<{
+          storeId: string;
+          remainingCents: number;
+          allTimeOnlineWalletCents: number;
+        }> =>
           computeBranchPayablesBreakdown(id).then((breakdown) => ({
             storeId: id,
-            cents: breakdown.allTimeAvailableBalanceCents,
+            remainingCents: breakdown.allTimeAvailableBalanceCents,
+            allTimeOnlineWalletCents: breakdown.allTimeOnlineWalletCents,
           })),
       ),
     );
     for (const row of rows) {
-      allTimeAvailableByStore.set(row.storeId, row.cents);
+      allTimeAvailableByStore.set(row.storeId, row.remainingCents);
+      allTimeOnlineWalletByStore.set(row.storeId, row.allTimeOnlineWalletCents);
     }
   }
 
@@ -1187,6 +1209,7 @@ export async function loadAdminWalletListPayload(
       currentBalance: enriched.currentBalance,
       availableBalance: enriched.availableBalance,
       allTimeAvailableBalanceCents: allTimeAvailableByStore.get(w.storeId),
+      allTimeOnlineWalletCents: allTimeOnlineWalletByStore.get(w.storeId),
       _count: { transactions: txnCountMap.get(w.storeId) ?? 0 },
     });
   });

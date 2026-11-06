@@ -1,13 +1,17 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle, ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { CheckCircle, ChevronLeft, ChevronRight, Download, FileText, Loader2, Search } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { formatMoneyAmount } from '@/lib/receipt';
 import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
 import { formatBranchName } from '@/lib/deliveryDisplay';
 import { cn } from '@/lib/utils';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { payoutPeriodRowNeedsLiveNetPreview } from '@/components/admin/payoutPeriodRowAmounts';
+import { readPayoutCycleStage } from '@/components/admin/payoutPeriodRowCycleDisplay';
+import { resolveListedPayoutPeriodDisplay } from '@/components/admin/payoutSecondCycleDisplayRange';
 import type { PeriodPayoutCardAmounts } from '@/components/admin/periodPayoutSplitDisplay';
 import {
   PayoutsDueTableHead,
@@ -20,6 +24,15 @@ import {
 } from '@/components/admin/usePayoutDueAmountMaps';
 import { Skeleton } from '@/components/ui/skeleton';
 import { isOldestUnpaidBranchPayoutRow } from '@/lib/branchPayoutsDue';
+import {
+  downloadPayoutReviewPdf,
+  downloadPayoutReviewZip,
+  fetchPayoutReviews,
+  payoutReviewMarkKey,
+  payoutReviewPdfFilename,
+  setPayoutInReview,
+  type PayoutReviewMark,
+} from '@/lib/payoutReviewDownload';
 import type { PayoutDueRow } from '@/components/admin/payoutDueTypes';
 
 export type { PayoutDueRow } from '@/components/admin/payoutDueTypes';
@@ -73,28 +86,78 @@ function PayoutDueAllocationCells({
 
 function PayoutDueTableRow({
   row,
+  storeRows,
   amounts,
+  netPreview,
   previewLoading,
   payEnabled,
+  inReview,
+  reviewBusy,
+  downloadBusy,
+  reviewsReady,
+  reviewsError,
+  onToggleReview,
+  onDownload,
   onView,
   onReviewAndPay,
 }: {
   row: PayoutDueRow;
+  storeRows: PayoutDueRow[];
   amounts: PeriodPayoutCardAmounts;
+  netPreview?: Record<string, unknown> | null;
   previewLoading: boolean;
   payEnabled: boolean;
+  inReview: boolean;
+  reviewBusy: boolean;
+  downloadBusy: boolean;
+  reviewsReady: boolean;
+  reviewsError: boolean;
+  onToggleReview: (row: PayoutDueRow, inReview: boolean) => void;
+  onDownload: (row: PayoutDueRow, filename: string) => void;
   onView?: (row: PayoutDueRow) => void;
   onReviewAndPay: (row: PayoutDueRow) => void;
 }) {
   const branchName = formatBranchName(row.storeName);
+  const cycleStage = readPayoutCycleStage(row.breakdown, netPreview);
+  const periodDisplay = resolveListedPayoutPeriodDisplay({
+    row,
+    rows: storeRows,
+    cycleStage,
+    breakdown: row.breakdown,
+    periodDays: row.days,
+  });
+  const payNote = !payEnabled
+    ? 'Pay earlier period first'
+    : reviewsError
+      ? 'Review status unavailable'
+      : !reviewsReady
+        ? 'Loading review status…'
+        : !inReview
+          ? 'Mark as In Review first'
+          : null;
 
   return (
-    <tr className="border-b border-[var(--color-navy-border)]/70 last:border-b-0 hover:bg-[var(--color-input-bg)]/40">
+    <tr
+      className={cn(
+        'border-b border-[var(--color-navy-border)]/70 last:border-b-0 hover:bg-[var(--color-input-bg)]/40',
+        inReview && 'bg-amber-500/[0.06]',
+      )}
+    >
+      <td className="px-3 py-3">
+        <input
+          type="checkbox"
+          checked={inReview}
+          disabled={!reviewsReady || reviewBusy}
+          aria-label={`Mark ${branchName} payout in review`}
+          onChange={(event) => onToggleReview(row, event.target.checked)}
+          className="h-4 w-4 accent-[var(--color-brand)] disabled:cursor-not-allowed"
+        />
+      </td>
       <td className="px-3 py-3 font-medium text-[var(--color-text)]">{branchName}</td>
       <td className="px-3 py-3 whitespace-nowrap text-[var(--color-text-muted)]">
-        {formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo)}
+        {formatBiweeklyPeriodLabel(periodDisplay.displayFrom, periodDisplay.displayTo)}
         <span className="ml-1.5 text-[10px] font-semibold text-[var(--color-text)]">
-          {row.days} days
+          {periodDisplay.displayDays} days
         </span>
       </td>
       <td className="px-3 py-3 text-right tabular-nums text-[var(--color-text)]">
@@ -119,7 +182,33 @@ function PayoutDueTableRow({
         </button>
       </td>
       <td className="px-3 py-3 text-right">
-        {payEnabled ? (
+        <button
+          type="button"
+          disabled={downloadBusy}
+          onClick={() =>
+            onDownload(
+              row,
+              payoutReviewPdfFilename(
+                row.storeName,
+                periodDisplay.displayFrom,
+                periodDisplay.displayTo,
+                cycleStage,
+              ),
+            )
+          }
+          aria-label={`Download payout PDF for ${branchName}`}
+          className={cn(
+            'inline-flex items-center gap-1 rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5',
+            'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
+            'disabled:cursor-not-allowed disabled:opacity-60',
+          )}
+        >
+          {downloadBusy ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+          PDF
+        </button>
+      </td>
+      <td className="px-3 py-3 text-right">
+        {payNote == null ? (
           <button
             type="button"
             onClick={() => onReviewAndPay(row)}
@@ -133,12 +222,12 @@ function PayoutDueTableRow({
         ) : (
           <span
             className="inline-flex max-w-[9.5rem] flex-col items-end gap-0.5 text-[10px] font-medium text-[var(--color-text-muted)]"
-            title="Pay the earlier period for this branch first"
+            title={payNote ?? undefined}
           >
             <span className="rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5 text-xs font-semibold opacity-50">
               Review & Pay
             </span>
-            Pay earlier period first
+            {payNote}
           </span>
         )}
       </td>
@@ -155,8 +244,21 @@ export default function PayoutsDuePanel({
 }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
+  const [reviewBusyKey, setReviewBusyKey] = useState<string | null>(null);
+  const [downloadBusyKey, setDownloadBusyKey] = useState<string | null>(null);
+  const [downloadingAll, setDownloadingAll] = useState(false);
   const count = rows.length;
   const apiBase = getApiBaseUrl();
+  const queryClient = useQueryClient();
+  const reviewsQuery = useQuery({
+    queryKey: ['branch-payout-reviews'],
+    queryFn: fetchPayoutReviews,
+    staleTime: 15_000,
+  });
+  const inReviewKeys = useMemo(
+    () => new Set((reviewsQuery.data ?? []).map((mark) => payoutReviewMarkKey(mark))),
+    [reviewsQuery.data],
+  );
 
   const filteredRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -188,8 +290,63 @@ export default function PayoutsDuePanel({
     [rows],
   );
 
-  const { displayAmountsByDueKey, previewLoadingByKey, resolveDueRowBaseAmounts } =
+  const { displayAmountsByDueKey, previewByKey, previewLoadingByKey, resolveDueRowBaseAmounts } =
     usePayoutDueAmountMaps(rows, pageRows, apiBase);
+
+  function reviewMark(row: PayoutDueRow): PayoutReviewMark {
+    return {
+      storeId: row.storeId,
+      periodFrom: row.periodFrom.slice(0, 10),
+      periodTo: row.periodTo.slice(0, 10),
+    };
+  }
+
+  async function toggleReview(row: PayoutDueRow, next: boolean) {
+    const mark = reviewMark(row);
+    const key = payoutReviewMarkKey(mark);
+    const previous = reviewsQuery.data ?? [];
+    setReviewBusyKey(key);
+    queryClient.setQueryData<PayoutReviewMark[]>(['branch-payout-reviews'], (current = []) => {
+      const without = current.filter((item) => payoutReviewMarkKey(item) !== key);
+      return next ? [...without, mark] : without;
+    });
+    try {
+      await setPayoutInReview(mark, next);
+    } catch (err) {
+      queryClient.setQueryData(['branch-payout-reviews'], previous);
+      toast.error(err instanceof Error ? err.message : 'Could not update review status');
+    } finally {
+      setReviewBusyKey(null);
+    }
+  }
+
+  async function downloadOne(row: PayoutDueRow, filename: string) {
+    const key = payoutDueRowKey(row);
+    setDownloadBusyKey(key);
+    try {
+      await downloadPayoutReviewPdf(reviewMark(row), filename);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not download the payout invoice');
+    } finally {
+      setDownloadBusyKey(null);
+    }
+  }
+
+  async function downloadAllListed() {
+    if (filteredRows.length === 0 || downloadingAll) return;
+    if (filteredRows.length > 40) {
+      toast.error('Download all is limited to 40 payouts. Narrow the branch search first.');
+      return;
+    }
+    setDownloadingAll(true);
+    try {
+      await downloadPayoutReviewZip(filteredRows.map(reviewMark));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not download the payout invoices');
+    } finally {
+      setDownloadingAll(false);
+    }
+  }
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
@@ -216,7 +373,21 @@ export default function PayoutsDuePanel({
                 {count} period{count === 1 ? '' : 's'} · oldest first · 15-day cycle
               </span>
             </div>
-            <div className="relative w-full max-w-[220px] sm:w-auto">
+            <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
+              <button
+                type="button"
+                disabled={downloadingAll || filteredRows.length === 0 || loadingMore}
+                onClick={() => void downloadAllListed()}
+                className={cn(
+                  'inline-flex h-8 items-center gap-1.5 rounded-[12px] border border-[var(--color-navy-border)] px-3',
+                  'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
+                  'disabled:cursor-not-allowed disabled:opacity-60',
+                )}
+              >
+                {downloadingAll ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                Download all
+              </button>
+              <div className="relative w-full max-w-[220px] sm:w-auto">
               <Search
                 size={13}
                 className="pointer-events-none absolute top-1/2 left-2.5 z-[2] -translate-y-1/2 text-muted"
@@ -231,7 +402,21 @@ export default function PayoutsDuePanel({
                 className="input-field h-8 w-full rounded-[12px] py-0 pr-3 text-xs"
               />
             </div>
+            </div>
           </div>
+
+          {reviewsQuery.isError && (
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--color-navy-border)] px-4 py-2 text-xs text-amber-700 sm:px-5">
+              <span>Could not load which payouts are in review.</span>
+              <button
+                type="button"
+                onClick={() => void reviewsQuery.refetch()}
+                className="font-semibold text-[var(--color-brand)] hover:underline"
+              >
+                Retry
+              </button>
+            </div>
+          )}
 
           {filteredRows.length === 0 ? (
             <div className="px-5 py-12 text-center text-sm text-[var(--color-text-muted)]">
@@ -239,18 +424,28 @@ export default function PayoutsDuePanel({
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1100px] text-left text-xs">
+              <table className="w-full min-w-[1240px] text-left text-xs">
                 <PayoutsDueTableHead />
                 <tbody>
                   {pageRows.map((row) => {
                     const key = payoutDueRowKey(row);
+                    const reviewKey = payoutReviewMarkKey(reviewMark(row));
                     return (
                       <PayoutDueTableRow
                         key={key}
                         row={row}
+                        storeRows={rows.filter((candidate) => candidate.storeId === row.storeId)}
                         amounts={displayAmountsByDueKey.get(key) ?? resolveDueRowBaseAmounts(row)}
+                        netPreview={previewByKey.get(key)}
                         previewLoading={previewLoadingByKey.get(key) ?? false}
                         payEnabled={canReviewAndPay(row)}
+                        inReview={inReviewKeys.has(reviewKey)}
+                        reviewBusy={reviewBusyKey === reviewKey}
+                        downloadBusy={downloadBusyKey === key || downloadingAll}
+                        reviewsReady={reviewsQuery.isSuccess}
+                        reviewsError={reviewsQuery.isError}
+                        onToggleReview={(target, next) => void toggleReview(target, next)}
+                        onDownload={(target, filename) => void downloadOne(target, filename)}
                         onView={onView}
                         onReviewAndPay={onReviewAndPay}
                       />

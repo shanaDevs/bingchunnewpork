@@ -140,14 +140,14 @@ export default function PeriodPayoutSplitCards({
           icon={User}
           variant="platform"
           title="Customer convenience fee"
-          amount={orderConvenienceFeeLkr}
+          amount={orderConvenienceFeeLkr ?? 0}
           subtitle="Platform share for this period"
         />
         <PayoutMetricCard
           icon={Percent}
           variant="platform"
           title="Platform commission"
-          amount={commissionLkr}
+          amount={commissionLkr ?? 0}
           amountLabel={isFirstCyclePayout ? '—' : undefined}
           subtitle={
             isFirstCyclePayout

@@ -28,6 +28,7 @@ import {
   paidPayoutAllTimeExpenseDeductionCents,
   readPayoutCycleStageFromBreakdown,
 } from '@/components/admin/paidPayoutAllTimeDeduction';
+import { resolveSlabRatePctFromPreview } from '@/components/admin/commissionUtils';
 
 type PayoutPeriodExpenseRow = {
   status: 'PAID' | 'PENDING' | 'IN_PROGRESS';
@@ -41,10 +42,82 @@ type PayoutPeriodExpenseRow = {
 export type PayoutPeriodExpensesCents = {
   netPlatformAmountCents: number;
   gatewayFeeCents: number;
+  /** Paid branch payouts including Jason top-up (light-blue Branch Receivable card). */
   branchReceivableCents: number;
+  /** Paid branch payouts excluding Jason's investment (All-Time Available Balance). */
+  branchReceivableExcludingJasonCents: number;
+  /** Jason shared-promo top-up included in paid branch payouts. */
+  jasonInvestmentCents: number;
   totalExpensesCents: number;
   allTimeExpenseDeductionCents: number;
 };
+
+/** Branch payout received through paid 15-day cycles, excluding Jason's investment. */
+export function branchReceivableExcludingJasonCents(
+  branchReceivableCents: number,
+  jasonInvestmentCents: number,
+): number {
+  return Math.max(0, branchReceivableCents - Math.max(0, jasonInvestmentCents));
+}
+
+/** Cumulative pickup + delivery online wallet from day one — never reduced by branch payouts. */
+export function computeAllTimeOnlineWalletCents(
+  pickupOnlineIn: number,
+  deliveryOnlineIn: number,
+): number {
+  return Math.max(0, pickupOnlineIn + deliveryOnlineIn);
+}
+
+/**
+ * Remaining online wallet after paid branch payouts (Jason excluded).
+ * Super Admin “Online Available Balance”.
+ */
+export function computeAllTimeAvailableBalanceCents(
+  pickupOnlineIn: number,
+  deliveryOnlineIn: number,
+  branchReceivableExcludingJason: number,
+): number {
+  return Math.max(
+    0,
+    computeAllTimeOnlineWalletCents(pickupOnlineIn, deliveryOnlineIn) -
+      branchReceivableExcludingJason,
+  );
+}
+
+function netAmountCentsFromBreakdown(breakdown: unknown): number {
+  if (!breakdown || typeof breakdown !== 'object') return 0;
+  const netAmount = (breakdown as Record<string, unknown>).netAmount;
+  return typeof netAmount === 'number' && Number.isFinite(netAmount)
+    ? Math.round(netAmount)
+    : 0;
+}
+
+function branchReceivableExcludingJasonFromRow(params: {
+  branchReceivableCents: number;
+  jasonInvestmentCents: number;
+  cycleStage: ReturnType<typeof readPayoutCycleStageFromBreakdown>;
+  netAmountCents: number;
+}): number {
+  const total = Math.max(0, params.branchReceivableCents);
+  const jason = Math.max(0, params.jasonInvestmentCents);
+  if (jason <= 0) return total;
+  if (
+    params.cycleStage === 'SECOND' &&
+    params.netAmountCents > 0 &&
+    Math.abs(total - (params.netAmountCents + jason)) <= 1
+  ) {
+    return Math.max(0, params.netAmountCents - jason);
+  }
+  return Math.max(0, total - jason);
+}
+
+function jasonInvestmentCentsFromBreakdown(breakdown: unknown): number {
+  const parsed = parseWithdrawalBreakdown(breakdown);
+  if (!parsed) return 0;
+  return lkrToExpenseCents(
+    extractSharedPromoLkrFromBreakdown(parsed, 0).jasonContributionLkr,
+  );
+}
 
 function lkrToExpenseCents(lkr: number): number {
   return Math.round(lkr * 100);
@@ -68,6 +141,8 @@ export function aggregatePaidPayoutPeriodExpensesCents(
   let netPlatformAmountCents = 0;
   let gatewayFeeCents = 0;
   let branchReceivableCents = 0;
+  let branchReceivableExcludingJason = 0;
+  let jasonInvestmentCents = 0;
   let allTimeExpenseDeductionCents = 0;
 
   for (const row of rows) {
@@ -83,13 +158,22 @@ export function aggregatePaidPayoutPeriodExpensesCents(
 
     const rowNetPlatform = lkrToExpenseCents(amounts.commissionLkr ?? 0);
     const rowBranchDisplay = lkrToExpenseCents(amounts.branchReceives);
+    const rowJasonInvestment = jasonInvestmentCentsFromBreakdown(row.breakdown);
     const rowGateway = gatewayFeeCentsFromBreakdown(row.breakdown);
     const cycleStage = readPayoutCycleStageFromBreakdown(row.breakdown);
+    const rowBranchExcludingJason = branchReceivableExcludingJasonFromRow({
+      branchReceivableCents: rowBranchDisplay,
+      jasonInvestmentCents: rowJasonInvestment,
+      cycleStage,
+      netAmountCents: netAmountCentsFromBreakdown(row.breakdown),
+    });
     const rowBranchForAllTime =
       cycleStage === 'FIRST' ? row.amountCents : rowBranchDisplay;
 
     netPlatformAmountCents += rowNetPlatform;
     branchReceivableCents += rowBranchDisplay;
+    branchReceivableExcludingJason += rowBranchExcludingJason;
+    jasonInvestmentCents += rowJasonInvestment;
     gatewayFeeCents += rowGateway;
     allTimeExpenseDeductionCents += paidPayoutAllTimeExpenseDeductionCents({
       cycleStage,
@@ -103,6 +187,8 @@ export function aggregatePaidPayoutPeriodExpensesCents(
     netPlatformAmountCents,
     gatewayFeeCents,
     branchReceivableCents,
+    branchReceivableExcludingJasonCents: branchReceivableExcludingJason,
+    jasonInvestmentCents,
     totalExpensesCents:
       netPlatformAmountCents + gatewayFeeCents + branchReceivableCents,
     allTimeExpenseDeductionCents,
@@ -157,6 +243,7 @@ function resolveBranchReceivesFromPayoutReport(params: {
     refundDeliveryFeeLkr: breakdownLkr.refundDeliveryFee ?? 0,
     rejectedRefundDeliveryFeeLkr: breakdownLkr.rejectedRefundDeliveryFee ?? 0,
   });
+  const slabRatePct = resolveSlabRatePctFromPreview(channelPreview);
 
   const reportValues = resolvePayoutReportValues(
     buildPayoutBreakdownDisplayInput({
@@ -166,6 +253,7 @@ function resolveBranchReceivesFromPayoutReport(params: {
       onlineOrderSubtotalLkr,
       convenienceFeeLkr: breakdownLkr.convenienceFee,
       deliveryFeeLkr: deliveryFeeForPeriodLkr,
+      slabRatePct,
       paybackEnabled,
       gatewayRatePct: breakdownLkr.gatewayRatePct ?? 1.9,
       sharedPromo,
@@ -180,7 +268,8 @@ function resolveBranchReceivesFromPayoutReport(params: {
 export function payoutPeriodRowNeedsLiveNetPreview(breakdown: unknown): boolean {
   if (breakdown == null) return true;
   const parsed = parseWithdrawalBreakdown(breakdown);
-  return parsed?.cycleStage === 'SECOND';
+  if (parsed == null) return true;
+  return parsed.cycleStage === 'SECOND';
 }
 
 /** Same allocation fields as payout modals / PeriodPayoutSplitCards (display only). */

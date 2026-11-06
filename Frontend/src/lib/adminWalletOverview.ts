@@ -25,6 +25,7 @@ export interface WalletSummary {
   availableBalance: number;
   onlineWalletAvailableBalance?: number;
   allTimeAvailableBalanceCents?: number;
+  allTimeOnlineWalletCents?: number;
 }
 
 export type AdminWalletOverviewData = {

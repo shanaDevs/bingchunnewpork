@@ -4,7 +4,11 @@ import { BarChart3, ChevronRight, HandCoins, Wallet } from 'lucide-react';
 import { DashSkel } from '@/components/admin/BranchDashboardSkeleton';
 import { formatMoneyAmount } from '@/lib/receipt';
 import { cn } from '@/lib/utils';
-import type { PayoutPeriodExpensesCents } from '@/components/admin/payoutPeriodRowAmounts';
+import {
+  branchReceivableExcludingJasonCents,
+  computeAllTimeAvailableBalanceCents,
+  type PayoutPeriodExpensesCents,
+} from '@/components/admin/payoutPeriodRowAmounts';
 import { usePaidPayoutPeriodExpenses } from '@/components/admin/usePaidPayoutPeriodExpenses';
 
 export type BranchWalletPayablesBreakdown = {
@@ -21,7 +25,10 @@ export type BranchWalletPayablesBreakdown = {
   gatewayFeeCents: number;
   branchReceivableCents: number;
   totalExpensesCents: number;
+  /** Remaining online wallet after paid branch payouts (Jason excluded). */
   allTimeAvailableBalanceCents: number;
+  /** Cumulative pickup + delivery online from day one (not reduced by payouts). */
+  allTimeOnlineWalletCents?: number;
 };
 
 export type BranchWalletDashboard = {
@@ -45,7 +52,6 @@ function centsToMoney(cents: number): string {
 }
 
 const ALL_TIME_HINT = 'All-time';
-const BRANCH_RECEIVABLE_HINT = 'Paid 15-day payouts';
 const PAYOUT_PERIOD_EXPENSE_HINT = 'Paid 15-day payouts';
 
 type Props = {
@@ -68,6 +74,8 @@ const EMPTY_PAID_PAYOUT_EXPENSES: PayoutPeriodExpensesCents = {
   netPlatformAmountCents: 0,
   gatewayFeeCents: 0,
   branchReceivableCents: 0,
+  branchReceivableExcludingJasonCents: 0,
+  jasonInvestmentCents: 0,
   totalExpensesCents: 0,
   allTimeExpenseDeductionCents: 0,
 };
@@ -167,12 +175,16 @@ function PayablesRevenueSummaryCard({
 }
 
 function BranchReceivableCard({
-  branchReceivableCents,
+  jasonInvestmentCents,
+  branchReceivableExcludingJasonCents,
   loading,
 }: {
-  branchReceivableCents: number;
+  jasonInvestmentCents: number;
+  branchReceivableExcludingJasonCents: number;
   loading: boolean;
 }) {
+  const combinedReceivableCents = jasonInvestmentCents + branchReceivableExcludingJasonCents;
+
   return (
     <section className="branch-wallet-receivable branch-wallet-payables__receivable">
       <HandCoins
@@ -190,10 +202,31 @@ function BranchReceivableCard({
           {loading ? (
             <DashSkel className="h-7 w-40 max-w-full bg-blue-900/10" />
           ) : (
-            centsToMoney(branchReceivableCents)
+            centsToMoney(combinedReceivableCents)
           )}
         </p>
-        <p className="branch-wallet-receivable__hint">{BRANCH_RECEIVABLE_HINT}</p>
+        <div className="branch-wallet-receivable__split">
+          <div className="branch-wallet-receivable__split-item">
+            <p className="branch-wallet-receivable__split-label">Jason&apos;s Investment Amount</p>
+            <p className="branch-wallet-receivable__split-amount">
+              {loading ? (
+                <DashSkel className="h-4 w-24 max-w-full bg-blue-900/10" />
+              ) : (
+                centsToMoney(jasonInvestmentCents)
+              )}
+            </p>
+          </div>
+          <div className="branch-wallet-receivable__split-item">
+            <p className="branch-wallet-receivable__split-label">Branch Receivable</p>
+            <p className="branch-wallet-receivable__split-amount">
+              {loading ? (
+                <DashSkel className="h-4 w-28 max-w-full bg-blue-900/10" />
+              ) : (
+                centsToMoney(branchReceivableExcludingJasonCents)
+              )}
+            </p>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -290,11 +323,25 @@ export default function BranchWalletSummaryCards({
   const branchReceivableCents = usePayoutPeriodExpenses
     ? (resolvedPaidExpenses?.branchReceivableCents ?? 0)
     : (payables?.branchReceivableCents ?? 0);
-  const onlineRevenueCents = pickupOnlineCents + deliveryOnlineCents;
+  const jasonInvestmentCents = usePayoutPeriodExpenses
+    ? (resolvedPaidExpenses?.jasonInvestmentCents ?? 0)
+    : 0;
+  const branchReceivableExcludingJason = usePayoutPeriodExpenses
+    ? (resolvedPaidExpenses?.branchReceivableExcludingJasonCents ??
+      branchReceivableExcludingJasonCents(branchReceivableCents, jasonInvestmentCents))
+    : branchReceivableExcludingJasonCents(branchReceivableCents, jasonInvestmentCents);
   const expensesSummaryTotalCents =
     platformCommissionCents + gatewayFeeCents + branchReceivableCents;
-  /** Pickup + delivery online minus branch receivable (matches wallet API / Branch Payables). */
-  const availableBalanceCents = Math.max(0, onlineRevenueCents - branchReceivableCents);
+  /** Remaining online wallet after paid branch payouts (Jason excluded). */
+  const remainingOnlineWalletCents = computeAllTimeAvailableBalanceCents(
+    pickupOnlineCents,
+    deliveryOnlineCents,
+    branchReceivableExcludingJason,
+  );
+  const availableBalanceCents =
+    usePayoutPeriodExpenses && payoutPeriodExpenses != null
+      ? remainingOnlineWalletCents
+      : (payables?.allTimeAvailableBalanceCents ?? remainingOnlineWalletCents);
 
   const cardLoading = loading || periodLoading || payoutPeriodExpensesLoading;
 
@@ -346,7 +393,8 @@ export default function BranchWalletSummaryCards({
           fromPayoutPeriods={usePayoutPeriodExpenses}
         />
         <BranchReceivableCard
-          branchReceivableCents={branchReceivableCents}
+          jasonInvestmentCents={jasonInvestmentCents}
+          branchReceivableExcludingJasonCents={branchReceivableExcludingJason}
           loading={cardLoading}
         />
       </div>

@@ -137,25 +137,31 @@ function resolveBranchWalletNetLkrForPayout(
 function formatBranchWalletNetLkrForSubmit(
   periodNet: WithdrawalBreakdown | null,
   branchWalletNetLkr: number,
+  jasonDiscountsLkr = 0,
 ): string {
-  return resolveBranchWalletNetLkrForPayout(periodNet, branchWalletNetLkr).toFixed(2);
+  const raw = resolveBranchWalletNetLkrForPayout(periodNet, branchWalletNetLkr);
+  return Math.max(0, raw - Math.max(0, jasonDiscountsLkr)).toFixed(2);
 }
 
-function availableCoversFinalPayout(availableLkr: number, finalPayLkr: number): boolean {
-  return availableLkr + PAYOUT_COMPARE_EPSILON >= finalPayLkr;
+function availableCoversOnlineWalletDebit(
+  availableLkr: number,
+  onlineWalletDebitLkr: number,
+): boolean {
+  return availableLkr + PAYOUT_COMPARE_EPSILON >= onlineWalletDebitLkr;
 }
 
 function resolveInitiatePayoutPayDisabledNote(params: {
   previewLoading: boolean;
   finalPayLkr: number;
   availableLkr: number;
+  onlineWalletDebitLkr: number;
   paymentMethod: PaymentMethod;
   reviewed: boolean;
 }): string | null {
   if (params.previewLoading) return 'Loading payout calculation…';
   if (params.finalPayLkr <= 0) return 'Waiting for payout calculation for this period.';
-  if (!availableCoversFinalPayout(params.availableLkr, params.finalPayLkr)) {
-    return `Available to withdraw (LKR ${formatMoneyAmount(params.availableLkr)}) must cover net payout (LKR ${formatMoneyAmount(params.finalPayLkr)}).`;
+  if (!availableCoversOnlineWalletDebit(params.availableLkr, params.onlineWalletDebitLkr)) {
+    return `Available to withdraw (LKR ${formatMoneyAmount(params.availableLkr)}) must cover the online wallet payout (LKR ${formatMoneyAmount(params.onlineWalletDebitLkr)}).`;
   }
   if (!params.paymentMethod) return 'Select a payment method to continue.';
   if (!params.reviewed) return 'Check the box to confirm you have reviewed the payout calculation.';
@@ -558,17 +564,26 @@ export default function AdminInitiatePayoutModal({
   const netPayoutFinalPayLkr = branchPayout?.totalBranchPayoutLkr ?? 0;
   const payTotalLkr = netPayoutFinalPayLkr;
   const reportBranchWalletNetLkr = branchPayout?.periodWalletNetLkr ?? periodNetLkr ?? 0;
-  const branchWalletNetLkr = resolveBranchWalletNetLkrForPayout(periodNet, reportBranchWalletNetLkr);
+  const jasonDiscountsLkr = Math.max(
+    payoutReportBundle?.reportValues.jasonDiscountsLkr ?? 0,
+    sharedPromo.jasonContributionLkr,
+  );
+  const jasonIncludedInPeriodNet =
+    (periodNet?.cycleStage ?? payoutReportBundle?.reportValues.cycleStage) === 'SECOND';
+  const jasonToExcludeFromOnlineDebit = jasonIncludedInPeriodNet ? jasonDiscountsLkr : 0;
   const availableBalanceView = resolveInitiatePayoutAvailableBalance({
     withdrawablePoolLkr,
     netPayoutFinalPayLkr,
+    jasonDiscountsLkr,
   });
   const availableLkr = availableBalanceView.availableBeforePayoutLkr;
   const availableAfterPayoutLkr = availableBalanceView.availableAfterPayoutLkr;
+  const onlineWalletDebitLkr = availableBalanceView.onlineWalletDebitLkr;
   const payDisabledNote = resolveInitiatePayoutPayDisabledNote({
     previewLoading,
     finalPayLkr: netPayoutFinalPayLkr,
     availableLkr,
+    onlineWalletDebitLkr,
     paymentMethod,
     reviewed,
   });
@@ -627,7 +642,11 @@ export default function AdminInitiatePayoutModal({
       const proofBase64 = btoa(binary);
 
       const payload: Record<string, string | number | boolean> = {
-        amount: formatBranchWalletNetLkrForSubmit(periodNet, reportBranchWalletNetLkr),
+        amount: formatBranchWalletNetLkrForSubmit(
+          periodNet,
+          reportBranchWalletNetLkr,
+          jasonToExcludeFromOnlineDebit,
+        ),
         periodDays: periodDays ?? 15,
         from: dateFrom,
         to: dateTo,
@@ -710,8 +729,8 @@ export default function AdminInitiatePayoutModal({
       toast.error(payDisabledNote);
       return;
     }
-    if (!availableCoversFinalPayout(availableLkr, netPayoutFinalPayLkr)) {
-      toast.error('Available to withdraw must cover the branch receives amount for this payout');
+    if (!availableCoversOnlineWalletDebit(availableLkr, onlineWalletDebitLkr)) {
+      toast.error('Available to withdraw must cover the online wallet amount for this payout');
       return;
     }
     if (!checkValid) {

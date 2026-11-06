@@ -151,13 +151,12 @@ export async function mapApprovedWithdrawalToPlatformPayoutRow(
   };
 }
 
+type PayoutHistorySortKey = { id: string; paidAt: string; storeWithdrawalId?: string };
+
 export function mergeBranchPayoutHistoryRows<
-  T extends { id: string; paidAt: string; storeWithdrawalId?: string },
->(
-  settlementRows: T[],
-  withdrawalRows: T[],
-  linkedSettlementWithdrawalIds: Set<string>,
-): T[] {
+  A extends PayoutHistorySortKey,
+  B extends PayoutHistorySortKey,
+>(settlementRows: A[], withdrawalRows: B[], linkedSettlementWithdrawalIds: Set<string>): (A | B)[] {
   const supplemental = withdrawalRows.filter(
     (row) => !linkedSettlementWithdrawalIds.has(row.storeWithdrawalId ?? row.id),
   );
