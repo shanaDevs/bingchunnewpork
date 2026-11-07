@@ -111,6 +111,9 @@ services:
         scope: RUN_TIME
         value: REPLACE_ME
         type: SECRET
+      - key: GOOGLE_MAPS_API_KEY
+        value: REPLACE_ME
+        type: SECRET
       - key: FRONTEND_URL
         scope: RUN_TIME
         value: "https://bing-chun-ui2ow.ondigitalocean.app"
