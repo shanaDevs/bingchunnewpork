@@ -1,7 +1,6 @@
 import type { PromoCode } from '@/types';
 import {
   formatPromotionBenefit,
-  isBannerPromotion,
   isSpinLinkedPromo,
   promotionKindRequiresCode,
   type PromotionKind,
@@ -27,24 +26,10 @@ export interface HomeOffer {
   /** BOGO / BXGY: units to add so the offer can validate. */
   buyQty?: number;
   getQty?: number;
-}
-
-export interface PromoDisplay {
-  code: string;
-  title: string;
-  subtitle: string;
-  image: string;
-  tone: OfferTone;
-  minOrderValue: number;
+  /** The promotion's own title, description and expiry, as stored (`title` above is the formatted discount). */
+  name?: string;
+  description?: string;
   expiresAt?: string;
-  promotionKind?: string;
-  displayPrice?: number;
-  ctaLabel?: string;
-  productHref?: string;
-  isBanner?: boolean;
-  isDirectOffer?: boolean;
-  requiresPromoCode?: boolean;
-  isSpinOffer?: boolean;
 }
 
 const TONES: OfferTone[] = ['blue', 'cream', 'green'];
@@ -136,89 +121,6 @@ export function imageForPromo(promo: PromoCode, tone: OfferTone): string {
   return OFFER_IMAGES[tone];
 }
 
-export function mapPromoToDisplay(promo: PromoCode, index = 0): PromoDisplay {
-  const tone = toneForPromo(promo, index);
-  const rules = (promo.promotionRules ?? {}) as PromotionRules;
-  const isBanner = isBannerPromotion(promo.promotionKind);
-  const isSpinOffer = isSpinLinkedPromo(promo);
-  const requiresCode = promo.promotionKind
-    ? promotionKindRequiresCode(promo.promotionKind as PromotionKind)
-    : true;
-  const product =
-    rules.selectedProducts?.[0] ??
-    rules.comboProducts?.[0] ??
-    (rules.giftProduct ? rules.giftProduct : undefined);
-
-  if (isSpinOffer) {
-    return {
-      code: promo.code.toUpperCase(),
-      title: promo.title?.trim() || formatDiscountTitle(promo),
-      subtitle: promo.description?.trim() || formatDiscountSubtitle(promo),
-      image: product?.imageUrl || imageForPromo(promo, tone),
-      tone,
-      minOrderValue: promo.minOrderValue ?? 0,
-      expiresAt: promo.expiresAt,
-      promotionKind: promo.promotionKind,
-      ctaLabel: 'Spin to win',
-      isBanner: false,
-      isDirectOffer: false,
-      requiresPromoCode: false,
-      isSpinOffer: true,
-    };
-  }
-
-  if (isBanner) {
-    return {
-      code: promo.code.toUpperCase(),
-      title: promo.title?.trim() || formatDiscountTitle(promo),
-      subtitle: promo.description?.trim() || '',
-      image: rules.bannerImageUrl || imageForPromo(promo, tone),
-      tone,
-      minOrderValue: promo.minOrderValue ?? 0,
-      expiresAt: promo.expiresAt,
-      promotionKind: promo.promotionKind,
-      displayPrice: rules.displayPrice,
-      ctaLabel: rules.ctaLabel || 'Add to Bucket',
-      productHref: product?.id ? `/product/${product.id}` : undefined,
-      isBanner: true,
-      isDirectOffer: false,
-      requiresPromoCode: false,
-    };
-  }
-
-  if (!requiresCode) {
-    return {
-      code: promo.code.toUpperCase(),
-      title: promo.title?.trim() || formatDiscountTitle(promo),
-      subtitle: promo.description?.trim() || formatDiscountSubtitle(promo),
-      image: product?.imageUrl || imageForPromo(promo, tone),
-      tone,
-      minOrderValue: promo.minOrderValue ?? 0,
-      expiresAt: promo.expiresAt,
-      promotionKind: promo.promotionKind,
-      ctaLabel: 'Add to Cup',
-      productHref: product?.id ? `/product/${product.id}` : '/menu',
-      isBanner: false,
-      isDirectOffer: true,
-      requiresPromoCode: false,
-    };
-  }
-
-  return {
-    code: promo.code.toUpperCase(),
-    title: promo.title?.trim() || formatDiscountTitle(promo),
-    subtitle: promo.description?.trim() || formatDiscountSubtitle(promo),
-    image: imageForPromo(promo, tone),
-    tone,
-    minOrderValue: promo.minOrderValue ?? 0,
-    expiresAt: promo.expiresAt,
-    promotionKind: promo.promotionKind,
-    isBanner: false,
-    isDirectOffer: false,
-    requiresPromoCode: true,
-  };
-}
-
 function productIdsFromPromo(promo: PromoCode): string[] {
   const rules = (promo.promotionRules ?? {}) as PromotionRules;
   const giftId = extractGiftFromPromotionRules(rules).giftProduct?.id;
@@ -259,13 +161,11 @@ export function mapPromosToHomeOffers(promos: PromoCode[], href = '/promotions')
       isDirectOffer: !requiresCode,
       buyQty: typeof rules.buyQty === 'number' ? rules.buyQty : undefined,
       getQty: typeof rules.getQty === 'number' ? rules.getQty : undefined,
+      name: promo.title?.trim() || undefined,
+      description: promo.description?.trim() || undefined,
+      expiresAt: promo.expiresAt || undefined,
     };
   });
-}
-
-export function mapPromosToDisplays(promos: PromoCode[]): PromoDisplay[] {
-  // Only real API codes — never invent hardcoded codes that fail at checkout.
-  return promos.map((promo, index) => mapPromoToDisplay(promo, index));
 }
 
 export function getFallbackHomeOffers(): HomeOffer[] {

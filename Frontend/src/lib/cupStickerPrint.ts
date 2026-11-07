@@ -1,23 +1,13 @@
 import type { Order, OrderItem } from '@/types';
+import { adminApiFetch } from '@/lib/adminApi';
+import { getAdminSession } from '@/lib/adminAuth';
 
 /**
- * Browser calls same-origin Next proxy (`/cup-sticker-agent/...`) — not `/api/*`,
- * because next.config rewrites `/api` to the backend in dev.
- * Next then talks to the local Windows agent on 127.0.0.1:9177.
+ * Chrome blocks HTTPS admin pages from calling http://127.0.0.1 directly.
+ * Print jobs are queued on the admin API; start.bat on the cashier PC polls and prints.
  */
-export function getCupStickerAgentUrl(): string {
-  if (typeof window !== 'undefined') {
-    return '/cup-sticker-agent';
-  }
-  return (
-    process.env.CUP_STICKER_AGENT_URL ||
-    process.env.NEXT_PUBLIC_CUP_STICKER_AGENT_URL ||
-    'http://127.0.0.1:9177'
-  );
-}
-
-/** @deprecated use getCupStickerAgentUrl() */
-export const CUP_STICKER_AGENT_URL = '/cup-sticker-agent';
+export const LOCAL_CUP_STICKER_AGENT_URL = 'http://127.0.0.1:9177';
+export const CUP_STICKER_AGENT_URL = LOCAL_CUP_STICKER_AGENT_URL;
 
 export const CUP_STICKER_ENABLED_KEY = 'bc_cup_sticker_enabled';
 export const CUP_STICKER_PRINTER_KEY = 'bc_cup_sticker_printer';
@@ -145,65 +135,70 @@ export function buildCupStickers(order: Order, printedAt = formatStickerDateTime
   return stickers;
 }
 
-function agentUnreachableMessage(raw?: string): string {
-  const msg = (raw || '').toLowerCase();
-  if (
-    msg.includes('failed to fetch') ||
-    msg.includes('abort') ||
-    msg.includes('network') ||
-    msg.includes('econnrefused') ||
-    msg.includes('not reachable')
-  ) {
-    return 'Cup sticker agent is not running. Start tools/cup-sticker-agent/start.bat on this PC and keep that window open.';
+const AGENT_OFFLINE_MSG =
+  'Cup sticker agent is not running. On this cashier PC start tools/cup-sticker-agent/start.bat and keep that window open.';
+
+async function waitForCupStickerJob(
+  jobId: string,
+  timeoutMs = 90_000,
+): Promise<{ printed: number }> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const status = await adminApiFetch<{
+      id: string;
+      status: 'pending' | 'printing' | 'done' | 'failed';
+      error?: string;
+      printed?: number;
+    }>(`/admin/cup-sticker-jobs/${jobId}`);
+    if (status.status === 'done') {
+      return { printed: status.printed ?? 0 };
+    }
+    if (status.status === 'failed') {
+      throw new Error(status.error || 'Sticker print failed');
+    }
+    await new Promise((r) => setTimeout(r, 800));
   }
-  return raw || 'Cup sticker agent unavailable';
+  throw new Error('Print timed out — is start.bat running on the cashier PC?');
 }
 
-export async function cupStickerAgentHealth(timeoutMs = 4000): Promise<{
+export async function cupStickerAgentHealth(): Promise<{
   ok: boolean;
   printer?: string;
   error?: string;
 }> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${getCupStickerAgentUrl()}/health`, { signal: ctrl.signal, cache: 'no-store' });
-    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; printer?: string; error?: string };
-    if (!res.ok || !json.ok) {
-      return { ok: false, error: agentUnreachableMessage(json.error || `Agent HTTP ${res.status}`) };
+    const status = await adminApiFetch<{
+      online: boolean;
+      lastSeenAt: number | null;
+      printerHint?: string;
+    }>('/admin/cup-sticker-agent/status');
+    if (!status.online) {
+      return { ok: false, error: AGENT_OFFLINE_MSG };
     }
-    return { ok: true, printer: json.printer };
+    return { ok: true, printer: getCupStickerPrinterName() };
   } catch (e) {
     return {
       ok: false,
-      error: agentUnreachableMessage(e instanceof Error ? e.message : undefined),
+      error: e instanceof Error ? e.message : AGENT_OFFLINE_MSG,
     };
-  } finally {
-    clearTimeout(t);
   }
 }
 
 export async function printCupStickers(stickers: CupSticker[]): Promise<{ printed: number }> {
   if (stickers.length === 0) throw new Error('No cups to print');
-  let res: Response;
-  try {
-    res = await fetch(`${getCupStickerAgentUrl()}/print`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        printerName: getCupStickerPrinterName(),
-        stickers,
-      }),
-      cache: 'no-store',
-    });
-  } catch (e) {
-    throw new Error(agentUnreachableMessage(e instanceof Error ? e.message : undefined));
-  }
-  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; printed?: number; error?: string };
-  if (!res.ok || !json.ok) {
-    throw new Error(agentUnreachableMessage(json.error) || `Sticker print failed (HTTP ${res.status})`);
-  }
-  return { printed: json.printed ?? stickers.length };
+  const health = await cupStickerAgentHealth();
+  if (!health.ok) throw new Error(health.error || AGENT_OFFLINE_MSG);
+
+  const session = getAdminSession();
+  const job = await adminApiFetch<{ id: string }>('/admin/cup-sticker-jobs', {
+    method: 'POST',
+    body: JSON.stringify({
+      printerName: getCupStickerPrinterName(),
+      storeId: session?.storeId ?? null,
+      stickers,
+    }),
+  });
+  return waitForCupStickerJob(job.id);
 }
 
 export async function printCupStickersForOrder(order: Order): Promise<{ printed: number }> {
@@ -211,30 +206,20 @@ export async function printCupStickersForOrder(order: Order): Promise<{ printed:
 }
 
 export async function printCupStickerTest(): Promise<{ printed: number }> {
-  let res: Response;
-  try {
-    res = await fetch(`${getCupStickerAgentUrl()}/test`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ printerName: getCupStickerPrinterName() }),
-      cache: 'no-store',
-    });
-  } catch (e) {
-    throw new Error(agentUnreachableMessage(e instanceof Error ? e.message : undefined));
-  }
-  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; printed?: number; error?: string };
-  if (!res.ok || !json.ok) {
-    throw new Error(agentUnreachableMessage(json.error) || `Test print failed (HTTP ${res.status})`);
-  }
-  return { printed: json.printed ?? 1 };
+  return printCupStickers([
+    {
+      orderLabel: 'OP-001',
+      cupLabel: '1/1',
+      itemName: 'Bobo',
+      printedAt: formatStickerDateTime(),
+      advisoryEn: CUP_STICKER_ADVISORY_EN,
+      advisorySi: CUP_STICKER_ADVISORY_SI,
+    },
+  ]);
 }
 
 /** Fire-and-forget helper for Accept — never blocks status update failure handling. */
 export async function tryPrintCupStickersForOrder(order: Order): Promise<void> {
   if (!isCupStickerPrintingEnabled()) return;
-  const health = await cupStickerAgentHealth();
-  if (!health.ok) {
-    throw new Error(health.error || 'Cup sticker agent unavailable');
-  }
   await printCupStickersForOrder(order);
 }

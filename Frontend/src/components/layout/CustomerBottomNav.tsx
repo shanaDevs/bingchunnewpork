@@ -12,10 +12,10 @@ const NAV_ITEMS = [
   { href: '/menu', label: 'Menu', icon: UtensilsCrossed, match: (p: string) => p.startsWith('/menu') },
   { href: '__order__', label: 'Order Now', match: () => false, primary: true },
   {
-    href: '/account/loyalty',
+    href: '/account/rewards',
     label: 'Rewards',
     icon: Gift,
-    match: (p: string) => p.startsWith('/account/loyalty'),
+    match: (p: string) => p.startsWith('/account/rewards'),
     loyaltyTarget: true,
   },
   {
@@ -27,7 +27,7 @@ const NAV_ITEMS = [
       || (p.startsWith('/account/')
         && !p.startsWith('/account/orders')
         && !p.startsWith('/account/login')
-        && !p.startsWith('/account/loyalty')),
+        && !p.startsWith('/account/rewards')),
   },
 ] as const;
 

@@ -1,7 +1,23 @@
-import type { HomeOffer } from "@/components/home/homeOffers";
+import { OFFER_IMAGES, type HomeOffer } from "@/components/home/homeOffers";
 import { resolveProductImageUrl } from "@/lib/productImageUrl";
 
-type OfferImage = { src: string; alt: string; width: number; height: number };
+type OfferImage = {
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+  /** A landscape illustration rather than a tall product cut-out; OfferCard centres it in the ring. */
+  wide?: boolean;
+};
+
+// The stock promo illustrations (used when a promotion has no product or banner image) carry about a third
+// of transparent margin, which made them look small on the cards. These are the same pictures cropped to the
+// artwork, in public/promos/home/; the originals stay as they are for the other places that use them.
+const TRIMMED_STOCK: Record<string, Omit<OfferImage, "alt">> = {
+  [OFFER_IMAGES.blue]: { src: "/promos/home/promo-offer-bingchun50-trimmed.png", width: 389, height: 311, wide: true },
+  [OFFER_IMAGES.cream]: { src: "/promos/home/promo-offer-boba100-v2-trimmed.png", width: 403, height: 315, wide: true },
+  [OFFER_IMAGES.green]: { src: "/promos/home/promo-offer-free-delivery-trimmed.png", width: 384, height: 326, wide: true },
+};
 
 /** What an offer card renders. Built from the app's live promotions by `toOffer`. */
 export type Offer = {
@@ -32,6 +48,8 @@ export type Offer = {
 // Promo images come from the API with unknown sizes; the card sets the height and the width follows
 // the real image once it loads, so this only seeds the aspect ratio.
 const imageFrom = (src: string | null | undefined, alt: string): OfferImage | undefined => {
+  const stock = src ? TRIMMED_STOCK[src] : undefined;
+  if (stock) return { ...stock, alt };
   const resolved = resolveProductImageUrl(src);
   return resolved ? { src: resolved, alt, width: 480, height: 800 } : undefined;
 };
@@ -48,7 +66,11 @@ export function toOffer(offer: HomeOffer, index: number): Offer {
     id: offer.id,
     discount: match ? match[1] : offer.title,
     discountSuffix: match ? match[2].toUpperCase() : undefined,
-    title: offer.subtitle,
+    // Title, description and expiry as the admin entered them. Without a title, the formatted subtitle
+    // (the description, else "orders above LKR …") stands in, and is not repeated as the description.
+    title: offer.name ?? offer.subtitle,
+    description: offer.name ? offer.description : undefined,
+    endsAt: offer.expiresAt,
     couponCode: offer.requiresPromoCode ? offer.code : undefined,
     ctaLabel: offer.requiresPromoCode ? "Claim Offer" : "Order Now",
     image: imageFrom(offer.image, ""),

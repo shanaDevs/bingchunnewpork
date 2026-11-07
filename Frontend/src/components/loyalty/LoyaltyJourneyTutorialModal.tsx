@@ -22,7 +22,7 @@ type TutorialGuide = {
   tip: string;
 };
 
-function guideForStep(step: CustomerLoyaltyJourneyStep): TutorialGuide {
+export function guideForStep(step: CustomerLoyaltyJourneyStep): TutorialGuide {
   if (step.key === 'OFFER_1') {
     return {
       howTitle: 'How to get Offer 1',

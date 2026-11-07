@@ -1,18 +1,8 @@
 'use client';
 
 import SpinCasinoIcon from '@/components/promo/SpinCasinoIcon';
-import { useQuery } from '@tanstack/react-query';
-import { usePathname } from 'next/navigation';
-import { useAuthStore } from '@/store/authStore';
-import { useCartStore } from '@/store/cartStore';
-import { useAuthHydrated } from '@/hooks/useAuthHydrated';
+import { useSpinHeaderButton } from '@/hooks/useSpinHeaderButton';
 import { useSpinStore } from '@/store/spinStore';
-import {
-  fetchSpinEligibility,
-  isSpinUiHidden,
-  SPIN_ELIGIBILITY_QUERY_KEY,
-  shouldShowSpinHeaderButton,
-} from '@/lib/spinEligibility';
 
 type SpinHeaderButtonProps = {
   className?: string;
@@ -20,24 +10,10 @@ type SpinHeaderButtonProps = {
 };
 
 export default function SpinHeaderButton({ className = '', compact = false }: SpinHeaderButtonProps) {
-  const pathname = usePathname();
-  const authHydrated = useAuthHydrated();
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const storeId = useCartStore((s) => s.getFulfillmentStoreId());
   const requestOpenSpin = useSpinStore((s) => s.requestOpenSpin);
-  const hidden = isSpinUiHidden(pathname);
+  const { visible, eligibility: data } = useSpinHeaderButton();
 
-  const { data } = useQuery({
-    queryKey: [...SPIN_ELIGIBILITY_QUERY_KEY, isAuthenticated ? 'auth' : 'guest', storeId ?? ''],
-    queryFn: () => fetchSpinEligibility(isAuthenticated, storeId),
-    enabled: authHydrated && isAuthenticated && !hidden,
-    staleTime: 15_000,
-    refetchOnMount: 'always',
-  });
-
-  // Guests must sign in before the spin wheel is offered in the header.
-  if (!authHydrated || !isAuthenticated) return null;
-  if (hidden || !data?.enabled || !shouldShowSpinHeaderButton(data)) return null;
+  if (!visible || !data) return null;
 
   const iconSize = compact ? 22 : 24;
 

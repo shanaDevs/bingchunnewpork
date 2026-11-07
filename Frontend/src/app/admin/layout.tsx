@@ -10,14 +10,13 @@ import {
   LogOut, Menu, X, Boxes, Settings, Truck, UserCircle2, Wallet, UserCog, Monitor,
   ChevronsLeft, ChevronsRight, History, TrendingUp, CreditCard,
   ShieldAlert, Dices, MessageCircle, DoorClosed, DoorOpen, Undo2, Gift, CircleDollarSign,
-  UserCheck, Radio,
+  UserCheck, Radio, Printer,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AdminNotificationBell from '@/components/admin/AdminNotificationBell';
 import EodStockResetPrompt, { type EodPromptVariant } from '@/components/admin/stock/EodStockResetPrompt';
 import { AdminNotificationProvider } from '@/contexts/AdminNotificationProvider';
 import CashierInstallButton, { useShowCashierInstall } from '@/components/admin/CashierInstallButton';
-import CupStickerPrinterPanel from '@/components/admin/CupStickerPrinterPanel';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import BrandLogo from '@/components/ui/BrandLogo';
 import {
@@ -52,7 +51,7 @@ function adminBranchFetch(endpoint: string, options?: RequestInit) {
   return adminApiFetch<BranchOperatingStatus>(endpoint, options);
 }
 
-const CASHIER_NAV_HREFS = new Set(['/admin', '/admin/orders']);
+const CASHIER_NAV_HREFS = new Set(['/admin', '/admin/orders', '/admin/printer']);
 
 const DELIVERY_MENU_KEYS = new Set(['DELIVERY', 'LIVE_DRIVERS', 'DELIVERY_PAYMENT', 'DELIVERY_WALLET']);
 
@@ -127,6 +126,7 @@ const ALL_NAV: Array<{
     { href: '/admin/users', label: 'Users', icon: Users, superOnly: true, menuKey: 'USERS' },
     { href: '/admin/reports', label: 'Reports', icon: BarChart2, superOnly: true, menuKey: 'REPORTS' },
     { href: '/admin/branch-reports', label: 'Reports', icon: BarChart2, superOnly: false, branchOnly: true, menuKey: 'REPORTS' },
+    { href: '/admin/printer', label: 'Printer', icon: Printer, superOnly: false, menuKey: 'ORDERS' },
     { href: '/admin/settings', label: 'Settings', icon: Settings, superOnly: false, menuKey: 'SETTINGS' },
   ];
 
@@ -587,12 +587,6 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
           );
         })}
       </nav>
-
-      {!collapsed && (
-        <div className="border-t border-white/10 p-3">
-          <CupStickerPrinterPanel compact />
-        </div>
-      )}
 
       <div className={`space-y-1 border-t border-white/10 ${collapsed ? 'p-2' : 'p-3'}`}>
         {!mobile && (

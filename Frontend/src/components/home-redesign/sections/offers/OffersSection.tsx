@@ -9,16 +9,49 @@ import { OfferCard } from "./OfferCard";
 import { OffersMotion } from "./OffersMotion";
 import { toOffer } from "./offers.data";
 
-/** Cards shown on the home page; the rest are on the promotions page. */
-const MAX_OFFERS = 6;
+/** Cards shown on the home page: one row, as in the prototype. The rest are on the promotions page. */
+const MAX_OFFERS = 3;
+
+function OffersSkeleton() {
+  return (
+    <section
+      aria-busy="true"
+      aria-label="Loading offers"
+      className="bg-white pt-4 pb-24 sm:pb-28 lg:pb-32"
+    >
+      <Container>
+        <div className="mx-auto max-w-2xl text-center">
+          <div className="mx-auto h-8 w-40 rounded-full bg-slate-100 animate-pulse" />
+          <div className="mx-auto mt-5 h-12 w-72 max-w-full rounded-2xl bg-slate-100 animate-pulse" />
+          <div className="mx-auto mt-5 h-5 w-36 rounded-full bg-slate-100 animate-pulse" />
+        </div>
+        <div className="mt-12 @container lg:mt-14">
+          <div className="grid gap-x-6 max-lg:[&>div+div]:mt-6 max-sm:[&>div+div]:mt-4 lg:grid-cols-3 lg:[&>div:nth-child(n+4)]:mt-6">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="min-h-[18rem] rounded-[1.75rem] bg-slate-100 animate-pulse ring-1 ring-slate-200/80"
+              />
+            ))}
+          </div>
+        </div>
+      </Container>
+    </section>
+  );
+}
 
 /**
  * The live home promotions (the same ones the app's offers slider used, for the chosen store), drawn
- * as coupon cards rather than uploaded posters. The whole section disappears when there are none.
+ * as coupon cards rather than uploaded posters. Shows a height-stable shimmer while loading.
  */
 export function OffersSection() {
-  const homeOffers = useHomeOffers();
+  const { offers: homeOffers, isPending } = useHomeOffers();
   const activeOffers = useMemo(() => homeOffers.slice(0, MAX_OFFERS).map(toOffer), [homeOffers]);
+
+  if (isPending && activeOffers.length === 0) {
+    return <OffersSkeleton />;
+  }
+
   if (activeOffers.length === 0) return null;
 
   return (

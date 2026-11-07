@@ -8,7 +8,7 @@ import { useCartStore } from '@/store/cartStore';
 import CupIcon, { cupFillFromCount } from '@/components/cart/CupIcon';
 import { useClientHydrated } from '@/hooks/useClientHydrated';
 import { useCupPourPulse } from '@/hooks/useCupPourPulse';
-import FloatingRewardsPeek from '@/components/cart/FloatingRewardsPeek';
+import { SpinFab } from '@/components/spin-redesign/SpinFab';
 
 export type CupCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
@@ -179,7 +179,7 @@ export default function FloatingCart() {
 
   return (
     <>
-      <FloatingRewardsPeek />
+      <SpinFab aboveCup />
       <motion.div
         initial={false}
         animate={{ scale: ready ? 1 : 1, opacity: 1 }}

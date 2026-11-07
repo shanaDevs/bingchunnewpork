@@ -18,6 +18,7 @@ import wishlistRoutes from './wishlist';
 import inventoryRoutes from './inventoryReservations';
 import spinRoutes from './spin';
 import messagingRoutes from './messaging';
+import cupStickerAgentRoutes from './cupStickerAgent';
 import { resolveApiSurface, type ApiSurface } from '../lib/apiSurface';
 import {
   ADMIN_ORDERS,
@@ -94,6 +95,7 @@ export function createApiRouter(surface: ApiSurface = resolveApiSurface()): Rout
     router.use('/addresses', addressRoutes);
     router.use('/promos', promoRoutes);
     router.use('/admin', adminRoutes);
+    router.use('/cup-sticker-agent', cupStickerAgentRoutes);
     router.use('/settings', settingsRoutes);
     router.use('/payments', paymentsRoutes);
     router.use('/notifications', notificationsRoutes);
@@ -144,6 +146,7 @@ export function createApiRouter(surface: ApiSurface = resolveApiSurface()): Rout
   mount(router, '/refunds', refundRoutes);
   mount(router, '/promos', promoRoutes);
   mount(router, '/admin', adminRoutes);
+  mount(router, '/cup-sticker-agent', cupStickerAgentRoutes);
   mount(router, '/settings', settingsRoutes);
   mount(router, '/loyalty', loyaltyRoutes);
   mount(router, '/spin', spinRoutes);

@@ -1,7 +1,7 @@
 'use client';
 
-import PromotionsDashboard from '@/components/promotions/PromotionsDashboard';
+import OffersPage from '@/components/offers-redesign/OffersPage';
 
 export default function PromotionsClient() {
-  return <PromotionsDashboard />;
+  return <OffersPage />;
 }

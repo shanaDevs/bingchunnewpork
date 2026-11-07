@@ -27,7 +27,7 @@ const PRIMARY_LINKS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: '/wishlist', label: 'Wishlist', icon: Heart },
   { href: '/promotions', label: 'Offers', icon: Tag },
   { href: '/stores', label: 'Stores', icon: MapPin },
-  { href: '/account/loyalty', label: 'Rewards', icon: Gift },
+  { href: '/account/rewards', label: 'Rewards', icon: Gift },
   { href: '/account/orders', label: 'My Orders', icon: ClipboardList },
   { href: '/account', label: 'Profile', icon: User },
 ];
@@ -44,7 +44,7 @@ function isLinkActive(pathname: string, href: string) {
       pathname === '/account'
       || (pathname.startsWith('/account/')
         && !pathname.startsWith('/account/login')
-        && !pathname.startsWith('/account/loyalty')
+        && !pathname.startsWith('/account/rewards')
         && !pathname.startsWith('/account/orders')
         && !pathname.startsWith('/account/notifications'))
     );
@@ -87,7 +87,7 @@ export default function MobileNavDrawer({ open, onClose }: MobileNavDrawerProps)
       <Link
         key={link.href}
         href={link.href}
-        data-loyalty-target={link.href === '/account/loyalty' ? 'rewards' : undefined}
+        data-loyalty-target={link.href === '/account/rewards' ? 'rewards' : undefined}
         className={`mobile-nav-drawer__link${active ? ' mobile-nav-drawer__link--active' : ''}`}
       >
         <Icon size={20} strokeWidth={active ? 2.25 : 1.9} className="mobile-nav-drawer__link-icon" aria-hidden />

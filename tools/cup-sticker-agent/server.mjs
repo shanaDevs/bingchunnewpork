@@ -21,6 +21,17 @@ const PRINTER = process.env.BC_STICKER_PRINTER || 'Xprinter XP-D35B';
 const WIDTH_MM = Number(process.env.BC_STICKER_WIDTH_MM || 40);
 const HEIGHT_MM = Number(process.env.BC_STICKER_HEIGHT_MM || 30);
 const PRINT_PS1 = path.join(__dirname, 'print-stickers.ps1');
+/** Admin API base (browser cannot reach localhost from HTTPS — agent pulls jobs). */
+const API_BASE = (process.env.BC_STICKER_API_URL || 'https://admin.bingchunsrilanka.com/api').replace(
+  /\/$/,
+  '',
+);
+const AGENT_SECRET =
+  process.env.BC_STICKER_SECRET ||
+  process.env.CUP_STICKER_AGENT_SECRET ||
+  'bingchun-cup-sticker-local';
+const STORE_ID = process.env.BC_STICKER_STORE_ID || '';
+const POLL_MS = Number(process.env.BC_STICKER_POLL_MS || 1500);
 
 const ADVISORY_EN =
   'Contains a non nutritive sweetener. Not recommended for children under 3 years of age.';
@@ -224,8 +235,72 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
+async function claimRemoteJob() {
+  const qs = STORE_ID ? `?storeId=${encodeURIComponent(STORE_ID)}` : '';
+  const res = await fetch(`${API_BASE}/cup-sticker-agent/claim${qs}`, {
+    headers: {
+      Accept: 'application/json',
+      'X-Cup-Sticker-Secret': AGENT_SECRET,
+    },
+    cache: 'no-store',
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.message || `Claim HTTP ${res.status}`);
+  }
+  return json.data || null;
+}
+
+async function completeRemoteJob(id, result) {
+  await fetch(`${API_BASE}/cup-sticker-agent/jobs/${encodeURIComponent(id)}/complete`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Cup-Sticker-Secret': AGENT_SECRET,
+    },
+    body: JSON.stringify(result),
+    cache: 'no-store',
+  }).catch(() => undefined);
+}
+
+let pollBusy = false;
+async function pollCloudJobs() {
+  if (pollBusy) return;
+  pollBusy = true;
+  try {
+    const job = await claimRemoteJob();
+    if (!job?.id) return;
+    console.log(`[cup-sticker-agent] claimed job ${job.id} (${(job.stickers || []).length} stickers)`);
+    try {
+      const result = await runPrint({
+        printerName: job.printerName || PRINTER,
+        widthMm: WIDTH_MM,
+        heightMm: HEIGHT_MM,
+        stickers: job.stickers || [],
+      });
+      await completeRemoteJob(job.id, { ok: true, printed: result.printed });
+      console.log(`[cup-sticker-agent] job ${job.id} printed`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await completeRemoteJob(job.id, { ok: false, error: message });
+      console.error(`[cup-sticker-agent] job ${job.id} failed:`, message);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Soft warn — network blips are normal
+    if (!message.includes('fetch failed') && !message.includes('ECONNREFUSED')) {
+      console.warn(`[cup-sticker-agent] poll:`, message);
+    }
+  } finally {
+    pollBusy = false;
+  }
+}
+
 freePortIfBusy();
 server.listen(PORT, HOST, () => {
   console.log(`[cup-sticker-agent] listening on http://${HOST}:${PORT}`);
   console.log(`[cup-sticker-agent] printer=${PRINTER} label=${WIDTH_MM}x${HEIGHT_MM}mm`);
+  console.log(`[cup-sticker-agent] polling ${API_BASE}/cup-sticker-agent/claim every ${POLL_MS}ms`);
+  void pollCloudJobs();
+  setInterval(() => void pollCloudJobs(), POLL_MS);
 });
