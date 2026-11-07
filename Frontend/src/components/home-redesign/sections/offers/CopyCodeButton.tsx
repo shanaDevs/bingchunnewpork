@@ -40,7 +40,7 @@ export function CopyCodeButton({ code, className }: { code: string; className?: 
         aria-label={`Copy code ${code}`}
         title={copied ? "Copied!" : "Copy code"}
         className={cn(
-          "grid size-8 cursor-pointer place-items-center rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-offset-2",
+          "grid size-8 cursor-pointer place-items-center rounded-[0.5rem] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2",
           className,
         )}
       >

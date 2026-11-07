@@ -1,7 +1,8 @@
 "use client";
 
-import { ChevronDown, MapPin, ShoppingBag, UserRound } from "lucide-react";
+import { ChevronDown, Globe, MapPin, ShoppingBag, Sparkles, UserRound } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type Ref } from "react";
 import { Container } from "@/components/home-redesign/ui/Container";
 import { Wordmark } from "@/components/home-redesign/ui/Wordmark";
@@ -9,6 +10,8 @@ import { mainNav } from "@/components/home-redesign/config/site";
 import { cn } from "@/components/home-redesign/lib/cn";
 import { useHeaderState } from "@/components/home-redesign/hooks/useHeaderState";
 import { openOrderModal } from "@/components/order/SiteOrderPrompt";
+import { useSpinHeaderButton } from "@/hooks/useSpinHeaderButton";
+import { useSpinStore } from "@/store/spinStore";
 import { MOBILE_MENU_ID, MenuIcon, MobileMenu } from "./MobileMenu";
 
 /**
@@ -85,7 +88,7 @@ const focusBase = "focus-visible:outline-2 focus-visible:outline-offset-2";
 
 /** Shared with the mobile menu's top row, which must line up with it exactly. */
 const headerRowClass =
-  "relative grid h-22 grid-cols-[1fr_auto] items-center gap-3 sm:gap-6 lg:grid-cols-[1fr_auto_1fr]";
+  "relative grid h-22 grid-cols-[1fr_auto] items-center gap-2 min-[400px]:gap-3 sm:gap-6 lg:grid-cols-[1fr_auto_1fr]";
 
 /** Past the hero the action buttons turn solid blue, mirroring the blue nav pill (white stays the highlight). */
 const solidBlue = "bg-brand-600 text-snow shadow-lg shadow-brand-600/25 hover:bg-brand-700";
@@ -97,9 +100,11 @@ const solidBlue = "bg-brand-600 text-snow shadow-lg shadow-brand-600/25 hover:bg
  * is built from what is behind it, it reads as the page itself rather than as a coloured bar.
  * Scrim strength and the blue-to-white tint follow the scroll position frame by frame (CSS variables
  * written directly, no re-render); only the item colours switch, with a short transition.
- * Below lg the nav links move into MobileMenu, opened from a menu button beside the cart.
+ * Below lg the nav links move: on tablets (md to lg) into MobileMenu, opened from a menu button beside
+ * the cart; on phones (below md) into BottomNav, a tab bar at the bottom of the screen.
  */
 export function SiteHeader() {
+  const pathname = usePathname();
   const headerRef = useRef<HTMLElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -162,8 +167,8 @@ export function SiteHeader() {
                 : "bg-white/10 ring-white/20",
             )}
           >
-            {mainNav.map((item, index) => {
-              const isCurrent = index === 0;
+            {mainNav.map((item) => {
+              const isCurrent = item.href === pathname;
               return (
                 <li key={item.label}>
                   <Link
@@ -221,31 +226,70 @@ type HeaderActionsProps = {
 };
 
 /**
- * Account, cart, pickup and (below lg) the menu button. Rendered in the header and again in the
- * open mobile menu's top row, so opening the menu reads as the same row with the icon turning into a cross.
- * On the narrowest phones (below 360px) the account button moves into the menu to make room.
- * Account and cart link to their pages; the store control opens the app's order setup (delivery or pickup).
+ * Language, Spin & Win (when the customer may spin), account, cart, pickup and (on tablets) the menu button. Rendered in
+ * the header and again in the open mobile menu's top row, so opening the menu reads as the same row with the icon
+ * turning into a cross. Below 400px the buttons and gaps tighten a little (the wordmark shrinks too), so the row fits
+ * with the Spin & Win button; on the narrowest phones (below 360px) the language, account and spin buttons move out to
+ * make room. Account and cart link to their pages; the store control opens the app's order setup (delivery or pickup).
+ * The language pill is only in place for now: the site is English only, so it doesn't open anything yet.
  */
 function HeaderActions({ onLight, menuOpen = false, inMenu = false, onMenuClick, menuButtonRef }: HeaderActionsProps) {
   const { accountHref, cartCount, storeKicker, storeLabel } = useHeaderState();
-  // In the open menu, links close it on the way out; the order setup waits for it to finish closing.
+  const { visible: showSpin } = useSpinHeaderButton();
+  const requestOpenSpin = useSpinStore((s) => s.requestOpenSpin);
+  // In the open menu, links close it on the way out; the order setup and the wheel wait for it to finish closing.
   const leaveMenu = inMenu ? onMenuClick : undefined;
   const chooseStore = () => {
     if (!inMenu) return openOrderModal({ allowSkip: true });
     onMenuClick();
     window.setTimeout(() => openOrderModal({ allowSkip: true }), MENU_CLOSE_MS);
   };
+  const openSpin = () => {
+    if (!inMenu) return requestOpenSpin();
+    onMenuClick();
+    window.setTimeout(requestOpenSpin, MENU_CLOSE_MS);
+  };
 
   const focusRing = cn(focusBase, onLight ? "focus-visible:outline-brand-600" : "focus-visible:outline-white");
   const roundButton = cn(
-    "grid size-11 place-items-center rounded-full",
+    "grid size-11 place-items-center rounded-full max-[400px]:size-10",
     fade,
     focusRing,
     onLight ? solidBlue : "bg-white text-brand-700 shadow-md shadow-brand-950/20 hover:bg-brand-50",
   );
 
   return (
-    <div className="flex items-center justify-self-end gap-1.5 sm:gap-2">
+    <div className="flex items-center justify-self-end gap-1 min-[400px]:gap-1.5 sm:gap-2">
+      {/* Placeholder for the language choice (English / 中文), as in the design: no menu behind it yet. */}
+      <button
+        type="button"
+        aria-label="Language: English"
+        title="Language"
+        className={cn(
+          "flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold ring-1 ring-inset max-[400px]:px-2.5 max-[359px]:hidden",
+          fade,
+          focusRing,
+          onLight ? "text-brand-700 ring-brand-200 hover:bg-brand-50" : "text-snow ring-white/30 hover:bg-white/10",
+        )}
+      >
+        {/* Phones: just the code, so it fits the row beside the other buttons. */}
+        <Globe className="size-4 max-sm:hidden" aria-hidden="true" />
+        <span>EN</span>
+      </button>
+
+      {showSpin && (
+        <button
+          type="button"
+          data-loyalty-target="spin-wheel"
+          onClick={openSpin}
+          aria-label="Spin to win"
+          title="Spin to win"
+          className={cn(roundButton, "cursor-pointer max-[359px]:hidden")}
+        >
+          <Sparkles className="size-5" aria-hidden="true" />
+        </button>
+      )}
+
       <Link href={accountHref} onClick={leaveMenu} aria-label="Account" className={cn(roundButton, "max-[359px]:hidden")}>
         <UserRound className="size-5" aria-hidden="true" />
       </Link>
@@ -301,7 +345,7 @@ function HeaderActions({ onLight, menuOpen = false, inMenu = false, onMenuClick,
               "aria-controls": MOBILE_MENU_ID,
             })}
         onClick={onMenuClick}
-        className={cn(roundButton, "lg:hidden")}
+        className={cn(roundButton, "max-md:hidden lg:hidden")}
       >
         <MenuIcon cross={inMenu} />
       </button>

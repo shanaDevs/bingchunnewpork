@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   shouldAutoOpenSpinPopup,
   shouldShowSpinEntryPoints,
+  shouldShowSpinFab,
+  shouldShowSpinHeaderButton,
   type SpinEligibility,
 } from './spinEligibility';
 
@@ -40,26 +42,31 @@ const loyaltyUnlocked: SpinEligibility = {
 
 describe('shouldAutoOpenSpinPopup', () => {
   it('blocks auto popup when loyalty journey criterion is locked', () => {
-    expect(shouldAutoOpenSpinPopup(loyaltyLocked, { isAuthenticated: true })).toBe(false);
+    expect(shouldAutoOpenSpinPopup(loyaltyLocked)).toBe(false);
     expect(shouldShowSpinEntryPoints(loyaltyLocked)).toBe(false);
   });
 
-  it('blocks auto popup for guests when loyalty journey gates the wheel', () => {
-    expect(shouldAutoOpenSpinPopup(loyaltyUnlocked, { isAuthenticated: false })).toBe(false);
+  it('allows auto popup when loyalty journey is unlocked', () => {
+    expect(shouldAutoOpenSpinPopup(loyaltyUnlocked)).toBe(true);
   });
 
-  it('allows auto popup when loyalty journey is unlocked and user is signed in', () => {
-    expect(shouldAutoOpenSpinPopup(loyaltyUnlocked, { isAuthenticated: true })).toBe(true);
-  });
-
-  it('blocks auto popup for signed-out users even for regular spin', () => {
+  it('allows auto popup for a regular spin, signed in or not', () => {
     const regular: SpinEligibility = { enabled: true, canSpin: true, loyaltySpin: null };
-    expect(shouldAutoOpenSpinPopup(regular, { isAuthenticated: false })).toBe(false);
+    expect(shouldAutoOpenSpinPopup(regular)).toBe(true);
   });
 
-  it('allows auto popup for regular spin when signed in', () => {
-    const regular: SpinEligibility = { enabled: true, canSpin: true, loyaltySpin: null };
-    expect(shouldAutoOpenSpinPopup(regular, { isAuthenticated: true })).toBe(true);
+  it('hides the wheel from a guest when the admin requires sign-in', () => {
+    // What the API answers a guest under the REQUIRE_LOGIN criterion.
+    const guest: SpinEligibility = {
+      enabled: true,
+      canSpin: false,
+      reason: 'Sign in to spin the wheel',
+      loyaltySpin: null,
+    };
+    expect(shouldShowSpinEntryPoints(guest)).toBe(false);
+    expect(shouldShowSpinHeaderButton(guest)).toBe(false);
+    expect(shouldShowSpinFab(guest)).toBe(false);
+    expect(shouldAutoOpenSpinPopup(guest)).toBe(false);
   });
 
   it('shows the wheel when journey exists but admin did not add it as a spin criterion', () => {
@@ -76,8 +83,7 @@ describe('shouldAutoOpenSpinPopup', () => {
       },
     };
     expect(shouldShowSpinEntryPoints(openWheel)).toBe(true);
-    expect(shouldAutoOpenSpinPopup(openWheel, { isAuthenticated: false })).toBe(false);
-    expect(shouldAutoOpenSpinPopup(openWheel, { isAuthenticated: true })).toBe(true);
+    expect(shouldAutoOpenSpinPopup(openWheel)).toBe(true);
   });
 
   it('respects admin auto-popup off and page targeting', () => {
@@ -93,17 +99,17 @@ describe('shouldAutoOpenSpinPopup', () => {
         loseAutoHideSeconds: 2.5,
       },
     };
-    expect(shouldAutoOpenSpinPopup(eligibility, { isAuthenticated: true, pathname: '/' })).toBe(false);
+    expect(shouldAutoOpenSpinPopup(eligibility, { pathname: '/' })).toBe(false);
 
     const onOrder: SpinEligibility = {
       ...eligibility,
       display: { ...eligibility.display!, autoPopup: true, popupPages: 'HOME' },
     };
-    expect(shouldAutoOpenSpinPopup(onOrder, { isAuthenticated: true, pathname: '/order/BC1' })).toBe(false);
+    expect(shouldAutoOpenSpinPopup(onOrder, { pathname: '/order/BC1' })).toBe(false);
     expect(
       shouldAutoOpenSpinPopup(
         { ...onOrder, display: { ...onOrder.display!, popupPages: 'HOME_AND_ORDER' } },
-        { isAuthenticated: true, pathname: '/order/BC1' },
+        { pathname: '/order/BC1' },
       ),
     ).toBe(true);
   });

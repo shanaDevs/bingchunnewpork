@@ -24,16 +24,3 @@ export function toMapLatLng(lat: unknown, lng: unknown): { lat: number; lng: num
   if (!isValidMapCoordinate(lat, lng)) return null;
   return fixSwappedSriLankaCoordinates(normalizeCoordinate(lat)!, normalizeCoordinate(lng)!);
 }
-
-export function buildGoogleMapsEmbedUrl(lat: unknown, lng: unknown): string | null {
-  const point = toMapLatLng(lat, lng);
-  if (!point) return null;
-  const q = encodeURIComponent(`${point.lat},${point.lng}`);
-  return `https://www.google.com/maps?q=${q}&hl=en&z=16&output=embed`;
-}
-
-export function buildGoogleMapsDirectionsUrl(lat: unknown, lng: unknown): string | null {
-  const point = toMapLatLng(lat, lng);
-  if (!point) return null;
-  return `https://www.google.com/maps?q=${point.lat},${point.lng}`;
-}
