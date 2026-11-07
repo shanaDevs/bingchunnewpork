@@ -932,17 +932,8 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
       prisma.commissionSettlement.findMany({
         where: {
           storeId: { in: storeIds },
-          // Show settlements whose billing window overlaps the wallet period,
-          // or that were paid/recorded during that period (common for past cycles).
-          OR: [
-            {
-              periodFrom: { lte: toDate },
-              periodTo: { gte: fromDate },
-            },
-            {
-              createdAt: { gte: fromDate, lte: toDate },
-            },
-          ],
+          periodFrom: { lte: toDate },
+          periodTo: { gte: fromDate },
         },
         orderBy: { createdAt: 'desc' },
         select: includePlatformPayoutHistory

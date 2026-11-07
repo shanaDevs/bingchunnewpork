@@ -13,7 +13,37 @@ import {
   type PaymentMethodConfig,
   type OnlineGateway,
 } from '../lib/paymentSettings';
-import { ensureAppSchema, getConvenienceFeeRates, getConvenientFeeRate, getGatewayFeeRate, getCommissionSlabs, setCommissionSlabs, invalidateCommissionSlabsCache, getDeliveryPlatformFeeRate, setDeliveryPlatformFeeRate, getMaxCupsPerRider, invalidatePickupOrderEditSettingsCache, invalidateGatewayFeeRateCache, invalidateDeliveryPlatformFeeRateCache, setMaxCupsPerRider, getAppDownloadSettings, setAppDownloadSettings, getWeeklyResetDay, setWeeklyResetDay, getSpinSettings, setSpinSettings, getCancelWindowMinutes, setCancelWindowMinutes, invalidateCancelWindowMinutesCache, getBranchCompletionRadiusM, setBranchCompletionRadiusM, getPickupMaxOrderAmount, setPickupMaxOrderAmount, invalidatePickupMaxOrderAmountCache } from '../lib/appSchema';
+import {
+  ensureAppSchema,
+  getConvenienceFeeRates,
+  getConvenientFeeRate,
+  getGatewayFeeRate,
+  getCommissionSlabs,
+  setCommissionSlabs,
+  invalidateCommissionSlabsCache,
+  getDeliveryPlatformFeeRate,
+  setDeliveryPlatformFeeRate,
+  getMaxCupsPerRider,
+  invalidatePickupOrderEditSettingsCache,
+  invalidateGatewayFeeRateCache,
+  invalidateDeliveryPlatformFeeRateCache,
+  setMaxCupsPerRider,
+  getAppDownloadSettings,
+  setAppDownloadSettings,
+  getWeeklyResetDay,
+  setWeeklyResetDay,
+  getSpinSettings,
+  setSpinSettings,
+  getCancelWindowMinutes,
+  setCancelWindowMinutes,
+  invalidateCancelWindowMinutesCache,
+  getBranchCompletionRadiusM,
+  setBranchCompletionRadiusM,
+  getPickupMaxOrderAmount,
+  setPickupMaxOrderAmount,
+  invalidatePickupMaxOrderAmountCache,
+} from '../lib/appSchema';
+import { getGoogleMapsApiKey, setGoogleMapsApiKey } from '../lib/googleMapsKey';
 import { parseSpinCriteria, parseSpinDisplay } from '../lib/spinDisplay';
 import {
   getActiveCancelReasons,
@@ -290,6 +320,7 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       spinDisplay: spinSettings.display,
       cancelWindowMinutes,
       pickupMaxOrderAmount,
+      googleMapsApiKey: await getGoogleMapsApiKey(),
     });
   } catch (err) {
     next(err);
@@ -358,6 +389,7 @@ const appSettingsSchema = z.object({
   })).optional(),
   cancelWindowMinutes: z.number().int().min(1).max(120).optional(),
   pickupMaxOrderAmount: z.number().int().min(0).max(50_000_000).nullable().optional(),
+  googleMapsApiKey: z.string().max(256).nullable().optional(),
 });
 
 export async function updateAppSettings(req: Request, res: Response, next: NextFunction) {
@@ -396,6 +428,7 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       pickupMaxOrderAmount,
       deliveryPlatformFeeRate,
       commissionSlabs,
+      googleMapsApiKey,
       ...prismaData
     } = data;
 
@@ -530,6 +563,9 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
     if (data.commissionSlabs != null) {
       await setCommissionSlabs(data.commissionSlabs);
     }
+    const savedGoogleMapsApiKey = googleMapsApiKey !== undefined
+      ? await setGoogleMapsApiKey(googleMapsApiKey)
+      : await getGoogleMapsApiKey();
 
     invalidatePickupOrderEditSettingsCache();
     invalidateGatewayFeeRateCache();
@@ -588,6 +624,7 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       spinCriteria: savedSpin.criteria,
       cancelWindowMinutes: savedCancelWindowMinutes,
       pickupMaxOrderAmount: savedPickupMaxOrderAmount,
+      googleMapsApiKey: savedGoogleMapsApiKey,
     });
   } catch (err) {
     next(err);

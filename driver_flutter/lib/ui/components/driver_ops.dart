@@ -176,28 +176,78 @@ class DriverAvatar extends StatelessWidget {
   }
 }
 
-class RiderReviewsSection extends StatelessWidget {
-  const RiderReviewsSection({super.key, required this.ratings, required this.loading, this.emptyLabel});
+/// Customer reviews card. Shows the newest [collapsedCount] reviews; the rest
+/// open with "Show all" so a long list doesn't push everything else off screen.
+class RiderReviewsSection extends StatefulWidget {
+  const RiderReviewsSection({
+    super.key,
+    required this.ratings,
+    required this.loading,
+    this.emptyLabel,
+    this.collapsedCount = 2,
+  });
 
   final List<RiderRatingItem> ratings;
   final bool loading;
   final String? emptyLabel;
+  final int collapsedCount;
+
+  @override
+  State<RiderReviewsSection> createState() => _RiderReviewsSectionState();
+}
+
+class _RiderReviewsSectionState extends State<RiderReviewsSection> {
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
+    final ratings = widget.ratings;
+    final collapsible = ratings.length > widget.collapsedCount;
+    final shown = collapsible && !_expanded ? ratings.take(widget.collapsedCount).toList() : ratings;
     return BcCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(tr('Customer reviews'), style: BcType.subtitle.copyWith(color: c.text)),
+          Row(
+            children: [
+              Expanded(
+                child: Text(tr('Customer reviews'), style: BcType.subtitle.copyWith(color: c.text)),
+              ),
+              if (ratings.isNotEmpty) Text('${ratings.length}', style: BcType.caption.copyWith(color: c.textMuted)),
+            ],
+          ),
           const SizedBox(height: 10),
-          if (loading && ratings.isEmpty)
+          if (widget.loading && ratings.isEmpty)
             Text(tr('Loading reviews…'), style: BcType.caption.copyWith(color: c.textMuted))
           else if (ratings.isEmpty)
-            Text(emptyLabel ?? tr('No reviews yet'), style: BcType.caption.copyWith(color: c.textMuted))
-          else
-            for (var i = 0; i < ratings.length; i++) ...[if (i > 0) const SizedBox(height: 10), _ReviewRow(ratings[i])],
+            Text(widget.emptyLabel ?? tr('No reviews yet'), style: BcType.caption.copyWith(color: c.textMuted))
+          else ...[
+            AnimatedSize(
+              duration: BcMotion.fast,
+              curve: Curves.easeOut,
+              alignment: Alignment.topCenter,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var i = 0; i < shown.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 10),
+                    _ReviewRow(shown[i]),
+                  ],
+                ],
+              ),
+            ),
+            if (collapsible)
+              Align(
+                alignment: Alignment.center,
+                child: TextButton.icon(
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                  icon: Icon(_expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 20),
+                  label: Text(_expanded ? tr('Show less') : tr('Show all {n} reviews', {'n': ratings.length})),
+                  style: TextButton.styleFrom(foregroundColor: c.brand),
+                ),
+              ),
+          ],
         ],
       ),
     );

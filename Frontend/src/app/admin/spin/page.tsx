@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { confirmDialog } from '@/store/confirmStore';
 import { SPIN_OFFERS_QUERY_KEY } from '@/lib/spinOffers';
 import { getAdminSession, isBranchAdmin, isSuperAdmin } from '@/lib/adminAuth';
+import { getApiBaseUrl } from '@/lib/apiBase';
 import { useRouter } from 'next/navigation';
 import SpinGiftProductModal, {
   type SpinGiftProductOption,
@@ -24,7 +25,7 @@ import {
 } from '@/lib/spinDisplay';
 
 function adminFetch(endpoint: string, options?: RequestInit) {
-    return fetch(`${process.env.NEXT_PUBLIC_API_URL}${endpoint}`, {
+  return fetch(`${getApiBaseUrl()}${endpoint}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

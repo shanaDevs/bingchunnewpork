@@ -356,7 +356,7 @@ model Store {
   lat           Float
   lng           Float
   phone         String?
-  openTime      String         @default("09:00")
+  openTime      String         @default("08:00")
   closeTime     String         @default("23:00")
   onlineOrderStartTime String?
   onlineOrderStopTime  String?
@@ -1346,6 +1346,8 @@ model AppSetting {
   iosStoreUrl                  String? @db.VarChar(512)
   androidAppIconUrl            String? @db.VarChar(512)
   iosAppIconUrl                String? @db.VarChar(512)
+  /// Browser and server Google Maps key. Empty falls back to GOOGLE_MAPS_API_KEY.
+  googleMapsApiKey             String? @db.VarChar(256)
   spinDurationSeconds          Int       @default(8)
   spinsPerWindow               Int       @default(1)
   spinWindowHours              Int       @default(24)

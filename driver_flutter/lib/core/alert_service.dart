@@ -83,10 +83,13 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
 
   // ---------------- Public state (the Kotlin companion StateFlows) ----------------
 
-  List<RideAlert> get activeAlerts =>
-      prioritizedRideAlerts(_activeAlerts.values, _lastRejectedJobId, _lastRejectedStoreId);
+  /// Empty while the rider holds an unfinished ride: no new-ride card or popup is shown
+  /// until the current ride is done. Alerts are kept and surface once eligible again.
+  List<RideAlert> get activeAlerts => alertEligible
+      ? prioritizedRideAlerts(_activeAlerts.values, _lastRejectedJobId, _lastRejectedStoreId)
+      : const [];
   Set<String> get activeAlertJobIds => activeAlerts.map((a) => a.jobId).toSet();
-  RideAlert? get ringingAlert => _ringingAlert;
+  RideAlert? get ringingAlert => alertEligible ? _ringingAlert : null;
   bool get postRejectHoldActive => _isPostRejectHoldActive;
   List<CancelledOrderAlert> get pendingCancellations => List.unmodifiable(_pendingCancellations);
   bool get isRunning => _running;
@@ -170,7 +173,9 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
           await stop();
           return;
         }
-        alertEligible = profile.alertEligible;
+        if (profile.alertEligible != alertEligible) {
+          setAlertEligible(profile.alertEligible);
+        }
       } catch (e) {
         debugPrint('Alert loop getMe failed (continuing poll/socket): $e');
       }
@@ -350,8 +355,13 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   void setAlertEligible(bool eligible) {
     alertEligible = eligible;
     if (!eligible) {
-      // Pause ringing while actively delivering — keep alerts queued so ringing resumes later.
+      // Pause ringing while actively delivering — keep alerts queued so ringing resumes later,
+      // and pull any new-ride notifications already posted so nothing invites a second claim.
       _pauseRingCycle();
+      for (final id in _activeAlerts.keys) {
+        BcNotifications.cancelJob(id);
+      }
+      _queuedNotifiedJobId = null;
     } else {
       _promoteFrontIfNeeded();
     }
@@ -415,7 +425,9 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
               alertEligible = true;
               _ringForJob(alert);
             } else {
-              debugPrint('Skipping ring for ${alert.jobId} — driver not alert-eligible');
+              // Hold it silently (hidden by [activeAlerts]) so it can ring once the ride is done.
+              debugPrint('Holding ${alert.jobId} — driver has an unfinished ride');
+              if (!_isSilenced(alert.jobId)) _activeAlerts[alert.jobId] = alert;
             }
           })
           .catchError((_) {
@@ -439,33 +451,14 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     if (alert.jobId.isEmpty) return;
     _activeAlerts[alert.jobId] = alert;
     notifyListeners();
-    if (alertEligible) {
-      _promoteFrontIfNeeded();
-    } else {
-      _notifyQueuedIfOffScreen();
-    }
+    // While a ride is unfinished the alert stays hidden — no card, no notification.
+    if (alertEligible) _promoteFrontIfNeeded();
   }
 
-  /// The card the in-app overlay shows: the ringing ride, else the first queued one.
-  RideAlert? get _displayedAlert {
-    if (_ringingAlert != null) return _ringingAlert;
-    if (_isPostRejectHoldActive) return null;
-    final queued = activeAlerts;
-    return queued.isEmpty ? null : queued.first;
-  }
-
+  /// Job id of a queued-card notification still on screen (cleared on resume).
+  /// Queued rides are no longer notified while a ride is unfinished — they stay hidden
+  /// until the rider is eligible again, then ring normally.
   String? _queuedNotifiedJobId;
-
-  void _notifyQueuedIfOffScreen() {
-    if (_appInForeground || alertEligible) return;
-    final alert = _displayedAlert;
-    if (alert == null || alert.jobId == _queuedNotifiedJobId) return;
-    _queuedNotifiedJobId = alert.jobId;
-    BcNotifications.notifyNewJob(alert);
-    try {
-      FlutterForegroundTask.wakeUpScreen();
-    } catch (_) {}
-  }
 
   /// Queued-card counterpart of the ringing hand-off in [didChangeAppLifecycleState].
   void _syncQueuedNotification(AppLifecycleState state) {
@@ -473,8 +466,6 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
       final shown = _queuedNotifiedJobId;
       _queuedNotifiedJobId = null;
       if (shown != null) BcNotifications.cancelJob(shown);
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
-      _notifyQueuedIfOffScreen();
     }
   }
 
@@ -501,6 +492,10 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   /// Ensure the next unclaimed job (if any) is the one actively ringing.
   void _promoteFrontIfNeeded() {
     if (_isPostRejectHoldActive) return;
+    if (!alertEligible) {
+      _pauseRingCycle();
+      return;
+    }
     final next = pickNextRideAlert(_activeAlerts.values, _lastRejectedJobId, _lastRejectedStoreId);
     if (next == null) {
       _pauseRingCycle();
@@ -513,6 +508,8 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Ring ~30s, then wait ~3min and ring again while the job is still open.
   void _startRingCycle(RideAlert alert) {
+    // Covers forced rings (admin re-ring, failure offers) too: nothing pops up mid-ride.
+    if (!alertEligible) return;
     _ringBurstTimer?.cancel();
     _ringGapTimer?.cancel();
     final current = _activeAlerts[alert.jobId];

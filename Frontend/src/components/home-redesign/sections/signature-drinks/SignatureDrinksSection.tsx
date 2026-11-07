@@ -71,8 +71,30 @@ function HoverMascot() {
   );
 }
 
+/**
+ * A tilted band of light that sweeps once across the hovered (or spotlit) card, left to right. It sits
+ * behind the photo and text (the card is `isolate`, so -z-10 keeps it above the card's own blue), and its
+ * own rounded, clipped layer keeps it inside the card while the mascot still pops out past the corner.
+ * The transition lives only on the hover/spotlight classes, so when the card lets go it jumps straight back
+ * off-card, ready for next time, rather than sweeping backwards. Reduced motion skips the sweep entirely.
+ */
+function CardGlow() {
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-[inherit]">
+      <div className="absolute inset-y-0 left-0 w-3/5 -translate-x-full bg-[linear-gradient(105deg,transparent_30%,rgb(255_255_255/0.55)_50%,transparent_70%)] group-hover:translate-x-[170%] group-hover:transition-[translate] group-hover:delay-100 group-hover:duration-900 group-hover:ease-in-out group-data-spotlight:translate-x-[170%] group-data-spotlight:transition-[translate] group-data-spotlight:delay-100 group-data-spotlight:duration-900 group-data-spotlight:ease-in-out" />
+    </div>
+  );
+}
+
+// rounded-[1.5rem] rather than rounded-3xl: the app's theme (globals.css) redefines --radius-3xl as 22px,
+// while the prototype's cards use Tailwind's default 24px.
 const cardClass =
-  "group relative flex w-64 shrink-0 flex-col rounded-3xl bg-brand-50 p-4 ring-1 ring-brand-100 transition duration-300 hover:-translate-y-2 hover:bg-brand-600 hover:shadow-xl hover:shadow-brand-900/20 hover:ring-brand-600 data-spotlight:-translate-y-2 data-spotlight:bg-brand-600 data-spotlight:shadow-xl data-spotlight:shadow-brand-900/20 data-spotlight:ring-brand-600 sm:w-72";
+  "group relative isolate flex w-64 shrink-0 flex-col rounded-[1.5rem] bg-brand-50 p-4 ring-1 ring-brand-100 transition duration-300 hover:-translate-y-2 hover:bg-brand-600 hover:shadow-xl hover:shadow-brand-900/20 hover:ring-brand-600 data-spotlight:-translate-y-2 data-spotlight:bg-brand-600 data-spotlight:shadow-xl data-spotlight:shadow-brand-900/20 data-spotlight:ring-brand-600 sm:w-72";
+// Shorter than the prototype's (h-64/sm:h-72, pt-8, pt-5/mb-5 around the text) to trim empty space; same width.
+// pt-6 still clears the rating badge in the top corner.
+// Fixed-height stage keeps every product the same height, whatever its cut-out width.
+const stageClass = "flex h-56 items-end justify-center px-6 pt-6 sm:h-60";
+const bodyClass = "flex flex-1 flex-col px-2 pt-4 pb-1";
 const nameClass =
   "text-lg font-semibold text-brand-950 transition-colors duration-300 group-hover:text-snow group-data-spotlight:text-snow";
 // mt-auto keeps the buttons level across cards whose names wrap onto two lines.
@@ -95,6 +117,7 @@ function ProductCard({ product, onOrder }: { product: Product; onOrder: (product
 
   return (
     <article className={cardClass}>
+      <CardGlow />
       <HoverMascot />
       {rating != null && rating > 0 && (
         <p className="absolute top-4 right-4 z-10 flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-sm font-semibold text-brand-950 shadow-sm">
@@ -103,8 +126,7 @@ function ProductCard({ product, onOrder }: { product: Product; onOrder: (product
           <span className="sr-only">out of 5 stars</span>
         </p>
       )}
-      {/* Fixed-height stage keeps every product the same height, whatever its cut-out width. */}
-      <div className="flex h-64 items-end justify-center px-6 pt-8 sm:h-72">
+      <div className={stageClass}>
         <div className="relative size-full">
           {src ? (
             <Image
@@ -112,6 +134,7 @@ function ProductCard({ product, onOrder }: { product: Product; onOrder: (product
               alt={product.name}
               fill
               unoptimized
+              loading="lazy"
               sizes="(min-width: 1024px) 160px, 140px"
               className={`object-contain object-bottom ${imageShadow}`}
             />
@@ -122,9 +145,9 @@ function ProductCard({ product, onOrder }: { product: Product; onOrder: (product
           )}
         </div>
       </div>
-      <div className="flex flex-1 flex-col px-2 pt-5 pb-2">
+      <div className={bodyClass}>
         <h3 className={nameClass}>{product.name}</h3>
-        <p className="font-numeric mt-1 mb-5 font-bold text-brand-600 transition-colors duration-300 group-hover:text-brand-100 group-data-spotlight:text-brand-100">
+        <p className="font-numeric mt-0.5 mb-4 font-bold text-brand-600 transition-colors duration-300 group-hover:text-brand-100 group-data-spotlight:text-brand-100">
           {formatLkr(product.basePrice)}
         </p>
         <Button onClick={() => onOrder(product)} disabled={!inStock} className={cardButtonClass}>
@@ -139,19 +162,21 @@ function ProductCard({ product, onOrder }: { product: Product; onOrder: (product
 function ShowcaseCard({ name, src, width, height }: ShowcaseDrink) {
   return (
     <article className={cardClass}>
+      <CardGlow />
       <HoverMascot />
-      <div className="flex h-64 items-end justify-center px-6 pt-8 sm:h-72">
+      <div className={stageClass}>
         <Image
           src={src}
           alt={name}
           width={width}
           height={height}
+          loading="lazy"
           sizes="(min-width: 1024px) 160px, 140px"
           className={`h-full w-auto object-contain ${imageShadow}`}
         />
       </div>
-      <div className="flex flex-1 flex-col px-2 pt-5 pb-2">
-        <h3 className={`${nameClass} mb-5`}>{name}</h3>
+      <div className={bodyClass}>
+        <h3 className={`${nameClass} mb-4`}>{name}</h3>
         <Button href="/menu" className={cardButtonClass}>
           View Menu
         </Button>

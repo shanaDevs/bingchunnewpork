@@ -14,6 +14,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Floating quick-action bubble (app logo) over other apps while the app is in the
+         background. Opt-in: the rider grants "Display over other apps" from
+         Me → Job Alerts & Reliability. See QuickBubble.kt. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Kept out on purpose (Play sensitive-permission policy); plugins must not merge them back.
          Background location: tracking runs in a location foreground service started while the
@@ -64,6 +68,11 @@
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
             android:exported="false" />
+
+        <!-- Google Maps SDK key, from GOOGLE_MAPS_API_KEY in driver_flutter/.env (see app/build.gradle.kts). -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${GOOGLE_MAPS_API_KEY}" />
 
         <!-- Small icon for the on-duty notification (white delivery truck). -->
         <meta-data

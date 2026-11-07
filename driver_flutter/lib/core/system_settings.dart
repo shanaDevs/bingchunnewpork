@@ -130,6 +130,45 @@ class SystemSettings {
     return _invoke('requestUnlock');
   }
 
+  // ---------------- Quick-action bubble ----------------
+  // Floating app-logo bubble drawn over other apps while the app is in the background
+  // (QuickBubble.kt). Tap = back to the app, drag = move (snaps to the left / right edge),
+  // drag onto ✕ = hide.
+
+  /// (enabled by the rider, "Display over other apps" granted). Android only.
+  static Future<({bool enabled, bool permitted})> quickBubbleStatus() async {
+    if (!Platform.isAndroid) return (enabled: false, permitted: false);
+    try {
+      final m = await _channel.invokeMapMethod<String, dynamic>('quickBubbleStatus');
+      return (enabled: m?['enabled'] == true, permitted: m?['permitted'] == true);
+    } catch (_) {
+      return (enabled: false, permitted: false);
+    }
+  }
+
+  static Future<void> setQuickBubbleEnabled(bool enabled) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<bool>('setQuickBubbleEnabled', enabled);
+    } catch (_) {}
+  }
+
+  static bool? _bubbleSignedIn;
+
+  /// The bubble only appears for a signed-in rider.
+  static Future<void> setQuickBubbleSignedIn(bool signedIn) async {
+    if (!Platform.isAndroid || _bubbleSignedIn == signedIn) return;
+    _bubbleSignedIn = signedIn;
+    try {
+      await _channel.invokeMethod<bool>('setQuickBubbleSignedIn', signedIn);
+    } catch (_) {}
+  }
+
+  /// System "Display over other apps" screen for this app.
+  static Future<void> openOverlaySettings() async {
+    if (!await _invoke('openOverlaySettings')) await openAppSettings();
+  }
+
   static Future<bool> isIgnoringBatteryOptimizations() async {
     if (!Platform.isAndroid) return true;
     return _invoke('isIgnoringBatteryOptimizations');

@@ -161,6 +161,11 @@ export async function ensureAppSchema(): Promise<void> {
   );
   await addColumnIfMissing(
     'app_settings',
+    'googleMapsApiKey',
+    'VARCHAR(256) NULL',
+  );
+  await addColumnIfMissing(
+    'app_settings',
     'weeklyResetDay',
     'INT NULL',
   );

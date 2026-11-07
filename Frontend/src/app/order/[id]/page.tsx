@@ -6,7 +6,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Clock, MapPin, Home, Receipt, CreditCard, Loader2, Truck, ShieldCheck, XCircle, ClipboardList } from 'lucide-react';
 import Link from 'next/link';
-import { markReceiptOpenedFrom } from '@/lib/orderLinks';
+import { ReceiptDialog } from '@/components/account-redesign/orders/ReceiptDialog';
 import { api } from '@/lib/api';
 import { openPayHereCheckout } from '@/lib/openPayHereCheckout';
 import { openWebXPayCheckout } from '@/lib/openWebXPayCheckout';
@@ -161,16 +161,19 @@ function OrderPageActions({
   orderNumber: string;
   className?: string;
 }) {
+  const [receiptOpen, setReceiptOpen] = useState(false);
   return (
     <div className={`order-page__actions grid grid-cols-3 gap-2 sm:gap-3 ${className}`}>
-      <Link
-        href={`/order/${orderNumber}/receipt`}
-        onClick={() => markReceiptOpenedFrom()}
+      <button
+        type="button"
+        onClick={() => setReceiptOpen(true)}
+        aria-haspopup="dialog"
         className="btn-primary py-3 px-2 text-xs sm:text-sm justify-center flex flex-col sm:flex-row items-center gap-1.5 sm:gap-2 min-w-0"
       >
         <Receipt size={16} className="shrink-0" />
         <span className="truncate">Receipt</span>
-      </Link>
+      </button>
+      {receiptOpen && <ReceiptDialog orderNumber={orderNumber} onClose={() => setReceiptOpen(false)} />}
       <Link
         href="/"
         className="btn-outline py-3 px-2 text-xs sm:text-sm justify-center flex flex-col sm:flex-row items-center gap-1.5 sm:gap-2 min-w-0"

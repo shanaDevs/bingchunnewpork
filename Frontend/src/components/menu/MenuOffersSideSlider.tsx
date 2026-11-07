@@ -8,7 +8,7 @@ import { useHomeOffers } from '@/hooks/useHomeOffers';
 const AUTO_PLAY_MS = 4500;
 
 export default function MenuOffersSideSlider() {
-  const offers = useHomeOffers();
+  const { offers } = useHomeOffers();
   const [index, setIndex] = useState(0);
   const slideCount = offers.length;
   const current = offers[index] ?? offers[0];

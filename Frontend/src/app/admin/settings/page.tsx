@@ -4,8 +4,9 @@ import { getApiBaseUrl, getWebxpayReturnUrlHint } from '@/lib/apiBase';
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, Clock, CreditCard, Dices, Gift, MessageCircle, Phone, RefreshCw, Save, Settings, ShoppingBag, Smartphone, Truck } from 'lucide-react';
+import { Bell, Clock, CreditCard, Dices, Gift, Map, MessageCircle, Phone, Printer, RefreshCw, Save, Settings, ShoppingBag, Smartphone, Truck } from 'lucide-react';
 import toast from 'react-hot-toast';
+import CupStickerPrinterPanel from '@/components/admin/CupStickerPrinterPanel';
 import LoyaltyProgramSettings from '@/components/admin/LoyaltyProgramSettings';
 import LoyaltyCampaignDashboard from '@/components/admin/loyalty/LoyaltyCampaignDashboard';
 import PlatformDiscountPaybackSettings from '@/components/admin/PlatformDiscountPaybackSettings';
@@ -86,6 +87,7 @@ export default function AdminSettingsPage() {
   const [iosStoreUrl, setIosStoreUrl] = useState('');
   const [androidAppIconUrl, setAndroidAppIconUrl] = useState('');
   const [iosAppIconUrl, setIosAppIconUrl] = useState('');
+  const [googleMapsApiKey, setGoogleMapsApiKey] = useState('');
   const [cancelWindowMinutes, setCancelWindowMinutes] = useState('10');
   const [pickupMaxOrderAmount, setPickupMaxOrderAmount] = useState('');
   const [pinGateOpen, setPinGateOpen] = useState(false);
@@ -128,7 +130,7 @@ export default function AdminSettingsPage() {
   const [smsConfigured, setSmsConfigured] = useState(false);
   const [smsConnectionTimeoutMs, setSmsConnectionTimeoutMs] = useState('30000');
   const [smsReadTimeoutMs, setSmsReadTimeoutMs] = useState('30000');
-  const [branchOpenTime, setBranchOpenTime] = useState('09:00');
+  const [branchOpenTime, setBranchOpenTime] = useState('08:00');
   const [branchCloseTime, setBranchCloseTime] = useState('23:00');
   const [branchOnlineStart, setBranchOnlineStart] = useState('');
   const [branchOnlineStop, setBranchOnlineStop] = useState('');
@@ -165,7 +167,7 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     if (!branchOrderingHours) return;
     setBranchStoreName(branchOrderingHours.storeName ?? '');
-    setBranchOpenTime(branchOrderingHours.openTime ?? '09:00');
+    setBranchOpenTime(branchOrderingHours.openTime ?? '08:00');
     setBranchCloseTime(branchOrderingHours.closeTime ?? '23:00');
     setBranchOnlineStart(branchOrderingHours.onlineOrderStartTime ?? '');
     setBranchOnlineStop(branchOrderingHours.onlineOrderStopTime ?? '');
@@ -290,6 +292,9 @@ export default function AdminSettingsPage() {
     }
     if (payload?.iosAppIconUrl != null) {
       setIosAppIconUrl(String(payload.iosAppIconUrl));
+    }
+    if (payload?.googleMapsApiKey != null) {
+      setGoogleMapsApiKey(String(payload.googleMapsApiKey));
     }
     if (payload?.cancelWindowMinutes != null) {
       setCancelWindowMinutes(String(payload.cancelWindowMinutes));
@@ -494,6 +499,7 @@ export default function AdminSettingsPage() {
           iosStoreUrl: iosStoreUrl.trim() || null,
           androidAppIconUrl: androidAppIconUrl.trim() || null,
           iosAppIconUrl: iosAppIconUrl.trim() || null,
+          googleMapsApiKey: googleMapsApiKey.trim() || null,
           spinDurationSeconds: Math.min(20, Math.max(3, parseInt(spinDurationSeconds, 10) || 8)),
           spinsPerWindow: Math.min(10, Math.max(1, parseInt(spinsPerWindow, 10) || 1)),
           spinWindowHours: (() => {
@@ -635,6 +641,10 @@ export default function AdminSettingsPage() {
                     <Smartphone size={16} />
                     App & spin
                   </TabsTrigger>
+                  <TabsTrigger value="printer" className="h-auto flex-none gap-2 px-3 py-2">
+                    <Printer size={16} />
+                    Printer
+                  </TabsTrigger>
                 </>
               ) : (
                 <>
@@ -653,6 +663,10 @@ export default function AdminSettingsPage() {
                   <TabsTrigger value="messaging" className="h-auto flex-none gap-2 px-3 py-2">
                     <Bell size={16} />
                     Notifications
+                  </TabsTrigger>
+                  <TabsTrigger value="printer" className="h-auto flex-none gap-2 px-3 py-2">
+                    <Printer size={16} />
+                    Printer
                   </TabsTrigger>
                 </>
               )}
@@ -1574,6 +1588,37 @@ export default function AdminSettingsPage() {
                 <a href="/admin/loyalty" className="text-brand hover:underline">Loyalty Rules</a>.
               </p>
               <LoyaltyCampaignDashboard branchMode={false} embedMode />
+            </div>
+          )}
+
+          {resolvedTab === 'printer' && (
+            <div className="card p-5">
+              <CupStickerPrinterPanel />
+            </div>
+          )}
+
+          {superAdmin && resolvedTab === 'app' && (
+            <div className="card p-5">
+              <h2 className="font-semibold text-white mb-2 flex items-center gap-2">
+                <Map size={18} className="text-brand" />
+                Google Maps
+              </h2>
+              <p className="text-xs text-muted mb-4">
+                One key for the whole application. Customer maps, live delivery, admin maps, the cashier and driver apps, and address search all use this value. Save the App tab after you change it.
+              </p>
+              <label className="text-xs text-muted block mb-1">Google Maps API key</label>
+              <input
+                className="input-field"
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="AIza..."
+                value={googleMapsApiKey}
+                onChange={(e) => setGoogleMapsApiKey(e.target.value)}
+              />
+              <p className="text-[11px] text-muted mt-2">
+                The shop and admin maps load this key through the Maps JavaScript API. Leave the field blank to keep the server environment key. OpenStreetMap is used only when no key is available.
+              </p>
             </div>
           )}
 
