@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Clock, List, LocateFixed, LocateOff, Map, MapPin, Navigation, Phone, RotateCw, Search, ShoppingBag, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -19,7 +20,6 @@ import { api } from "@/lib/api";
 import { branchManuallyClosedMessage, isBranchManuallyClosed } from "@/lib/storeOrderingHours";
 import { useCartStore } from "@/store/cartStore";
 import type { Store } from "@/types";
-import { StoreMap } from "./StoreMap";
 import {
   callHref,
   directionsHref,
@@ -38,6 +38,20 @@ import {
 } from "./stores";
 import { usePlaceSearch, type Place } from "./usePlaceSearch";
 import { useUserLocation } from "./useUserLocation";
+
+const StoreMap = dynamic(
+  () => import("./StoreMap").then((m) => m.StoreMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        aria-busy="true"
+        aria-label="Loading map"
+        className="h-full min-h-[18rem] w-full rounded-[1.25rem] bg-brand-50 animate-pulse ring-1 ring-brand-100"
+      />
+    ),
+  },
+);
 
 /** For a typed place that no store matches, the stores within this distance of it are listed (nearest first). */
 const PLACE_RADIUS_KM = 30;

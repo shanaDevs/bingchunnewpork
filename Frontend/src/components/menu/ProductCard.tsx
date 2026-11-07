@@ -130,14 +130,17 @@ export default function ProductCard({
       {!isList && wishlistButton}
 
       <motion.article
-        initial={{ opacity: 0, y: 12 }}
+        initial={reduceMotion || index > 5 ? false : { opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -6 }}
-        transition={{
-          delay: Math.min(index * 0.04, 0.28),
-          duration: 0.4,
-          ease: [0.22, 1, 0.36, 1],
-        }}
+        transition={
+          reduceMotion || index > 5
+            ? { duration: 0 }
+            : {
+                delay: Math.min(index * 0.04, 0.2),
+                duration: 0.28,
+                ease: [0.22, 1, 0.36, 1],
+              }
+        }
         whileTap={isInteractive ? { opacity: 0.92, transition: { duration: 0.1 } } : undefined}
         className={`product-card product-card--app${isList ? ' product-card--row' : ''}${isCompact ? ' product-card--compact' : ''} ${active ? 'product-card--active' : ''} ${
           isInteractive ? 'cursor-pointer' : 'product-card--unavailable'
@@ -158,7 +161,13 @@ export default function ProductCard({
         }
       >
         <div className="product-card__image-area">
-          <ProductRadialImage imageUrl={imageUrl} alt={name} emoji={emoji} className="h-full w-full" />
+          <ProductRadialImage
+            imageUrl={imageUrl}
+            alt={name}
+            emoji={emoji}
+            className="h-full w-full"
+            priority={index < 2}
+          />
 
           {!isList && (
             <motion.div

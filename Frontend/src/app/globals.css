@@ -1210,6 +1210,95 @@
     box-shadow: 0 6px 15px rgba(0, 0, 0, 0.06);
   }
 
+  .product-card-skeleton__card {
+    pointer-events: none;
+  }
+
+  .product-card-skeleton__card::before {
+    display: none;
+  }
+
+  .product-card-skeleton__image {
+    min-height: 9rem;
+    background: linear-gradient(
+      90deg,
+      rgba(148, 163, 184, 0.12) 25%,
+      rgba(148, 163, 184, 0.22) 50%,
+      rgba(148, 163, 184, 0.12) 75%
+    );
+    background-size: 200% 100%;
+    animation: wishlistSkeleton 1.4s ease infinite;
+  }
+
+  .product-card-skeleton__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding: 0.85rem 0.9rem 1rem;
+  }
+
+  .product-card-skeleton__line {
+    height: 0.7rem;
+    border-radius: 999px;
+    background: linear-gradient(
+      90deg,
+      rgba(148, 163, 184, 0.12) 25%,
+      rgba(148, 163, 184, 0.22) 50%,
+      rgba(148, 163, 184, 0.12) 75%
+    );
+    background-size: 200% 100%;
+    animation: wishlistSkeleton 1.4s ease infinite;
+  }
+
+  .product-card-skeleton__line--title {
+    width: 72%;
+  }
+
+  .product-card-skeleton__line--meta {
+    width: 48%;
+    height: 0.55rem;
+  }
+
+  .product-card-skeleton__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0.35rem;
+  }
+
+  .product-card-skeleton__line--price {
+    width: 36%;
+  }
+
+  .product-card-skeleton__add {
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 999px;
+    background: linear-gradient(
+      90deg,
+      rgba(148, 163, 184, 0.12) 25%,
+      rgba(148, 163, 184, 0.22) 50%,
+      rgba(148, 163, 184, 0.12) 75%
+    );
+    background-size: 200% 100%;
+    animation: wishlistSkeleton 1.4s ease infinite;
+  }
+
+  .product-card-shell--list .product-card-skeleton__image {
+    min-height: 5.5rem;
+    width: 5.5rem;
+    flex-shrink: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .product-card-skeleton__image,
+    .product-card-skeleton__line,
+    .product-card-skeleton__add {
+      animation: none;
+    }
+  }
+
   .product-card--app.product-card--active {
     border-color: var(--color-brand);
     border-width: 1.5px;

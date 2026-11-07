@@ -30,7 +30,7 @@ export default function HomeOffersSlider({
   variant = 'slider',
   offerHref,
 }: HomeOffersSliderProps) {
-  const rawOffers = useHomeOffers();
+  const { offers: rawOffers } = useHomeOffers();
   const offers = useMemo(
     () => (offerHref ? rawOffers.map((offer) => ({ ...offer, href: offerHref })) : rawOffers),
     [rawOffers, offerHref],

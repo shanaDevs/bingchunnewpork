@@ -1,8 +1,9 @@
 'use client';
 
 import { Suspense, useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   Search,
   X,
@@ -11,11 +12,11 @@ import {
   LayoutGrid,
   List,
 } from 'lucide-react';
-import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
+import { AnimatePresence, LayoutGroup } from 'framer-motion';
 import { api, ApiError } from '@/lib/api';
 import type { Product, Category, ProductSortMode, Order } from '@/types';
-import ProductDrawer from '@/components/menu/ProductDrawer';
 import ProductCard from '@/components/menu/ProductCard';
+import ProductCardSkeleton from '@/components/menu/ProductCardSkeleton';
 import CategoryChip from '@/components/menu/CategoryChip';
 import MenuHeroSlide from '@/components/menu/MenuHeroSlide';
 import { openOrderModal } from '@/components/order/SiteOrderPrompt';
@@ -30,6 +31,16 @@ import { useAuthStore } from '@/store/authStore';
 import { useWishlistIds, useWishlistToggle } from '@/hooks/useWishlist';
 import { useBranchOrderingHours } from '@/hooks/useBranchOrderingHours';
 import OnlineOrderingClosedBanner from '@/components/order/OnlineOrderingClosedBanner';
+
+const ProductDrawer = dynamic(() => import('@/components/menu/ProductDrawer'), {
+  ssr: false,
+  loading: () => null,
+});
+
+type MenuClientProps = {
+  initialProducts?: Product[];
+  initialCategories?: Category[];
+};
 
 const SORT_OPTIONS: { value: ProductSortMode; label: string }[] = [
   { value: 'name_asc', label: 'A–Z' },
@@ -63,23 +74,34 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced;
 }
 
-export default function MenuPage() {
+export default function MenuPage({ initialProducts = [], initialCategories = [] }: MenuClientProps) {
   return (
     <Suspense fallback={<MenuPageFallback />}>
-      <MenuPageContent />
+      <MenuPageContent initialProducts={initialProducts} initialCategories={initialCategories} />
     </Suspense>
   );
 }
 
 function MenuPageFallback() {
   return (
-    <div className="menu-page min-h-screen bg-white md:bg-navy flex items-center justify-center">
-      <p className="text-muted text-sm">Loading menu...</p>
+    <div className="menu-page min-h-screen bg-white md:bg-navy">
+      <div className="menu-page__section-inner py-4 sm:py-5 px-4">
+        <div className="mb-4 h-28 rounded-2xl bg-navy-light/60 animate-pulse" />
+        <div className="mb-4 flex gap-2 overflow-hidden">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="h-9 w-20 shrink-0 rounded-full bg-navy-light/60 animate-pulse" />
+          ))}
+        </div>
+        <ProductCardSkeleton count={8} />
+      </div>
     </div>
   );
 }
 
-function MenuPageContent() {
+function MenuPageContent({
+  initialProducts = [],
+  initialCategories = [],
+}: MenuClientProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -115,13 +137,23 @@ function MenuPageContent() {
 
   const hasSearch = debouncedSearch.length > 0;
 
+  const isDefaultCatalog =
+    selectedCategory === 'all' &&
+    !debouncedSearch &&
+    !activeStoreId &&
+    sort === 'name_asc' &&
+    !tagFilter;
+
   const {
-    data: categories = [],
+    data: categories = initialCategories,
     isError: categoriesError,
     refetch: refetchCategories,
   } = useQuery<Category[]>({
     queryKey: ['categories'],
     queryFn: () => api.get('/menu/categories'),
+    ...(initialCategories.length > 0
+      ? { initialData: initialCategories, initialDataUpdatedAt: Date.now() - 60_000 }
+      : {}),
   });
 
   const {
@@ -145,7 +177,14 @@ function MenuPageContent() {
       const qs = params.toString();
       return api.get(`/menu/products${qs ? `?${qs}` : ''}`);
     },
+    placeholderData: keepPreviousData,
+    ...(isDefaultCatalog && initialProducts.length > 0
+      ? { initialData: initialProducts, initialDataUpdatedAt: Date.now() - 60_000 }
+      : {}),
   });
+
+  const showColdSkeleton = isLoading && products.length === 0;
+  const isRefreshing = isFetching && !showColdSkeleton;
 
   const { data: myOrders = [] } = useQuery<Order[]>({
     queryKey: ['orders', 'my', 'menu-sort'],
@@ -341,7 +380,7 @@ function MenuPageContent() {
             />
           )}
 
-          {!apiDown && !isLoading && orderMode && !activeStoreId && (
+          {!apiDown && !showColdSkeleton && orderMode && !activeStoreId && (
             <p className="text-sm text-amber-400/90 mb-4 text-center">
               Select your branch in order settings to see branch stock.
               <button type="button" onClick={() => openOrderModal()} className="text-brand ml-1 underline">
@@ -352,8 +391,10 @@ function MenuPageContent() {
 
           <div className="menu-toolbar">
             <p className="menu-toolbar__count text-sm text-muted">
-              {isFetching && debouncedSearch ? (
+              {isRefreshing && debouncedSearch ? (
                 'Searching…'
+              ) : isRefreshing ? (
+                'Updating…'
               ) : (
                 <>
                   Showing <span className="text-fg font-semibold">{sortedProducts.length}</span>
@@ -415,16 +456,8 @@ function MenuPageContent() {
             </div>
           </div>
 
-          {isLoading ? (
-            <div className="product-card-grid grid grid-cols-2 md:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-3 sm:gap-4 md:gap-5">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="card p-4 animate-pulse">
-                  <div className="h-36 rounded-xl mb-4 bg-navy-light" />
-                  <div className="h-4 rounded mb-2 bg-navy-light w-3/5" />
-                  <div className="h-3 rounded bg-navy-light w-4/5" />
-                </div>
-              ))}
-            </div>
+          {showColdSkeleton ? (
+            <ProductCardSkeleton count={8} layout={viewMode} />
           ) : !apiDown && sortedProducts.length === 0 ? (
             <div className="text-center py-16 sm:py-20">
               <div className="text-6xl mb-4 flex justify-center items-center center ">
@@ -450,37 +483,35 @@ function MenuPageContent() {
               </button>
             </div>
           ) : !apiDown ? (
-            <div className={gridClass}>
-              <AnimatePresence mode="popLayout">
-                {sortedProducts.map((product, i) => {
-                  const inStock = isProductInStock(product);
-                  const comingSoon = isProductComingSoon(product);
-                  const wishlisted = wishlistSet.has(product.id);
+            <div className={`${gridClass}${isRefreshing ? ' opacity-80 transition-opacity' : ''}`}>
+              {sortedProducts.map((product, i) => {
+                const inStock = isProductInStock(product);
+                const comingSoon = isProductComingSoon(product);
+                const wishlisted = wishlistSet.has(product.id);
 
-                  return (
-                    <ProductCard
-                      key={product.id}
-                      id={product.id}
-                      index={i}
-                      layout={viewMode}
-                      name={product.name}
-                      basePrice={product.basePrice}
-                      imageUrl={product.imageUrl}
-                      tag={inStock ? product.tag : undefined}
-                      categoryName={product.category?.name}
-                      emoji={getCategoryEmoji(product.category?.slug ?? '')}
-                      isAvailable={inStock}
-                      isComingSoon={comingSoon}
-                      isLowStock={isProductLowStock(product)}
-                      rating={product.avgRating}
-                      ratingCount={product.ratingCount}
-                      isWishlisted={wishlisted}
-                      onWishlistToggle={() => toggleWishlist(product.id, wishlisted)}
-                      onSelect={() => handleProductSelect(product)}
-                    />
-                  );
-                })}
-              </AnimatePresence>
+                return (
+                  <ProductCard
+                    key={product.id}
+                    id={product.id}
+                    index={i}
+                    layout={viewMode}
+                    name={product.name}
+                    basePrice={product.basePrice}
+                    imageUrl={product.imageUrl}
+                    tag={inStock ? product.tag : undefined}
+                    categoryName={product.category?.name}
+                    emoji={getCategoryEmoji(product.category?.slug ?? '')}
+                    isAvailable={inStock}
+                    isComingSoon={comingSoon}
+                    isLowStock={isProductLowStock(product)}
+                    rating={product.avgRating}
+                    ratingCount={product.ratingCount}
+                    isWishlisted={wishlisted}
+                    onWishlistToggle={() => toggleWishlist(product.id, wishlisted)}
+                    onSelect={() => handleProductSelect(product)}
+                  />
+                );
+              })}
             </div>
           ) : null}
         </div>

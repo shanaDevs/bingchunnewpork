@@ -28,16 +28,22 @@ export function selectFulfillmentOrActiveStoreId(s: {
 export function useHomeOffers() {
   const storeId = useCartStore((s) => selectFulfillmentOrActiveStoreId(s));
 
-  const { data: promos = [] } = useQuery<PromoCode[]>({
+  const { data: promos = [], isPending, isFetching } = useQuery<PromoCode[]>({
     queryKey: ['promos', storeId ?? 'all'],
     queryFn: () =>
       api.get(`/promos${storeId ? `?storeId=${encodeURIComponent(storeId)}` : ''}`),
   });
 
-  return useMemo(() => {
+  const offers = useMemo(() => {
     const homePromos = [...promos]
       .filter((promo) => promo.showOnHome !== false)
       .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
     return mapPromosToHomeOffers(homePromos);
   }, [promos]);
+
+  return {
+    offers,
+    isPending,
+    isFetching,
+  };
 }

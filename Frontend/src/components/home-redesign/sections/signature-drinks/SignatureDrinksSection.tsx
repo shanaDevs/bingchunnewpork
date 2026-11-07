@@ -134,6 +134,7 @@ function ProductCard({ product, onOrder }: { product: Product; onOrder: (product
               alt={product.name}
               fill
               unoptimized
+              loading="lazy"
               sizes="(min-width: 1024px) 160px, 140px"
               className={`object-contain object-bottom ${imageShadow}`}
             />
@@ -169,6 +170,7 @@ function ShowcaseCard({ name, src, width, height }: ShowcaseDrink) {
           alt={name}
           width={width}
           height={height}
+          loading="lazy"
           sizes="(min-width: 1024px) 160px, 140px"
           className={`h-full w-auto object-contain ${imageShadow}`}
         />
