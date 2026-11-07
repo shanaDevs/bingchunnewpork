@@ -37,14 +37,15 @@ function readGoogleMapsKey(): Promise<string> {
 
 function loadGoogleMaps(key: string): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
-  const w = window as Window & { google?: { maps?: MapsNamespace } };
-  if (w.google?.maps?.Map && mapsKey === key) return Promise.resolve();
+  // Avoid clashing with Window.google typings from Google Identity Services.
+  const host = window as unknown as { google?: { maps?: MapsNamespace } };
+  if (host.google?.maps?.Map && mapsKey === key) return Promise.resolve();
   if (mapsRequest && mapsKey === key) return mapsRequest;
   mapsKey = key;
 
   mapsRequest = (async () => {
-    w.google = w.google || {};
-    const maps: MapsNamespace = w.google.maps || (w.google.maps = {});
+    if (!host.google) host.google = {};
+    const maps: MapsNamespace = host.google.maps || (host.google.maps = {});
     if (!maps.importLibrary) {
       const requested = new Set<string>();
       let pending: Promise<void> | null = null;
