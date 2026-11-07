@@ -1,16 +1,14 @@
 import { prisma } from '@bingchun/db';
 import { creditedDeliveredTotals, groupFailedOrderIdsByJob } from './gpsPath';
 import { meritStatusBand } from './jobStateMachine';
+import { jobRiderDistanceKm, roundDistanceKm, sumRiderDistanceKm } from './riderDistance';
 
 /**
  * Rider-facing performance figures for the driver app's Stats tab.
  *
- * Metric definitions deliberately mirror the admin rider KPI endpoints
- * (`getDriverAnalytics` / `getRiderKpiDetail` in
- * `backend/src/controllers/adminDeliveryController.ts`) so a rider and their branch
- * manager never see different numbers for the same window. The duration and shift
- * helpers below are small re-implementations of the private ones in that controller —
- * kept separate on purpose so the admin endpoints stay untouched.
+ * Distance totals use {@link jobRiderDistanceKm} and match admin Delivery Analytics
+ * (`getDriverAnalytics` / `getRiderKpiDetail`): completed jobs, `completedAt` window,
+ * actual GPS km when available.
  */
 
 export type RiderStatsPeriod = 'today' | '7d' | '30d' | 'all';
@@ -214,10 +212,7 @@ export async function computeRiderStats(
 
   let deliveredStops = 0;
   let earningsLkr = 0;
-  let totalDistanceKm = 0;
-
   for (const job of jobs) {
-    totalDistanceKm += job.actualDistanceKm ?? job.totalDistanceKm ?? 0;
     // Same basis as `deliveredTotal` on the job-history endpoint, so the Stats tab
     // and the History tab always add up to the same number.
     const credited = creditedDeliveredTotals(
@@ -241,7 +236,7 @@ export async function computeRiderStats(
     totals: {
       completedRuns: jobs.length,
       deliveredStops,
-      totalDistanceKm: round1(totalDistanceKm),
+      totalDistanceKm: roundDistanceKm(sumRiderDistanceKm(jobs)),
       earningsLkr,
       onlineMinutes: shiftMetrics.onlineMinutes,
       attendanceDays: shiftMetrics.attendanceDays,

@@ -171,14 +171,12 @@ function createSmsAdapter(): SmsAdapter {
 
 export const smsAdapter = createSmsAdapter();
 
-export async function sendOtp(phone: string, code: string, appSignature?: string) {
-  // Android SMS Retriever requires the 11-char app hash on its own line at the end.
-  const hash = (appSignature?.trim() || process.env.ANDROID_SMS_APP_HASH?.trim() || '');
-  const signatureLine = hash ? `\n\n${hash}` : '';
+/** @param _appSignature Ignored; kept so mobile clients can send it without API churn. */
+export async function sendOtp(phone: string, code: string, _appSignature?: string) {
   try {
     await smsAdapter.send({
       to: phone,
-      message: `Your Bing Chun verification code is: ${code}. Valid for 10 minutes.${signatureLine}`,
+      message: `Your Bing Chun verification code is: ${code}. Valid for 10 minutes.`,
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

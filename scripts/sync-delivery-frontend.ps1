@@ -46,6 +46,7 @@ foreach ($f in $storeFiles) {
   if (Test-Path $from) { Copy-Item $from (Join-Path $storeDst $f) -Force }
 }
 Copy-Tree 'types'
+Copy-Tree 'components\maps'
 
 $libDst = Join-Path $dst 'lib'
 New-Item -ItemType Directory -Force -Path $libDst | Out-Null

@@ -31,6 +31,7 @@ import {
   jobOrdersWithDetails,
   maybeEnterReturningPhase,
   recordVehicleFailureAndReleaseJob,
+  executeAdminCancelDeliveryJob,
   REJECT_JOB_BEFORE_FAILURE_MESSAGE,
   ensureJobDeliveryTerminalEvent,
   orderStopImageMeta,
@@ -39,9 +40,15 @@ import {
   resolveCompletionRadiusM,
   resolveJobRouteOrigin,
 } from '../lib/deliveryJobHelpers';
-import { dateStringInColombo, todayDateRange, todayDateString } from '../lib/datetime';
+import {
+  dateStringInColombo,
+  rescheduleMissedJobToToday,
+  todayDateRange,
+  todayDateString,
+} from '../lib/datetime';
 import { applyMeritDelta, MERIT_DELTAS, recordSuccessfulDelivery } from '../lib/meritPoints';
 import { resolveAdminStoreIdForRequest } from '../lib/adminDeliveryHelpers';
+import { isAllBranchRole } from '../middleware/auth';
 import { getMaxCupsPerRider } from '../lib/appSchema';
 import { buildDeliveryRoutePayload } from '../lib/deliveryRouteResponse';
 import { invalidateJobRoute } from '../lib/routeCache';
@@ -175,9 +182,23 @@ async function formatJob(
       (sum, jo) => sum + jo.order.items.reduce((n, item) => n + item.quantity, 0),
       0,
     );
+  const creditedLinks = job.jobOrders.map((jo) => ({
+    orderId: jo.orderId,
+    order: {
+      status: jo.order.status,
+      deliveryFee: jo.order.deliveryFee,
+      cancelledAtStatus:
+        (jo.order as { cancelledAtStatus?: string | null }).cancelledAtStatus ?? null,
+    },
+  }));
+  const { deliveredTotal } = creditedDeliveredTotals(creditedLinks, failedOrderIds);
+
+  const terminalFeeSnapshot =
+    job.status === 'COMPLETED' || job.status === 'VEHICLE_FAILURE' || job.status === 'CANCELLED';
   const storedFees = (job as { totalDeliveryFees?: unknown }).totalDeliveryFees;
-  const totalDeliveryFees =
-    storedFees != null
+  const totalDeliveryFees = terminalFeeSnapshot
+    ? formatTotalDeliveryFeesForApi(null, deliveredTotal)
+    : storedFees != null
       ? serializeDeliveryJobFees(parseDecimalFromDb(storedFees))
       : String(job.jobOrders.reduce((sum, jo) => sum + jo.order.deliveryFee, 0));
 
@@ -649,13 +670,25 @@ export async function reRingDeliveryJob(req: Request, res: Response, next: NextF
       throw new AppError('Job already claimed or no longer active', 409);
     }
 
+    const { from: todayFrom } = todayDateRange();
+    let scheduledAt = job.scheduledAt;
+    const isMissedUnclaimed = job.scheduledAt < todayFrom;
+    if (isMissedUnclaimed) {
+      scheduledAt = rescheduleMissedJobToToday(job.scheduledAt);
+      await prisma.deliveryJob.update({
+        where: { id: jobId },
+        data: { scheduledAt },
+      });
+      broadcastDeliveryJobUpdated(job.storeId, { jobId, status: 'SCHEDULED' });
+    }
+
     const broadcastedAt = new Date();
     const offer = buildNewJobBroadcastPayload(
       {
         id: job.id,
         title: job.title,
         status: 'SCHEDULED',
-        scheduledAt: job.scheduledAt,
+        scheduledAt,
         storeId: job.storeId,
         rideCode: job.rideCode,
         totalCups: job.totalCups,
@@ -674,7 +707,76 @@ export async function reRingDeliveryJob(req: Request, res: Response, next: NextF
       buildNewJobPushFromBroadcast(offer, { forceRing: true }),
     ).catch(() => {});
 
-    return success(res, { reRung: true, jobId });
+    return success(res, { reRung: true, jobId, rescheduled: isMissedUnclaimed });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const adminCancelDeliveryJobSchema = z
+  .object({
+    reason: z.string().min(3).max(500),
+    applyMeritPenalty: z.boolean().optional().default(false),
+    meritDelta: z.number().int().min(-20).max(-1).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.applyMeritPenalty && data.meritDelta == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'meritDelta is required when applyMeritPenalty is true',
+        path: ['meritDelta'],
+      });
+    }
+  });
+
+/** HQ admin: terminal-close a stuck delivery job (orders unchanged) and release the rider. */
+export async function adminCancelDeliveryJob(req: Request, res: Response, next: NextFunction) {
+  try {
+    const jobId = req.params.id as string;
+    const body = adminCancelDeliveryJobSchema.parse(req.body);
+    const adminId = req.user!.sub;
+    const queryStoreId = req.query.storeId as string | undefined;
+
+    const row = await prisma.deliveryJob.findUnique({
+      where: { id: jobId },
+      select: { id: true, storeId: true, rideCode: true, driverId: true },
+    });
+    if (!row) throw new AppError('Job not found', 404);
+
+    let storeId = row.storeId;
+    if (!(isAllBranchRole(req.user?.role) && !queryStoreId)) {
+      const resolved = await resolveAdminStoreIdForRequest(req, queryStoreId);
+      if (row.storeId !== resolved) throw new AppError('Job not found', 404);
+      storeId = resolved;
+    }
+
+    const meritDelta =
+      body.applyMeritPenalty && body.meritDelta != null ? body.meritDelta : null;
+
+    const result = await executeAdminCancelDeliveryJob({
+      jobId,
+      storeId,
+      adminId,
+      reason: body.reason,
+      meritDelta,
+    });
+
+    let meritApplied: { delta: number; newPoints: number } | undefined;
+    if (meritDelta != null && result.releasedDriverId) {
+      const rideRef = row.rideCode ?? jobId;
+      const merit = await applyMeritDelta({
+        driverId: result.releasedDriverId,
+        delta: meritDelta,
+        eventType: 'MANUAL_ADJUSTMENT',
+        reason: `Admin closed stuck ride ${rideRef}: ${body.reason}`,
+        createdBy: adminId,
+      }).catch(() => null);
+      if (merit) {
+        meritApplied = { delta: meritDelta, newPoints: merit.newPoints };
+      }
+    }
+
+    return success(res, { ...result, meritApplied });
   } catch (err) {
     next(err);
   }

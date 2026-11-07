@@ -86,7 +86,7 @@ const otpRequestSchema = z.object({
   phone: z.string().regex(/^(?:\+94|0)[0-9]{9}$/),
   referralCode: z.string().max(32).optional(),
   intent: z.enum(['login', 'recover', 'create_new']).optional(),
-  /** Android SMS Retriever app hash — appended to the OTP SMS for autofill. */
+  /** Legacy Android SMS Retriever hash from the client; not included in the OTP SMS body. */
   appSignature: z.string().min(8).max(16).optional(),
 });
 
@@ -811,7 +811,7 @@ const sriLankanMobile = z.string().regex(/^(?:\+94|0)[0-9]{9}$/, 'Invalid Sri La
 
 const deliveryOtpRequestSchema = z.object({
   phone: sriLankanMobile,
-  /** Android SMS Retriever app hash — appended to the OTP SMS for autofill. */
+  /** Legacy Android SMS Retriever hash from the client; not included in the OTP SMS body. */
   appSignature: z.string().min(8).max(16).optional(),
 });
 

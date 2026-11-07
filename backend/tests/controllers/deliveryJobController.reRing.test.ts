@@ -3,7 +3,7 @@ import { createMockReq, createMockRes, createMockNext, asMockFn } from '../helpe
 
 vi.mock('../../src/lib/prisma', () => ({
   prisma: {
-    deliveryJob: { findUnique: vi.fn() },
+    deliveryJob: { findUnique: vi.fn(), update: vi.fn() },
   },
 }));
 
@@ -27,8 +27,9 @@ vi.mock('../../src/utils/logger', () => ({
 }));
 
 import { reRingDeliveryJob } from '../../src/controllers/deliveryJobController';
+import { dateStringInColombo } from '../../src/lib/datetime';
 import { prisma } from '../../src/lib/prisma';
-import { broadcastNewJob } from '../../src/lib/socket';
+import { broadcastDeliveryJobUpdated, broadcastNewJob } from '../../src/lib/socket';
 import { sendPushToBranchDrivers } from '../../src/lib/driverPush';
 import { AppError } from '../../src/middleware/errorHandler';
 
@@ -65,6 +66,7 @@ function thrownError(next: ReturnType<typeof createMockNext>): AppError {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(prisma.deliveryJob.update).mockResolvedValue({} as never);
 });
 
 /**
@@ -167,5 +169,39 @@ describe('reRingDeliveryJob', () => {
       success: true,
       data: { reRung: true, jobId: 'job-1' },
     });
+  });
+
+  it('reschedules a missed past-day job to today before re-broadcasting', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-07T12:00:00+05:30'));
+    const past = new Date('2026-11-05T10:00:00+05:30');
+    vi.mocked(prisma.deliveryJob.findUnique).mockResolvedValue(unclaimedJob({ scheduledAt: past }) as never);
+
+    await reRingDeliveryJob(req(), createMockRes(), createMockNext());
+
+    expect(prisma.deliveryJob.update).toHaveBeenCalledWith({
+      where: { id: 'job-1' },
+      data: { scheduledAt: expect.any(Date) },
+    });
+    expect(broadcastDeliveryJobUpdated).toHaveBeenCalledWith('store-1', {
+      jobId: 'job-1',
+      status: 'SCHEDULED',
+    });
+    const offer = vi.mocked(broadcastNewJob).mock.calls[0]?.[1] as { scheduledAt: Date };
+    expect(dateStringInColombo(offer.scheduledAt)).toBe('2026-11-07');
+    vi.useRealTimers();
+  });
+
+  it('does not reschedule same-day unclaimed jobs', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-07T12:00:00+05:30'));
+    const sameDay = new Date('2026-11-07T08:00:00+05:30');
+    vi.mocked(prisma.deliveryJob.findUnique).mockResolvedValue(unclaimedJob({ scheduledAt: sameDay }) as never);
+
+    await reRingDeliveryJob(req(), createMockRes(), createMockNext());
+
+    expect(prisma.deliveryJob.update).not.toHaveBeenCalled();
+    expect(broadcastDeliveryJobUpdated).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });

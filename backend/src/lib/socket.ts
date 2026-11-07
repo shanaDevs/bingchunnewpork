@@ -552,6 +552,13 @@ export function broadcastNewJob(storeId: string, job: DeliveryJobBroadcastPayloa
   logger.debug(`Broadcast newDeliveryJob ${job.id} to branch-pool:${storeId}`);
 }
 
+/** Catch-up for a rider who went ONLINE after a pool broadcast they missed. */
+export function emitNewJobToDriver(driverId: string, job: DeliveryJobBroadcastPayload): void {
+  if (!io) return;
+  io.to(`driver:${driverId}`).emit('newDeliveryJob', job);
+  logger.debug(`Emit newDeliveryJob ${job.id} to driver:${driverId} (go-online replay)`);
+}
+
 export function broadcastJobClaimed(
   storeId: string,
   jobId: string,

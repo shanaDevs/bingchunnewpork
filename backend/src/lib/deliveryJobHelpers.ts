@@ -1,4 +1,6 @@
+import { randomUUID } from 'crypto';
 import { DeliveryJobStatus, type Order, type OrderItem, type User, type Address, type OrderStatus } from '@prisma/client';
+import { AppError } from '../middleware/errorHandler';
 import { normalizeProductImageUrl } from './productImages';
 import { prisma } from './prisma';
 import { creditedDeliveredTotals } from '@bingchun/delivery-domain';
@@ -12,9 +14,10 @@ import {
 } from './appSchema';
 import { broadcastDeliveryJobUpdated } from './socket';
 import { invalidateJobRoute } from './routeCache';
-import { ensureDeliveryJobsTables } from './deliverySchema';
+import { ensureDeliveryJobAdminCancellationsSchema, ensureDeliveryJobsTables } from './deliverySchema';
 import { getDeliveryJobsSqlRef } from './deliveryPg';
 import { lkrToDecimal } from './moneyDecimal';
+import { todayDateRange } from './datetime';
 
 export const ACTIVE_JOB_STATUSES = [
   'SCHEDULED',
@@ -407,6 +410,131 @@ export async function recordVehicleFailureAndReleaseJob(opts: {
   broadcastDeliveryJobUpdated(opts.storeId, { jobId: opts.jobId, status: 'VEHICLE_FAILURE' });
 
   return { orderIds };
+}
+
+const ADMIN_CANCEL_BLOCKED_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'VEHICLE_FAILURE']);
+
+/** Whether HQ may close a stuck job (incomplete tab or rider-blocking held run). */
+export function isAdminDeliveryJobCancellable(
+  job: { status: string; driverId: string | null; scheduledAt: Date },
+  deliveredCount: number,
+  todayFrom: Date = todayDateRange().from,
+): boolean {
+  if (ADMIN_CANCEL_BLOCKED_STATUSES.has(job.status)) return false;
+  const pastDue = job.scheduledAt < todayFrom;
+  if (pastDue && classifyIncompleteJob(job, deliveredCount)) return true;
+  if (
+    job.driverId &&
+    (DRIVER_HELD_JOB_STATUSES as readonly string[]).includes(job.status)
+  ) {
+    return true;
+  }
+  if (job.status === 'SCHEDULED' && !job.driverId && job.scheduledAt < todayFrom) {
+    return true;
+  }
+  return false;
+}
+
+export type AdminCancelDeliveryJobResult = {
+  jobId: string;
+  status: 'CANCELLED';
+  releasedDriverId: string | null;
+};
+
+/** Close a stuck delivery job as CANCELLED; orders keep their current status. */
+export async function executeAdminCancelDeliveryJob(opts: {
+  jobId: string;
+  storeId: string;
+  adminId: string;
+  reason: string;
+  meritDelta?: number | null;
+}): Promise<AdminCancelDeliveryJobResult> {
+  const { from: todayFrom } = todayDateRange();
+  await ensureDeliveryJobAdminCancellationsSchema();
+
+  const job = await prisma.deliveryJob.findUnique({
+    where: { id: opts.jobId },
+    include: {
+      jobOrders: {
+        include: {
+          order: {
+            select: {
+              id: true,
+              status: true,
+              deliveryFee: true,
+              cancelledAtStatus: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!job || job.storeId !== opts.storeId) throw new AppError('Job not found', 404);
+
+  const deliveredCount = job.jobOrders.filter((jo) => jo.order.status === 'DELIVERED').length;
+  if (!isAdminDeliveryJobCancellable(job, deliveredCount, todayFrom)) {
+    throw new AppError('This delivery job cannot be cancelled', 400);
+  }
+
+  const failedAttempts = await prisma.deliveryAttempt.findMany({
+    where: { jobId: opts.jobId, outcome: { not: 'DELIVERED' } },
+    select: { orderId: true },
+    distinct: ['orderId'],
+  });
+  const failedOrderIds = new Set(failedAttempts.map((a) => a.orderId));
+  const { deliveredTotal } = creditedDeliveredTotals(job.jobOrders, failedOrderIds);
+
+  const previousStatus = job.status;
+  const driverId = job.driverId;
+
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.deliveryJob.updateMany({
+      where: {
+        id: opts.jobId,
+        status: { notIn: ['COMPLETED', 'CANCELLED', 'VEHICLE_FAILURE'] as DeliveryJobStatus[] },
+      },
+      data: {
+        status: 'CANCELLED',
+        completedAt: new Date(),
+        totalDeliveryFees: lkrToDecimal(deliveredTotal),
+      },
+    });
+    if (updated.count === 0) throw new AppError('Job could not be cancelled', 409);
+
+    await tx.deliveryJobAdminCancellation.create({
+      data: {
+        id: randomUUID(),
+        jobId: opts.jobId,
+        cancelledByAdminId: opts.adminId,
+        reason: opts.reason,
+        meritDelta: opts.meritDelta ?? null,
+        previousJobStatus: previousStatus,
+      },
+    });
+
+    const auditNote = `Admin closed ride: ${opts.reason}`;
+    for (const link of job.jobOrders) {
+      if (link.order.status === 'DELIVERED' || link.order.status === 'CANCELLED') continue;
+      await tx.deliveryEvent.create({
+        data: {
+          id: randomUUID(),
+          orderId: link.orderId,
+          jobId: opts.jobId,
+          driverId,
+          state: 'FAILED',
+          note: auditNote,
+        },
+      });
+    }
+  }, { maxWait: 10_000, timeout: 30_000 });
+
+  await releaseDriverWhenIdle(driverId);
+  await promoteNextQueuedJob(driverId);
+
+  invalidateJobRoute(opts.jobId);
+  broadcastDeliveryJobUpdated(opts.storeId, { jobId: opts.jobId, status: 'CANCELLED' });
+
+  return { jobId: opts.jobId, status: 'CANCELLED', releasedDriverId: driverId };
 }
 
 /** Flip the driver back to ONLINE once they hold no assigned/queued/in-progress/returning run. */
@@ -804,6 +932,63 @@ export function deriveAdminOrderDeliveryState(
     failureOutcome: null,
     failureNote: null,
   };
+}
+
+/** Lightweight delivery state for admin job list timelines (detail endpoint stays authoritative). */
+export function deliveryStateFromOrderStatusForList(
+  status: string,
+  cancelReason?: string | null,
+): AdminOrderDeliveryState['deliveryState'] {
+  if (status === 'DELIVERED') return 'Delivered';
+  if (status === 'CANCELLED') {
+    return 'Failed';
+  }
+  void cancelReason;
+  return 'Pending';
+}
+
+export type ListJobOrderStop = {
+  orderId: string;
+  orderNumber: string;
+  sequence: number;
+  status: string;
+  deliveryState: AdminOrderDeliveryState['deliveryState'];
+  failureOutcome: string | null;
+};
+
+export function mapListJobOrderStops<
+  T extends {
+    orderId: string;
+    sequence: number;
+    order: { id: string; orderNumber: string; status: string; cancelReason?: string | null };
+  },
+>(links: T[]): ListJobOrderStop[] {
+  return [...links]
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((jo) => {
+      const deliveryState = deliveryStateFromOrderStatusForList(
+        jo.order.status,
+        jo.order.cancelReason,
+      );
+      const failureOutcome =
+        jo.order.status === 'CANCELLED' ? (jo.order.cancelReason ?? 'CANCELLED') : null;
+      return {
+        orderId: jo.orderId,
+        orderNumber: jo.order.orderNumber,
+        sequence: jo.sequence,
+        status: jo.order.status,
+        deliveryState,
+        failureOutcome,
+      };
+    });
+}
+
+const POST_PICKUP_JOB_STATUSES_LIST = new Set(['IN_PROGRESS', 'RETURNING', 'COMPLETED']);
+
+/** Branch pickup node on list timelines — avoids per-job jobHasPickedUp on list queries. */
+export function jobPickedUpForList(startedAt: Date | null | undefined, jobStatus: string): boolean {
+  if (startedAt) return true;
+  return POST_PICKUP_JOB_STATUSES_LIST.has(jobStatus);
 }
 
 /** Admin detail include — events and attempts scoped to the current job. */
