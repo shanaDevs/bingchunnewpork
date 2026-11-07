@@ -2,11 +2,6 @@
 
 import { hasPositiveLkr } from '@/components/admin/settlementTypes';
 import type { PayoutReportValues } from '@/components/admin/resolvePayoutReportValues';
-import {
-  resolveBranchWalletBeforeGatewayLkr,
-  resolveReportNetPayoutFinalPayLkr,
-  resolveSecondCycleGatewayLkr,
-} from '@/components/admin/resolvePayoutReportValues';
 import { plainAmount, signedAmount } from '@/components/admin/payoutFinancialReportFormatting';
 import {
   InfoFormulaLine,
@@ -21,8 +16,6 @@ import {
   PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL,
   PAYOUT_FIRST_ONLINE_DELIVERY_SUBTOTAL_LABEL,
   PAYOUT_FIRST_ONLINE_PICKUP_SUBTOTAL_LABEL,
-  PAYOUT_SECOND_BRANCH_WALLET_BEFORE_GATEWAY_LABEL,
-  PAYOUT_SECOND_CYCLE_PRIOR_ONLINE_WALLET_LABEL,
 } from '@/components/admin/payoutFirstCycleCopy';
 
 export function DiscountDetailsInfoPopover({ values }: { values: PayoutReportValues }) {
@@ -314,116 +307,6 @@ export function NetPlatformAmountInfoPopover({ values }: { values: PayoutReportV
           />
         ) : null}
         <ReportRow label="Net Platform Amount" value={plainAmount(values.netPlatformAmountLkr)} bold />
-      </div>
-    </SectionInfoPopover>
-  );
-}
-
-export function NetBranchPayoutInfoPopover({ values }: { values: PayoutReportValues }) {
-  const walletLkr = values.onlinePaymentsCollectedLkr;
-  const jasonLkr = values.jasonDiscountsLkr;
-  const gatewayRatePct = values.gatewayRatePct;
-  const isFirstCyclePayout = values.cycleStage === 'FIRST';
-  const walletLabel = isFirstCyclePayout
-    ? PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL
-    : 'Online Wallet Amount';
-
-  if (isFirstCyclePayout) {
-    return (
-      <SectionInfoPopover ariaLabel="Net Branch Payout calculation details">
-        <InfoPopoverHeader
-          title="Net Branch Payout"
-          description="Payout 1: pickup and delivery online revenue after discounts, minus the payment gateway fee. Commission and further discount reconciliation are settled in Payout 2."
-        />
-        <div className="space-y-2">
-          <ReportRow label={walletLabel} value={plainAmount(walletLkr)} />
-          {hasPositiveLkr(values.gatewayLkr) ? (
-            <>
-              <InfoFormulaLine>
-                Payment Gateway Fee = {walletLabel} × {gatewayRatePct}% ={' '}
-                {plainAmount(walletLkr)} × {gatewayRatePct}% = {plainAmount(values.gatewayLkr)}
-              </InfoFormulaLine>
-              <ReportRow
-                label="− Payment Gateway Fee"
-                value={signedAmount(values.gatewayLkr, '−')}
-                valueTone="red"
-              />
-            </>
-          ) : null}
-        </div>
-      </SectionInfoPopover>
-    );
-  }
-
-  const priorLkr = values.priorOnlineWalletAmountLkr;
-  const beforeGatewayLkr = resolveBranchWalletBeforeGatewayLkr(values);
-  const gatewayLkr = resolveSecondCycleGatewayLkr(values) ?? values.gatewayLkr;
-  const finalPayLkr = resolveReportNetPayoutFinalPayLkr(values);
-
-  return (
-    <SectionInfoPopover ariaLabel="Net Branch Payout calculation details">
-      <InfoPopoverHeader
-        title="Net Branch Payout"
-        description="Payout 2: online wallet and Jason top-up, minus Payout 1 and platform share, then payment gateway fee on the remaining online wallet."
-      />
-      <div className="space-y-2">
-        <ReportRow label="Online Wallet Amount" value={plainAmount(walletLkr)} />
-        <ReportRow label="+ Jason Discounts" value={signedAmount(jasonLkr, '+')} />
-        {hasPositiveLkr(values.nonReturningRefundsBranchGrossLkr) ? (
-          <ReportRow
-            label="+ Non-returning refunds (Branch)"
-            value={signedAmount(values.nonReturningRefundsBranchGrossLkr, '+')}
-          />
-        ) : null}
-        {hasPositiveLkr(priorLkr) ? (
-          <ReportRow
-            label={PAYOUT_SECOND_CYCLE_PRIOR_ONLINE_WALLET_LABEL}
-            value={signedAmount(priorLkr, '−')}
-            valueTone="red"
-          />
-        ) : null}
-        {hasPositiveLkr(values.netPlatformAmountLkr) ? (
-          <ReportRow
-            label="− Net Platform Amount"
-            value={signedAmount(values.netPlatformAmountLkr, '−')}
-            valueTone="red"
-          />
-        ) : null}
-        {beforeGatewayLkr != null ? (
-          <ReportRow
-            label={PAYOUT_SECOND_BRANCH_WALLET_BEFORE_GATEWAY_LABEL}
-            value={plainAmount(beforeGatewayLkr)}
-            bold
-          />
-        ) : null}
-        {hasPositiveLkr(gatewayLkr) ? (
-          <>
-            <InfoFormulaLine>
-              Payment Gateway Fee = Branch wallet before gateway × {gatewayRatePct}% ={' '}
-              {plainAmount(beforeGatewayLkr ?? 0)} × {gatewayRatePct}% = {plainAmount(gatewayLkr)}
-            </InfoFormulaLine>
-            <ReportRow
-              label={`− Payment Gateway Fee ${gatewayRatePct}%`}
-              value={signedAmount(gatewayLkr, '−')}
-              valueTone="red"
-            />
-          </>
-        ) : null}
-        {hasPositiveLkr(values.cancelledByBranchGatewayFeeLkr) ? (
-          <ReportRow
-            label="− Bank penalty (branch cancellation)"
-            value={signedAmount(values.cancelledByBranchGatewayFeeLkr, '−')}
-            valueTone="red"
-          />
-        ) : null}
-        <InfoFormulaLine>
-          Net payout (final pay amount) = {plainAmount(beforeGatewayLkr ?? 0)} −{' '}
-          {plainAmount(gatewayLkr)}
-          {hasPositiveLkr(values.cancelledByBranchGatewayFeeLkr)
-            ? ` − ${plainAmount(values.cancelledByBranchGatewayFeeLkr)}`
-            : ''}{' '}
-          = {plainAmount(finalPayLkr)}
-        </InfoFormulaLine>
       </div>
     </SectionInfoPopover>
   );

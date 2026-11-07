@@ -5,7 +5,7 @@ import type { LucideIcon } from 'lucide-react';
 
 import { formatMoneyAmount } from '@/lib/receipt';
 import {
-  COMMISSION_SLABS,
+  resolveCommissionSlabs,
   formatCommissionRate,
   getNextTierProgress,
   type SlabInfo,
@@ -112,10 +112,11 @@ export default function CommissionBreakdownBadges({
   isCurrentMonth = true,
   showActiveTierLabel = true,
 }: Props) {
+  const slabs = resolveCommissionSlabs(slabInfo?.slabs);
   const activeIndex = slabInfo?.slabIndex ?? 0;
   const effectiveRate = slabInfo?.effectiveRate;
   const next =
-    slabInfo != null ? getNextTierProgress(slabInfo.monthlyBase, slabInfo.slabIndex) : null;
+    slabInfo != null ? getNextTierProgress(slabInfo.monthlyBase, slabInfo.slabIndex, slabs) : null;
 
   const channelSubtitle = [
     isCurrentMonth ? 'This month' : periodLabel ? `Period: ${periodLabel}` : 'Selected period',
@@ -246,7 +247,7 @@ export default function CommissionBreakdownBadges({
                   </tr>
                 </thead>
                 <tbody>
-                  {COMMISSION_SLABS.map((slab, index) => {
+                  {slabs.map((slab, index) => {
                     const isActive = index === activeIndex;
                     return (
                       <tr

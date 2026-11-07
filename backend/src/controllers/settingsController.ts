@@ -160,11 +160,13 @@ const updateSchema = z.object({
   webxpayApiPassword: z.string().optional(),
   webxpayMode: z.enum(['sandbox', 'live']).optional(),
   webxpayReturnUrl: z.string().optional(),
+  password: z.string().min(1, 'PIN is required'),
 });
 
 export async function updateAdminPaymentSettings(req: Request, res: Response, next: NextFunction) {
   try {
     const data = updateSchema.parse(req.body);
+    await verifyAdminPin(req.user?.sub, data.password);
     const updated = await updatePaymentSettings({
       paymentMethods: (data.paymentMethods || {}) as Record<string, PaymentMethodConfig>,
       activeOnlineGateway: data.activeOnlineGateway as OnlineGateway | undefined,
@@ -334,11 +336,13 @@ const appSettingsSchema = z.object({
   commissionSlabs: z
     .array(
       z.object({
-        upTo: z.number().min(0),
-        rate: z.number().min(0).max(1),
+        upTo: z.number().finite().min(0),
+        rate: z.number().finite().min(0).max(1),
         label: z.string().max(120).optional(),
       }),
     )
+    .min(2)
+    .max(6)
     .optional(),
   deliveryPlatformFeeRate: z.number().min(0).max(1).optional(),
   pickupAllowAddItemsPaidOnline: z.boolean().optional(),
@@ -390,12 +394,23 @@ const appSettingsSchema = z.object({
   cancelWindowMinutes: z.number().int().min(1).max(120).optional(),
   pickupMaxOrderAmount: z.number().int().min(0).max(50_000_000).nullable().optional(),
   googleMapsApiKey: z.string().max(256).nullable().optional(),
+  password: z.string().min(1).optional(),
 });
 
 export async function updateAppSettings(req: Request, res: Response, next: NextFunction) {
   try {
     await ensureAppSchema();
     const data = appSettingsSchema.parse(req.body);
+    const paymentSettingsPatch =
+      data.convenientFeeRate !== undefined ||
+      data.pickupConvenientFeeRate !== undefined ||
+      data.gatewayFeeRate !== undefined ||
+      data.deliveryPlatformFeeRate !== undefined ||
+      data.commissionSlabs !== undefined;
+    if (paymentSettingsPatch && req.user?.role === 'SYSTEM_ADMIN') {
+      const password = data.password ?? '';
+      await verifyAdminPin(req.user?.sub, password);
+    }
     const {
       maxCupsPerRider,
       branchCompletionRadiusM,
@@ -429,6 +444,7 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       deliveryPlatformFeeRate,
       commissionSlabs,
       googleMapsApiKey,
+      password: _pinForVerification,
       ...prismaData
     } = data;
 
@@ -561,7 +577,11 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
     }
 
     if (data.commissionSlabs != null) {
-      await setCommissionSlabs(data.commissionSlabs);
+      try {
+        await setCommissionSlabs(data.commissionSlabs);
+      } catch (err) {
+        throw new AppError(err instanceof Error ? err.message : 'Invalid commission slabs', 400);
+      }
     }
     const savedGoogleMapsApiKey = googleMapsApiKey !== undefined
       ? await setGoogleMapsApiKey(googleMapsApiKey)

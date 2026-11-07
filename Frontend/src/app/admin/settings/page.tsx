@@ -91,6 +91,7 @@ export default function AdminSettingsPage() {
   const [cancelWindowMinutes, setCancelWindowMinutes] = useState('10');
   const [pickupMaxOrderAmount, setPickupMaxOrderAmount] = useState('');
   const [pinGateOpen, setPinGateOpen] = useState(false);
+  const [paymentPinGateOpen, setPaymentPinGateOpen] = useState(false);
   const [spinDurationSeconds, setSpinDurationSeconds] = useState('8');
   const [spinsPerWindow, setSpinsPerWindow] = useState('1');
   const [spinWindowValue, setSpinWindowValue] = useState('1');
@@ -325,8 +326,35 @@ export default function AdminSettingsPage() {
     }
   }, [appSettings]);
 
+  const buildCommissionSlabsPayload = () => {
+    const threshold = parseFloat(commissionSlab1UpTo);
+    const rateBelowPct = parseFloat(commissionSlab1RatePercent);
+    const rateAbovePct = parseFloat(commissionSlab2RatePercent);
+    if (!Number.isFinite(threshold) || threshold <= 0) {
+      throw new Error('Commission threshold must be a positive LKR amount');
+    }
+    if (!Number.isFinite(rateBelowPct) || rateBelowPct < 0 || rateBelowPct > 100) {
+      throw new Error('Rate at/below threshold must be between 0 and 100');
+    }
+    if (!Number.isFinite(rateAbovePct) || rateAbovePct < 0 || rateAbovePct > 100) {
+      throw new Error('Rate above threshold must be between 0 and 100');
+    }
+    return [
+      {
+        upTo: threshold,
+        rate: rateBelowPct / 100,
+        label: `Up to LKR ${threshold.toLocaleString('en-LK')}`,
+      },
+      {
+        upTo: Number.MAX_SAFE_INTEGER,
+        rate: rateAbovePct / 100,
+        label: `Above LKR ${threshold.toLocaleString('en-LK')}`,
+      },
+    ];
+  };
+
   const savePayments = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (password: string) => {
       await adminFetch('/settings/payment', {
         method: 'PUT',
         body: JSON.stringify({
@@ -341,6 +369,7 @@ export default function AdminSettingsPage() {
           ...(webxpayApiPassword ? { webxpayApiPassword } : {}),
           webxpayMode,
           webxpayReturnUrl: webxpayReturnUrl || undefined,
+          password,
         }),
       });
       await adminFetch('/settings/app', {
@@ -350,18 +379,8 @@ export default function AdminSettingsPage() {
           pickupConvenientFeeRate: parseFloat(pickupConvenienceFeePercent) / 100,
           gatewayFeeRate: parseFloat(gatewayFeePercent) / 100,
           deliveryPlatformFeeRate: parseFloat(deliveryPlatformFeePercent) / 100,
-          commissionSlabs: [
-            {
-              upTo: parseFloat(commissionSlab1UpTo),
-              rate: parseFloat(commissionSlab1RatePercent) / 100,
-              label: `Up to LKR ${Number(commissionSlab1UpTo).toLocaleString('en-LK')}`,
-            },
-            {
-              upTo: Number.MAX_SAFE_INTEGER,
-              rate: parseFloat(commissionSlab2RatePercent) / 100,
-              label: `Above LKR ${Number(commissionSlab1UpTo).toLocaleString('en-LK')}`,
-            },
-          ],
+          commissionSlabs: buildCommissionSlabsPayload(),
+          password,
         }),
       });
     },
@@ -416,6 +435,11 @@ export default function AdminSettingsPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const handleSavePayments = () => {
+    if (savePayments.isPending) return;
+    setPaymentPinGateOpen(true);
+  };
 
   const handleSaveOperations = async () => {
     if (saveOperations.isPending) return;
@@ -1040,7 +1064,7 @@ export default function AdminSettingsPage() {
                 <label className="text-xs text-muted block mb-1">Branch commission slabs</label>
                 <div className="grid gap-2 sm:grid-cols-3">
                   <div>
-                    <span className="text-[11px] text-muted">Net amount up to (LKR)</span>
+                    <span className="text-[11px] text-muted">Commission threshold (LKR)</span>
                     <input
                       className="input-field mt-1"
                       type="number"
@@ -1791,7 +1815,7 @@ export default function AdminSettingsPage() {
           )}
           {resolvedTab === 'payments' && superAdmin && (
             <TabSaveButton
-              onClick={() => savePayments.mutate()}
+              onClick={handleSavePayments}
               pending={savePayments.isPending}
               label="Save payment settings"
             />
@@ -1842,6 +1866,20 @@ export default function AdminSettingsPage() {
         titleId="pickup-max-pin-title"
         inputId="pickup-max-pin"
         description="Enter your admin PIN to confirm this pickup order amount limit."
+      />
+      <AdminPinGateModal
+        open={paymentPinGateOpen}
+        onClose={() => {
+          if (!savePayments.isPending) setPaymentPinGateOpen(false);
+        }}
+        onVerified={(pin) => {
+          savePayments.mutate(pin);
+        }}
+        apiBase={getApiBaseUrl()}
+        busy={savePayments.isPending}
+        titleId="payment-settings-pin-title"
+        inputId="payment-settings-pin"
+        description="Enter your admin passcode to save payment gateway, fees, and commission settings."
       />
     </div>
   );

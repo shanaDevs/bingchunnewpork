@@ -560,6 +560,8 @@ export type PeriodBreakdown = {
    * Reuse for payout validation / net-preview — do not re-scan orders.
    */
   channelBreakdown: Record<CommissionChannel, ChannelSettlementRow>;
+  /** Commission tier schedule used for this breakdown (DB-configured). */
+  commissionSlabs: readonly CommissionSlab[];
   cycleStage?: PayoutCycleStage;
   cycleFrom?: string;
   cycleTo?: string;
@@ -1602,6 +1604,7 @@ export async function computeBreakdownForPeriodOrders(
       rejectedRefundConvenienceFee: rejectedRefundPayout.rejectedRefundConvenienceFee,
       rejectedRefundDeliveryFee: rejectedRefundPayout.rejectedRefundDeliveryFee,
       channelBreakdown: emptySettlementBreakdown(gatewayFeeRate),
+      commissionSlabs,
       ...EMPTY_SHARED_PROMO_BREAKDOWN_FIELDS,
     };
   }
@@ -1746,6 +1749,7 @@ export async function computeBreakdownForPeriodOrders(
     rejectedRefundConvenienceFee: rejectedRefundPayout.rejectedRefundConvenienceFee,
     rejectedRefundDeliveryFee: rejectedRefundPayout.rejectedRefundDeliveryFee,
     channelBreakdown,
+    commissionSlabs,
     priorOnlineWalletAmountCents:
       cycleStage === 'SECOND' ? priorOnlineWalletAmountCents : undefined,
     remainingOnlineWalletCents,

@@ -10,7 +10,6 @@ import { finalLkr, plainAmount, signedAmount } from '@/components/admin/payoutFi
 import {
   CommissionInfoPopover,
   DiscountDetailsInfoPopover,
-  NetBranchPayoutInfoPopover,
   NetPlatformAmountInfoPopover,
   OnlineWalletInfoPopover,
   RefundsInfoPopover,
@@ -210,10 +209,7 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
         )}
       </ReportSection>
 
-      <ReportSection
-        title="Net Branch Payout"
-        info={<NetBranchPayoutInfoPopover values={values} />}
-      >
+      <ReportSection title="Net Branch Payout">
         {hasNetBranchBreakdown && (
           <>
             {hasPositiveLkr(values.onlinePaymentsCollectedLkr) && (

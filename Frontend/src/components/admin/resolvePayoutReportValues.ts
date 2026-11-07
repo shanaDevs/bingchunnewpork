@@ -1,6 +1,7 @@
 import {
   commissionRateToDisplayPct,
   getEffectiveRate,
+  resolveCommissionSlabs,
 } from '@/components/admin/commissionUtils';
 import { formatMoneyAmount } from '@/lib/receipt';
 import {
@@ -499,9 +500,12 @@ function resolveApplicableSlabCommissionRateDisplay(params: {
   periodBreakdownLkr: PayoutFormulaBreakdownLkr;
 }): { applicableSlabCommissionRatePct: number | null; slabMonthlyBaseLkr: number | null } {
   const monthlyBase = params.preview?.slabInfo.monthlyBase;
+  const payoutSlabs = resolveCommissionSlabs(params.preview?.slabInfo.slabs);
   if (monthlyBase != null && monthlyBase >= 0) {
     return {
-      applicableSlabCommissionRatePct: commissionRateToDisplayPct(getEffectiveRate(monthlyBase)),
+      applicableSlabCommissionRatePct: commissionRateToDisplayPct(
+        getEffectiveRate(monthlyBase, payoutSlabs),
+      ),
       slabMonthlyBaseLkr: monthlyBase,
     };
   }

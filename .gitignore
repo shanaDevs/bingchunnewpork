@@ -45,6 +45,9 @@ test-results/
 # Backend test files
 backend/tests/
 
+# Frontend-v2 unit tests (local only — do not publish)
+Frontend-v2/**/*.test.ts
+
 # Next.js build output
 .next/
 out/
