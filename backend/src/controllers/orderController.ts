@@ -1281,7 +1281,9 @@ export async function placeOrder(req: Request, res: Response, next: NextFunction
       }
 
       return created;
-    }).catch(async (err: unknown) => {
+    // Remote Postgres (high RTT) + promo/loyalty/stock work needs more than Prisma's
+    // default 5s interactive timeout — otherwise placeOrder fails with P2028.
+    }, { maxWait: 20_000, timeout: 60_000 }).catch(async (err: unknown) => {
       const duplicate = typeof err === 'object' && err !== null && 'code' in err && (err as { code?: string }).code === 'P2002';
       if (!duplicate || !idempotencyKey) {
         throw err;

@@ -1,7 +1,8 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, ZoomControl, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Popup, Polyline, ZoomControl, useMap } from 'react-leaflet';
+import AppMapTiles from '@/components/maps/AppMapTiles';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { DELIVERY_RIDER_MARKER_GLYPH } from '@/components/delivery/DeliveryBikeMarkerIcon';
@@ -151,10 +152,7 @@ export default function AdminLiveDriversMap({
   return (
     <div className={`delivery-map-wrap h-full w-full ${className}`}>
       <MapContainer center={center} zoom={12} scrollWheelZoom zoomControl={false} className="h-full w-full">
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        <AppMapTiles />
         <ZoomControl position={zoomPosition} />
         <FitBounds points={points} mode={fitBoundsMode} />
         <FocusDriver position={focusPosition} nonce={focusNonce} />

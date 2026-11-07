@@ -25,7 +25,7 @@ export const DEFAULT_KEYWORDS = [
 export const BUSINESS_PHONE = '+94765466686';
 export const BUSINESS_PHONE_DISPLAY = '076 546 6686';
 export const BUSINESS_EMAIL = 'info@bingchunsrilanka.com';
-export const BUSINESS_HOURS = 'Mo-Su 09:00-23:00';
+export const BUSINESS_HOURS = 'Mo-Su 08:00-23:00';
 
 export const DEFAULT_OG_IMAGE = '/icons/icon-512x512.png';
 

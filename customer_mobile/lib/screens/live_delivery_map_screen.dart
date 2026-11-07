@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../models/order.dart';
+import '../widgets/app_map_tiles.dart';
 import '../providers/auth_provider.dart';
 import '../providers/order_provider.dart';
 import '../services/order_socket_service.dart';
@@ -306,10 +307,7 @@ class _LiveDeliveryMapScreenState extends ConsumerState<LiveDeliveryMapScreen> {
                 ),
               ),
               children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'lk.bingchun.bing_chun_customer',
-                ),
+                const AppMapTiles(),
                 if (line.length >= 2)
                   PolylineLayer(
                     polylines: [

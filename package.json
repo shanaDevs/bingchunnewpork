@@ -11,9 +11,9 @@
     "services/*"
   ],
   "scripts": {
-    "dev": "node init && npm run db:generate && npm run build -w @bingchun/db --ignore-scripts && concurrently -n backend,frontend,delivery,delivery-fe -c blue,green,magenta,cyan \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:delivery\" \"npm run dev:delivery-frontend\"",
-    "dev:web": "node init && concurrently -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:all": "node init && concurrently -n backend,frontend,delivery,orders,payments,notify -c blue,green,magenta,yellow,cyan,red \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:delivery\" \"npm run dev:orders\" \"npm run dev:payments\" \"npm run dev:notify\"",
+    "dev": "node init && npm run db:generate && npm run build -w @bingchun/db --ignore-scripts && concurrently -n backend,frontend,delivery,delivery-fe,stickers -c blue,green,magenta,cyan,yellow \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:delivery\" \"npm run dev:delivery-frontend\" \"npm run dev:cup-stickers\"",
+    "dev:web": "node init && concurrently -n backend,frontend,stickers -c blue,green,yellow \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:cup-stickers\"",
+    "dev:all": "node init && concurrently -n backend,frontend,delivery,orders,payments,notify,stickers -c blue,green,magenta,yellow,cyan,red,white \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:delivery\" \"npm run dev:orders\" \"npm run dev:payments\" \"npm run dev:notify\" \"npm run dev:cup-stickers\"",
     "dev:backend": "node init && npm run dev -w @bingchun/backend",
     "dev:frontend": "node init && npm run dev -w @bingchun/frontend",
     "dev:delivery": "node init && cross-env DELIVERY_LOAD_BACKEND_ENV=true DELIVERY_PORT=4100 npm run dev -w @bingchun/delivery-service",
@@ -21,6 +21,7 @@
     "dev:orders": "node init && npm run dev -w @bingchun/order-service",
     "dev:payments": "node init && npm run dev -w @bingchun/payment-service",
     "dev:notify": "node init && npm run dev -w @bingchun/notification-service",
+    "dev:cup-stickers": "node tools/cup-sticker-agent/server.mjs",
     "dev:mobile": "node init && cd mobile && ..\\scripts\\flutter.cmd run",
     "dev:driver-android": "node init && cd driver_android && gradlew.bat installDebug",
     "dev:customer": "node init && cd customer_mobile && ..\\scripts\\flutter.cmd run --dart-define=API_BASE=https://bing-chung-b.mp.dartcodes.com",
