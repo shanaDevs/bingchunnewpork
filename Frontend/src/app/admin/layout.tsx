@@ -17,7 +17,6 @@ import AdminNotificationBell from '@/components/admin/AdminNotificationBell';
 import EodStockResetPrompt, { type EodPromptVariant } from '@/components/admin/stock/EodStockResetPrompt';
 import { AdminNotificationProvider } from '@/contexts/AdminNotificationProvider';
 import CashierInstallButton, { useShowCashierInstall } from '@/components/admin/CashierInstallButton';
-import CupStickerPrinterPanel from '@/components/admin/CupStickerPrinterPanel';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import BrandLogo from '@/components/ui/BrandLogo';
 import {
@@ -587,12 +586,6 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
           );
         })}
       </nav>
-
-      {!collapsed && (
-        <div className="border-t border-white/10 p-3">
-          <CupStickerPrinterPanel compact />
-        </div>
-      )}
 
       <div className={`space-y-1 border-t border-white/10 ${collapsed ? 'p-2' : 'p-3'}`}>
         {!mobile && (

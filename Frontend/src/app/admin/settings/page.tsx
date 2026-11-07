@@ -4,8 +4,9 @@ import { getWebxpayReturnUrlHint } from '@/lib/apiBase';
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, Clock, CreditCard, Dices, Gift, Map, MessageCircle, Phone, RefreshCw, Save, Settings, ShoppingBag, Smartphone, Truck } from 'lucide-react';
+import { Bell, Clock, CreditCard, Dices, Gift, Map, MessageCircle, Phone, Printer, RefreshCw, Save, Settings, ShoppingBag, Smartphone, Truck } from 'lucide-react';
 import toast from 'react-hot-toast';
+import CupStickerPrinterPanel from '@/components/admin/CupStickerPrinterPanel';
 import LoyaltyProgramSettings from '@/components/admin/LoyaltyProgramSettings';
 import LoyaltyCampaignDashboard from '@/components/admin/loyalty/LoyaltyCampaignDashboard';
 import PlatformDiscountPaybackSettings from '@/components/admin/PlatformDiscountPaybackSettings';
@@ -572,6 +573,10 @@ export default function AdminSettingsPage() {
                     <Smartphone size={16} />
                     App & spin
                   </TabsTrigger>
+                  <TabsTrigger value="printer" className="h-auto flex-none gap-2 px-3 py-2">
+                    <Printer size={16} />
+                    Printer
+                  </TabsTrigger>
                 </>
               ) : (
                 <>
@@ -590,6 +595,10 @@ export default function AdminSettingsPage() {
                   <TabsTrigger value="messaging" className="h-auto flex-none gap-2 px-3 py-2">
                     <Bell size={16} />
                     Notifications
+                  </TabsTrigger>
+                  <TabsTrigger value="printer" className="h-auto flex-none gap-2 px-3 py-2">
+                    <Printer size={16} />
+                    Printer
                   </TabsTrigger>
                 </>
               )}
@@ -1447,6 +1456,12 @@ export default function AdminSettingsPage() {
                 <a href="/admin/loyalty" className="text-brand hover:underline">Loyalty Rules</a>.
               </p>
               <LoyaltyCampaignDashboard branchMode={false} embedMode />
+            </div>
+          )}
+
+          {resolvedTab === 'printer' && (
+            <div className="card p-5">
+              <CupStickerPrinterPanel />
             </div>
           )}
 
