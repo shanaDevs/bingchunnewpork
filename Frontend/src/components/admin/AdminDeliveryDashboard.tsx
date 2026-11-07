@@ -29,6 +29,7 @@ import AdminRiderKpiDetailModal from '@/components/admin/AdminRiderKpiDetailModa
 import SearchableBranchSelect from '@/components/admin/SearchableBranchSelect';
 import type { AnalyticsFilters } from '@/components/admin/AdminDriverOpsPanel';
 import { RiderAvatar } from '@/components/admin/deliveryAnalyticsUi';
+import { displayRideId } from '@/lib/deliveryDisplay';
 
 async function adminFetch(endpoint: string) {
     const res = await fetch(`${getApiBaseUrl()}${endpoint}`, {
@@ -83,6 +84,7 @@ type DashboardResponse = {
     jobsInProgress: number;
     activeJobs: Array<{
       id: string;
+      rideCode: string | null;
       storeId: string;
       driverId: string | null;
       riderName: string | null;
@@ -135,10 +137,6 @@ function formatMinutesValue(value: number | null | undefined): ReactNode {
       <span className="ml-0.5 text-sm font-normal text-muted">min</span>
     </>
   );
-}
-
-function shortJobId(id: string): string {
-  return id.slice(0, 8).toUpperCase();
 }
 
 function DashboardKpiCard({
@@ -499,7 +497,7 @@ export default function AdminDeliveryDashboard({
               <table className="w-full min-w-[640px] text-sm">
                 <thead>
                   <tr className={tableHeadClass}>
-                    <th className={tableHeadCellClass}>Job</th>
+                    <th className={tableHeadCellClass}>Ride ID</th>
                     <th className={tableHeadCellClass}>Rider</th>
                     <th className={tableHeadCellClass}>Status</th>
                     <th className={`${tableHeadCellClass} text-right`}>Orders</th>
@@ -515,7 +513,7 @@ export default function AdminDeliveryDashboard({
                       key={job.id}
                       tabIndex={0}
                       role="button"
-                      aria-label={`View job ${shortJobId(job.id)}`}
+                      aria-label={`View job ${displayRideId(job.rideCode, job.id)}`}
                       className="group cursor-pointer border-b border-navy-border transition-colors last:border-b-0 hover:bg-brand-subtle/40 focus-visible:bg-brand-subtle/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
                       onClick={() => setDrawerJob({ jobId: job.id, storeId: job.storeId })}
                       onKeyDown={(e) => {
@@ -526,7 +524,7 @@ export default function AdminDeliveryDashboard({
                       }}
                     >
                       <td className={`${tableBodyCellClass} font-mono text-xs text-fg`}>
-                        {shortJobId(job.id)}
+                        {displayRideId(job.rideCode, job.id)}
                       </td>
                       <td className={`${tableBodyCellClass} text-fg`}>{job.riderName ?? '—'}</td>
                       <td className={tableBodyCellClass}>

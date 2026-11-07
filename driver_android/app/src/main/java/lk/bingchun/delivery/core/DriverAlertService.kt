@@ -297,14 +297,14 @@ class DriverAlertService : Service() {
             val obj = socketPayload(raw)
             val id = obj.optString("id")
             if (id.isBlank()) return
-            val scheduledAt = obj.optString("scheduledAt").ifBlank { null }
-            if (scheduledAt != null && !Format.isToday(scheduledAt)) {
-                Log.d(TAG, "Skipping ring for $id — not scheduled today")
-                return
-            }
             val isRebroadcast = obj.has("broadcastedAt") && !obj.isNull("broadcastedAt")
             val forceRing = obj.optBoolean("forceRing", false) ||
                 obj.optString("forceRing") == "true"
+            val scheduledAt = obj.optString("scheduledAt").ifBlank { null }
+            if (!forceRing && scheduledAt != null && !Format.isToday(scheduledAt)) {
+                Log.d(TAG, "Skipping ring for $id — not scheduled today")
+                return
+            }
             if (isRebroadcast) {
                 val alert = parseAlertFromJson(obj)
                 if (isSilenced(id) && !forceRing) {

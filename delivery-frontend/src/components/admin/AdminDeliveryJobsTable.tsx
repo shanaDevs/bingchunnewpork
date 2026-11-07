@@ -2,7 +2,8 @@
 
 import { adminApiFetch, adminApiJson } from '@/lib/adminApi';
 
-import { Fragment, useEffect, useState, type MouseEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Fragment, useEffect, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { Bell, ChevronLeft, ChevronRight, Loader2, MapPin, Route } from 'lucide-react';
 import {
   adminBadgeClass,
@@ -10,7 +11,7 @@ import {
   DELIVERY_JOB_STATUS_LABEL,
   ORDER_STATUS_BADGE,
 } from '@/lib/adminBadges';
-import { formatBranchName, shortJobId } from '@/lib/deliveryDisplay';
+import { displayRideId, formatBranchName } from '@/lib/deliveryDisplay';
 import { getStatusLabel } from '@/lib/orderStatus';
 import { ADMIN_TABLE_PAGE_SIZE, buildPageList } from '@/lib/pagination';
 import type { OrderStatus } from '@/types';
@@ -28,6 +29,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDeliveryJobTitle } from '@/lib/deliveryRoute';
+import DeliveryJobTableTimeline, {
+  type JobListOrderStop,
+} from '@/components/admin/DeliveryJobTableTimeline';
+import { canAdminCancelDeliveryJob } from '@/lib/adminDeliveryQueries';
+import AdminCancelDeliveryJobModal from '@/components/admin/AdminCancelDeliveryJobModal';
+
+export type ReassignedRiderSummary = {
+  id: string;
+  name: string;
+  phone?: string | null;
+  jobId: string;
+  rideCode?: string | null;
+  status: string;
+};
 
 export type DeliveryJobListItem = {
   id: string;
@@ -52,7 +67,11 @@ export type DeliveryJobListItem = {
   completedAt?: string | null;
   storeName?: string;
   storeId?: string;
-  driver?: { id?: string; name: string } | null;
+  driver?: { id?: string; name: string; phone?: string | null } | null;
+  /** Takeover riders for a vehicle-failure job. Empty until someone is assigned. */
+  reassignedRiders?: ReassignedRiderSummary[];
+  pickedUp?: boolean;
+  orders?: JobListOrderStop[];
 };
 
 export type JobFilters = {
@@ -60,6 +79,8 @@ export type JobFilters = {
   driverId: string;
   dateFrom: string;
   dateTo: string;
+  /** Empty = all incomplete sub-statuses on the Incomplete tab. */
+  incompleteReason: string;
 };
 
 /** @deprecated Use JobFilters */
@@ -106,7 +127,7 @@ type DeliveryJobDetail = {
   orderCount: number;
   deliveredCount: number;
   store: { name: string };
-  driver?: { name: string } | null;
+  driver?: { name: string; phone?: string | null } | null;
   orders: JobOrder[];
 };
 
@@ -127,11 +148,45 @@ function formatScheduleDate(value: string) {
   return new Date(value).toLocaleString('en-LK', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function jobHasProgressFooter(job: DeliveryJobListItem): boolean {
+  return (job.orders?.length ?? 0) > 0 || job.orderCount > 0;
+}
+
+function showRouteProgressFooter(
+  variant: 'active' | 'completed' | 'incomplete',
+  job: DeliveryJobListItem,
+): boolean {
+  if (variant === 'completed') return false;
+  return jobHasProgressFooter(job);
+}
+
+function JobRouteTimeline({ job }: { job: DeliveryJobListItem }) {
+  if (job.orders?.length) {
+    return (
+      <DeliveryJobTableTimeline
+        jobStatus={job.status}
+        pickedUp={job.pickedUp}
+        orders={job.orders}
+        layout="footer"
+      />
+    );
+  }
+  if (job.orderCount > 0) {
+    return (
+      <p className="text-center text-[11px] text-muted tabular-nums">
+        {job.deliveredCount ?? 0}/{job.orderCount} delivered
+      </p>
+    );
+  }
+  return null;
+}
+
 const RE_RING_VISIBLE_AFTER_MS = 30_000;
 const RE_RING_COOLDOWN_MS = 30_000;
 
-/** Re-notify branch drivers about a job still sitting unclaimed 30s+ after creation. */
+/** Re-notify branch drivers about a same-day job still unclaimed 30s+ after creation (Active tab only). */
 function ReRingButton({ job }: { job: DeliveryJobListItem }) {
+  const queryClient = useQueryClient();
   const [now, setNow] = useState(() => Date.now());
   const [lastRungAt, setLastRungAt] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
@@ -144,7 +199,8 @@ function ReRingButton({ job }: { job: DeliveryJobListItem }) {
 
   const isUnclaimed = job.status === 'SCHEDULED' && !job.driver;
   const createdAtMs = job.createdAt ? new Date(job.createdAt).getTime() : null;
-  const eligible = isUnclaimed && createdAtMs != null && now - createdAtMs >= RE_RING_VISIBLE_AFTER_MS;
+  const eligible =
+    isUnclaimed && createdAtMs != null && now - createdAtMs >= RE_RING_VISIBLE_AFTER_MS && !job.displayStatus;
 
   if (!eligible) return null;
 
@@ -162,6 +218,7 @@ function ReRingButton({ job }: { job: DeliveryJobListItem }) {
         method: 'POST',
       });
       setLastRungAt(Date.now());
+      void queryClient.invalidateQueries({ queryKey: ['admin-delivery-jobs-active'] });
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Could not re-ring drivers');
     } finally {
@@ -199,6 +256,81 @@ function formatAmount(amount?: number | null): string {
 function formatDistance(km?: number | null): string {
   if (km == null) return '—';
   return `${km.toFixed(1)} km`;
+}
+
+function RiderMobileCell({ phone }: { phone?: string | null }) {
+  if (!phone?.trim()) {
+    return <span className="text-slate-400">—</span>;
+  }
+  return (
+    <a
+      href={`tel:${phone.trim()}`}
+      onClick={(e) => e.stopPropagation()}
+      className="text-brand hover:underline whitespace-nowrap font-medium"
+    >
+      {phone.trim()}
+    </a>
+  );
+}
+
+function isVehicleFailureJob(job: DeliveryJobListItem): boolean {
+  return (job.displayStatus ?? job.status) === 'VEHICLE_FAILURE';
+}
+
+function RiderFieldLabel({ children }: { children: string }) {
+  return (
+    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{children}</p>
+  );
+}
+
+function JobDriverCell({ job }: { job: DeliveryJobListItem }) {
+  const original =
+    job.driver?.name ?? <span className="text-slate-400 italic font-normal">Unassigned</span>;
+  if (!isVehicleFailureJob(job)) return <>{original}</>;
+
+  const reassigned = job.reassignedRiders ?? [];
+  return (
+    <div className="space-y-1.5">
+      <div>
+        <RiderFieldLabel>Rider</RiderFieldLabel>
+        <p>{original}</p>
+      </div>
+      <div>
+        <RiderFieldLabel>Reassigned</RiderFieldLabel>
+        {reassigned.length === 0 ? (
+          <p className="text-slate-400 italic font-normal">Not reassigned</p>
+        ) : (
+          reassigned.map((rider) => <p key={rider.jobId}>{rider.name}</p>)
+        )}
+      </div>
+    </div>
+  );
+}
+
+function JobRiderMobileCell({ job }: { job: DeliveryJobListItem }) {
+  if (!isVehicleFailureJob(job)) return <RiderMobileCell phone={job.driver?.phone} />;
+
+  const reassigned = job.reassignedRiders ?? [];
+  return (
+    <div className="space-y-1.5">
+      <div>
+        <RiderFieldLabel>Rider</RiderFieldLabel>
+        <RiderMobileCell phone={job.driver?.phone} />
+      </div>
+      <div>
+        <RiderFieldLabel>Reassigned</RiderFieldLabel>
+        {reassigned.length === 0 ? (
+          <span className="text-slate-400">—</span>
+        ) : (
+          reassigned.map((rider) => (
+            <div key={rider.jobId}>
+              <RiderMobileCell phone={rider.phone} />
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
 }
 
 function formatItemsCompact(items?: JobOrderItem[]) {
@@ -353,6 +485,8 @@ type Props = {
   onViewRoute?: (job: { jobId: string; storeId: string; initialStatus?: string }) => void;
   onViewActualRoute?: (job: { jobId: string; storeId: string }) => void;
   onRowClick?: (job: DeliveryJobListItem) => void;
+  /** Super Admin / Delivery Partner may close stuck rides. */
+  hqCanCancelJobs?: boolean;
 };
 
 export default function AdminDeliveryJobsTable({
@@ -368,8 +502,10 @@ export default function AdminDeliveryJobsTable({
   onViewRoute,
   onViewActualRoute,
   onRowClick,
+  hqCanCancelJobs = false,
 }: Props) {
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [cancelJob, setCancelJob] = useState<DeliveryJobListItem | null>(null);
   const [page, setPage] = useState(1);
   const isCompleted = variant === 'completed';
   const totalItems = jobs.length;
@@ -443,7 +579,9 @@ export default function AdminDeliveryJobsTable({
           <div className="flex items-center">
             <button
               type="button"
-              onClick={() => onFiltersChange({ storeId: '', driverId: '', dateFrom: '', dateTo: '' })}
+              onClick={() =>
+                onFiltersChange({ storeId: '', driverId: '', dateFrom: '', dateTo: '', incompleteReason: '' })
+              }
               className="text-sm text-white bg-navy-light border border-navy-border rounded-lg px-4 py-2 hover:bg-navy transition-colors h-[38px] flex items-center"
             >
               Reset
@@ -463,13 +601,14 @@ export default function AdminDeliveryJobsTable({
   }
 
   const paginationLabel = isCompleted ? 'Completed schedules pagination' : 'Active schedules pagination';
-  const completedColSpan = 9;
+  const showCloseRideActions = hqCanCancelJobs && !isCompleted;
+  const tableColSpan = isCompleted ? 13 : showCloseRideActions ? 10 : 9;
 
   return (
     <>
       {filterBar}
       <div className="overflow-x-auto rounded-xl border border-slate-200/60 shadow-sm bg-white">
-        <Table className={`w-full text-sm ${isCompleted ? 'min-w-[1400px]' : 'min-w-[980px]'}`}>
+        <Table className={`w-full text-sm ${isCompleted ? 'min-w-[1650px]' : 'min-w-[1280px]'}`}>
           <TableHeader className="bg-[#f0f4f8]">
             <TableRow className="hover:bg-transparent border-b border-slate-200/80">
               <TableHead className="w-10 h-11" aria-hidden />
@@ -487,16 +626,21 @@ export default function AdminDeliveryJobsTable({
                   <TableHead className="w-28 text-slate-600 font-semibold h-11">Route</TableHead>
                   <TableHead className="min-w-[120px] text-slate-600 font-semibold h-11">Branch</TableHead>
                   <TableHead className="min-w-[120px] text-slate-600 font-semibold h-11">Driver</TableHead>
+                  <TableHead className="min-w-[110px] text-slate-600 font-semibold h-11">Rider mobile</TableHead>
                 </>
               ) : (
                 <>
-                  <TableHead className="min-w-[180px] text-slate-600 font-semibold h-11">Schedule</TableHead>
+                  <TableHead className="min-w-[240px] text-slate-600 font-semibold h-11">Schedule</TableHead>
                   <TableHead className="w-32 text-slate-600 font-semibold h-11">Job status</TableHead>
                   <TableHead className="w-24 text-slate-600 font-semibold h-11">Orders</TableHead>
                   <TableHead className="w-24 text-slate-600 font-semibold h-11">Map</TableHead>
                   <TableHead className="min-w-[120px] text-slate-600 font-semibold h-11">Branch</TableHead>
                   <TableHead className="min-w-[120px] text-slate-600 font-semibold h-11">Driver</TableHead>
+                  <TableHead className="min-w-[110px] text-slate-600 font-semibold h-11">Rider mobile</TableHead>
                   <TableHead className="min-w-[140px] whitespace-nowrap text-slate-600 font-semibold h-11">Scheduled at</TableHead>
+                  {showCloseRideActions ? (
+                    <TableHead className="min-w-[120px] text-slate-600 font-semibold h-11">Actions</TableHead>
+                  ) : null}
                 </>
               )}
             </TableRow>
@@ -505,6 +649,25 @@ export default function AdminDeliveryJobsTable({
             {pageJobs.map((job) => {
               const open = expandedJobId === job.id;
               const jobStoreId = job.storeId ?? storeId;
+              const showProgressFooter = showRouteProgressFooter(variant, job);
+              const rowSurface = `cursor-pointer transition-colors duration-200 ${
+                open ? 'bg-[#f8fafc]' : 'bg-white hover:bg-slate-50/70'
+              }`;
+
+              function activateJobRow() {
+                if (onRowClick) {
+                  onRowClick(job);
+                  return;
+                }
+                setExpandedJobId(open ? null : job.id);
+              }
+
+              function onJobRowKeyDown(e: KeyboardEvent) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  activateJobRow();
+                }
+              }
 
               return (
                 <Fragment key={job.id}>
@@ -512,24 +675,9 @@ export default function AdminDeliveryJobsTable({
                     role="button"
                     tabIndex={0}
                     aria-expanded={open}
-                    onClick={() => {
-                      if (onRowClick) {
-                        onRowClick(job);
-                        return;
-                      }
-                      setExpandedJobId(open ? null : job.id);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        if (onRowClick) {
-                          onRowClick(job);
-                          return;
-                        }
-                        setExpandedJobId(open ? null : job.id);
-                      }
-                    }}
-                    className={`cursor-pointer transition-colors duration-200 ${open ? 'bg-[#f8fafc]' : 'bg-white hover:bg-slate-50/70'} border-b border-slate-100`}
+                    onClick={activateJobRow}
+                    onKeyDown={onJobRowKeyDown}
+                    className={`${rowSurface} ${showProgressFooter ? 'border-b-0' : 'border-b border-slate-100'}`}
                   >
                     <TableCell className="py-3">
                       <button
@@ -558,7 +706,7 @@ export default function AdminDeliveryJobsTable({
                         </TableCell>
                         <TableCell className="py-3">
                           <span className="font-mono text-xs text-blue-600 font-semibold">
-                            {job.rideCode ?? shortJobId(job.id)}
+                            {displayRideId(job.rideCode, job.id)}
                           </span>
                         </TableCell>
                         <TableCell className="tabular-nums text-slate-900 font-bold py-3">
@@ -611,7 +759,10 @@ export default function AdminDeliveryJobsTable({
                         </TableCell>
                         <TableCell className="text-slate-700 font-medium py-3">{job.storeName ?? '—'}</TableCell>
                         <TableCell className="text-slate-700 font-medium py-3">
-                          {job.driver?.name ?? <span className="text-slate-400 italic font-normal">Unassigned</span>}
+                          <JobDriverCell job={job} />
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <JobRiderMobileCell job={job} />
                         </TableCell>
                       </>
                     ) : (
@@ -648,22 +799,56 @@ export default function AdminDeliveryJobsTable({
                               <Route size={13} aria-hidden strokeWidth={2.5} />
                               View route
                             </button>
-                            <ReRingButton job={job} />
+                            {variant === 'active' ? <ReRingButton job={job} /> : null}
                           </div>
                         </TableCell>
                         <TableCell className="text-slate-700 font-medium py-3">{job.storeName ?? '—'}</TableCell>
                         <TableCell className="text-slate-700 font-medium py-3">
-                          {job.driver?.name ?? <span className="text-slate-400 italic font-normal">Unassigned</span>}
+                          <JobDriverCell job={job} />
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <JobRiderMobileCell job={job} />
                         </TableCell>
                         <TableCell className="text-slate-500 text-xs whitespace-nowrap tabular-nums py-3 font-medium">
                           {formatScheduleDate(job.scheduledAt)}
                         </TableCell>
+                        {showCloseRideActions ? (
+                          <TableCell className="py-3">
+                            {canAdminCancelDeliveryJob(job) ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCancelJob(job);
+                                }}
+                                className="inline-flex items-center rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-red-700 hover:bg-red-100"
+                              >
+                                Close ride
+                              </button>
+                            ) : (
+                              <span className="text-slate-400 text-xs">—</span>
+                            )}
+                          </TableCell>
+                        ) : null}
                       </>
                     )}
                   </TableRow>
+                  {showProgressFooter ? (
+                    <TableRow
+                      role="button"
+                      tabIndex={0}
+                      onClick={activateJobRow}
+                      onKeyDown={onJobRowKeyDown}
+                      className={`${rowSurface} border-b border-slate-100`}
+                    >
+                      <TableCell colSpan={tableColSpan} className="px-4 pb-3 pt-0 hover:bg-transparent">
+                        <JobRouteTimeline job={job} />
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
                   {open && (
                     <TableRow className="bg-[#f8fafc] border-b border-slate-200/60">
-                      <TableCell colSpan={isCompleted ? completedColSpan : 8} className="p-0 sm:p-2 sm:px-4 hover:bg-transparent border-0">
+                      <TableCell colSpan={tableColSpan} className="p-0 sm:p-2 sm:px-4 hover:bg-transparent border-0">
                         <JobOrdersPanel
                           jobId={job.id}
                           storeId={jobStoreId}
@@ -726,6 +911,13 @@ export default function AdminDeliveryJobsTable({
           </button>
         </nav>
       </div>
+
+      <AdminCancelDeliveryJobModal
+        job={cancelJob}
+        storeId={cancelJob?.storeId ?? storeId}
+        open={!!cancelJob}
+        onClose={() => setCancelJob(null)}
+      />
     </>
   );
 }

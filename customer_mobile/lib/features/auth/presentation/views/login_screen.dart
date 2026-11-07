@@ -46,7 +46,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (state.offline) return l10n.offlineBlock;
     final raw = state.errorMessage;
     if (raw == null) return '';
-    if (raw.contains('15 minutes')) return l10n.otpRateLimited;
+    if (raw.contains('Too many OTP requests')) return l10n.otpRateLimited;
     return raw;
   }
 

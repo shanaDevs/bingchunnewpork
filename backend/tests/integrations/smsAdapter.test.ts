@@ -25,6 +25,7 @@ vi.mock('../../src/config', () => ({
 
 import {
   orderSmsPhone,
+  sendOtp,
   sendOrderConfirmationSms,
   sendOrderReceiptSms,
   sendOrderStatusSms,
@@ -75,6 +76,20 @@ describe('orderSmsPhone', () => {
     expect(orderSmsPhone({ guestPhone: '0771111111', user: { phone: '0772222222' } })).toBe('0771111111');
     expect(orderSmsPhone({ guestPhone: null, user: { phone: '0772222222' } })).toBe('0772222222');
     expect(orderSmsPhone({ guestPhone: '  ', user: {} })).toBeNull();
+  });
+});
+
+describe('sendOtp', () => {
+  beforeEach(() => {
+    vi.spyOn(smsAdapter, 'send').mockResolvedValue(undefined);
+  });
+
+  it('sends only the verification text without an Android app hash', async () => {
+    await sendOtp('0771234567', '946905', 'VhVuEOUt1nY');
+    expect(smsAdapter.send).toHaveBeenCalledWith({
+      to: '0771234567',
+      message: 'Your Bing Chun verification code is: 946905. Valid for 10 minutes.',
+    });
   });
 });
 

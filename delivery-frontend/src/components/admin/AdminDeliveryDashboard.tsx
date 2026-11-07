@@ -24,7 +24,7 @@ import { adminBadgeClass, DELIVERY_JOB_STATUS_LABEL, type AdminBadgeVariant } fr
 import { getAdminSession, isDeliveryAdmin, isSuperAdmin } from '@/lib/adminAuth';
 import { hasMenuReadAccess } from '@/lib/adminPermissions';
 import { formatDateTime, formatDurationMinutes } from '@/lib/datetime';
-import { formatBranchName } from '@/lib/deliveryDisplay';
+import { displayRideId, formatBranchName } from '@/lib/deliveryDisplay';
 import { deliveryWalletFetch } from '@/lib/deliveryWalletApi';
 import {
   clearDeliveryWalletUnlockToken,
@@ -88,6 +88,7 @@ type DashboardResponse = {
     jobsInProgress: number;
     activeJobs: Array<{
       id: string;
+      rideCode: string | null;
       storeId: string;
       driverId: string | null;
       riderName: string | null;
@@ -169,10 +170,6 @@ function buildDashboardQuery(filters: AnalyticsFilters) {
 function formatDistance(km: number | null | undefined): string {
   if (km == null) return '—';
   return `${km.toFixed(1)} km`;
-}
-
-function shortJobId(id: string): string {
-  return id.slice(0, 8).toUpperCase();
 }
 
 function inferPeriod(
@@ -700,7 +697,7 @@ export default function AdminDeliveryDashboard({
                 <table className="w-full min-w-[720px] text-sm">
                   <thead>
                     <tr className="border-b border-navy-border bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-muted dark:bg-navy-light/50">
-                      <th className="px-4 py-2.5">Job</th>
+                      <th className="px-4 py-2.5">Ride ID</th>
                       <th className="px-4 py-2.5">Rider</th>
                       <th className="px-4 py-2.5">Status</th>
                       <th className="px-4 py-2.5 text-right">Orders</th>
@@ -724,7 +721,9 @@ export default function AdminDeliveryDashboard({
                           }
                         }}
                       >
-                        <td className="px-4 py-3 font-mono text-xs">{shortJobId(job.id)}</td>
+                        <td className="px-4 py-3 font-mono text-xs">
+                          {displayRideId(job.rideCode, job.id)}
+                        </td>
                         <td className="px-4 py-3">{job.riderName ?? '—'}</td>
                         <td className="px-4 py-3">
                           <span

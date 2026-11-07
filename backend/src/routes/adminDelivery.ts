@@ -124,6 +124,12 @@ router.get('/delivery-jobs/:id/actual-route', requirePermission('DELIVERY', 'rea
 router.get('/delivery-jobs/:id/live-route', requirePermission('DELIVERY', 'read'), adminDeliveryController.getAdminDeliveryJobLiveRoute);
 router.post('/delivery-jobs', requirePermission('DELIVERY', 'create'), deliveryJobController.createDeliveryJob);
 router.post('/delivery-jobs/:id/re-ring', requirePermission('DELIVERY', 'update'), deliveryJobController.reRingDeliveryJob);
+router.post(
+  '/delivery-jobs/:id/cancel',
+  requireSystemOrDeliveryAdmin,
+  requirePermission('DELIVERY', 'update'),
+  deliveryJobController.adminCancelDeliveryJob,
+);
 router.get('/drivers', requirePermission('DELIVERY', 'read'), adminDeliveryController.listDeliveryDrivers);
 router.get(
   '/drivers/:id/ratings',

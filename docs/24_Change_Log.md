@@ -18,6 +18,34 @@ This log records version / feature snapshots from package manifests and codebase
 
 ---
 
+## [Admin delivery] Close stuck rides — 2026-11-07
+
+**Summary:** Super Admin and Delivery Partner can close stuck delivery jobs from Delivery → Jobs
+(Incomplete / Active): `POST /admin/delivery-jobs/:id/cancel` sets job `CANCELLED`, releases the
+rider, optional merit deduction; **customer order statuses are unchanged**. Audit rows in
+`delivery_job_admin_cancellations` (migration `20261107150000_delivery_job_admin_cancellations`).
+
+---
+
+## [Admin delivery] Rider KPI efficiency times — 2026-11-07
+
+**Summary:** Admin rider KPI **Efficiency** metrics (total delivery time, average time per
+order, average station time) now use one shared calculator in
+`packages/delivery-domain/src/riderEfficiency.ts`, wired from `computeRiderDetailKpi` in
+`backend/src/controllers/adminDeliveryController.ts`.
+
+### Definitions
+- **Total delivery time** and **average time per order** share the same per-stop durations
+  (pickup `DeliveryEvent` → `DELIVERED`, latest event when retried; per-order fallback splits
+  job wall-clock when events are missing).
+- **Average station time** is only the return leg (last `DELIVERED` / `FAILED` event on the job
+  → `completedAt`).
+- Rider KPI modal filters **Efficiency** on **completed jobs within jobs assigned in the
+  selected range** (`assignedAt`). The delivery **dashboard** period averages still use jobs
+  **completed** in the range (`completedAt`).
+
+---
+
 ## [Driver app + Delivery API] Map-first Stops screen — 2026-09-03
 
 **Summary:** The pre-claim Stops screen becomes map-first, and the route API stops masking

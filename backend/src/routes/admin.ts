@@ -27,6 +27,12 @@ import { deliveryAdminServiceProxy } from '../middleware/deliveryAdminProxy';
 import { settlementProofMemoryUpload } from '../middleware/upload';
 import adminDeliveryRoutes from './adminDelivery';
 import { verifyAdminPinHandler } from '../lib/verifyAdminPin';
+import {
+  enqueueCupStickerJob,
+  getCupStickerAgentPresence,
+  getCupStickerJob,
+  type CupStickerPayload,
+} from '../lib/cupStickerJobs';
 
 const router = Router();
 
@@ -388,6 +394,57 @@ router.post(
   requireSystemAdmin,
   messagingAdminController.sendAdminMessagingReply,
 );
+
+router.get('/cup-sticker-agent/status', (_req, res) => {
+  const presence = getCupStickerAgentPresence();
+  res.json({
+    success: true,
+    data: {
+      online: presence.online,
+      lastSeenAt: presence.lastSeenAt,
+      printerHint: 'Run tools/cup-sticker-agent/start.bat on the cashier PC',
+    },
+  });
+});
+
+/** Queue a cup-sticker print for the local Windows agent (polls /cup-sticker-agent/claim). */
+router.post('/cup-sticker-jobs', (req, res) => {
+  const stickers = Array.isArray(req.body?.stickers) ? (req.body.stickers as CupStickerPayload[]) : [];
+  if (stickers.length === 0) {
+    res.status(400).json({ success: false, message: 'stickers array required' });
+    return;
+  }
+  const storeId =
+    (typeof req.body?.storeId === 'string' && req.body.storeId) ||
+    (req as { user?: { storeId?: string | null } }).user?.storeId ||
+    null;
+  const printerName =
+    (typeof req.body?.printerName === 'string' && req.body.printerName.trim()) || 'Xprinter XP-D35B';
+  const job = enqueueCupStickerJob({ storeId, printerName, stickers });
+  res.status(201).json({
+    success: true,
+    data: { id: job.id, status: job.status, createdAt: job.createdAt },
+  });
+});
+
+router.get('/cup-sticker-jobs/:id', (req, res) => {
+  const job = getCupStickerJob(req.params.id);
+  if (!job) {
+    res.status(404).json({ success: false, message: 'Job not found' });
+    return;
+  }
+  res.json({
+    success: true,
+    data: {
+      id: job.id,
+      status: job.status,
+      error: job.error,
+      printed: job.status === 'done' ? job.stickers.length : undefined,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+    },
+  });
+});
 
 // Customer 360 profile and actions (Super Admin only)
 router.get('/customers', requireSystemAdmin, adminCustomerController.listCustomers);

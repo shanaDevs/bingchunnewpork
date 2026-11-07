@@ -4,6 +4,10 @@ import { logger } from '../utils/logger';
 
 const isDev = process.env.NODE_ENV !== 'production';
 
+const OTP_REQUEST_WINDOW_MS = 3 * 60 * 1000;
+const OTP_REQUEST_LIMIT_MESSAGE =
+  'Too many OTP requests. Please try again after 3 minutes.';
+
 /** Per-limiter Redis store factory — never share one Store across limiters. */
 type StoreFactory = ((prefix: string) => Store) | undefined;
 let storeFactory: StoreFactory;
@@ -42,9 +46,9 @@ function buildLimiter(
 function buildLimiters(): LimiterBundle {
   return {
     otpRateLimiter: buildLimiter('rl:otp:', {
-      windowMs: 15 * 60 * 1000,
+      windowMs: OTP_REQUEST_WINDOW_MS,
       max: isDev ? 1000 : 5,
-      message: { success: false, message: 'Too many OTP requests. Please try again after 15 minutes.' },
+      message: { success: false, message: OTP_REQUEST_LIMIT_MESSAGE },
     }),
     // Count failed auth only — successful login/refresh must not burn the budget.
     authRateLimiter: buildLimiter('rl:auth:', {

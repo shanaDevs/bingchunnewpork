@@ -1,7 +1,13 @@
 import type { Order, OrderItem, User, Address } from '@bingchun/db';
 import { prisma } from '@bingchun/db';
 import { DeliveryJobStatus } from '@prisma/client';
-import { haversineKm, optimizeDeliveryStops, totalRouteDistanceKm, totalRouteEtaMinutes } from '@bingchun/delivery-domain';
+import {
+  creditedDeliveredTotals,
+  haversineKm,
+  optimizeDeliveryStops,
+  totalRouteDistanceKm,
+  totalRouteEtaMinutes,
+} from '@bingchun/delivery-domain';
 import type { RouteStop } from '@bingchun/delivery-domain';
 import { isOtpRequiredForStore } from './otp';
 
@@ -348,7 +354,23 @@ export async function formatJob(
   const deliveredCount = orders.filter(
     (o) => o.status === 'DELIVERED' || o.status === 'CANCELLED' || o.deliveryFailed,
   ).length;
-  const totalDeliveryFees = job.jobOrders.reduce((sum, jo) => sum + jo.order.deliveryFee, 0);
+
+  const creditedLinks = job.jobOrders.map((jo) => ({
+    orderId: jo.orderId,
+    order: {
+      status: jo.order.status,
+      deliveryFee: jo.order.deliveryFee,
+      cancelledAtStatus:
+        (jo.order as { cancelledAtStatus?: string | null }).cancelledAtStatus ?? null,
+    },
+  }));
+  const { deliveredTotal } = creditedDeliveredTotals(creditedLinks, failedOrderIds);
+
+  const terminalFeeSnapshot =
+    job.status === 'COMPLETED' || job.status === 'VEHICLE_FAILURE' || job.status === 'CANCELLED';
+  const totalDeliveryFees = terminalFeeSnapshot
+    ? deliveredTotal
+    : job.jobOrders.reduce((sum, jo) => sum + jo.order.deliveryFee, 0);
 
   return {
     id: job.id,

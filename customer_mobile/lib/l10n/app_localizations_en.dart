@@ -150,7 +150,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get otpRateLimited =>
-      'Too many OTP requests. Please try again after 15 minutes.';
+      'Too many OTP requests. Please try again after 3 minutes.';
 
   @override
   String get cupEmpty => 'Your cup is empty';

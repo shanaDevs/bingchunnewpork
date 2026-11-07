@@ -5819,7 +5819,7 @@
     position: absolute;
     top: 10px;
     right: 10px;
-    z-index: 500;
+    z-index: 1100;
   }
 
   .live-delivery-map-fullscreen {
@@ -6172,6 +6172,17 @@
     min-width: 0;
     flex: 1 1 0%;
     border-radius: 999px;
+  }
+
+  .delivery-job-table-timeline__connector {
+    width: 1.75rem;
+    flex: 0 0 auto;
+  }
+
+  @media (min-width: 640px) {
+    .delivery-job-table-timeline__connector {
+      width: 2rem;
+    }
   }
 
   .delivery-timeline-rail--done {

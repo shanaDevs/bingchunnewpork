@@ -38,6 +38,7 @@ import { adminBadgeClass, DELIVERY_JOB_STATUS_LABEL, type AdminBadgeVariant } fr
 import { formatDate, formatDurationMinutes, formatTime } from '@/lib/datetime';
 import type { AnalyticsFilters } from '@/components/admin/AdminDriverOpsPanel';
 import { RiderAvatar, RiderDetailKpiItem } from '@/components/admin/deliveryAnalyticsUi';
+import { displayRideId } from '@/lib/deliveryDisplay';
 
 async function adminFetch(endpoint: string) {
     const res = await fetch(`${getApiBaseUrl()}${endpoint}`, {
@@ -74,6 +75,7 @@ const DUTY_STATUS_BADGE: Record<string, AdminBadgeVariant> = {
 
 type JobRow = {
   id: string;
+  rideCode: string | null;
   date: string | null;
   status: string;
   orderCount: number;
@@ -141,10 +143,6 @@ function formatPeriod(dateFrom?: string | null, dateTo?: string | null): string 
   if (dateFrom && dateTo) return `${dateFrom} → ${dateTo}`;
   if (dateFrom) return `From ${dateFrom}`;
   return `Until ${dateTo}`;
-}
-
-function shortJobId(id: string): string {
-  return id.slice(0, 8).toUpperCase();
 }
 
 function formatTimestampCell(value: string | null): string {
@@ -231,7 +229,9 @@ function JobCard({ row }: { row: JobRow }) {
     <article className="rounded-xl border border-navy-border bg-white p-4 shadow-sm dark:bg-navy-card sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[15px] font-semibold tabular-nums text-fg">{shortJobId(row.id)}</p>
+          <p className="text-[15px] font-semibold tabular-nums text-fg">
+            {displayRideId(row.rideCode, row.id)}
+          </p>
           <p className="mt-0.5 text-[13px] text-muted">{row.date ? formatDate(row.date) : '—'}</p>
         </div>
         <span className={adminBadgeClass(JOB_STATUS_BADGE[row.status] ?? 'neutral')}>
@@ -300,7 +300,7 @@ function JobsTable({ rows }: { rows: JobRow[] }) {
       </colgroup>
       <thead className="sticky top-0 z-[1] bg-slate-100/95 dark:bg-slate-800/60">
         <tr className="border-b border-navy-border text-left text-xs font-semibold uppercase tracking-wide text-muted">
-          <th className="px-4 py-3 sm:px-4">Job</th>
+          <th className="px-4 py-3 sm:px-4">Ride ID</th>
           <th className="px-4 py-3 sm:px-4">Status</th>
           <th className="px-4 py-3 text-right sm:px-4">Orders</th>
           <th className="px-4 py-3 text-right sm:px-4">Distance</th>
@@ -319,7 +319,7 @@ function JobsTable({ rows }: { rows: JobRow[] }) {
           >
             <td className="px-4 py-3.5 sm:px-4">
               <p className="truncate text-[15px] font-semibold tabular-nums text-fg">
-                {shortJobId(row.id)}
+                {displayRideId(row.rideCode, row.id)}
               </p>
               <p className="mt-0.5 truncate text-xs text-muted">
                 {row.date ? formatDate(row.date) : '—'}
@@ -465,7 +465,8 @@ export default function AdminRiderKpiDetailModal({ riderId, filters, open, onClo
                 <div className="mb-4">
                   <h3 className="text-lg font-semibold text-fg">Performance metrics</h3>
                   <p className="mt-1 text-[13px] text-muted sm:text-sm">
-                    KPI totals for the selected period.
+                    KPI totals for the selected period. Efficiency times apply to completed jobs
+                    assigned in this range (see notes below).
                   </p>
                 </div>
                 <div className="grid grid-cols-1 gap-3.5 xl:grid-cols-3">
@@ -555,6 +556,12 @@ export default function AdminRiderKpiDetailModal({ riderId, filters, open, onClo
                       value={formatDurationMinutes(data.kpi.averageStationTimeMinutes)}
                       tone="neutral"
                     />
+                    <p className="text-[12px] leading-relaxed text-muted">
+                      Total and average per order sum the same per-stop intervals (pickup event to
+                      delivery, with an even split of job duration when events are missing).
+                      Average station time is from the last delivered or failed stop until the ride
+                      is marked complete.
+                    </p>
                   </MetricCategoryPanel>
                 </div>
               </section>
@@ -568,7 +575,9 @@ export default function AdminRiderKpiDetailModal({ riderId, filters, open, onClo
                     <div>
                       <h3 className="text-lg font-semibold text-fg">Contributing jobs</h3>
                       <p className="mt-1 max-w-3xl text-[13px] text-muted sm:text-sm">
-                        Jobs included in this rider&apos;s KPI calculations for the selected filters.
+                        Jobs assigned in the selected period. Per-row Duration is job wall-clock
+                        (started to completed) and may differ from Efficiency totals on multi-stop
+                        runs.
                       </p>
                     </div>
                   </div>
