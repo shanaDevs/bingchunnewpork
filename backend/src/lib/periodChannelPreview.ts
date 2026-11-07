@@ -7,8 +7,11 @@ import {
   sumBreakdownProviderFee,
   sumCommissionableBase,
   getSlabIndex,
+  serializeCommissionSlabsForApi,
+  DEFAULT_COMMISSION_SLABS,
   type ChannelSettlementRow,
   type CommissionChannel,
+  type CommissionSlab,
   type SlabInfo,
 } from './commission';
 import { getCommissionSlabs, getConvenienceFeeRates, getGatewayFeeRate } from './appSchema';
@@ -34,7 +37,9 @@ export type PeriodChannelPreview = {
   orderCount: number;
   /** Sum of promo + loyalty discounts on paid orders in period (invoice display only). */
   storeDiscountsTotal: number;
-  slabInfo: Pick<SlabInfo, 'monthlyBase' | 'effectiveRate' | 'slabIndex'>;
+  slabInfo: Pick<SlabInfo, 'monthlyBase' | 'effectiveRate' | 'slabIndex'> & {
+    slabs: ReturnType<typeof serializeCommissionSlabsForApi>;
+  };
 };
 
 async function fetchPaidOrdersInRange(storeId: string, from: string, to: string) {
@@ -80,6 +85,7 @@ export async function buildPeriodChannelPreview(
       monthlyBase: slabInfo.monthlyBase,
       effectiveRate: slabInfo.effectiveRate,
       slabIndex: slabInfo.slabIndex,
+      slabs: serializeCommissionSlabsForApi(commissionSlabs),
     },
   };
 }
@@ -91,6 +97,7 @@ export function channelPreviewFromPeriodBreakdown(
     commissionRate: number;
     periodDiscountsTotal: number;
     orderCount: number;
+    commissionSlabs?: readonly CommissionSlab[];
     cycleStage?: string;
     cycleFrom?: string;
     cycleTo?: string;
@@ -100,6 +107,7 @@ export function channelPreviewFromPeriodBreakdown(
 ): PeriodChannelPreview {
   const breakdown = period.channelBreakdown;
   const monthlyBaseLkr = period.windowBase / 100;
+  const slabs = period.commissionSlabs ?? DEFAULT_COMMISSION_SLABS;
   const from =
     period.cycleStage === 'SECOND' && period.cycleFrom ? period.cycleFrom : windowFrom;
   const to = period.cycleTo ?? windowTo;
@@ -113,7 +121,8 @@ export function channelPreviewFromPeriodBreakdown(
     slabInfo: {
       monthlyBase: monthlyBaseLkr,
       effectiveRate: period.commissionRate,
-      slabIndex: getSlabIndex(monthlyBaseLkr),
+      slabIndex: getSlabIndex(monthlyBaseLkr, slabs),
+      slabs: serializeCommissionSlabsForApi(slabs),
     },
   };
 }

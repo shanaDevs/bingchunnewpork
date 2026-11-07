@@ -32,6 +32,14 @@ export type CommissionSlab = {
   label: string;
 };
 
+export function serializeCommissionSlabsForApi(slabs: readonly CommissionSlab[]) {
+  return slabs.map((s) => ({
+    upTo: Number.isFinite(s.upTo) ? s.upTo : null,
+    rate: s.rate,
+    label: s.label,
+  }));
+}
+
 export function normalizeCommissionSlabs(
   input: readonly { upTo: number; rate: number; label?: string }[] | null | undefined,
 ): readonly CommissionSlab[] {
@@ -457,9 +465,10 @@ function applyChannelRate(breakdown: Record<CommissionChannel, ChannelBreakdown>
 export function accumulateCommissionBreakdown(
   orders: CommissionOrderFields[],
   monthlyBase: number,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
 ): Record<CommissionChannel, ChannelBreakdown> {
   const breakdown = emptyCommissionBreakdown();
-  const effectiveRate = getEffectiveRate(monthlyBase);
+  const effectiveRate = getEffectiveRate(monthlyBase, slabs);
 
   for (const order of orders) {
     const channel = orderCommissionChannel(order.orderMode, order.paymentMethod);
@@ -467,7 +476,7 @@ export function accumulateCommissionBreakdown(
 
     const base = commissionableSubtotal(order);
     breakdown[channel].revenueSubtotal += base;
-    breakdown[channel].commission += computePlatformCommission(base, monthlyBase);
+    breakdown[channel].commission += computePlatformCommission(base, monthlyBase, slabs);
     breakdown[channel].orderCount += 1;
     breakdown[channel].rate = effectiveRate;
   }
@@ -533,6 +542,7 @@ export function accumulateSettlementBreakdown(
 export function accumulateCommissionBreakdownMultiMonth(
   orders: Array<CommissionOrderFields & { createdAt: Date | string; storeId: string }>,
   monthlyBaseLookup: Record<string, number>,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
 ): Record<CommissionChannel, ChannelBreakdown> {
   const breakdown = emptyCommissionBreakdown();
 
@@ -541,11 +551,11 @@ export function accumulateCommissionBreakdownMultiMonth(
     if (!channel) continue;
 
     const monthlyBase = monthlyBaseLookup[storePeriodKey(order.storeId, order.createdAt)] ?? 0;
-    const effectiveRate = getEffectiveRate(monthlyBase);
+    const effectiveRate = getEffectiveRate(monthlyBase, slabs);
 
     const base = commissionableSubtotal(order);
     breakdown[channel].revenueSubtotal += base;
-    breakdown[channel].commission += computePlatformCommission(base, monthlyBase);
+    breakdown[channel].commission += computePlatformCommission(base, monthlyBase, slabs);
     breakdown[channel].orderCount += 1;
     breakdown[channel].rate = effectiveRate;
   }
@@ -557,13 +567,15 @@ export function accumulateCommissionBreakdownMultiMonth(
 export function computeAllTimeCommission(
   orders: Array<CommissionOrderFields & { createdAt: Date | string; storeId: string }>,
   monthlyBaseLookup: Record<string, number>,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
 ): number {
-  const breakdown = accumulateCommissionBreakdownMultiMonth(orders, monthlyBaseLookup);
+  const breakdown = accumulateCommissionBreakdownMultiMonth(orders, monthlyBaseLookup, slabs);
   return sumBreakdownCommission(breakdown);
 }
 
 export function buildPeriodSlabInfoList(
   periodBaseLookup: Record<string, number>,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
 ): PeriodSlabInfo[] {
   return Object.entries(periodBaseLookup)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -571,7 +583,7 @@ export function buildPeriodSlabInfoList(
       const period = storePeriod.includes('|') ? storePeriod.split('|')[1]! : storePeriod;
       return {
         period,
-        ...buildSlabInfo(monthlyBase),
+        ...buildSlabInfo(monthlyBase, slabs),
       };
     });
 }
@@ -579,8 +591,9 @@ export function buildPeriodSlabInfoList(
 /** @deprecated Use buildPeriodSlabInfoList */
 export function buildMonthlySlabInfoList(
   monthlyBaseLookup: Record<string, number>,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
 ): MonthlySlabInfo[] {
-  return buildPeriodSlabInfoList(monthlyBaseLookup).map(({ period, ...rest }) => ({
+  return buildPeriodSlabInfoList(monthlyBaseLookup, slabs).map(({ period, ...rest }) => ({
     month: period,
     period,
     ...rest,

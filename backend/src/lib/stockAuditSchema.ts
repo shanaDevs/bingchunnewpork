@@ -1,12 +1,39 @@
 import { prisma } from './prisma';
-import { addColumnIfMissing, columnIsNullable, createIndexIfMissing, tableHasColumn } from './schemaPatch';
+import { qualifiedPhysicalTable } from './deliveryPg';
+import {
+  addColumnIfMissing,
+  columnIsNullable,
+  createIndexIfMissing,
+  tableExists,
+  tableHasColumn,
+} from './schemaPatch';
 import { logger } from '../utils/logger';
+
+/**
+ * Required for stock batch receive / audit writes. Runs even when RUNTIME_SCHEMA_PATCHES=false
+ * (core-only boot patches), because admin stock APIs must self-heal legacy DBs.
+ */
+export async function ensureStockAuditAdminUserNameColumn(): Promise<void> {
+  if (!(await tableExists('stock_audit_logs'))) return;
+  if (await tableHasColumn('stock_audit_logs', 'adminUserName')) return;
+
+  const tableRef = await qualifiedPhysicalTable('stock_audit_logs');
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE ${tableRef} ADD COLUMN IF NOT EXISTS "adminUserName" TEXT`,
+  );
+
+  if (!(await tableHasColumn('stock_audit_logs', 'adminUserName'))) {
+    throw new Error(
+      'Could not add stock_audit_logs.adminUserName. Apply migration 20261107190000_stock_audit_admin_user_name.',
+    );
+  }
+}
 
 export async function ensureStockAuditLogTable(): Promise<void> {
   await createIndexIfMissing('stock_audit_logs', 'stock_audit_logs_storeId_productId_idx', '`storeId`, `productId`');
   await createIndexIfMissing('stock_audit_logs', 'stock_audit_logs_createdAt_idx', '`createdAt`');
   await createIndexIfMissing('stock_audit_logs', 'stock_audit_logs_changeType_idx', '`changeType`');
-  await addColumnIfMissing('stock_audit_logs', 'adminUserName', 'TEXT NULL');
+  await ensureStockAuditAdminUserNameColumn();
   await backfillStockAuditAdminUserNames();
 }
 

@@ -59,6 +59,9 @@ async function ensureDeliveryZonesTable(): Promise<void> {
 }
 
 export async function ensureAppSchema(): Promise<void> {
+  // Prisma selects every AppSetting field; ensure columns exist even when full runtime patches are skipped.
+  await ensureAppSettingsColumnForWrite('googleMapsApiKey', 'VARCHAR(256) NULL');
+
   if (appSchemaReady) return;
   // Non-core surfaces must not run DDL on the request path (pool exhaustion / locks).
   if (!runtimeSchemaPatchesAllowed()) {
@@ -355,9 +358,28 @@ export async function getCommissionSlabs(): Promise<readonly CommissionSlab[]> {
   return commissionSlabsCache;
 }
 
+export function assertValidCommissionSlabsInput(
+  slabs: readonly { upTo: number; rate: number; label?: string }[],
+): void {
+  if (slabs.length < 2) {
+    throw new Error('Commission slabs require at least two tiers (at/below threshold and above)');
+  }
+  const sorted = [...slabs].sort((a, b) => a.upTo - b.upTo);
+  const threshold = sorted[0]!.upTo;
+  if (!Number.isFinite(threshold) || threshold <= 0) {
+    throw new Error('Commission threshold must be a positive LKR amount');
+  }
+  for (const row of sorted) {
+    if (!Number.isFinite(row.rate) || row.rate < 0 || row.rate > 1) {
+      throw new Error('Each commission rate must be between 0 and 1 (0%–100%)');
+    }
+  }
+}
+
 export async function setCommissionSlabs(
   slabs: readonly { upTo: number; rate: number; label?: string }[],
 ): Promise<readonly CommissionSlab[]> {
+  assertValidCommissionSlabsInput(slabs);
   const normalized = normalizeCommissionSlabs(slabs);
   await ensureAppSchema();
   await prisma.appSetting.upsert({

@@ -38,6 +38,7 @@ import { requireBranchStoreId, resolveBranchStoreId, isBranchScopedRole } from '
 import { AppError } from '../middleware/errorHandler';
 import { success } from '../utils/apiResponse';
 import { dateStringInColombo, formatDateTime } from '../lib/datetime';
+import { getCommissionSlabs } from '../lib/appSchema';
 import { resolveCustomerDisplayName } from '../lib/customerName';
 import { promiseAllLimited } from '../utils/promiseAllLimited';
 import { analyticsCacheKey, withAnalyticsCache } from '../lib/analyticsResponseCache';
@@ -1601,6 +1602,7 @@ export async function getBrandAnalytics(req: Request, res: Response, next: NextF
     );
     let periodCommission = 0;
     let gatewayFee = 0;
+    const commissionSlabs = await getCommissionSlabs();
 
     const branchPerformance = stores.map((store) => {
       const storeOrders = periodOrders.filter((order) => order.storeId === store.id);
@@ -1609,6 +1611,9 @@ export async function getBrandAnalytics(req: Request, res: Response, next: NextF
       const breakdown = accumulateSettlementBreakdown(
         storeOrders as BranchOrderForAnalytics[],
         windowBase,
+        undefined,
+        undefined,
+        commissionSlabs,
       );
       const commission = sumBreakdownCommission(breakdown);
       const providerFee = sumBreakdownProviderFee(breakdown);
@@ -1814,7 +1819,7 @@ async function loadBrandBranchPerformance(selectedRange: { gte: Date; lte: Date 
     1,
   );
 
-  const [stores, periodOrders, monthlyBaseOrders] = await Promise.all([
+  const [stores, periodOrders, monthlyBaseOrders, commissionSlabs] = await Promise.all([
     prisma.store.findMany({
       where: { isActive: true },
       select: { id: true, name: true, city: true, district: true },
@@ -1850,6 +1855,7 @@ async function loadBrandBranchPerformance(selectedRange: { gte: Date; lte: Date 
         storeId: true,
       },
     }),
+    getCommissionSlabs(),
   ]);
 
   const periodBaseLookup = buildPeriodBaseLookup(monthlyBaseOrders);
@@ -1862,6 +1868,9 @@ async function loadBrandBranchPerformance(selectedRange: { gte: Date; lte: Date 
       const breakdown = accumulateSettlementBreakdown(
         storeOrders as BranchOrderForAnalytics[],
         windowBase,
+        undefined,
+        undefined,
+        commissionSlabs,
       );
       const commission = sumBreakdownCommission(breakdown);
       const providerFee = sumBreakdownProviderFee(breakdown);
@@ -1991,7 +2000,10 @@ export async function getBrandBranchPerformance(req: Request, res: Response, nex
       },
     });
 
-    const periodBaseLookup = buildPeriodBaseLookup(monthlyBaseOrders);
+    const [periodBaseLookup, commissionSlabs] = await Promise.all([
+      Promise.resolve(buildPeriodBaseLookup(monthlyBaseOrders)),
+      getCommissionSlabs(),
+    ]);
     const previousGrossMap = new Map(
       previousGrossByStore.map((row) => [row.storeId, row._sum.total ?? 0]),
     );
@@ -2013,6 +2025,9 @@ export async function getBrandBranchPerformance(req: Request, res: Response, nex
         const breakdown = accumulateSettlementBreakdown(
           storeOrders as BranchOrderForAnalytics[],
           windowBase,
+          undefined,
+          undefined,
+          commissionSlabs,
         );
         const commission = sumBreakdownCommission(breakdown);
         const providerFee = sumBreakdownProviderFee(breakdown);
@@ -2456,6 +2471,7 @@ export async function getBranchAnalytics(req: Request, res: Response, next: Next
       settlements,
       pendingSettlementCount,
       storeWallet,
+      commissionSlabs,
     ] = await Promise.all([
       prisma.order.findMany({
         where: paidPeriodWhere,
@@ -2521,6 +2537,7 @@ export async function getBranchAnalytics(req: Request, res: Response, next: Next
         where: { storeId },
         select: { lastSettledAt: true },
       }),
+      getCommissionSlabs(),
     ]);
 
     const paidSalesScope: PaidSalesScope = {
@@ -2548,6 +2565,9 @@ export async function getBranchAnalytics(req: Request, res: Response, next: Next
     const settlementBreakdown = accumulateSettlementBreakdown(
       periodOrders as BranchOrderForAnalytics[],
       windowBase,
+      undefined,
+      undefined,
+      commissionSlabs,
     );
     const periodCommission = sumBreakdownCommission(settlementBreakdown);
     const gatewayFee = sumBreakdownProviderFee(settlementBreakdown);
@@ -2557,7 +2577,7 @@ export async function getBranchAnalytics(req: Request, res: Response, next: Next
       periodBaseLookup[storePeriodKey(storeId, now)] ??
       periodBaseLookup[Object.keys(periodBaseLookup).sort().pop() ?? ''] ??
       0;
-    const slabInfo = buildSlabInfo(currentPeriodBase);
+    const slabInfo = buildSlabInfo(currentPeriodBase, commissionSlabs);
 
     const orderSummaryChart = buildOrderSummaryChart(periodOrders, period, selectedRange);
     const orderModeChart = buildOrderModeChart(periodOrders, period, selectedRange);

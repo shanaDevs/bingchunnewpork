@@ -25,6 +25,7 @@
     "seed:main-branches": "ts-node --transpile-only src/scripts/reseed-main-branches.ts",
     "backfill:partial-refund-amounts": "ts-node --transpile-only src/scripts/backfill-partial-refund-amounts.ts",
     "backfill:platform-earnings": "ts-node --transpile-only src/scripts/backfill-platform-earnings.ts",
+    "ensure:stock-audit-admin-name": "ts-node --transpile-only src/scripts/ensure-stock-audit-admin-user-name.ts",
     "migrate:promo-columns": "ts-node --transpile-only src/scripts/migrate-promo-columns.ts",
     "migrate:promotion-shared": "ts-node --transpile-only src/scripts/migrate-promotion-shared.ts",
     "migrate:user-referral": "ts-node --transpile-only src/scripts/migrate-user-referral.ts",

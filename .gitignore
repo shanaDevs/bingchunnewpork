@@ -4,8 +4,6 @@ jspm_packages/
 web_modules/
 
 # Local env files
-.env
-.env.local
 .env.development.local
 .env.test.local
 .env.production.local
@@ -45,6 +43,9 @@ test-results/
 # Backend test files
 backend/tests/
 
+# Frontend-v2 unit tests (local only — do not publish)
+Frontend-v2/**/*.test.ts
+
 # Next.js build output
 .next/
 out/
@@ -58,7 +59,6 @@ output/
 *.tsbuildinfo
 
 # IDE / Editors
-.vscode/
 .idea/
 *.suo
 *.ntvs*

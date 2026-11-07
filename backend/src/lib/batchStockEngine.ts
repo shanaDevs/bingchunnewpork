@@ -10,6 +10,8 @@ import { InsufficientStockError } from '../repositories/inventoryReservationRepo
 
 export const LOW_STOCK_THRESHOLD = 25;
 export const OUT_OF_STOCK_THRESHOLD = 5;
+/** Suggested weekly target when a branch has not configured one yet. */
+export const DEFAULT_WEEKLY_TARGET_QTY = 200;
 
 type Tx = Prisma.TransactionClient;
 
@@ -279,6 +281,11 @@ async function syncStoreProductFromBatches(
   return { onHand, weeklyBaseQty: weeklyReceivedQty };
 }
 
+async function ensureStockAuditSchemaForWrite(): Promise<void> {
+  const { ensureStockAuditAdminUserNameColumn } = await import('./stockAuditSchema');
+  await ensureStockAuditAdminUserNameColumn();
+}
+
 async function resolveAdminUserName(
   tx: Tx,
   adminUserId?: string,
@@ -310,6 +317,7 @@ async function writeAuditLog(
     note?: string;
   },
 ): Promise<void> {
+  await ensureStockAuditSchemaForWrite();
   const adminUserName = await resolveAdminUserName(tx, input.adminUserId, input.adminUserName);
   await tx.stockAuditLog.create({
     data: {
