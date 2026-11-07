@@ -106,7 +106,7 @@ export function orderingConfigFromFulfillment(
 ): (StoreOrderingConfig & BranchCloseState) | null {
   if (!info) return null;
   return {
-    openTime: info.openTime ?? defaults?.openTime ?? '09:00',
+    openTime: info.openTime ?? defaults?.openTime ?? '08:00',
     closeTime: info.closeTime ?? defaults?.closeTime ?? '23:00',
     onlineOrderStartTime: info.onlineOrderStartTime,
     onlineOrderStopTime: info.onlineOrderStopTime,

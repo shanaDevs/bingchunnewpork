@@ -53,7 +53,7 @@ export const contactInfo = {
     { label: "071 511 8888", href: "tel:+94715118888" },
     { label: "071 511 7777", href: "tel:+94715117777" },
   ],
-  hours: "Open Daily: 9 AM - 11 PM",
+  hours: "Open Daily: 8 AM - 11 PM",
 } as const;
 
 export const socialLinks = [

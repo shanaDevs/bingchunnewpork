@@ -9,6 +9,9 @@ router.get('/', optionalAuth, storeController.getStores);
 router.get('/address/autocomplete', storeController.autocompleteAddress);
 router.get('/address/geocode', storeController.geocodeAddress);
 router.get('/address/reverse', storeController.reverseGeocodeAddress);
+router.get('/address/tiles', storeController.customerMapTiles);
+router.get('/address/directions', storeController.drivingDirections);
+router.get('/address/place', storeController.placeLocation);
 router.post('/validate-delivery', storeController.validateDelivery);
 router.get('/:id', storeController.getStore);
 

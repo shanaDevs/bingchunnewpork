@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../domain/entities/delivery.dart';
+import 'app_map_tiles.dart';
 import '../theme/pos_theme.dart';
 
 LatLng ll(GeoPoint p) => LatLng(p.lat, p.lng);
@@ -118,11 +119,8 @@ class _DeliveryMapState extends State<DeliveryMap> {
             interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
           ),
           children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.bingchun.bing_chun_cashier',
+            const AppMapTiles(
               maxNativeZoom: 19,
-              // Keep the last tiles while new ones load instead of flashing grey.
               keepBuffer: 4,
             ),
             PolylineLayer(

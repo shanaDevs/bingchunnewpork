@@ -8,6 +8,7 @@ import '../../core/format.dart';
 import '../../core/intents.dart';
 import '../../data/models/delivery_route.dart';
 import '../../tracking/location_tracker.dart';
+import '../components/app_map_tiles.dart';
 import '../components/buttons.dart';
 import '../components/run_kit.dart';
 import '../theme/bc_theme.dart';
@@ -192,10 +193,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
                 },
               ),
               children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'lk.bingchun.bing_chun_delivery',
-                ),
+                const AppMapTiles(),
                 if (_roadPath.length >= 2)
                   PolylineLayer(
                     polylines: [

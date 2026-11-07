@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/bc_theme.dart';
 import '../utils/app_toast.dart';
+import 'app_map_tiles.dart';
 import 'bc_map_pin.dart';
 import 'design/bc_app_design.dart';
 
@@ -528,10 +529,7 @@ class _PickupStorePickerState extends State<PickupStorePicker> {
         onTap: (_, __) {},
       ),
       children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'lk.bingchun.bing_chun_customer',
-        ),
+        const AppMapTiles(),
         MarkerLayer(markers: markers),
       ],
     );

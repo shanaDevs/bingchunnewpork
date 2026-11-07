@@ -6,6 +6,7 @@ import 'package:latlong2/latlong.dart' hide Path;
 import 'package:provider/provider.dart';
 
 import '../../core/app_container.dart';
+import 'app_map_tiles.dart';
 import '../../data/models/delivery_route.dart';
 import '../../tracking/location_tracker.dart';
 import '../theme/bc_theme.dart';
@@ -18,9 +19,6 @@ const _stopPinRedNext = Color(0xFFC62828);
 
 /// Pickup-zone ring — the admin route map's zone green.
 const pickupZoneGreen = Color(0xFF16A34A);
-
-const _osmTiles = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const _userAgentPackage = 'lk.bingchun.bing_chun_delivery';
 
 /// OpenStreetMap route view — port of RouteMapView.kt.
 ///
@@ -224,7 +222,7 @@ class _RouteMapState extends State<RouteMap> {
         },
       ),
       children: [
-        TileLayer(urlTemplate: _osmTiles, userAgentPackageName: _userAgentPackage),
+        const AppMapTiles(),
         if (zone.isNotEmpty)
           PolygonLayer(
             polygons: [
