@@ -6041,6 +6041,17 @@
     border-radius: 999px;
   }
 
+  .delivery-job-table-timeline__connector {
+    width: 1.75rem;
+    flex: 0 0 auto;
+  }
+
+  @media (min-width: 640px) {
+    .delivery-job-table-timeline__connector {
+      width: 2rem;
+    }
+  }
+
   .delivery-timeline-rail--done {
     background: linear-gradient(90deg, var(--color-brand-light), var(--color-brand));
   }

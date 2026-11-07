@@ -21,6 +21,7 @@ import { applyMeritDelta } from '../lib/meritPoints';
 import { heldJobStatuses, canDriverClaimMore, classifyIncompleteJob, prismaKnowsDeliveryJobStatus } from '../lib/deliveryJobHelpers';
 import { todayDateRange } from '../lib/datetime';
 import { getEventPublisher } from '../sockets/eventPublisher';
+import { replayPendingJobsForDriverGoingOnline } from '../lib/pendingJobAlerts';
 import { logger } from '../utils/logger';
 
 /** Private licence objects need a short-lived GET URL. Core owns the Spaces signer. */
@@ -161,6 +162,13 @@ export async function updateDuty(req: Request, res: Response, next: NextFunction
       }
     } catch {
       // Socket may be unavailable — duty DB update still applies.
+    }
+
+    if (dutyStatus === 'ONLINE' && driver.dutyStatus !== 'ONLINE') {
+      const storeIds = await getDriverAccessibleStoreIds(driverId, driver.storeId);
+      replayPendingJobsForDriverGoingOnline(driverId, storeIds).catch((err) =>
+        logger.warn('Pending job replay on go-online failed', { driverId, err }),
+      );
     }
 
     return success(res, {

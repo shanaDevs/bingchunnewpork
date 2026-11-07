@@ -37,6 +37,8 @@ import {
   parseActualRouteJson,
   simplifyGpsPath,
   visibleJobOrderLinksForDeliveryJob,
+  jobPickedUpForList,
+  mapListJobOrderStops,
 } from '../lib/deliveryJobHelpers';
 import { jobHasPickedUp } from '../lib/liveDriverTracking';
 import { optimizeDeliveryStops, type RouteStop } from '../lib/routeOptimizer';
@@ -53,7 +55,13 @@ import { uploadDriverAsset, viewableLicenseImageUrl, viewableLicenseImageUrlWith
 import { retryOnceOnDisconnect } from '../utils/prismaErrors';
 import { DriverDutyStatus, DeliveryDomainState, Prisma } from '@prisma/client';
 import { resolveCustomerDisplayName } from '../lib/customerName';
-import { syncRiderProfileFromAdminUser } from '@bingchun/delivery-domain';
+import {
+  computeRiderEfficiencyMetrics,
+  jobRiderDistanceKm,
+  roundDistanceKm,
+  sumRiderDistanceKm,
+  syncRiderProfileFromAdminUser,
+} from '@bingchun/delivery-domain';
 import { meritStatusBand, applyMeritDelta, MERIT_DELTAS } from '../lib/meritPoints';
 import {
   assertCashierCanViewJob,
@@ -69,6 +77,7 @@ import {
   collectForwardOrders,
   deriveFailureReassignment,
   failureOutcomeAllowsRiderReassignment,
+  loadReassignedRidersByFailedJob,
   reassignFailedDeliveryOrders,
   REDELIVERY_JOB_STATUSES,
 } from '../lib/deliveryFailureReassign';
@@ -270,9 +279,20 @@ export async function listAdminDeliveryJobs(req: Request, res: Response, next: N
       },
       include: {
         store: { select: { id: true, name: true, city: true } },
-        driver: { select: { id: true, name: true, email: true } },
+        driver: { select: { id: true, name: true, email: true, phone: true } },
         jobOrders: {
-          include: { order: { select: { status: true, total: true } } },
+          orderBy: { sequence: 'asc' },
+          include: {
+            order: {
+              select: {
+                id: true,
+                orderNumber: true,
+                status: true,
+                total: true,
+                cancelReason: true,
+              },
+            },
+          },
         },
       },
       // Latest scheduled job first, regardless of status — so Active isn't
@@ -284,6 +304,10 @@ export async function listAdminDeliveryJobs(req: Request, res: Response, next: N
     if (!statusFilter && !scopedDates.liveStatusFilter) {
       jobs = jobs.filter((j) => j.status !== 'VEHICLE_FAILURE');
     }
+
+    const reassignedByJob = await loadReassignedRidersByFailedJob(
+      jobs.filter((j) => j.status === 'VEHICLE_FAILURE').map((j) => j.id),
+    );
 
     return success(
       res,
@@ -329,7 +353,19 @@ export async function listAdminDeliveryJobs(req: Request, res: Response, next: N
           hasActualRoute: Boolean(j.actualRoute),
           storeName: j.store.name,
           storeId: j.storeId,
-          driver: j.driver ? { id: j.driver.id, name: j.driver.name, email: j.driver.email } : null,
+          driver: j.driver
+            ? {
+                id: j.driver.id,
+                name: j.driver.name,
+                email: j.driver.email,
+                phone: j.driver.phone ?? null,
+              }
+            : null,
+          ...(j.status === 'VEHICLE_FAILURE'
+            ? { reassignedRiders: reassignedByJob.get(j.id) ?? [] }
+            : {}),
+          pickedUp: jobPickedUpForList(j.startedAt, j.status),
+          orders: mapListJobOrderStops(visibleOrders),
         };
       })
     );
@@ -347,7 +383,7 @@ export async function getAdminDeliveryJob(req: Request, res: Response, next: Nex
       where: { id: jobId },
       include: {
         store: { select: { id: true, name: true, addressLine: true, city: true, lat: true, lng: true } },
-        driver: { select: { id: true, name: true, email: true } },
+        driver: { select: { id: true, name: true, email: true, phone: true } },
         jobOrders: adminJobOrdersInclude(jobId),
       },
     });
@@ -384,6 +420,10 @@ export async function getAdminDeliveryJob(req: Request, res: Response, next: Nex
     });
     const deliveredCount = orders.filter((o) => o.status === 'DELIVERED').length;
     const vehicleFailure = await fetchJobVehicleFailure(job.id);
+    const reassignedRiders =
+      job.status === 'VEHICLE_FAILURE'
+        ? ((await loadReassignedRidersByFailedJob([job.id])).get(job.id) ?? [])
+        : [];
 
     const returningToBranch =
       job.status === 'IN_PROGRESS' &&
@@ -428,7 +468,15 @@ export async function getAdminDeliveryJob(req: Request, res: Response, next: Nex
           : null,
       hasActualRoute: Boolean(job.actualRoute),
       store: job.store,
-      driver: job.driver ? { id: job.driver.id, name: job.driver.name, email: job.driver.email } : null,
+      driver: job.driver
+        ? {
+            id: job.driver.id,
+            name: job.driver.name,
+            email: job.driver.email,
+            phone: job.driver.phone ?? null,
+          }
+        : null,
+      reassignedRiders,
       orderCount: orders.length,
       deliveredCount,
       pickedUp: await jobHasPickedUp(job.id, job.status),
@@ -1973,6 +2021,26 @@ function buildAnalyticsJobWhere(
   };
 }
 
+/** Completed jobs for distance totals — matches rider Stats (`completedAt` window). */
+function buildCompletedDistanceJobWhere(
+  storeId: string | undefined,
+  driverId: string | string[] | undefined,
+  dateFrom?: Date,
+  dateTo?: Date,
+) {
+  const completedAt = buildAssignedAtRange(dateFrom, dateTo);
+  return {
+    status: 'COMPLETED' as const,
+    ...(storeId ? { storeId } : {}),
+    ...(driverId
+      ? Array.isArray(driverId)
+        ? { driverId: { in: driverId } }
+        : { driverId }
+      : { driverId: { not: null } }),
+    ...(completedAt ? { completedAt } : {}),
+  };
+}
+
 function buildAnalyticsRiderWhere(storeId: string | undefined, driverId?: string) {
   return {
     role: { name: 'DELIVERY_DRIVER' },
@@ -2083,10 +2151,32 @@ type JobKpiRow = {
   jobOrders: JobOrderLink[];
 };
 
-function aggregateJobMetricsByDriver(jobs: JobKpiRow[]) {
+type DriverDistanceRow = {
+  driverId: string | null;
+  actualDistanceKm: number | null;
+  totalDistanceKm: number | null;
+};
+
+function aggregateDriverDistanceByDriver(jobs: DriverDistanceRow[]) {
+  const totals = new Map<string, number>();
+  for (const job of jobs) {
+    if (!job.driverId) continue;
+    totals.set(job.driverId, (totals.get(job.driverId) ?? 0) + jobRiderDistanceKm(job));
+  }
+  const rounded = new Map<string, number>();
+  for (const [driverId, km] of totals) {
+    rounded.set(driverId, roundDistanceKm(km));
+  }
+  return rounded;
+}
+
+function aggregateJobMetricsByDriver(
+  jobs: JobKpiRow[],
+  distanceByDriver: Map<string, number> = new Map(),
+) {
   const result = new Map<
     string,
-    { jobCount: number; orderIds: Set<string>; totalDistanceKm: number }
+    { jobCount: number; orderIds: Set<string> }
   >();
 
   for (const job of jobs) {
@@ -2094,23 +2184,23 @@ function aggregateJobMetricsByDriver(jobs: JobKpiRow[]) {
     const existing = result.get(job.driverId) ?? {
       jobCount: 0,
       orderIds: new Set<string>(),
-      totalDistanceKm: 0,
     };
 
     existing.jobCount += 1;
-    existing.totalDistanceKm += job.totalDistanceKm ?? 0;
     for (const link of job.jobOrders) {
       existing.orderIds.add(link.orderId);
     }
     result.set(job.driverId, existing);
   }
 
+  const driverIds = new Set([...result.keys(), ...distanceByDriver.keys()]);
   const mapped = new Map<string, { jobCount: number; orderCount: number; totalDistanceKm: number }>();
-  for (const [driverId, data] of result) {
+  for (const driverId of driverIds) {
+    const data = result.get(driverId);
     mapped.set(driverId, {
-      jobCount: data.jobCount,
-      orderCount: data.orderIds.size,
-      totalDistanceKm: Math.round(data.totalDistanceKm * 10) / 10,
+      jobCount: data?.jobCount ?? 0,
+      orderCount: data?.orderIds.size ?? 0,
+      totalDistanceKm: distanceByDriver.get(driverId) ?? 0,
     });
   }
   return mapped;
@@ -2118,20 +2208,25 @@ function aggregateJobMetricsByDriver(jobs: JobKpiRow[]) {
 
 const riderJobDetailSelect = {
   id: true,
+  rideCode: true,
   status: true,
   assignedAt: true,
   startedAt: true,
   completedAt: true,
+  actualDistanceKm: true,
   totalDistanceKm: true,
   jobOrders: { select: { orderId: true } },
 };
 
 type RiderJobDetailRow = {
   id: string;
+  /** Present for rider KPI detail; omitted on some dashboard aggregates that only need KPI math. */
+  rideCode?: string | null;
   status: string;
   assignedAt: Date | null;
   startedAt: Date | null;
   completedAt: Date | null;
+  actualDistanceKm: number | null;
   totalDistanceKm: number | null;
   jobOrders: JobOrderLink[];
 };
@@ -2144,8 +2239,6 @@ type DeliveryEventRow = {
 };
 
 const KPI_EVENT_STATES = ['PICKED_UP', 'EN_ROUTE', 'DELIVERED', 'FAILED'] as const;
-const PICKUP_EVENT_STATES = new Set<DeliveryDomainState>(['PICKED_UP', 'EN_ROUTE']);
-const FINAL_EVENT_STATES = new Set<DeliveryDomainState>(['DELIVERED', 'FAILED']);
 
 function groupEventsByJobId(events: DeliveryEventRow[]): Map<string, DeliveryEventRow[]> {
   const map = new Map<string, DeliveryEventRow[]>();
@@ -2157,53 +2250,23 @@ function groupEventsByJobId(events: DeliveryEventRow[]): Map<string, DeliveryEve
   return map;
 }
 
-function earliestEvent(
-  events: DeliveryEventRow[],
-  states: Set<DeliveryDomainState>,
-): DeliveryEventRow | null {
-  let earliest: DeliveryEventRow | null = null;
-  for (const event of events) {
-    if (!states.has(event.state)) continue;
-    if (!earliest || event.createdAt < earliest.createdAt) {
-      earliest = event;
-    }
-  }
-  return earliest;
-}
-
-function latestEvent(
-  events: DeliveryEventRow[],
-  states: Set<DeliveryDomainState>,
-): DeliveryEventRow | null {
-  let latest: DeliveryEventRow | null = null;
-  for (const event of events) {
-    if (!states.has(event.state)) continue;
-    if (!latest || event.createdAt > latest.createdAt) {
-      latest = event;
-    }
-  }
-  return latest;
-}
-
 function computeRiderDetailKpi(
   jobs: RiderJobDetailRow[],
   eventsByJobId: Map<string, DeliveryEventRow[]> = new Map(),
+  completedDistanceJobs: DriverDistanceRow[] = [],
 ) {
   const allOrderIds = new Set<string>();
-  const completedOrderIds = new Set<string>();
   let totalJobs = 0;
   let completedJobs = 0;
   let cancelledJobs = 0;
-  let totalDistanceKm = 0;
-  let totalDeliveryTimeMs = 0;
-  const stationDurations: Array<number | null> = [];
 
-  let orderDeliveryTimeMs = 0;
-  let orderDeliveryCount = 0;
+  const distanceJobs =
+    completedDistanceJobs.length > 0
+      ? completedDistanceJobs
+      : jobs.filter((job) => job.status === 'COMPLETED');
 
   for (const job of jobs) {
     totalJobs += 1;
-    totalDistanceKm += job.totalDistanceKm ?? 0;
 
     for (const link of job.jobOrders) {
       allOrderIds.add(link.orderId);
@@ -2211,63 +2274,25 @@ function computeRiderDetailKpi(
 
     if (job.status === 'COMPLETED') {
       completedJobs += 1;
-      const deliveryMs = durationMs(job.startedAt, job.completedAt);
-      if (deliveryMs != null && deliveryMs >= 0) {
-        totalDeliveryTimeMs += deliveryMs;
-        for (const link of job.jobOrders) {
-          completedOrderIds.add(link.orderId);
-        }
-      }
-
-      const jobEvents = eventsByJobId.get(job.id) ?? [];
-      let jobHasEventBasedOrder = false;
-
-      for (const link of job.jobOrders) {
-        const orderEvents = jobEvents.filter((event) => event.orderId === link.orderId);
-        const pickupEvent = earliestEvent(orderEvents, PICKUP_EVENT_STATES);
-        const deliveredEvent = orderEvents.find((event) => event.state === 'DELIVERED') ?? null;
-
-        if (pickupEvent && deliveredEvent) {
-          const orderMs = durationMs(pickupEvent.createdAt, deliveredEvent.createdAt);
-          if (orderMs != null && orderMs >= 0) {
-            orderDeliveryTimeMs += orderMs;
-            orderDeliveryCount += 1;
-            jobHasEventBasedOrder = true;
-          }
-        }
-      }
-
-      if (!jobHasEventBasedOrder && deliveryMs != null && deliveryMs >= 0 && job.jobOrders.length > 0) {
-        const perOrderMs = deliveryMs / job.jobOrders.length;
-        for (const link of job.jobOrders) {
-          orderDeliveryTimeMs += perOrderMs;
-          orderDeliveryCount += 1;
-        }
-      }
-
-      const lastFinalEvent = latestEvent(jobEvents, FINAL_EVENT_STATES);
-      if (lastFinalEvent && job.completedAt) {
-        stationDurations.push(durationMs(lastFinalEvent.createdAt, job.completedAt));
-      } else {
-        stationDurations.push(durationMs(job.assignedAt, job.startedAt));
-      }
     } else if (job.status === 'CANCELLED') {
       cancelledJobs += 1;
     }
   }
 
-  const averageTimePerOrderMinutes =
-    orderDeliveryCount > 0 ? msToMinutes(orderDeliveryTimeMs / orderDeliveryCount) : null;
+  const efficiency = computeRiderEfficiencyMetrics(
+    jobs.filter((job) => job.status === 'COMPLETED'),
+    eventsByJobId,
+  );
 
   return {
     totalJobs,
     completedJobs,
     cancelledJobs,
     totalOrders: allOrderIds.size,
-    totalDistanceKm: Math.round(totalDistanceKm * 10) / 10,
-    totalDeliveryTimeMinutes: msToMinutes(totalDeliveryTimeMs) ?? 0,
-    averageTimePerOrderMinutes,
-    averageStationTimeMinutes: msToMinutes(averageDuration(stationDurations)),
+    totalDistanceKm: roundDistanceKm(sumRiderDistanceKm(distanceJobs)),
+    totalDeliveryTimeMinutes: efficiency.totalDeliveryTimeMinutes,
+    averageTimePerOrderMinutes: efficiency.averageTimePerOrderMinutes,
+    averageStationTimeMinutes: efficiency.averageStationTimeMinutes,
   };
 }
 
@@ -2275,10 +2300,11 @@ function mapRiderJobDetailRow(job: RiderJobDetailRow) {
   const deliveryMs = durationMs(job.startedAt, job.completedAt);
   return {
     id: job.id,
+    rideCode: job.rideCode ?? null,
     date: job.assignedAt?.toISOString() ?? null,
     status: job.status,
     orderCount: job.jobOrders.length,
-    distanceKm: job.totalDistanceKm,
+    distanceKm: job.status === 'COMPLETED' ? roundDistanceKm(jobRiderDistanceKm(job)) : job.totalDistanceKm,
     assignedAt: job.assignedAt?.toISOString() ?? null,
     startedAt: job.startedAt?.toISOString() ?? null,
     completedAt: job.completedAt?.toISOString() ?? null,
@@ -2309,11 +2335,12 @@ export async function getDriverAnalytics(req: Request, res: Response, next: Next
         where: { ...jobWhere, status: 'CANCELLED' },
       }),
       prisma.deliveryJob.findMany({
-        where: { ...jobWhere, status: 'COMPLETED' },
+        where: buildCompletedDistanceJobWhere(storeId, driverId, dateFrom, dateTo),
         select: {
           assignedAt: true,
           startedAt: true,
           completedAt: true,
+          actualDistanceKm: true,
           totalDistanceKm: true,
         },
       }),
@@ -2330,7 +2357,7 @@ export async function getDriverAnalytics(req: Request, res: Response, next: Next
     const riderIds = riders.map((r) => r.id);
     const assignedAtRange = buildAssignedAtRange(dateFrom, dateTo);
 
-    const [jobsForRiders, shiftsForRiders] =
+    const [jobsForRiders, completedJobsForDistance, shiftsForRiders] =
       riderIds.length > 0
         ? await Promise.all([
             prisma.deliveryJob.findMany({
@@ -2346,19 +2373,28 @@ export async function getDriverAnalytics(req: Request, res: Response, next: Next
                 jobOrders: { select: { orderId: true } },
               },
             }),
+            prisma.deliveryJob.findMany({
+              where: buildCompletedDistanceJobWhere(storeId, riderIds, dateFrom, dateTo),
+              select: {
+                driverId: true,
+                actualDistanceKm: true,
+                totalDistanceKm: true,
+              },
+            }),
             prisma.driverShift.findMany({
               where: buildShiftOverlapWhere(storeId, riderIds, dateFrom, dateTo),
               select: { driverId: true, startedAt: true, endedAt: true },
             }),
           ])
-        : [[], []];
+        : [[], [], []];
 
-    const jobMetrics = aggregateJobMetricsByDriver(jobsForRiders);
+    const distanceByDriver = aggregateDriverDistanceByDriver(completedJobsForDistance);
+    const jobMetrics = aggregateJobMetricsByDriver(jobsForRiders, distanceByDriver);
     const shiftMetrics = computeShiftMetricsByDriver(shiftsForRiders, dateFrom, dateTo);
 
     const completedCount = completed.length;
     const cancelRate = accepted + cancelled > 0 ? cancelled / (accepted + cancelled) : 0;
-    const totalDistance = completed.reduce((s, j) => s + (j.totalDistanceKm ?? 0), 0);
+    const totalDistance = sumRiderDistanceKm(completed);
 
     return success(res, {
       filters: { storeId: storeId ?? null, driverId: driverId ?? null, dateFrom, dateTo },
@@ -2367,7 +2403,7 @@ export async function getDriverAnalytics(req: Request, res: Response, next: Next
         cancelledRides: cancelled,
         cancelRate,
         completedRides: completedCount,
-        totalDistanceKm: Math.round(totalDistance * 10) / 10,
+        totalDistanceKm: roundDistanceKm(totalDistance),
         averagePickupMinutes: msToMinutes(
           averageDuration(completed.map((j) => durationMs(j.assignedAt, j.startedAt))),
         ),
@@ -2431,7 +2467,10 @@ export async function getRiderKpiDetail(req: Request, res: Response, next: NextF
       throw new AppError('Rider not found', 404);
     }
 
-    const [allJobs, jobsTotal, paginatedJobs, shifts, rejectedJobs] = await Promise.all([
+    const completedDistanceWhere = buildCompletedDistanceJobWhere(storeId, riderId, dateFrom, dateTo);
+
+    const [allJobs, jobsTotal, paginatedJobs, shifts, rejectedJobs, completedDistanceJobs] =
+      await Promise.all([
       prisma.deliveryJob.findMany({
         where: jobWhere,
         select: riderJobDetailSelect,
@@ -2455,6 +2494,14 @@ export async function getRiderKpiDetail(req: Request, res: Response, next: NextF
           ...(storeId ? { job: { storeId } } : {}),
         },
       }),
+      prisma.deliveryJob.findMany({
+        where: completedDistanceWhere,
+        select: {
+          driverId: true,
+          actualDistanceKm: true,
+          totalDistanceKm: true,
+        },
+      }),
     ]);
 
     const completedJobIds = allJobs.filter((job) => job.status === 'COMPLETED').map((job) => job.id);
@@ -2473,7 +2520,7 @@ export async function getRiderKpiDetail(req: Request, res: Response, next: NextF
     );
 
     const shiftMetrics = computeShiftMetricsByDriver(shifts, dateFrom, dateTo).get(riderId);
-    const kpi = computeRiderDetailKpi(allJobs, eventsByJobId);
+    const kpi = computeRiderDetailKpi(allJobs, eventsByJobId, completedDistanceJobs);
 
     return success(res, {
       rider: {
@@ -2558,6 +2605,7 @@ function buildPeriodStatusWhere(
 function aggregateTopRiders(
   completedJobs: Array<{
     driverId: string | null;
+    actualDistanceKm: number | null;
     totalDistanceKm: number | null;
     jobOrders: JobOrderLink[];
     driver: { id: string; name: string } | null;
@@ -2583,7 +2631,7 @@ function aggregateTopRiders(
       totalDistanceKm: 0,
     };
     existing.completedJobs += 1;
-    existing.totalDistanceKm += job.totalDistanceKm ?? 0;
+    existing.totalDistanceKm += jobRiderDistanceKm(job);
     for (const link of job.jobOrders) {
       existing.orderIds.add(link.orderId);
     }
@@ -2596,7 +2644,7 @@ function aggregateTopRiders(
       riderName: data.riderName,
       completedJobs: data.completedJobs,
       distinctOrders: data.orderIds.size,
-      totalDistanceKm: Math.round(data.totalDistanceKm * 10) / 10,
+      totalDistanceKm: roundDistanceKm(data.totalDistanceKm),
       onlineTimeMinutes: shiftMetrics.get(riderId)?.onlineTimeMinutes ?? 0,
     }))
     .sort(
@@ -2629,6 +2677,7 @@ export async function getDeliveryDashboard(req: Request, res: Response, next: Ne
         },
         select: {
           id: true,
+          rideCode: true,
           storeId: true,
           driverId: true,
           status: true,
@@ -2649,6 +2698,7 @@ export async function getDeliveryDashboard(req: Request, res: Response, next: Ne
           assignedAt: true,
           startedAt: true,
           completedAt: true,
+          actualDistanceKm: true,
           totalDistanceKm: true,
           store: { select: { name: true } },
           driver: { select: { id: true, name: true } },
@@ -2726,6 +2776,7 @@ export async function getDeliveryDashboard(req: Request, res: Response, next: Ne
       .slice(0, 8)
       .map((job) => ({
         id: job.id,
+        rideCode: job.rideCode ?? null,
         storeId: job.storeId,
         driverId: job.driverId,
         riderName: job.driver?.name ?? null,

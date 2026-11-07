@@ -17,6 +17,7 @@ export const DELIVERY_PHYSICAL_TABLES = new Set([
   'delivery_events',
   'delivery_outbox',
   'delivery_job_rejections',
+  'delivery_job_admin_cancellations',
   'driver_complaints',
   'driver_branch_requests',
   'merit_point_history',

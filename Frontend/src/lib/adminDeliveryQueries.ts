@@ -1,5 +1,11 @@
 import { todayDateString } from '@/lib/datetime';
 
+function isPastScheduleDay(scheduledAt?: string): boolean {
+  if (!scheduledAt) return false;
+  const day = scheduledAt.slice(0, 10);
+  return day < todayDateString();
+}
+
 export type DeliveryJobsQueryParams = {
   storeId?: string;
   status?: string;
@@ -26,6 +32,46 @@ export function isActiveDeliveryJob(job: {
   displayStatus?: string | null;
 }): boolean {
   return ACTIVE_DELIVERY_JOB_STATUSES.has(job.status) && job.orderCount > 0 && !job.displayStatus;
+}
+
+/** Incomplete tab sub-status values from API `displayStatus` (or raw `status` for terminal cases). */
+export const INCOMPLETE_JOB_REASONS = [
+  'MISSED',
+  'ABANDONED',
+  'PARTIALLY_COMPLETED',
+  'CANCELLED',
+  'VEHICLE_FAILURE',
+] as const;
+
+export type IncompleteJobReason = (typeof INCOMPLETE_JOB_REASONS)[number];
+
+const HELD_DELIVERY_JOB_STATUSES = new Set(['ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING']);
+const ADMIN_CANCEL_BLOCKED_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'VEHICLE_FAILURE']);
+
+/** HQ "close ride" — incomplete sub-status or rider-blocking held job (not already terminal). */
+export function canAdminCancelDeliveryJob(job: {
+  status: string;
+  displayStatus?: string | null;
+  driver?: { id?: string; name?: string } | null;
+  scheduledAt?: string;
+}): boolean {
+  if (ADMIN_CANCEL_BLOCKED_STATUSES.has(job.status)) return false;
+  const display = job.displayStatus ?? job.status;
+  if (display === 'CANCELLED') return false;
+  if (display === 'MISSED' || display === 'ABANDONED' || display === 'PARTIALLY_COMPLETED') {
+    return true;
+  }
+  if (job.status === 'SCHEDULED' && !job.driver && isPastScheduleDay(job.scheduledAt)) return true;
+  if (job.driver && HELD_DELIVERY_JOB_STATUSES.has(job.status)) return true;
+  return false;
+}
+
+export function filterIncompleteJobsByReason<T extends { status: string; displayStatus?: string | null }>(
+  jobs: T[],
+  reason: string,
+): T[] {
+  if (!reason) return jobs;
+  return jobs.filter((job) => (job.displayStatus ?? job.status) === reason);
 }
 
 export function buildDeliveryJobsQuery(params: DeliveryJobsQueryParams): string {

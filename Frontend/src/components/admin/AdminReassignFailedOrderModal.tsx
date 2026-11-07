@@ -256,12 +256,13 @@ export default function AdminReassignFailedOrderModal({
     }
     setSelectedDriverIds([]);
     setRiderSearchQuery('');
+    const stops = forwardOrdersFromFailure(failure);
     const defaults: Record<string, string> = {};
-    for (const stop of forward) {
+    for (const stop of stops) {
       defaults[stop.orderId] = '';
     }
     setOrderAssignments(defaults);
-  }, [failure?.id, forward]);
+  }, [failure?.id]);
 
   useEffect(() => {
     if (selectedDriverIds.length === 0) {

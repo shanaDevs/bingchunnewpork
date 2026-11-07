@@ -21,13 +21,16 @@ import {
   Truck,
   Users,
 } from 'lucide-react';
-import { getAdminSession, isAllBranchView, isBranchScoped, isCashier } from '@/lib/adminAuth';
+import { getAdminSession, isAllBranchView, isBranchScoped, isCashier, isDeliveryAdmin, isSuperAdmin } from '@/lib/adminAuth';
 import {
   buildDeliveryJobsQuery,
   DELIVERY_TAB_QUERY_KEYS,
   effectiveScheduleDates,
+  filterIncompleteJobsByReason,
+  INCOMPLETE_JOB_REASONS,
   isActiveDeliveryJob,
 } from '@/lib/adminDeliveryQueries';
+import { DELIVERY_JOB_STATUS_LABEL } from '@/lib/adminBadges';
 import { formatBranchName } from '@/lib/deliveryDisplay';
 import { todayDateString } from '@/lib/datetime';
 import AdminDeliveryJobsTable, {
@@ -40,6 +43,7 @@ import AdminDeliveryRouteView from '@/components/admin/AdminDeliveryRouteView';
 import AdminActualRouteView from '@/components/admin/AdminActualRouteView';
 import AdminDriverOpsPanel, { type AnalyticsFilters } from '@/components/admin/AdminDriverOpsPanel';
 import AdminDeliveryDashboard from '@/components/admin/AdminDeliveryDashboard';
+import JobsScheduleStatusTabs from '@/components/admin/JobsScheduleStatusTabs';
 import { orderDateRange } from '@/components/admin/DashboardPeriodFilter';
 import SearchableBranchSelect from '@/components/admin/SearchableBranchSelect';
 import { useDriverManagementAccess } from '@/hooks/useDriverManagementAccess';
@@ -67,6 +71,7 @@ function defaultFilters(sessionStoreId?: string, forCashier = false): JobFilters
     driverId: '',
     dateFrom: today,
     dateTo: today,
+    incompleteReason: '',
   };
 }
 
@@ -330,7 +335,13 @@ function AdminDeliveryContent() {
     [activeJobs],
   );
 
+  const filteredIncompleteJobs = useMemo(
+    () => filterIncompleteJobsByReason(incompleteJobs, appliedFilters.incompleteReason),
+    [incompleteJobs, appliedFilters.incompleteReason],
+  );
+
   const branchScoped = isBranchScoped(admin);
+  const hqCanCancelJobs = isSuperAdmin(admin) || isDeliveryAdmin(admin);
   const jobsRefreshing = activeFetching || completedFetching || incompleteFetching;
 
   const refreshCurrentTab = useCallback(async () => {
@@ -407,6 +418,7 @@ function AdminDeliveryContent() {
       driverId: filters.driverId ?? '',
       dateFrom: filters.dateFrom ?? '',
       dateTo: filters.dateTo ?? '',
+      incompleteReason: '',
     };
   }
 
@@ -445,7 +457,9 @@ function AdminDeliveryContent() {
         <p className="text-muted text-xs mt-0.5">
           {cashierMode
             ? "Showing today's delivery schedules."
-            : 'Apply filters to both active and completed delivery schedules.'}
+            : jobsSubTab === 'incomplete'
+              ? 'Apply filters to incomplete schedules; narrow by reason when the Incomplete tab is selected.'
+              : 'Apply filters to active, completed, and incomplete delivery schedules.'}
         </p>
       </div>
       <div className="px-4 py-4 sm:px-5 flex flex-wrap gap-3 items-end">
@@ -511,6 +525,25 @@ function AdminDeliveryContent() {
                 className="bg-navy-light border border-navy-border rounded-lg px-3 py-2 text-white text-sm h-[38px]"
               />
             </div>
+            {jobsSubTab === 'incomplete' && (
+              <div>
+                <label className="block text-xs text-muted mb-1">Incomplete reason</label>
+                <select
+                  value={pendingFilters.incompleteReason}
+                  onChange={(e) =>
+                    setPendingFilters((current) => ({ ...current, incompleteReason: e.target.value }))
+                  }
+                  className="bg-navy-light border border-navy-border rounded-lg px-3 py-2 text-white text-sm min-w-[180px] h-[38px]"
+                >
+                  <option value="">All incomplete types</option>
+                  {INCOMPLETE_JOB_REASONS.map((reason) => (
+                    <option key={reason} value={reason}>
+                      {DELIVERY_JOB_STATUS_LABEL[reason] ?? reason.replace(/_/g, ' ')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </>
         )}
         <div className="flex items-center gap-2">
@@ -838,43 +871,19 @@ function AdminDeliveryContent() {
         />
       ) : (
         <>
-          {filterBar}
+          <JobsScheduleStatusTabs
+            value={jobsSubTab}
+            onChange={setJobsSubTab}
+            activeCount={filteredActiveJobs.length}
+            completedCount={completedJobs.length}
+            incompleteLabel={
+              appliedFilters.incompleteReason
+                ? `${filteredIncompleteJobs.length} of ${incompleteJobs.length}`
+                : String(filteredIncompleteJobs.length)
+            }
+          />
 
-          <div className="mb-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setJobsSubTab('active')}
-              className={`rounded-lg px-3.5 py-1.5 text-sm font-medium ${
-                jobsSubTab === 'active' ? 'bg-brand text-white' : 'bg-navy-light text-muted'
-              }`}
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <Truck size={14} /> Active ({filteredActiveJobs.length})
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setJobsSubTab('completed')}
-              className={`rounded-lg px-3.5 py-1.5 text-sm font-medium ${
-                jobsSubTab === 'completed' ? 'bg-brand text-white' : 'bg-navy-light text-muted'
-              }`}
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <CheckCircle2 size={14} /> Complete ({completedJobs.length})
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setJobsSubTab('incomplete')}
-              className={`rounded-lg px-3.5 py-1.5 text-sm font-medium ${
-                jobsSubTab === 'incomplete' ? 'bg-brand text-white' : 'bg-navy-light text-muted'
-              }`}
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <AlertTriangle size={14} /> Incomplete ({incompleteJobs.length})
-              </span>
-            </button>
-          </div>
+          {filterBar}
 
           {jobsSubTab === 'active' && (
             <section className="card overflow-hidden">
@@ -884,7 +893,8 @@ function AdminDeliveryContent() {
                   Active schedules
                 </h2>
                 <p className="text-muted text-xs mt-1">
-                  Today&apos;s unclaimed jobs and runs currently in progress. Click a row to open full job details.
+                  Today&apos;s unclaimed jobs and runs currently in progress. Route progress shows below each
+                  row; click a row for full job details.
                 </p>
               </div>
               {activeLoading ? (
@@ -905,6 +915,7 @@ function AdminDeliveryContent() {
                   storeId={effectiveStoreId ?? storeId}
                   variant="active"
                   emptyMessage="No active delivery schedules."
+                  hqCanCancelJobs={hqCanCancelJobs}
                   onViewRoute={(view) => openRoute(view, 'planned')}
                   onRowClick={handleRowClick}
                 />
@@ -959,10 +970,15 @@ function AdminDeliveryContent() {
                 </div>
               ) : (
                 <AdminDeliveryJobsTable
-                  jobs={incompleteJobs}
+                  jobs={filteredIncompleteJobs}
                   storeId={effectiveStoreId ?? storeId}
                   variant="incomplete"
-                  emptyMessage="No incomplete delivery schedules."
+                  hqCanCancelJobs={hqCanCancelJobs}
+                  emptyMessage={
+                    appliedFilters.incompleteReason
+                      ? 'No incomplete schedules match this reason.'
+                      : 'No incomplete delivery schedules.'
+                  }
                   onViewRoute={(view) => openRoute(view, 'planned')}
                   onRowClick={handleRowClick}
                 />
@@ -975,6 +991,7 @@ function AdminDeliveryContent() {
               jobId={drawerJob.jobId}
               storeId={drawerJob.storeId}
               open={!!drawerJob}
+              hqCanCancelJobs={hqCanCancelJobs}
               onClose={() => setDrawerJob(null)}
               onViewRoute={(opts) => {
                 setDrawerJob(null);
