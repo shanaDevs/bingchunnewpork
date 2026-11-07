@@ -148,6 +148,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
     final name = context.watch<AuthController>().driver?.name.trim().split(' ').first ?? '';
     final top = MediaQuery.paddingOf(context).top;
     final isFace = lock.method == AppLockMethod.face;
+    final combined = AppLock.combinedBiometric;
 
     final title = widget.confirmOnly
         ? tr('Confirm it is you')
@@ -157,7 +158,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
     final subtitle = switch (lock.method) {
       AppLockMethod.pin => tr('Enter your 4-digit app PIN'),
       AppLockMethod.face => tr('Use face unlock to open the app'),
-      _ => tr('Use your fingerprint to open the app'),
+      _ => combined ? tr('Use your fingerprint or face to open the app') : tr('Use your fingerprint to open the app'),
     };
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -240,7 +241,11 @@ class _AppLockScreenState extends State<AppLockScreen> {
                                 const SizedBox(height: 18),
                                 _Message(
                                   error: _error,
-                                  idle: isFace ? tr('Tap to use face unlock') : tr('Tap to use your fingerprint'),
+                                  idle: isFace
+                                      ? tr('Tap to use face unlock')
+                                      : combined
+                                      ? tr('Tap to verify with fingerprint or face')
+                                      : tr('Tap to use your fingerprint'),
                                 ),
                               ],
                               const SizedBox(height: 26),
@@ -393,7 +398,11 @@ class _BiometricButtonState extends State<_BiometricButton> with SingleTickerPro
     final c = context.bc;
     return Semantics(
       button: true,
-      label: widget.isFace ? tr('Unlock with face') : tr('Unlock with fingerprint'),
+      label: widget.isFace
+          ? tr('Unlock with face')
+          : AppLock.combinedBiometric
+          ? tr('Unlock with biometrics')
+          : tr('Unlock with fingerprint'),
       child: GestureDetector(
         onTap: widget.busy ? null : widget.onTap,
         child: AnimatedBuilder(

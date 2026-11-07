@@ -54,6 +54,18 @@ class MainActivity : FlutterFragmentActivity() {
         super.onNewIntent(intent)
     }
 
+    // Quick-action bubble: shown over other apps whenever the app leaves the screen
+    // (home, recents, Google Maps, swiped away while on duty) and hidden when it's back.
+    override fun onStart() {
+        super.onStart()
+        QuickBubble.hide(this)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) QuickBubble.show(this)
+    }
+
     // No release in onStop: the screen turning off right after the full-screen alert (the
     // rider locking the phone) stops the activity, and releasing there hid the ringing ride
     // for good — the full-screen intent only fires once. Flutter releases when no ride rings.
@@ -172,6 +184,24 @@ class MainActivity : FlutterFragmentActivity() {
                 )
                 "openBatteryOptimizationSettings" -> result.success(
                     launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)),
+                )
+                "quickBubbleStatus" -> result.success(
+                    mapOf(
+                        "enabled" to QuickBubble.isEnabled(this),
+                        "permitted" to QuickBubble.canDrawOverlays(this),
+                    ),
+                )
+                "setQuickBubbleEnabled" -> {
+                    QuickBubble.setEnabled(this, call.arguments as? Boolean ?: true)
+                    result.success(true)
+                }
+                "setQuickBubbleSignedIn" -> {
+                    QuickBubble.setSignedIn(this, call.arguments as? Boolean ?: false)
+                    result.success(true)
+                }
+                "openOverlaySettings" -> result.success(
+                    launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) ||
+                        launch(appDetails()),
                 )
                 else -> result.notImplemented()
             }
