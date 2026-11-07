@@ -4,7 +4,8 @@ cd /d "%~dp0"
 
 echo Starting cup sticker agent on http://127.0.0.1:9177
 echo Printer default: Xprinter XP-D35B  (override with BC_STICKER_PRINTER)
-echo Keep this window open while using the cashier.
+echo Run this on the cashier PC with the USB printer — not on the server.
+echo Keep this window open while using the cashier browser on THIS PC.
 echo.
 
 REM Free port 9177 if a previous agent is still running

@@ -12,11 +12,13 @@ Blank rolls already have the Bing Chun logo — the agent only prints:
 ## Setup (once per cashier PC)
 
 1. Plug in the Xprinter USB and confirm Windows shows **Xprinter XP-D35B** (or your model) on port **USB001**.
-2. Double-click `start.bat` (or run `npm run dev:cup-stickers` from the repo root).
-3. Keep that window open while using the cashier.
-4. In admin sidebar → **Cup stickers** → **Test print**.
+2. On **this same PC** (not the cloud server), double-click `start.bat`.
+3. Keep that window open while using the cashier browser on this PC.
+4. Open admin in the browser **on this PC** → sidebar → **Cup stickers** → **Test print**.
 
-Default label size is **50×30 mm**. Override if your roll differs:
+The admin site (even when hosted remotely) talks directly to `http://127.0.0.1:9177` on the cashier machine. Do **not** run `start.bat` only on the server — the USB printer is on the matching local PC.
+
+Default label size is **40×30 mm**. Override if your roll differs:
 
 ```bat
 set BC_STICKER_WIDTH_MM=40
@@ -25,7 +27,9 @@ set BC_STICKER_PRINTER=Xprinter XP-D35B
 start.bat
 ```
 
-## API (localhost only)
+## API (cashier PC localhost)
+
+Admin browser → `http://127.0.0.1:9177` (this PC):
 
 - `GET  /health`
 - `POST /test`

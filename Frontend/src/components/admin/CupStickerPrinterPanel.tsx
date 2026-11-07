@@ -67,7 +67,8 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
       </div>
       <p className="mb-3 text-[11px] leading-relaxed text-muted">
         On Accept, prints one sticker per cup (POS-#, OP-1001 pickup, OD-1001 delivery — last 4 of order #).
-        Keep <code className="text-cream/80">tools/cup-sticker-agent/start.bat</code> running on this PC.
+        Run <code className="text-cream/80">tools/cup-sticker-agent/start.bat</code> on this cashier PC
+        (the matching machine with the USB Xprinter) — not on the server.
       </p>
       <label className="mb-2 flex items-center gap-2 text-xs text-cream">
         <input

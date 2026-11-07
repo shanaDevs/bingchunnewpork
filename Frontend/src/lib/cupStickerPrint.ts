@@ -1,23 +1,35 @@
 import type { Order, OrderItem } from '@/types';
 
+/** Local Windows agent on the cashier PC (start.bat). USB printer lives here. */
+export const LOCAL_CUP_STICKER_AGENT_URL = 'http://127.0.0.1:9177';
+
+export const CUP_STICKER_AGENT_URL_KEY = 'bc_cup_sticker_agent_url';
+
 /**
- * Browser calls same-origin Next proxy (`/cup-sticker-agent/...`) — not `/api/*`,
- * because next.config rewrites `/api` to the backend in dev.
- * Next then talks to the local Windows agent on 127.0.0.1:9177.
+ * Browser must call the agent on THIS PC (127.0.0.1:9177), not a same-origin Next
+ * proxy. Proxying through a remote admin host would print on the server's localhost
+ * instead of the matching cashier machine.
+ *
+ * Override: NEXT_PUBLIC_CUP_STICKER_AGENT_URL, or localStorage `bc_cup_sticker_agent_url`.
  */
 export function getCupStickerAgentUrl(): string {
   if (typeof window !== 'undefined') {
-    return '/cup-sticker-agent';
+    const stored = localStorage.getItem(CUP_STICKER_AGENT_URL_KEY)?.trim();
+    if (stored) return stored.replace(/\/$/, '');
   }
-  return (
-    process.env.CUP_STICKER_AGENT_URL ||
+
+  const env = (
     process.env.NEXT_PUBLIC_CUP_STICKER_AGENT_URL ||
-    'http://127.0.0.1:9177'
-  );
+    (typeof window === 'undefined' ? process.env.CUP_STICKER_AGENT_URL : undefined) ||
+    ''
+  ).trim();
+  if (env) return env.replace(/\/$/, '');
+
+  return LOCAL_CUP_STICKER_AGENT_URL;
 }
 
 /** @deprecated use getCupStickerAgentUrl() */
-export const CUP_STICKER_AGENT_URL = '/cup-sticker-agent';
+export const CUP_STICKER_AGENT_URL = LOCAL_CUP_STICKER_AGENT_URL;
 
 export const CUP_STICKER_ENABLED_KEY = 'bc_cup_sticker_enabled';
 export const CUP_STICKER_PRINTER_KEY = 'bc_cup_sticker_printer';
