@@ -40,8 +40,6 @@ import toast from 'react-hot-toast';
 import { adminAuthHeaders } from '@/lib/adminSession';
 import { normalizeWithdrawalFromApi } from '@/lib/moneyString';
 import {
-  branchPayoutsDueQueryKey,
-  fetchBranchPayoutsDue,
   refreshBranchPayoutsDueQueries,
   removePaidBranchFromPayoutsDueCache,
   type BranchPayoutCompletedMeta,
@@ -104,6 +102,7 @@ function WalletOverviewPageContent() {
     periodFrom: string;
     periodTo: string;
     days: number;
+    withdrawalId?: string;
   } | null>(null);
   const [payoutPeriodsRefresh, setPayoutPeriodsRefresh] = useState(0);
 
@@ -176,24 +175,6 @@ function WalletOverviewPageContent() {
     void queryClient.invalidateQueries({ queryKey: ['admin-stats'] });
     void queryClient.invalidateQueries({ queryKey: ['admin-dashboard'] });
   }, [queryClient]);
-
-  const superAdminSession = admin != null && isSuperAdmin(admin);
-
-  const branchPayoutsDueQuery = useQuery({
-    queryKey: branchPayoutsDueQueryKey(),
-    queryFn: ({ signal }) => fetchBranchPayoutsDue(apiBase, signal),
-    enabled: superAdminSession && dueTabActive && Boolean(periodFrom && periodTo),
-    staleTime: 45_000,
-  });
-
-  const duePayouts = branchPayoutsDueQuery.data ?? [];
-  const duePayoutsLoading =
-    branchPayoutsDueQuery.isLoading ||
-    (branchPayoutsDueQuery.isFetching && !branchPayoutsDueQuery.isFetched);
-  const duePayoutsLoadingMore =
-    branchPayoutsDueQuery.isFetching &&
-    branchPayoutsDueQuery.isFetched &&
-    !branchPayoutsDueQuery.isLoading;
 
   const invalidateBranchPayoutsDue = useCallback(() => {
     void refreshBranchPayoutsDueQueries(queryClient);
@@ -326,6 +307,7 @@ function WalletOverviewPageContent() {
       periodFrom: row.periodFrom,
       periodTo: row.periodTo,
       days: row.days,
+      ...(row.withdrawalId ? { withdrawalId: row.withdrawalId } : {}),
     });
   };
 
@@ -448,9 +430,7 @@ function WalletOverviewPageContent() {
               setDuePeriodFocus(null);
               setBranchWalletTarget(wallet);
             }}
-            duePayouts={duePayouts}
-            duePayoutsLoading={duePayoutsLoading}
-            duePayoutsLoadingMore={duePayoutsLoadingMore}
+            dueListEnabled={dueTabActive && Boolean(periodFrom && periodTo)}
             onViewDuePayout={handleViewDuePayout}
             onReviewDuePayout={handleReviewDuePayout}
             tabActions={walletTabActions}
@@ -510,6 +490,7 @@ function WalletOverviewPageContent() {
           presetPeriodFrom={initiatePayoutPreset?.periodFrom ?? null}
           presetPeriodTo={initiatePayoutPreset?.periodTo ?? null}
           presetPeriodDays={initiatePayoutPreset?.days ?? null}
+          presetWithdrawalId={initiatePayoutPreset?.withdrawalId ?? null}
           storeId={initiatePayoutTarget.storeId}
           branchName={branchDisplayName(initiatePayoutTarget.store.name)}
           walletBalance={initiatePayoutTarget.balance ?? 0}

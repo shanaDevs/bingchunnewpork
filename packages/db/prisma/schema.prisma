@@ -384,7 +384,6 @@ model Store {
   wallet                 StoreWallet?
   walletTransactions     WalletTransaction[]
   storeWithdrawals       StoreWithdrawal[]
-  branchPayoutReviews    BranchPayoutReview[]
   commissionSettlements  CommissionSettlement[]
   platformEarnings       PlatformEarning[]
   promotionUsages        PromotionUsage[]
@@ -611,10 +610,11 @@ model StockAuditLog {
   qtyBefore   Int
   qtyChange   Int
   qtyAfter    Int
-  orderId     String?
-  adminUserId String?
-  note        String?         @db.Text
-  createdAt   DateTime        @default(now())
+  orderId       String?
+  adminUserId   String?
+  adminUserName String?
+  note          String?         @db.Text
+  createdAt     DateTime        @default(now())
 
   store       Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
   product     Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -1363,6 +1363,9 @@ model AppSetting {
   spinDisplayJson              Json?
   spinCriteriaJson             Json?
   cancelWindowMinutes          Int       @default(10)
+  weeklyResetDay               Int?
+  /// Max payable LKR total for takeaway orders placed online; null or 0 = no cap.
+  pickupMaxOrderAmount         Int?
   /// Default geofence (meters) for completing a ride at the assigned branch.
   branchCompletionRadiusM      Int       @default(100)
 
@@ -1404,6 +1407,7 @@ enum PayoutCycleStage {
 
 enum WithdrawalStatus {
   PENDING
+  IN_REVIEW
   APPROVED
   REJECTED
   CANCELLED
@@ -1432,24 +1436,6 @@ model StoreWallet {
   @@schema("public")
 
   @@map("store_wallets")
-}
-
-model BranchPayoutReview {
-  id         String   @id @default(uuid())
-  storeId    String
-  periodFrom DateTime
-  periodTo   DateTime
-  markedById String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
-
-  @@unique([storeId, periodFrom, periodTo], map: "branch_payout_review_period")
-  @@index([storeId])
-  @@schema("public")
-
-  @@map("branch_payout_reviews")
 }
 
 model StoreWithdrawal {

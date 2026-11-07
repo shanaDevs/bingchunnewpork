@@ -3,11 +3,12 @@ import { prisma } from './prisma';
 import {
   addColumnIfMissing,
   createIndexIfMissing,
+  pgColumnDef,
   runtimeSchemaPatchesAllowed,
   tableExists,
   tableHasColumn,
 } from './schemaPatch';
-import { getDeliveryZonesSqlRef, primeDeliverySqlRefs } from './deliveryPg';
+import { getDeliveryZonesSqlRef, primeDeliverySqlRefs, qualifiedPhysicalTable } from './deliveryPg';
 import { ensureCancelReasonSchema } from './cancelReasonConfig';
 import { ensureOrderStatusRefundSchema } from './orderStatusRefundConfig';
 import {
@@ -25,6 +26,18 @@ import {
 } from './commission';
 
 let appSchemaReady = false;
+
+/** Ensures optional app_settings columns exist before raw SQL writes (dev DBs may skip boot patches). */
+async function ensureAppSettingsColumnForWrite(column: string, columnDef: string): Promise<void> {
+  if (await tableHasColumn('app_settings', column)) return;
+  await addColumnIfMissing('app_settings', column, columnDef);
+  if (await tableHasColumn('app_settings', column)) return;
+  const tableRef = await qualifiedPhysicalTable('app_settings');
+  const quoted = `"${column.replace(/"/g, '""')}"`;
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE ${tableRef} ADD COLUMN IF NOT EXISTS ${quoted} ${pgColumnDef(columnDef)}`,
+  );
+}
 
 async function ensureDeliveryZonesTable(): Promise<void> {
   if (await tableExists('delivery_zones')) return;
@@ -184,6 +197,7 @@ export async function ensureAppSchema(): Promise<void> {
   await addColumnIfMissing('app_settings', 'spinDisplayJson', 'JSON NULL');
   await addColumnIfMissing('app_settings', 'spinCriteriaJson', 'JSON NULL');
   await addColumnIfMissing('app_settings', 'cancelWindowMinutes', 'INT NOT NULL DEFAULT 10');
+  await addColumnIfMissing('app_settings', 'pickupMaxOrderAmount', 'INT NULL');
   await addColumnIfMissing(
     'app_settings',
     'branchCompletionRadiusM',
@@ -553,6 +567,55 @@ export async function getCancelWindowMinutes(): Promise<number> {
   return cancelWindowMinutesCache;
 }
 
+/** Null or unset means no pickup amount cap. */
+let pickupMaxOrderAmountCache: number | null | undefined;
+
+export function invalidatePickupMaxOrderAmountCache(): void {
+  pickupMaxOrderAmountCache = undefined;
+}
+
+function normalizePickupMaxOrderAmount(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  const rounded = Math.round(value);
+  if (rounded <= 0) return null;
+  return rounded;
+}
+
+async function readPickupMaxOrderAmountFromDb(): Promise<number | null> {
+  await ensureAppSchema();
+  const rows = await prisma.$queryRawUnsafe<Array<{ pickupMaxOrderAmount: number | bigint | null }>>(
+    'SELECT "pickupMaxOrderAmount" FROM "app_settings" WHERE "id" = $1 LIMIT 1',
+    'default',
+  );
+  const raw = rows[0]?.pickupMaxOrderAmount;
+  if (raw == null) return null;
+  return normalizePickupMaxOrderAmount(Number(raw));
+}
+
+export async function setPickupMaxOrderAmount(value: number | null): Promise<number | null> {
+  const normalized = normalizePickupMaxOrderAmount(value);
+  await ensureAppSchema();
+  await ensureAppSettingsColumnForWrite('pickupMaxOrderAmount', 'INT NULL');
+  await prisma.$executeRawUnsafe(
+    'UPDATE "app_settings" SET "pickupMaxOrderAmount" = $1 WHERE "id" = $2',
+    normalized,
+    'default',
+  );
+  pickupMaxOrderAmountCache = normalized;
+  return normalized;
+}
+
+export async function getPickupMaxOrderAmount(): Promise<number | null> {
+  if (pickupMaxOrderAmountCache !== undefined) return pickupMaxOrderAmountCache;
+  pickupMaxOrderAmountCache = await readPickupMaxOrderAmountFromDb();
+  return pickupMaxOrderAmountCache;
+}
+
+export function isPickupOrderOverMaxAmount(total: number, maxAmount: number | null): boolean {
+  if (maxAmount == null || maxAmount <= 0) return false;
+  return total > maxAmount;
+}
+
 let weeklyResetDayCache: number | null | undefined;
 
 export function invalidateWeeklyResetDayCache(): void {
@@ -576,6 +639,7 @@ async function readWeeklyResetDayFromDb(): Promise<number | null> {
 
 export async function setWeeklyResetDay(value: number | null): Promise<number | null> {
   await ensureAppSchema();
+  await ensureAppSettingsColumnForWrite('weeklyResetDay', 'INT NULL');
   const next = value == null ? null : clampWeeklyResetDay(value);
   await prisma.$executeRawUnsafe(
     'UPDATE "app_settings" SET "weeklyResetDay" = $1 WHERE "id" = $2',

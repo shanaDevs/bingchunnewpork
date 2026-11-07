@@ -1,3 +1,5 @@
+import { Request, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { prisma } from './prisma';
 import { AppError } from '../middleware/errorHandler';
@@ -23,5 +25,20 @@ export async function verifyAdminPin(adminId: string | undefined, password: stri
   const valid = await bcrypt.compare(pin, admin.passwordHash);
   if (!valid) {
     throw new AppError('Invalid PIN', 401);
+  }
+}
+
+const pinBodySchema = z.object({
+  password: z.string().min(1, 'PIN is required'),
+});
+
+/** POST /admin/verify-pin — any signed-in admin, no WALLET permission required. */
+export async function verifyAdminPinHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { password } = pinBodySchema.parse(req.body ?? {});
+    await verifyAdminPin(req.user?.sub, password);
+    res.json({ success: true, data: { verified: true } });
+  } catch (err) {
+    next(err);
   }
 }

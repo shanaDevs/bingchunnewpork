@@ -68,9 +68,15 @@ export default function BranchSettlementReport({ lockedStoreId, lockedStoreName 
     return `/admin/reports/settlements${qs ? `?${qs}` : ''}`;
   }, [from, to, storeId]);
 
-  const { data, isFetching } = useQuery<{ settlements: SettlementRow[] }>({
+  const { data, isFetching, isError, error } = useQuery<{ settlements: SettlementRow[] }>({
     queryKey: ['report-branch-settlement', queryUrl],
-    queryFn: () => adminFetch(queryUrl),
+    queryFn: async () => {
+      const payload = await adminFetch<{ settlements?: SettlementRow[]; message?: string }>(queryUrl);
+      if (!payload || !Array.isArray(payload.settlements)) {
+        throw new Error(payload?.message || 'Failed to load settlement sheet');
+      }
+      return { settlements: payload.settlements };
+    },
     placeholderData: keepPreviousData,
   });
 
@@ -116,6 +122,13 @@ export default function BranchSettlementReport({ lockedStoreId, lockedStoreName 
       columnOptions={COLUMNS.map((c) => ({ key: c.key, label: c.label }))}
       loading={isFetching && !data}
       empty={rows.length === 0}
+      emptyMessage={
+        isError
+          ? error instanceof Error
+            ? error.message
+            : 'Failed to load settlement sheet'
+          : 'No payout settlements for the selected branch and date range.'
+      }
       onPdfClick={() => setPreviewOpen(true)}
       controls={
         <div className="flex flex-wrap gap-3 items-end">
@@ -198,10 +211,10 @@ export default function BranchSettlementReport({ lockedStoreId, lockedStoreName 
                   if (s === 'PAID' || s === 'SETTLED' || s === 'COMPLETED') {
                     badgeClass = 'admin-status-badge admin-status-badge--green';
                     StatusIcon = CheckCircle2;
-                  } else if (s === 'PENDING' || s === 'UNPAID') {
+                  } else if (s === 'PENDING' || s === 'UNPAID' || s === 'PAYMENT_PENDING') {
                     badgeClass = 'admin-status-badge admin-status-badge--amber';
                     StatusIcon = Clock;
-                  } else if (s === 'PROCESSING') {
+                  } else if (s === 'PROCESSING' || s === 'IN_PROGRESS' || s === 'IN_REVIEW') {
                     badgeClass = 'admin-status-badge admin-status-badge--blue';
                     StatusIcon = Loader2;
                   } else if (s === 'FAILED' || s === 'REJECTED' || s === 'CANCELLED') {

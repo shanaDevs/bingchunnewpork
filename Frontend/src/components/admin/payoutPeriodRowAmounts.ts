@@ -31,7 +31,7 @@ import {
 import { resolveSlabRatePctFromPreview } from '@/components/admin/commissionUtils';
 
 type PayoutPeriodExpenseRow = {
-  status: 'PAID' | 'PENDING' | 'IN_PROGRESS';
+  status: 'PAID' | 'PENDING' | 'IN_PROGRESS' | 'PAYMENT_PENDING';
   amountCents: number;
   breakdown?: unknown;
   periodFrom: string;

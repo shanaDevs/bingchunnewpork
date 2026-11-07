@@ -130,7 +130,7 @@ export async function determineNextPayoutCycleStage(storeId: string): Promise<Pa
   const latest = await prisma.storeWithdrawal.findFirst({
     where: {
       storeId,
-      status: { in: ['PENDING', 'APPROVED'] },
+      status: { in: ['PENDING', 'APPROVED', 'IN_REVIEW'] },
       periodTo: { not: null },
     },
     orderBy: { periodTo: 'desc' },
@@ -161,7 +161,7 @@ export async function resolvePayoutCycleContext(storeId: string): Promise<Payout
   const latest = await prisma.storeWithdrawal.findFirst({
     where: {
       storeId,
-      status: { in: ['PENDING', 'APPROVED'] },
+      status: { in: ['PENDING', 'APPROVED', 'IN_REVIEW'] },
       periodTo: { not: null },
     },
     orderBy: { periodTo: 'desc' },
@@ -178,7 +178,7 @@ export async function resolvePayoutCycleContext(storeId: string): Promise<Payout
   const pairedFirst = await prisma.storeWithdrawal.findFirst({
     where: {
       storeId,
-      status: { in: ['PENDING', 'APPROVED'] },
+      status: { in: ['PENDING', 'APPROVED', 'IN_REVIEW'] },
       periodFrom: { not: null },
     },
     orderBy: { periodTo: 'desc' },

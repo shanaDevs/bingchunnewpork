@@ -18,6 +18,7 @@ import {
   requireAdmin,
   requireSystemAdmin,
   requireBranchAdminOnly,
+  requireBranchStaff,
   blockCashier,
 } from '../middleware/auth';
 import { requireAnyPermission, requirePermission } from '../middleware/permission';
@@ -25,12 +26,15 @@ import { adminReportsRateLimiter, authRateLimiter } from '../middleware/rateLimi
 import { deliveryAdminServiceProxy } from '../middleware/deliveryAdminProxy';
 import { settlementProofMemoryUpload } from '../middleware/upload';
 import adminDeliveryRoutes from './adminDelivery';
+import { verifyAdminPinHandler } from '../lib/verifyAdminPin';
 
 const router = Router();
 
 router.use(authenticate, requireAdmin);
 router.use('/reports', adminReportsRateLimiter);
 router.use(deliveryAdminServiceProxy);
+
+router.post('/verify-pin', authRateLimiter, verifyAdminPinHandler);
 
 router.get(
   '/invoices/withdrawal/:withdrawalId',
@@ -192,21 +196,27 @@ router.get('/stock', requirePermission('STOCK', 'read'), storeInventoryControlle
 router.get('/stock/batch-preview', requirePermission('STOCK', 'read'), batchStockController.previewNextBatchNumber);
 router.get('/stock/batches', requirePermission('STOCK', 'read'), batchStockController.listBranchBatches);
 router.get('/stock/reset/preview', requirePermission('STOCK', 'read'), batchStockController.previewResetBatchNumber);
-router.post('/stock/reset', requirePermission('STOCK', 'update'), requireBranchAdminOnly, batchStockController.createStockReset);
-router.post('/stock/bulk-restock', requirePermission('STOCK', 'update'), requireBranchAdminOnly, batchStockController.createBulkRestock);
+router.post('/stock/reset', requirePermission('STOCK', 'update'), requireBranchStaff, batchStockController.createStockReset);
+router.post('/stock/bulk-restock', requirePermission('STOCK', 'update'), requireBranchStaff, batchStockController.createBulkRestock);
 router.get('/stock/reset-groups', requirePermission('STOCK', 'read'), batchStockController.listStockBatchGroups);
 router.get('/stock/invariant-check', requireSystemAdmin, batchStockController.stockInvariantCheck);
 router.get('/stock/:productId/pricing', requirePermission('STOCK', 'read'), batchStockController.getProductPricing);
 router.get('/stock/:productId/batches', requirePermission('STOCK', 'read'), batchStockController.listProductBatches);
-router.post('/stock/:productId/batches', requirePermission('STOCK', 'update'), requireBranchAdminOnly, batchStockController.receiveStockBatch);
-router.patch('/stock/batches/:batchId', requirePermission('STOCK', 'update'), requireBranchAdminOnly, batchStockController.patchBatch);
-router.patch('/stock/:productId/settings', requirePermission('STOCK', 'update'), requireBranchAdminOnly, batchStockController.updateProductStockSettings);
+router.post('/stock/:productId/batches', requirePermission('STOCK', 'update'), requireBranchStaff, batchStockController.receiveStockBatch);
+router.post(
+  '/stock/:productId/restock-to-target',
+  requirePermission('STOCK', 'update'),
+  requireBranchStaff,
+  batchStockController.restockToWeeklyTarget,
+);
+router.patch('/stock/batches/:batchId', requirePermission('STOCK', 'update'), requireBranchStaff, batchStockController.patchBatch);
+router.patch('/stock/:productId/settings', requirePermission('STOCK', 'update'), requireBranchStaff, batchStockController.updateProductStockSettings);
 router.get('/stock/report', requirePermission('STOCK', 'read'), stockReportController.stockWeeklyReport);
 router.get('/stock/audit-logs', requirePermission('STOCK', 'read'), stockReportController.stockAuditLogs);
 router.get('/stock/movement-ledger', requirePermission('STOCK', 'read'), stockReportController.stockMovementLedger);
-router.post('/stock/sync', requirePermission('STOCK', 'update'), requireBranchAdminOnly, storeInventoryController.syncBranchInventory);
-router.patch('/stock/:productId', requirePermission('STOCK', 'update'), requireBranchAdminOnly, storeInventoryController.updateBranchStock);
-router.post('/stock/:productId/topup', requirePermission('STOCK', 'update'), requireBranchAdminOnly, stockReportController.stockTopUp);
+router.post('/stock/sync', requirePermission('STOCK', 'update'), requireBranchStaff, storeInventoryController.syncBranchInventory);
+router.patch('/stock/:productId', requirePermission('STOCK', 'update'), requireBranchStaff, storeInventoryController.updateBranchStock);
+router.post('/stock/:productId/topup', requirePermission('STOCK', 'update'), requireBranchStaff, stockReportController.stockTopUp);
 
 // Notifications usually don't need strict RBAC because they are personal. 
 // We'll leave them protected by general admin auth.
@@ -279,6 +289,11 @@ router.get(
   requireSystemAdmin,
   requirePermission('WALLET', 'read'),
   walletController.getPayoutReviewInvoiceHandler,
+);
+router.get(
+  '/wallet/payout-draft-invoice',
+  requirePermission('WALLET', 'read'),
+  walletController.getPayoutDraftInvoiceHandler,
 );
 router.post(
   '/wallet/payout-review-zip',

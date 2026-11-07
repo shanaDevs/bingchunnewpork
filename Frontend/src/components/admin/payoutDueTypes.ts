@@ -7,4 +7,7 @@ export type PayoutDueRow = {
   netAmountCents: number;
   orderCount: number;
   breakdown?: unknown | null;
+  withdrawalId?: string;
+  /** Oldest unpaid window for this branch; set by the paginated due-list API. */
+  isOldestUnpaid?: boolean;
 };

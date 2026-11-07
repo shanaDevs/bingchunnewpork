@@ -14,7 +14,10 @@ import {
   XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { isBranchAdmin, type AdminSession } from '@/lib/adminAuth';
+import { type AdminSession } from '@/lib/adminAuth';
+import { getApiBaseUrl } from '@/lib/apiBase';
+import { confirmDialog } from '@/store/confirmStore';
+import AdminPinGateModal from '@/components/admin/AdminPinGateModal';
 import { adminBadgeClass } from '@/lib/adminBadges';
 import {
   adminStockFetch,
@@ -132,6 +135,7 @@ function formatBranchName(name: string): string {
 
 interface StockTableTabProps {
   admin: AdminSession | null;
+  canEditStock: boolean;
   data: StockResponse | undefined;
   isLoading: boolean;
   error: Error | null;
@@ -154,6 +158,7 @@ interface StockTableTabProps {
 
 export default function StockTableTab({
   admin,
+  canEditStock,
   data,
   isLoading,
   error,
@@ -180,6 +185,8 @@ export default function StockTableTab({
   const [settingsItem, setSettingsItem] = useState<StockItem | null>(null);
   const [settingsSetupIntent, setSettingsSetupIntent] = useState<'receive' | 'reactivate' | null>(null);
   const [togglingProductId, setTogglingProductId] = useState<string | null>(null);
+  const [pinGateOpen, setPinGateOpen] = useState(false);
+  const pendingDeactivateItemRef = useRef<StockItem | null>(null);
   const [adjustModalPurpose, setAdjustModalPurpose] = useState<'default' | 'activate'>('default');
   const [flashProductId, setFlashProductId] = useState<string | null>(null);
   const highlightSyncAttemptedRef = useRef(false);
@@ -342,8 +349,6 @@ export default function StockTableTab({
     [allItems],
   );
 
-  const canEditStock = isBranchAdmin(admin);
-
   async function toggleExpandedBatches(item: StockItem) {
     if (expandedProductId === item.productId) {
       setExpandedProductId(null);
@@ -378,7 +383,7 @@ export default function StockTableTab({
     setSettingsItem(item);
   }
 
-  function handlePowerToggle(item: StockItem) {
+  async function handlePowerToggle(item: StockItem) {
     if (isBranchInactiveItem(item)) {
       if (!hasWeeklyTargetConfigured(item)) {
         openSettings(item, 'reactivate');
@@ -388,16 +393,25 @@ export default function StockTableTab({
       return;
     }
     if (item.isAvailable) {
-      void deactivateProduct(item);
+      const confirmed = await confirmDialog({
+        title: 'Deactivate product?',
+        message: `${item.name} will be hidden from customers and remaining stock will be frozen.`,
+        confirmLabel: 'Continue',
+        cancelLabel: 'Cancel',
+        variant: 'danger',
+      });
+      if (!confirmed) return;
+      pendingDeactivateItemRef.current = item;
+      setPinGateOpen(true);
     }
   }
 
-  async function deactivateProduct(item: StockItem) {
+  async function deactivateProduct(item: StockItem, password: string) {
     setTogglingProductId(item.productId);
     try {
       await adminStockFetch(`/admin/stock/${item.productId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ isAvailable: false, storeId: effectiveStoreId }),
+        body: JSON.stringify({ isAvailable: false, storeId: effectiveStoreId, password }),
       });
       patchStockItem(item.productId, {
         isAvailable: false,
@@ -651,7 +665,7 @@ export default function StockTableTab({
                                 }
                                 onClick={() => {
                                   if (togglingProductId === item.productId) return;
-                                  handlePowerToggle(item);
+                                  void handlePowerToggle(item);
                                 }}
                                 className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
                                   branchInactive
@@ -900,6 +914,25 @@ export default function StockTableTab({
           }}
         />
       )}
+
+      <AdminPinGateModal
+        open={pinGateOpen}
+        onClose={() => {
+          if (togglingProductId) return;
+          setPinGateOpen(false);
+        }}
+        onVerified={(pin) => {
+          const item = pendingDeactivateItemRef.current;
+          pendingDeactivateItemRef.current = null;
+          if (!item) return;
+          void deactivateProduct(item, pin);
+        }}
+        apiBase={getApiBaseUrl()}
+        busy={Boolean(togglingProductId)}
+        titleId="stock-deactivate-pin-title"
+        inputId="stock-deactivate-pin"
+        description="Enter your admin PIN to deactivate this product."
+      />
     </div>
   );
 }

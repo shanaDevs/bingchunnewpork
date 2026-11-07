@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
+import { verifyAdminPin } from '../lib/verifyAdminPin';
 import {
   getPaymentSettings,
   getEnabledMethodsForCheckout,
@@ -12,7 +13,7 @@ import {
   type PaymentMethodConfig,
   type OnlineGateway,
 } from '../lib/paymentSettings';
-import { ensureAppSchema, getConvenienceFeeRates, getConvenientFeeRate, getGatewayFeeRate, getCommissionSlabs, setCommissionSlabs, invalidateCommissionSlabsCache, getDeliveryPlatformFeeRate, setDeliveryPlatformFeeRate, getMaxCupsPerRider, invalidatePickupOrderEditSettingsCache, invalidateGatewayFeeRateCache, invalidateDeliveryPlatformFeeRateCache, setMaxCupsPerRider, getAppDownloadSettings, setAppDownloadSettings, getWeeklyResetDay, setWeeklyResetDay, getSpinSettings, setSpinSettings, getCancelWindowMinutes, setCancelWindowMinutes, invalidateCancelWindowMinutesCache, getBranchCompletionRadiusM, setBranchCompletionRadiusM } from '../lib/appSchema';
+import { ensureAppSchema, getConvenienceFeeRates, getConvenientFeeRate, getGatewayFeeRate, getCommissionSlabs, setCommissionSlabs, invalidateCommissionSlabsCache, getDeliveryPlatformFeeRate, setDeliveryPlatformFeeRate, getMaxCupsPerRider, invalidatePickupOrderEditSettingsCache, invalidateGatewayFeeRateCache, invalidateDeliveryPlatformFeeRateCache, setMaxCupsPerRider, getAppDownloadSettings, setAppDownloadSettings, getWeeklyResetDay, setWeeklyResetDay, getSpinSettings, setSpinSettings, getCancelWindowMinutes, setCancelWindowMinutes, invalidateCancelWindowMinutesCache, getBranchCompletionRadiusM, setBranchCompletionRadiusM, getPickupMaxOrderAmount, setPickupMaxOrderAmount, invalidatePickupMaxOrderAmountCache } from '../lib/appSchema';
 import { parseSpinCriteria, parseSpinDisplay } from '../lib/spinDisplay';
 import {
   getActiveCancelReasons,
@@ -241,7 +242,7 @@ export async function updateAdminMessagingSettings(req: Request, res: Response, 
 export async function getAppSettings(_req: Request, res: Response, next: NextFunction) {
   try {
     await ensureAppSchema();
-    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, gatewayFeeRate, , branchCompletionRadiusM, commissionSlabs] = await Promise.all([
+    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, gatewayFeeRate, , branchCompletionRadiusM, commissionSlabs, pickupMaxOrderAmount] = await Promise.all([
       getConvenienceFeeRates(),
       prisma.appSetting.findUnique({ where: { id: 'default' } }),
       getMaxCupsPerRider(),
@@ -254,6 +255,7 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       getDeliveryPlatformFeeRate(),
       getBranchCompletionRadiusM(),
       getCommissionSlabs(),
+      getPickupMaxOrderAmount(),
     ]);
     return success(res, {
       convenientFeeRate: feeRates.delivery,
@@ -287,6 +289,7 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       spinRequireLogin: spinSettings.requireLogin,
       spinDisplay: spinSettings.display,
       cancelWindowMinutes,
+      pickupMaxOrderAmount,
     });
   } catch (err) {
     next(err);
@@ -354,6 +357,7 @@ const appSettingsSchema = z.object({
     value: z.number().min(0).max(1_000_000).optional(),
   })).optional(),
   cancelWindowMinutes: z.number().int().min(1).max(120).optional(),
+  pickupMaxOrderAmount: z.number().int().min(0).max(50_000_000).nullable().optional(),
 });
 
 export async function updateAppSettings(req: Request, res: Response, next: NextFunction) {
@@ -389,6 +393,7 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       spinDisplay,
       spinCriteria,
       cancelWindowMinutes,
+      pickupMaxOrderAmount,
       deliveryPlatformFeeRate,
       commissionSlabs,
       ...prismaData
@@ -503,6 +508,21 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       invalidateCancelWindowMinutesCache();
     }
 
+    let savedPickupMaxOrderAmount = await getPickupMaxOrderAmount();
+    if (pickupMaxOrderAmount !== undefined) {
+      if (req.user?.role !== 'SYSTEM_ADMIN') {
+        throw new AppError('Only system admin can update pickup order amount limit', 403);
+      }
+      const nextAmount =
+        pickupMaxOrderAmount == null || pickupMaxOrderAmount <= 0 ? null : pickupMaxOrderAmount;
+      if (savedPickupMaxOrderAmount !== nextAmount) {
+        const password = typeof req.body?.password === 'string' ? req.body.password : '';
+        await verifyAdminPin(req.user?.sub, password);
+      }
+      savedPickupMaxOrderAmount = await setPickupMaxOrderAmount(pickupMaxOrderAmount);
+      invalidatePickupMaxOrderAmountCache();
+    }
+
     if (deliveryPlatformFeeRate != null) {
       await setDeliveryPlatformFeeRate(deliveryPlatformFeeRate);
     }
@@ -567,6 +587,7 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       spinDisplay: savedSpin.display,
       spinCriteria: savedSpin.criteria,
       cancelWindowMinutes: savedCancelWindowMinutes,
+      pickupMaxOrderAmount: savedPickupMaxOrderAmount,
     });
   } catch (err) {
     next(err);

@@ -42,7 +42,10 @@ import {
   resolveCycleContextForWindow,
 } from './withdrawalPeriodNet';
 import { runWithdrawalApprovalSideEffects } from './withdrawalApprovalSideEffects';
+import { withdrawalInvoiceApiPath } from './withdrawalInvoice';
 import {
+  findCompletablePeriodWithdrawal,
+  findInReviewWithdrawalForPeriod,
   getNextPayoutStartDate,
   isValidPayoutPeriodDays,
   listElapsedPayoutWindows,
@@ -339,19 +342,26 @@ async function resolveValidatedPayoutBounds(
     throw new AppError('Payout period cannot be in the future', 400);
   }
 
-  const nextStart = await getNextPayoutStartDate(storeId);
-  if (nextStart && fromStr !== nextStart) {
-    throw new AppError(
-      `Payout period must start on ${nextStart} (the day after your last payout request).`,
-      400,
-    );
-  }
+  const completingExisting =
+    periodBounds?.from && periodBounds?.to
+      ? (await findCompletablePeriodWithdrawal(storeId, fromStr, toStr)) != null
+      : false;
 
-  if (periodBounds?.from && periodBounds?.to) {
-    const elapsed = await listElapsedPayoutWindows(storeId, periodDays, 24);
-    const eligible = elapsed.some((window) => window.from === fromStr && window.to === toStr);
-    if (!eligible) {
-      throw new AppError('Selected payout period is not eligible for settlement', 400);
+  if (!completingExisting) {
+    const nextStart = await getNextPayoutStartDate(storeId);
+    if (nextStart && fromStr !== nextStart) {
+      throw new AppError(
+        `Payout period must start on ${nextStart} (the day after your last payout request).`,
+        400,
+      );
+    }
+
+    if (periodBounds?.from && periodBounds?.to) {
+      const elapsed = await listElapsedPayoutWindows(storeId, periodDays, 24);
+      const eligible = elapsed.some((window) => window.from === fromStr && window.to === toStr);
+      if (!eligible) {
+        throw new AppError('Selected payout period is not eligible for settlement', 400);
+      }
     }
   }
 
@@ -454,31 +464,71 @@ export async function initiateAndApproveWithdrawal(
   isAdvance = false,
   extras?: ApproveWithdrawalExtras & { prevalidated?: ValidatedPayoutRequest },
 ): Promise<StoreWithdrawal> {
-  // Prefer caller-supplied validation (allows Spaces upload to run in parallel).
-  const { fromStr, toStr, breakdown, remainingAvailableCents } =
-    extras?.prevalidated ??
-    (await validatePayoutRequest(
-      storeId,
-      amount,
-      periodDays,
-      isAdvance,
-      extras?.periodBounds ?? null,
-    ));
+  let inReviewDraft: StoreWithdrawal | null = null;
+  if (extras?.periodBounds) {
+    if (extras.draftWithdrawalId) {
+      inReviewDraft = await prisma.storeWithdrawal.findFirst({
+        where: { id: extras.draftWithdrawalId, storeId, status: 'IN_REVIEW' },
+      });
+    }
+    if (!inReviewDraft) {
+      inReviewDraft = await findInReviewWithdrawalForPeriod(
+        storeId,
+        extras.periodBounds.from,
+        extras.periodBounds.to,
+      );
+    }
+  }
+
+  let fromStr: string;
+  let toStr: string;
+  let breakdown: StoredWithdrawalBreakdown;
+  let remainingAvailableCents: number;
+  let payoutRequestCents: number;
+
+  if (inReviewDraft?.breakdown) {
+    payoutRequestCents = withdrawalAmountCents(inReviewDraft);
+    breakdown = inReviewDraft.breakdown as StoredWithdrawalBreakdown;
+    fromStr = toUtcDateStr(inReviewDraft.periodFrom!);
+    toStr = toUtcDateStr(inReviewDraft.periodTo!);
+    const walletSummary = await getWalletSummary(storeId);
+    remainingAvailableCents = withdrawableAllTimeBalanceCents(
+      walletSummary.allTimeAvailableBalanceCents,
+      walletSummary.pendingWithdrawalTotal,
+    );
+  } else {
+    // Prefer caller-supplied validation (allows Spaces upload to run in parallel).
+    const validated =
+      extras?.prevalidated ??
+      (await validatePayoutRequest(
+        storeId,
+        amount,
+        periodDays,
+        isAdvance,
+        extras?.periodBounds ?? null,
+      ));
+    fromStr = validated.fromStr;
+    toStr = validated.toStr;
+    breakdown = validated.breakdown;
+    remainingAvailableCents = validated.remainingAvailableCents;
+    payoutRequestCents = amount;
+  }
+
   const periodFrom = new Date(`${fromStr}T00:00:00.000Z`);
   const periodTo = new Date(`${toStr}T23:59:59.999Z`);
 
   const sppc = parseSharedPromoFromBreakdown(breakdown);
   const sppcJasonCents = sppc.sharedPromoJasonContributionAmount;
-  const paymentCents = resolveFinalPayoutAmountFromBreakdown(breakdown, amount);
+  const paymentCents = resolveFinalPayoutAmountFromBreakdown(breakdown, payoutRequestCents);
   const onlineWalletDebitCents = onlineWalletDebitCentsFromRequestedAmount(
-    amount,
+    payoutRequestCents,
     breakdown.netAmount,
     sppcJasonCents,
   );
   const jasonNet = await computeJasonNetBalance();
   assertJasonBalanceCoversContribution(jasonNet, sppcJasonCents);
 
-  const withdrawalId = crypto.randomUUID();
+  const withdrawalId = inReviewDraft?.id ?? crypto.randomUUID();
   const txnId = crypto.randomUUID();
   const now = new Date();
   const { checkNumber: checkNum, checkDate: checkDt } = resolveCheckPaymentFields(paymentMethod, extras);
@@ -518,32 +568,47 @@ export async function initiateAndApproveWithdrawal(
       },
     });
 
-    // Single create (APPROVED) — avoids create-then-update P2025 under PgBouncer
-    // when an interactive transaction briefly loses the row mid-flight.
-    // walletTransactionId FK requires PAYOUT row above to exist first.
-    await tx.storeWithdrawal.create({
-      data: {
-        id: withdrawalId,
-        storeId,
-        amount: centsToDecimal(amount),
-        status: 'APPROVED',
-        remarks: remarks?.trim() || null,
-        periodFrom,
-        periodTo,
-        requestedById: initiatorId,
-        reviewedById: initiatorId,
-        reviewedAt: now,
-        walletTransactionId: txnId,
-        paymentMethod,
-        proofUrl,
-        checkNumber: checkNum,
-        checkDate: checkDt,
-        isAdvance,
-        breakdown,
-        cycleStage: breakdown.cycleStage ?? 'FIRST',
-        cyclePairId: breakdown.cyclePairId ?? null,
-      },
-    });
+    const approvalData = {
+      amount: centsToDecimal(payoutRequestCents),
+      status: 'APPROVED' as WithdrawalStatus,
+      remarks: remarks?.trim() || null,
+      periodFrom,
+      periodTo,
+      reviewedById: initiatorId,
+      reviewedAt: now,
+      walletTransactionId: txnId,
+      paymentMethod,
+      proofUrl,
+      checkNumber: checkNum,
+      checkDate: checkDt,
+      isAdvance,
+      breakdown,
+      cycleStage: breakdown.cycleStage ?? 'FIRST',
+      cyclePairId: breakdown.cyclePairId ?? null,
+      invoiceUrl: withdrawalInvoiceApiPath(withdrawalId),
+    };
+
+    if (inReviewDraft) {
+      const updated = await tx.storeWithdrawal.updateMany({
+        where: { id: inReviewDraft.id, status: 'IN_REVIEW' },
+        data: approvalData,
+      });
+      if (updated.count !== 1) {
+        throw new AppError('Payout draft is no longer in review', 409);
+      }
+    } else {
+      // Single create (APPROVED) — avoids create-then-update P2025 under PgBouncer
+      // when an interactive transaction briefly loses the row mid-flight.
+      // walletTransactionId FK requires PAYOUT row above to exist first.
+      await tx.storeWithdrawal.create({
+        data: {
+          id: withdrawalId,
+          storeId,
+          ...approvalData,
+          requestedById: initiatorId,
+        },
+      });
+    }
 
     return tx.storeWithdrawal.findUniqueOrThrow({
       where: { id: withdrawalId },
@@ -565,6 +630,8 @@ export type ApproveWithdrawalExtras = {
   checkDate?: Date | null;
   /** Super Admin initiate from Payouts Due — settle this exact elapsed window. */
   periodBounds?: PayoutPeriodBounds;
+  /** Optional draft row from Payouts Due — backend still resolves by store+period when omitted. */
+  draftWithdrawalId?: string;
 };
 
 function resolveApprovalPayoutAmounts(withdrawal: StoreWithdrawal): {

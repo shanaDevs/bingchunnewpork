@@ -1,6 +1,6 @@
 'use client';
 import { adminApiFetch as adminFetch } from '@/lib/adminApi';
-import { getWebxpayReturnUrlHint } from '@/lib/apiBase';
+import { getApiBaseUrl, getWebxpayReturnUrlHint } from '@/lib/apiBase';
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -9,7 +9,9 @@ import toast from 'react-hot-toast';
 import LoyaltyProgramSettings from '@/components/admin/LoyaltyProgramSettings';
 import LoyaltyCampaignDashboard from '@/components/admin/loyalty/LoyaltyCampaignDashboard';
 import PlatformDiscountPaybackSettings from '@/components/admin/PlatformDiscountPaybackSettings';
+import AdminPinGateModal from '@/components/admin/AdminPinGateModal';
 import { isSuperAdmin, type AdminSession } from '@/lib/adminAuth';
+import { confirmDialog } from '@/store/confirmStore';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 type MethodKey = 'PAYHERE' | 'CASH_AT_COUNTER';
@@ -85,6 +87,8 @@ export default function AdminSettingsPage() {
   const [androidAppIconUrl, setAndroidAppIconUrl] = useState('');
   const [iosAppIconUrl, setIosAppIconUrl] = useState('');
   const [cancelWindowMinutes, setCancelWindowMinutes] = useState('10');
+  const [pickupMaxOrderAmount, setPickupMaxOrderAmount] = useState('');
+  const [pinGateOpen, setPinGateOpen] = useState(false);
   const [spinDurationSeconds, setSpinDurationSeconds] = useState('8');
   const [spinsPerWindow, setSpinsPerWindow] = useState('1');
   const [spinWindowValue, setSpinWindowValue] = useState('1');
@@ -290,6 +294,11 @@ export default function AdminSettingsPage() {
     if (payload?.cancelWindowMinutes != null) {
       setCancelWindowMinutes(String(payload.cancelWindowMinutes));
     }
+    if (payload?.pickupMaxOrderAmount != null && payload.pickupMaxOrderAmount > 0) {
+      setPickupMaxOrderAmount(String(payload.pickupMaxOrderAmount));
+    } else {
+      setPickupMaxOrderAmount('');
+    }
     if (payload?.spinDurationSeconds != null) {
       setSpinDurationSeconds(String(payload.spinDurationSeconds));
     }
@@ -363,8 +372,23 @@ export default function AdminSettingsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const parsePickupMaxFromInput = (): number | null => {
+    const raw = pickupMaxOrderAmount.trim();
+    if (raw === '') return null;
+    const parsed = parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
+  };
+
+  const savedPickupMaxOrderAmount =
+    appSettings?.pickupMaxOrderAmount != null && appSettings.pickupMaxOrderAmount > 0
+      ? appSettings.pickupMaxOrderAmount
+      : null;
+
+  const pickupMaxAmountChanged = parsePickupMaxFromInput() !== savedPickupMaxOrderAmount;
+
   const saveOperations = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (password?: string) => {
       await adminFetch('/settings/app', {
         method: 'PUT',
         body: JSON.stringify({
@@ -374,6 +398,8 @@ export default function AdminSettingsPage() {
           ...(superAdmin
             ? {
                 cancelWindowMinutes: Math.min(120, Math.max(1, parseInt(cancelWindowMinutes, 10) || 10)),
+                pickupMaxOrderAmount: parsePickupMaxFromInput(),
+                ...(password ? { password } : {}),
               }
             : {}),
         }),
@@ -385,6 +411,26 @@ export default function AdminSettingsPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const handleSaveOperations = async () => {
+    if (saveOperations.isPending) return;
+    if (superAdmin && pickupMaxAmountChanged) {
+      const nextAmount = parsePickupMaxFromInput();
+      const confirmed = await confirmDialog({
+        title: 'Confirm pickup order limit',
+        message:
+          nextAmount == null
+            ? 'Remove the pickup order amount limit? Customers will be able to place pickup orders of any amount online.'
+            : `Set the maximum pickup order amount to LKR ${nextAmount.toLocaleString()}? Pickup orders above this total cannot be confirmed on the website.`,
+        confirmLabel: 'Continue',
+        cancelLabel: 'Cancel',
+      });
+      if (!confirmed) return;
+      setPinGateOpen(true);
+      return;
+    }
+    saveOperations.mutate(undefined);
+  };
 
   const saveDeliverySettings = useMutation({
     mutationFn: async () => {
@@ -893,6 +939,28 @@ export default function AdminSettingsPage() {
                 max={120}
                 value={cancelWindowMinutes}
                 onChange={(e) => setCancelWindowMinutes(e.target.value)}
+              />
+            </div>
+          </div>
+          )}
+
+          {superAdmin && resolvedTab === 'operations' && (
+          <div className="card p-5">
+            <h2 className="font-semibold text-white mb-2">Pickup order amount limit</h2>
+            <p className="text-xs text-muted mb-3">
+              Maximum payable total (LKR) for takeaway orders placed online. Leave empty or set 0 for no limit.
+              Orders above this total cannot be confirmed on the website. Changing this amount requires confirmation and your admin PIN.
+            </p>
+            <div className="max-w-xs">
+              <label className="text-xs text-muted block mb-1">Maximum pickup order amount (LKR)</label>
+              <input
+                className="input-field"
+                type="number"
+                min={0}
+                step={1}
+                value={pickupMaxOrderAmount}
+                onChange={(e) => setPickupMaxOrderAmount(e.target.value)}
+                placeholder="No limit"
               />
             </div>
           </div>
@@ -1692,7 +1760,7 @@ export default function AdminSettingsPage() {
           )}
           {resolvedTab === 'operations' && (
             <TabSaveButton
-              onClick={() => saveOperations.mutate()}
+              onClick={() => void handleSaveOperations()}
               pending={saveOperations.isPending}
               label="Save operations settings"
             />
@@ -1715,6 +1783,21 @@ export default function AdminSettingsPage() {
           )}
         </div>
       )}
+
+      <AdminPinGateModal
+        open={pinGateOpen}
+        onClose={() => {
+          if (!saveOperations.isPending) setPinGateOpen(false);
+        }}
+        onVerified={(pin) => {
+          saveOperations.mutate(pin);
+        }}
+        apiBase={getApiBaseUrl()}
+        busy={saveOperations.isPending}
+        titleId="pickup-max-pin-title"
+        inputId="pickup-max-pin"
+        description="Enter your admin PIN to confirm this pickup order amount limit."
+      />
     </div>
   );
 }

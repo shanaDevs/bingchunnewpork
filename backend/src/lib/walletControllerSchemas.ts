@@ -109,6 +109,8 @@ export const initiatePayoutBodySchema = z
     proofBase64: z.string().min(8).max(6_000_000).optional(),
     proofFileName: z.string().min(1).max(255).optional(),
     proofMimeType: z.string().min(3).max(100).optional(),
+    /** Payouts Due IN_REVIEW draft row — backend also resolves by store+period when omitted. */
+    withdrawalId: z.string().uuid().optional(),
   })
   .superRefine(superRefineCheckPaymentFields);
 
@@ -124,6 +126,23 @@ export const payoutReviewPeriodSchema = z.object({
   periodFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   periodTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
+
+export const payoutDraftInvoiceQuerySchema = z
+  .object({
+    withdrawalId: z.string().uuid().optional(),
+    storeId: z.string().min(1).optional(),
+    periodFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    periodTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.withdrawalId) return;
+    if (!value.storeId || !value.periodFrom || !value.periodTo) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'withdrawalId or storeId + periodFrom + periodTo is required',
+      });
+    }
+  });
 
 export const setPayoutReviewSchema = payoutReviewPeriodSchema.extend({
   inReview: z.boolean(),

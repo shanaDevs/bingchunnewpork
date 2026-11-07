@@ -39,7 +39,7 @@ function paymentFooterLines(
 ): string[] {
   if (forReview) {
     return [
-      'Status      : In review',
+      'Status      : Payment Pending',
       'Payment     : Not processed',
       'Share this copy for approval before uploading the bank slip.',
     ];
@@ -56,7 +56,7 @@ function paymentFooterLines(
 }
 
 function statusLabel(input: GenerateWithdrawalInvoiceInput, forReview: boolean): string {
-  if (forReview) return 'In review  \u2022  Awaiting approval';
+  if (forReview) return 'Payment Pending  \u2022  Awaiting payment';
   return `Paid  \u2022  ${paymentMethodLabel(input.paymentMethod)}`;
 }
 

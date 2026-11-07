@@ -220,7 +220,7 @@ type Props = {
   periodLabel: string;
   branchPeriod: DashboardPeriod;
   branchCustomRange?: DateRange;
-  onBranchPeriodChange: (p: Exclude<DashboardPeriod, 'custom'>) => void;
+  onBranchPeriodChange: (p: DashboardPeriod) => void;
   onBranchCustomRangeChange: (r: DateRange | undefined) => void;
   branchRows: BranchPerformanceRow[];
   branchLoading: boolean;

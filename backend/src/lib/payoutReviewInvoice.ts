@@ -16,7 +16,11 @@ import {
 } from './walletControllerSupport';
 import { buildPayoutStatementFromBreakdown } from './invoice/payoutStatement';
 import { renderWithdrawalInvoiceToBuffer } from './invoice/renderWithdrawalInvoice';
+import { parseWithdrawalInvoiceInput } from './invoice/parsing';
 import type { GenerateWithdrawalInvoiceInput } from './invoice/types';
+import { payoutDraftInvoiceApiPath } from './payoutInReviewDraft';
+import { findInReviewWithdrawalForPeriod } from './withdrawalPayoutPeriod';
+import { toUtcDateStr } from './utcDateString';
 
 export type PayoutReviewPeriodRef = {
   storeId: string;
@@ -36,17 +40,30 @@ function periodDate(ymd: string): Date {
   return new Date(`${ymd}T00:00:00.000Z`);
 }
 
-export async function renderBranchPayoutReviewInvoice(input: {
+export { payoutDraftInvoiceApiPath, payoutDraftInvoiceApiPathByPeriod } from './payoutInReviewDraft';
+
+/** Build the frozen draft invoice input (same as pre-payment PDF). */
+export async function buildBranchPayoutDraftSnapshot(input: {
   storeId: string;
   storeName: string;
   periodFrom: string;
   periodTo: string;
-}): Promise<{ buffer: Buffer; filename: string; zipEntryPath: string }> {
+  withdrawalId: string;
+}): Promise<{
+  invoiceData: GenerateWithdrawalInvoiceInput;
+  breakdownSnapshot: Record<string, unknown>;
+  cycleStage: string | null;
+  display: { from: string; to: string };
+  periodFromYmd: string;
+  periodToYmd: string;
+}> {
   assertPayoutReviewPeriod(input.periodFrom, input.periodTo);
+  const periodFromYmd = input.periodFrom.slice(0, 10);
+  const periodToYmd = input.periodTo.slice(0, 10);
 
-  const preview = await buildNetPreviewResponseData(input.storeId, input.periodFrom, input.periodTo);
-  const periodFrom = periodDate(input.periodFrom);
-  const periodTo = periodDate(input.periodTo);
+  const preview = await buildNetPreviewResponseData(input.storeId, periodFromYmd, periodToYmd);
+  const periodFrom = periodDate(periodFromYmd);
+  const periodTo = periodDate(periodToYmd);
   const invoiceContext = await loadWithdrawalInvoicePeriodContext(
     input.storeId,
     periodFrom,
@@ -60,19 +77,19 @@ export async function renderBranchPayoutReviewInvoice(input: {
   const cycleStage = typeof preview.cycleStage === 'string' ? preview.cycleStage : null;
   const cycleFrom = typeof preview.cycleFrom === 'string' ? preview.cycleFrom : null;
   const display = payoutReviewDisplayRange({
-    from: input.periodFrom,
-    to: input.periodTo,
+    from: periodFromYmd,
+    to: periodToYmd,
     cycleStage,
     cycleFrom,
   });
   const periodLabel = `${formatPayoutReviewPeriodLabel(display.from, display.to)} · ${payoutReviewOrdinalLabel(cycleStage)}`;
 
-  const invoiceInput: GenerateWithdrawalInvoiceInput = {
+  const invoiceData: GenerateWithdrawalInvoiceInput = {
     storeId: input.storeId,
-    withdrawalId: `review-${input.storeId}-${input.periodFrom}-${input.periodTo}`,
+    withdrawalId: input.withdrawalId,
     storeName: input.storeName,
     branchBalanceCents: 0,
-    requestedCents,
+    requestedCents: requestedCents,
     balanceAfterCents: 0,
     netTransferableEarningsCents: 0,
     netTransferableEarningsAsOf: new Date(),
@@ -91,17 +108,98 @@ export async function renderBranchPayoutReviewInvoice(input: {
     payoutStatement: buildPayoutStatementFromBreakdown(preview, requestedCents, paybackEnabled),
   };
 
+  return {
+    invoiceData,
+    breakdownSnapshot: preview as Record<string, unknown>,
+    cycleStage,
+    display,
+    periodFromYmd,
+    periodToYmd,
+  };
+}
+
+async function loadWithdrawalDraftForRender(input: {
+  storeId: string;
+  storeName: string;
+  periodFrom: string;
+  periodTo: string;
+  withdrawalId?: string;
+}): Promise<{
+  invoiceInput: GenerateWithdrawalInvoiceInput;
+  breakdownSnapshot: unknown;
+  cycleStage: string | null;
+  display: { from: string; to: string };
+}> {
+  const periodFromYmd = input.periodFrom.slice(0, 10);
+  const periodToYmd = input.periodTo.slice(0, 10);
+
+  const withdrawal = input.withdrawalId
+    ? await prisma.storeWithdrawal.findFirst({
+        where: {
+          id: input.withdrawalId,
+          storeId: input.storeId,
+          status: 'IN_REVIEW',
+        },
+      })
+    : await findInReviewWithdrawalForPeriod(input.storeId, periodFromYmd, periodToYmd);
+
+  if (!withdrawal?.invoiceData) throw new AppError('Payout draft not found', 404);
+
+  const invoiceInput = parseWithdrawalInvoiceInput(withdrawal.invoiceData);
+  if (!invoiceInput) throw new AppError('Payout draft snapshot is invalid', 500);
+
+  const breakdownSnapshot = withdrawal.breakdown ?? withdrawal.invoiceData;
+  const cycleStage =
+    withdrawal.breakdown && typeof withdrawal.breakdown === 'object' && 'cycleStage' in withdrawal.breakdown
+      ? (withdrawal.breakdown as { cycleStage?: string }).cycleStage ?? null
+      : null;
+  const cycleFrom =
+    withdrawal.breakdown && typeof withdrawal.breakdown === 'object' && 'cycleFrom' in withdrawal.breakdown
+      ? (withdrawal.breakdown as { cycleFrom?: string }).cycleFrom ?? null
+      : null;
+  const display = payoutReviewDisplayRange({
+    from: periodFromYmd,
+    to: periodToYmd,
+    cycleStage,
+    cycleFrom,
+  });
+  return { invoiceInput, breakdownSnapshot, cycleStage, display };
+}
+
+export async function renderBranchPayoutReviewInvoice(input: {
+  storeId: string;
+  storeName: string;
+  periodFrom: string;
+  periodTo: string;
+  withdrawalId?: string;
+}): Promise<{ buffer: Buffer; filename: string; zipEntryPath: string }> {
+  const { invoiceInput, breakdownSnapshot, cycleStage, display } = await loadWithdrawalDraftForRender(
+    input,
+  );
+  const periodFromYmd = input.periodFrom.slice(0, 10);
+  const periodToYmd = input.periodTo.slice(0, 10);
+
   const buffer = await renderWithdrawalInvoiceToBuffer(invoiceInput, {
-    withdrawalBreakdown: preview,
+    withdrawalBreakdown: breakdownSnapshot,
     cycleStage,
     forReview: true,
-    invoiceRef: `REVIEW-${input.periodFrom}-${input.periodTo}`,
+    invoiceRef: `DRAFT-${periodFromYmd}-${periodToYmd}`,
   });
 
   return {
     buffer,
-    filename: payoutReviewDownloadFilename(input.storeName, display.from, display.to, cycleStage),
-    zipEntryPath: payoutReviewZipEntryPath(input.storeName, display.from, display.to, cycleStage),
+    filename: payoutReviewDownloadFilename(
+      input.storeName,
+      display.from,
+      display.to,
+      cycleStage === 'FIRST' || cycleStage === 'SECOND' ? cycleStage : undefined,
+    ),
+    zipEntryPath: payoutReviewZipEntryPath(
+      input.storeName,
+      display.from,
+      display.to,
+      cycleStage === 'FIRST' || cycleStage === 'SECOND' ? cycleStage : undefined,
+    ),
   };
 }
 
@@ -118,7 +216,14 @@ export async function renderBranchPayoutReviewZip(
 
   const rendered = [];
   for (const item of ordered) {
-    rendered.push(await renderBranchPayoutReviewInvoice(item));
+    const withdrawalId =
+      (await resolveInReviewWithdrawalId(item.storeId, item.periodFrom, item.periodTo)) ?? undefined;
+    rendered.push(
+      await renderBranchPayoutReviewInvoice({
+        ...item,
+        withdrawalId,
+      }),
+    );
   }
 
   const paths = uniqueZipEntryPaths(rendered.map((file) => file.zipEntryPath));
@@ -137,4 +242,13 @@ export async function loadReviewStoreNames(storeIds: string[]): Promise<Map<stri
     select: { id: true, name: true },
   });
   return new Map(stores.map((store) => [store.id, store.name]));
+}
+
+export async function resolveInReviewWithdrawalId(
+  storeId: string,
+  periodFrom: string,
+  periodTo: string,
+): Promise<string | null> {
+  const row = await findInReviewWithdrawalForPeriod(storeId, periodFrom, periodTo);
+  return row?.id ?? null;
 }

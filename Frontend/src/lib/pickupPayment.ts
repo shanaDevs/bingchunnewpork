@@ -18,3 +18,22 @@ export function filterCheckoutPaymentMethods<T extends { id: string }>(
   }
   return methods.filter((method) => method.id !== 'CASH_AT_COUNTER');
 }
+
+/** Returns a positive LKR cap, or null when no pickup max is configured. */
+export function activePickupMaxOrderAmount(limit: number | null | undefined): number | null {
+  if (limit == null || limit <= 0) return null;
+  return limit;
+}
+
+export function isPickupOrderOverMaxAmount(
+  total: number,
+  limit: number | null | undefined,
+): boolean {
+  const active = activePickupMaxOrderAmount(limit);
+  if (active == null) return false;
+  return total > active;
+}
+
+export function pickupMaxOrderAmountToast(limit: number): string {
+  return `You can order a maximum of LKR ${limit.toLocaleString()} for pickup.`;
+}

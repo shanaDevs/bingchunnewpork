@@ -84,6 +84,7 @@ type Props = {
   presetPeriodFrom?: string | null;
   presetPeriodTo?: string | null;
   presetPeriodDays?: number | null;
+  presetWithdrawalId?: string | null;
 };
 
 function normalizePresetDate(value: string | null | undefined): string | null {
@@ -184,6 +185,7 @@ export default function AdminInitiatePayoutModal({
   presetPeriodFrom = null,
   presetPeriodTo = null,
   presetPeriodDays = null,
+  presetWithdrawalId = null,
 }: Props) {
   const [portalReady, setPortalReady] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
@@ -661,6 +663,7 @@ export default function AdminInitiatePayoutModal({
         payload.checkNumber = checkNumber.trim();
         payload.checkDate = checkDate;
       }
+      if (presetWithdrawalId) payload.withdrawalId = presetWithdrawalId;
 
       const res = await fetch(
         `${apiBase}/admin/wallet/${encodeURIComponent(storeId)}/initiate-payout`,
@@ -684,8 +687,15 @@ export default function AdminInitiatePayoutModal({
       }
       if (!res.ok) throw new Error(json.message || 'Payout failed');
 
-      if (json.data?.invoiceUrl) {
-        void openWithdrawalInvoice(json.data.invoiceUrl).catch(() => {
+      const paidWithdrawalId =
+        json.data && typeof json.data === 'object' && 'id' in json.data
+          ? String((json.data as { id: string }).id)
+          : null;
+      const invoiceOpenTarget = paidWithdrawalId
+        ? `/api/admin/invoices/withdrawal/${encodeURIComponent(paidWithdrawalId)}`
+        : json.data?.invoiceUrl;
+      if (invoiceOpenTarget) {
+        void openWithdrawalInvoice(invoiceOpenTarget).catch(() => {
           toast.error('Could not open invoice');
         });
       }

@@ -35,7 +35,7 @@ export function PayoutsDueTableHead() {
     <thead>
       <tr className={TABLE_HEAD_ROW_CLASS}>
         <th scope="col" className={TH_BASE}>
-          In review
+          Draft
         </th>
         <th scope="col" className={TH_BASE}>
           Branch

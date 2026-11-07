@@ -32,6 +32,7 @@ import {
 } from '@/lib/promoFreeProduct';
 import { isFreeProductPromoKind } from '@/lib/promotionAutoApply';
 import { api } from '@/lib/api';
+import { activePickupMaxOrderAmount, pickupMaxOrderAmountToast } from '@/lib/pickupPayment';
 import {
   appliesConvenienceFee,
   chargedConvenienceFee,
@@ -214,6 +215,14 @@ export default function CartPage() {
   useApplySpinClaim(sub, orderMode);
   usePromoSubtotalDiscount(sub);
   const isTakeaway = orderMode === 'TAKEAWAY';
+  const { data: appSettings } = useQuery({
+    queryKey: ['app-settings-checkout'],
+    queryFn: () =>
+      api.get<{ pickupMaxOrderAmount?: number | null }>('/settings/app'),
+    enabled: isTakeaway,
+    staleTime: 60_000,
+  });
+  const pickupMaxOrderAmount = activePickupMaxOrderAmount(appSettings?.pickupMaxOrderAmount);
   const { data: paymentConfig } = useQuery({
     queryKey: ['payment-methods', orderMode, sub],
     queryFn: () =>
@@ -515,6 +524,9 @@ export default function CartPage() {
                   if (!orderMode) {
                     openOrderModal();
                     return;
+                  }
+                  if (isTakeaway && pickupMaxOrderAmount != null) {
+                    toast(pickupMaxOrderAmountToast(pickupMaxOrderAmount), { duration: 5000 });
                   }
                   router.push('/checkout');
                 }}

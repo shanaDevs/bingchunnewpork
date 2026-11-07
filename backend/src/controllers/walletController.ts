@@ -22,7 +22,7 @@ import {
 import { resolveBranchCancellationGatewayFeeLkr } from '../lib/refundPaymentStructure';
 import { isWalletCreditPaymentMethod } from '../lib/orderPayment';
 import { ensureWalletSettlementColumns } from '../lib/walletSchema';
-import { ensureWithdrawalSchema } from '../lib/withdrawalSchema';
+import { ensureWithdrawalInReviewEnumReady, ensureWithdrawalSchema } from '../lib/withdrawalSchema';
 import {
   listWithdrawalsUnsettledForDartCodes,
 } from '../lib/settlementWithdrawalQuery';
@@ -102,15 +102,22 @@ import {
   toDateStr,
 } from '../lib/walletControllerSupport';
 import type { WithdrawalStatus } from '@prisma/client';
-import { ensureBranchPayoutReviewSchema } from '../lib/payoutReviewSchema';
+import {
+  createInReviewPayoutDraft,
+  listInReviewPayoutMarks,
+  removeInReviewPayoutDraft,
+} from '../lib/payoutInReviewDraft';
 import {
   loadReviewStoreNames,
   renderBranchPayoutReviewInvoice,
   renderBranchPayoutReviewZip,
+  resolveInReviewWithdrawalId,
   type PayoutReviewPeriodRef,
 } from '../lib/payoutReviewInvoice';
+import { findInReviewWithdrawalForPeriod } from '../lib/withdrawalPayoutPeriod';
 import {
   walletAnalysisQuerySchema,
+  walletPayoutsDueQuerySchema,
   walletReportQuerySchema,
   walletTransactionsQuerySchema,
   walletWithdrawalsListQuerySchema,
@@ -121,6 +128,7 @@ import {
   attachWithdrawalProofBodySchema,
   initiatePayoutBodySchema,
   netPreviewQuerySchema,
+  payoutDraftInvoiceQuerySchema,
   payoutReviewPeriodSchema,
   payoutReviewZipSchema,
   settleRangeSchema,
@@ -171,7 +179,7 @@ export async function getPayoutPeriodInfoHandler(req: Request, res: Response, ne
 // GET /admin/wallet/payouts-due
 // Super Admin queue: all elapsed unpaid branch payout periods (oldest first).
 // Optional query `from`/`to` are ignored (wallet month filter does not scope this list).
-// Optional `cursor` paginates active branches.
+// `page` / `limit` (default 10) paginate due periods. Optional `search` filters by branch name.
 // ──────────────────────────────────────────────────────────────────────────────
 function invalidateWalletPayoutsDueCache(): void {
   invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-payouts-due']));
@@ -187,22 +195,26 @@ export async function getPayoutsDueHandler(req: Request, res: Response, next: Ne
   try {
     if (req.user?.role !== 'SYSTEM_ADMIN') throw new AppError('Forbidden', 403);
 
-    const from = typeof req.query.from === 'string' ? req.query.from : undefined;
-    const to = typeof req.query.to === 'string' ? req.query.to : undefined;
-    const cursor = typeof req.query.cursor === 'string' && req.query.cursor ? req.query.cursor : undefined;
+    const { page, limit, search, from, to } = walletPayoutsDueQuerySchema.parse(req.query);
 
-    // Schema patch once per process; do not block every page behind DDL checks.
-    void ensureWithdrawalSchema().catch(() => undefined);
+    await ensureWithdrawalInReviewEnumReady();
 
     // PgBouncer can drop idle sockets mid fan-out; reconnect once and retry.
-    const page = await retryOnceOnDisconnect(
-      async () => listSuperAdminPayoutsDueItems({ from, to, ...(cursor ? { cursor } : {}) }),
+    const result = await retryOnceOnDisconnect(
+      async () =>
+        listSuperAdminPayoutsDueItems({
+          page,
+          limit,
+          ...(search ? { search } : {}),
+          ...(from ? { from } : {}),
+          ...(to ? { to } : {}),
+        }),
       async () => {
         await prisma.$disconnect().catch(() => undefined);
         await prisma.$connect();
       },
     );
-    res.json({ success: true, data: page });
+    res.json({ success: true, data: result });
   } catch (err) {
     next(err);
   }
@@ -609,7 +621,7 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
 
     await verifyAdminPin(user.sub, data.password);
 
-    const amountCents = data.amount;
+    let amountCents = data.amount;
     const periodDays = data.periodDays as (typeof PAYOUT_PERIOD_DAYS)[number];
     const periodBounds =
       data.from && data.to ? { from: data.from, to: data.to } : null;
@@ -631,14 +643,30 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
     }
     const proofFile = assertSettlementProofFile(uploadedProof);
 
+    let draftWithdrawalId: string | undefined = data.withdrawalId;
+    let inReviewDraft: Awaited<ReturnType<typeof findInReviewWithdrawalForPeriod>> = null;
+    if (periodBounds) {
+      inReviewDraft = data.withdrawalId
+        ? await prisma.storeWithdrawal.findFirst({
+            where: { id: data.withdrawalId, storeId, status: 'IN_REVIEW' },
+          })
+        : await findInReviewWithdrawalForPeriod(storeId, periodBounds.from, periodBounds.to);
+      if (inReviewDraft) {
+        draftWithdrawalId = inReviewDraft.id;
+        amountCents = withdrawalAmountCents(inReviewDraft);
+      }
+    }
+
     const [prevalidated, wallet, store] = await Promise.all([
-      validatePayoutRequest(
-        storeId,
-        amountCents,
-        periodDays,
-        data.isAdvance ?? false,
-        periodBounds,
-      ),
+      inReviewDraft
+        ? Promise.resolve(null)
+        : validatePayoutRequest(
+            storeId,
+            amountCents,
+            periodDays,
+            data.isAdvance ?? false,
+            periodBounds,
+          ),
       getOrCreateWallet(storeId),
       prisma.store.findUnique({
         where: { id: storeId },
@@ -662,7 +690,8 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
         checkNumber: data.paymentMethod === 'CHECK' ? data.checkNumber?.trim() : null,
         checkDate,
         ...(periodBounds ? { periodBounds } : {}),
-        prevalidated,
+        ...(draftWithdrawalId ? { draftWithdrawalId } : {}),
+        ...(prevalidated ? { prevalidated } : {}),
       },
     );
 
@@ -1557,22 +1586,8 @@ export async function syncWallets(req: Request, res: Response, next: NextFunctio
   }
 }
 
-function reviewPeriodDate(ymd: string): Date {
-  return new Date(`${ymd}T00:00:00.000Z`);
-}
-
 function assertPayoutReviewAdmin(req: Request): void {
   if (req.user?.role !== 'SYSTEM_ADMIN') throw new AppError('Forbidden', 403);
-}
-
-function rethrowPayoutReviewStorage(err: unknown): never {
-  if (
-    err instanceof Prisma.PrismaClientKnownRequestError &&
-    (err.code === 'P2021' || err.code === 'P2022')
-  ) {
-    throw new AppError('Payout review storage is not ready. Apply the latest database migration.', 503);
-  }
-  throw err;
 }
 
 function attachmentDisposition(filename: string): string {
@@ -1591,24 +1606,18 @@ function sendAttachment(res: Response, buffer: Buffer, contentType: string, file
 export async function listPayoutReviewsHandler(req: Request, res: Response, next: NextFunction) {
   try {
     assertPayoutReviewAdmin(req);
-    await ensureBranchPayoutReviewSchema();
-    const rows = await prisma.branchPayoutReview.findMany({
-      select: { storeId: true, periodFrom: true, periodTo: true },
-    });
+    await ensureWithdrawalInReviewEnumReady();
+    const rows = await listInReviewPayoutMarks();
     res.json({
       success: true,
       data: rows.map((row) => ({
         storeId: row.storeId,
-        periodFrom: toDateStr(row.periodFrom),
-        periodTo: toDateStr(row.periodTo),
+        periodFrom: row.periodFrom,
+        periodTo: row.periodTo,
       })),
     });
   } catch (err) {
-    try {
-      rethrowPayoutReviewStorage(err);
-    } catch (mapped) {
-      next(mapped);
-    }
+    next(err);
   }
 }
 
@@ -1618,38 +1627,28 @@ export async function setPayoutReviewHandler(req: Request, res: Response, next: 
     assertPayoutReviewAdmin(req);
     const body = setPayoutReviewSchema.parse(req.body);
     if (body.periodFrom > body.periodTo) throw new AppError('Invalid payout period', 400);
-    await ensureBranchPayoutReviewSchema();
-    const periodFrom = reviewPeriodDate(body.periodFrom);
-    const periodTo = reviewPeriodDate(body.periodTo);
+    await ensureWithdrawalSchema();
     if (body.inReview) {
-      await prisma.branchPayoutReview.upsert({
-        where: {
-          storeId_periodFrom_periodTo: {
-            storeId: body.storeId,
-            periodFrom,
-            periodTo,
-          },
-        },
-        create: {
-          storeId: body.storeId,
-          periodFrom,
-          periodTo,
-          markedById: req.user!.sub,
-        },
-        update: { markedById: req.user!.sub },
+      const names = await loadReviewStoreNames([body.storeId]);
+      const storeName = names.get(body.storeId);
+      if (!storeName) throw new AppError('Branch not found', 404);
+      await createInReviewPayoutDraft({
+        storeId: body.storeId,
+        storeName,
+        periodFrom: body.periodFrom,
+        periodTo: body.periodTo,
+        markedById: req.user!.sub,
       });
+      invalidateBranchPayablesBalanceCaches(body.storeId);
+      invalidateWalletPayoutsDueCache();
     } else {
-      await prisma.branchPayoutReview.deleteMany({
-        where: { storeId: body.storeId, periodFrom, periodTo },
-      });
+      await removeInReviewPayoutDraft(body.storeId, body.periodFrom, body.periodTo);
+      invalidateBranchPayablesBalanceCaches(body.storeId);
+      invalidateWalletPayoutsDueCache();
     }
     res.json({ success: true, data: { ...body } });
   } catch (err) {
-    try {
-      rethrowPayoutReviewStorage(err);
-    } catch (mapped) {
-      next(mapped);
-    }
+    next(err);
   }
 }
 
@@ -1675,7 +1674,54 @@ export async function getPayoutReviewInvoiceHandler(req: Request, res: Response,
       periodTo: req.query.periodTo,
     });
     const [item] = await resolveReviewItems([query]);
-    const file = await renderBranchPayoutReviewInvoice(item!);
+    const withdrawalId =
+      (await resolveInReviewWithdrawalId(item!.storeId, item!.periodFrom, item!.periodTo)) ?? undefined;
+    const file = await renderBranchPayoutReviewInvoice({
+      ...item!,
+      withdrawalId,
+    });
+    sendAttachment(res, file.buffer, 'application/pdf', file.filename);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /admin/wallet/payout-draft-invoice — branch or Super Admin; frozen draft PDF.
+export async function getPayoutDraftInvoiceHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    await ensureWithdrawalSchema();
+    const query = payoutDraftInvoiceQuerySchema.parse(req.query);
+    let storeId = query.storeId;
+    let periodFrom = query.periodFrom;
+    let periodTo = query.periodTo;
+    let withdrawalId = query.withdrawalId;
+
+    if (withdrawalId) {
+      const draft = await prisma.storeWithdrawal.findFirst({
+        where: { id: withdrawalId, status: 'IN_REVIEW' },
+        select: { storeId: true, periodFrom: true, periodTo: true },
+      });
+      if (!draft?.periodFrom || !draft.periodTo) throw new AppError('Payout draft not found', 404);
+      storeId = draft.storeId;
+      periodFrom = toDateStr(draft.periodFrom);
+      periodTo = toDateStr(draft.periodTo);
+    }
+
+    if (!storeId || !periodFrom || !periodTo) {
+      throw new AppError('storeId, periodFrom, and periodTo are required', 400);
+    }
+
+    await assertStoreAccess(req, storeId);
+    const names = await loadReviewStoreNames([storeId]);
+    const storeName = names.get(storeId);
+    if (!storeName) throw new AppError('Branch not found', 404);
+    const file = await renderBranchPayoutReviewInvoice({
+      storeId,
+      storeName,
+      periodFrom,
+      periodTo,
+      withdrawalId,
+    });
     sendAttachment(res, file.buffer, 'application/pdf', file.filename);
   } catch (err) {
     next(err);

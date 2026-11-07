@@ -34,6 +34,14 @@ type LoyaltyRow = {
   totalValue: number;
 };
 
+const LOYALTY_THRESHOLD_MIN = 2;
+const LOYALTY_THRESHOLD_MAX = 9_999;
+
+function clampLoyaltyThreshold(value: number) {
+  if (!Number.isFinite(value)) return LOYALTY_THRESHOLD_MIN;
+  return Math.min(LOYALTY_THRESHOLD_MAX, Math.max(LOYALTY_THRESHOLD_MIN, Math.floor(value)));
+}
+
 const COLUMNS = [
   { key: 'name', label: 'Customer Name / Phone' },
   { key: 'registration', label: 'Registration Date' },
@@ -141,11 +149,12 @@ export default function CustomerLoyaltyReport({ lockedStoreId, lockedStoreName }
               <input
                 type="number"
                 id="threshold"
-                min={2}
-                max={100}
-                className="input-field text-sm px-2 py-1 h-[32px] rounded-lg w-16"
+                min={LOYALTY_THRESHOLD_MIN}
+                max={LOYALTY_THRESHOLD_MAX}
+                className="input-field text-sm px-2 py-1 h-[32px] rounded-lg w-20"
                 value={loyaltyThreshold}
-                onChange={(e) => setLoyaltyThreshold(Math.max(2, Number(e.target.value) || 2))}
+                onChange={(e) => setLoyaltyThreshold(clampLoyaltyThreshold(Number(e.target.value)))}
+                onBlur={(e) => setLoyaltyThreshold(clampLoyaltyThreshold(Number(e.target.value)))}
               />
             </div>
           </div>

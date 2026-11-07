@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, ChevronLeft, ChevronRight, Download, FileText, Loader2, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatMoneyAmount } from '@/lib/receipt';
@@ -23,7 +23,13 @@ import {
   usePayoutDueAmountMaps,
 } from '@/components/admin/usePayoutDueAmountMaps';
 import { Skeleton } from '@/components/ui/skeleton';
-import { isOldestUnpaidBranchPayoutRow } from '@/lib/branchPayoutsDue';
+import {
+  branchPayoutsDueQueryKey,
+  fetchBranchPayoutsDue,
+  isOldestUnpaidBranchPayoutRow,
+  PAYOUTS_DUE_PAGE_SIZE,
+} from '@/lib/branchPayoutsDue';
+import { buildAdminMetaPagination } from '@/lib/pagination';
 import {
   downloadPayoutReviewPdf,
   downloadPayoutReviewZip,
@@ -33,19 +39,27 @@ import {
   setPayoutInReview,
   type PayoutReviewMark,
 } from '@/lib/payoutReviewDownload';
+import { payoutPeriodsQueryKey } from '@/components/admin/BranchPayoutPeriodsSection';
 import type { PayoutDueRow } from '@/components/admin/payoutDueTypes';
 
 export type { PayoutDueRow } from '@/components/admin/payoutDueTypes';
+export { PAYOUTS_DUE_PAGE_SIZE };
 
 type Props = {
-  rows: PayoutDueRow[];
-  loading?: boolean;
-  loadingMore?: boolean;
+  enabled?: boolean;
   onView?: (row: PayoutDueRow) => void;
   onReviewAndPay: (row: PayoutDueRow) => void;
+  onTotalChange?: (total: number) => void;
 };
 
-export const PAYOUTS_DUE_PAGE_SIZE = 10;
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 function PayoutDueAllocationCells({
   amounts,
@@ -133,7 +147,7 @@ function PayoutDueTableRow({
       : !reviewsReady
         ? 'Loading review status…'
         : !inReview
-          ? 'Mark as In Review first'
+          ? 'Save as draft first'
           : null;
 
   return (
@@ -148,7 +162,7 @@ function PayoutDueTableRow({
           type="checkbox"
           checked={inReview}
           disabled={!reviewsReady || reviewBusy}
-          aria-label={`Mark ${branchName} payout in review`}
+          aria-label={`Save ${branchName} payout as draft`}
           onChange={(event) => onToggleReview(row, event.target.checked)}
           className="h-4 w-4 accent-[var(--color-brand)] disabled:cursor-not-allowed"
         />
@@ -184,7 +198,8 @@ function PayoutDueTableRow({
       <td className="px-3 py-3 text-right">
         <button
           type="button"
-          disabled={downloadBusy}
+          disabled={!inReview || downloadBusy}
+          title={!inReview ? 'Save as draft first' : undefined}
           onClick={() =>
             onDownload(
               row,
@@ -236,54 +251,67 @@ function PayoutDueTableRow({
 }
 
 export default function PayoutsDuePanel({
-  rows,
-  loading,
-  loadingMore = false,
+  enabled = true,
   onView,
   onReviewAndPay,
+  onTotalChange,
 }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [reviewBusyKey, setReviewBusyKey] = useState<string | null>(null);
   const [downloadBusyKey, setDownloadBusyKey] = useState<string | null>(null);
   const [downloadingAll, setDownloadingAll] = useState(false);
-  const count = rows.length;
+  const debouncedSearch = useDebouncedValue(searchQuery.trim(), 300);
   const apiBase = getApiBaseUrl();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
+
+  const dueQuery = useQuery({
+    queryKey: branchPayoutsDueQueryKey(page, debouncedSearch),
+    queryFn: ({ signal }) =>
+      fetchBranchPayoutsDue(
+        apiBase,
+        { page, limit: PAYOUTS_DUE_PAGE_SIZE, search: debouncedSearch },
+        signal,
+      ),
+    enabled,
+    staleTime: 45_000,
+    placeholderData: keepPreviousData,
+  });
+
+  const pageData = dueQuery.data;
+  const rows = pageData?.items ?? [];
+  const total = pageData?.total ?? 0;
+  const allTotal = pageData?.allTotal ?? total;
+  const totalPages = Math.max(1, pageData?.pages ?? 1);
+  const loading = dueQuery.isLoading || (dueQuery.isFetching && !dueQuery.isFetched);
+  const pageFetching = dueQuery.isFetching && dueQuery.isFetched;
+  const count = allTotal;
+
+  useEffect(() => {
+    if (pageData && page > pageData.pages) setPage(pageData.pages);
+  }, [page, pageData]);
+
+  useEffect(() => {
+    if (!pageData) return;
+    onTotalChange?.(pageData.allTotal);
+  }, [pageData, onTotalChange]);
+
   const reviewsQuery = useQuery({
     queryKey: ['branch-payout-reviews'],
     queryFn: fetchPayoutReviews,
     staleTime: 15_000,
+    enabled,
   });
   const inReviewKeys = useMemo(
     () => new Set((reviewsQuery.data ?? []).map((mark) => payoutReviewMarkKey(mark))),
     [reviewsQuery.data],
   );
 
-  const filteredRows = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((row) => {
-      const raw = row.storeName.toLowerCase();
-      const label = formatBranchName(row.storeName).toLowerCase();
-      return raw.includes(q) || label.includes(q);
-    });
-  }, [rows, searchQuery]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAYOUTS_DUE_PAGE_SIZE));
-
-  useEffect(() => {
-    setPage(1);
-  }, [rows, searchQuery]);
-
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
-
-  const pageRows = useMemo(() => {
-    const start = (page - 1) * PAYOUTS_DUE_PAGE_SIZE;
-    return filteredRows.slice(start, start + PAYOUTS_DUE_PAGE_SIZE);
-  }, [filteredRows, page]);
+  const pagination = buildAdminMetaPagination(total, page, PAYOUTS_DUE_PAGE_SIZE, totalPages);
 
   const canReviewAndPay = useMemo(
     () => (row: PayoutDueRow) => isOldestUnpaidBranchPayoutRow(row, rows),
@@ -291,7 +319,7 @@ export default function PayoutsDuePanel({
   );
 
   const { displayAmountsByDueKey, previewByKey, previewLoadingByKey, resolveDueRowBaseAmounts } =
-    usePayoutDueAmountMaps(rows, pageRows, apiBase);
+    usePayoutDueAmountMaps(rows, rows, apiBase);
 
   function reviewMark(row: PayoutDueRow): PayoutReviewMark {
     return {
@@ -312,6 +340,7 @@ export default function PayoutsDuePanel({
     });
     try {
       await setPayoutInReview(mark, next);
+      void queryClient.invalidateQueries({ queryKey: payoutPeriodsQueryKey(row.storeId) });
     } catch (err) {
       queryClient.setQueryData(['branch-payout-reviews'], previous);
       toast.error(err instanceof Error ? err.message : 'Could not update review status');
@@ -333,14 +362,26 @@ export default function PayoutsDuePanel({
   }
 
   async function downloadAllListed() {
-    if (filteredRows.length === 0 || downloadingAll) return;
-    if (filteredRows.length > 40) {
-      toast.error('Download all is limited to 40 payouts. Narrow the branch search first.');
-      return;
-    }
+    if (downloadingAll) return;
     setDownloadingAll(true);
     try {
-      await downloadPayoutReviewZip(filteredRows.map(reviewMark));
+      const listed = await fetchBranchPayoutsDue(apiBase, {
+        page: 1,
+        limit: 100,
+        search: debouncedSearch,
+      });
+      const draftRows = listed.items.filter((row) =>
+        inReviewKeys.has(payoutReviewMarkKey(reviewMark(row))),
+      );
+      if (draftRows.length === 0) {
+        toast.error('No saved drafts match the current list.');
+        return;
+      }
+      if (draftRows.length > 40) {
+        toast.error('Download all is limited to 40 drafts. Narrow the branch search first.');
+        return;
+      }
+      await downloadPayoutReviewZip(draftRows.map(reviewMark));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not download the payout invoices');
     } finally {
@@ -348,11 +389,14 @@ export default function PayoutsDuePanel({
     }
   }
 
+  const searchActive = debouncedSearch.length > 0;
+  const pageBusy = pageFetching && dueQuery.isPlaceholderData;
+
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
-      {(loading || loadingMore) && count === 0 && <PayoutsDueTableSkeleton />}
+      {loading && count === 0 && !searchActive && <PayoutsDueTableSkeleton />}
 
-      {!loading && !loadingMore && count === 0 && (
+      {!loading && count === 0 && !searchActive && (
         <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-400">
             <CheckCircle size={28} />
@@ -364,7 +408,7 @@ export default function PayoutsDuePanel({
         </div>
       )}
 
-      {!loading && count > 0 && (
+      {(count > 0 || searchActive || (loading && searchActive)) && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-navy-border)] px-4 py-3 sm:px-5">
             <div className="flex flex-wrap items-baseline gap-2">
@@ -376,7 +420,7 @@ export default function PayoutsDuePanel({
             <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
               <button
                 type="button"
-                disabled={downloadingAll || filteredRows.length === 0 || loadingMore}
+                disabled={downloadingAll || total === 0 || pageBusy}
                 onClick={() => void downloadAllListed()}
                 className={cn(
                   'inline-flex h-8 items-center gap-1.5 rounded-[12px] border border-[var(--color-navy-border)] px-3',
@@ -407,7 +451,7 @@ export default function PayoutsDuePanel({
 
           {reviewsQuery.isError && (
             <div className="flex items-center justify-between gap-3 border-b border-[var(--color-navy-border)] px-4 py-2 text-xs text-amber-700 sm:px-5">
-              <span>Could not load which payouts are in review.</span>
+              <span>Could not load payout draft status.</span>
               <button
                 type="button"
                 onClick={() => void reviewsQuery.refetch()}
@@ -418,16 +462,21 @@ export default function PayoutsDuePanel({
             </div>
           )}
 
-          {filteredRows.length === 0 ? (
+          {loading && rows.length === 0 ? (
+            <div className="flex items-center justify-center gap-2 px-5 py-12 text-xs text-[var(--color-text-muted)]">
+              <Loader2 size={14} className="animate-spin text-[var(--color-brand)]" />
+              Loading payouts…
+            </div>
+          ) : total === 0 && searchActive ? (
             <div className="px-5 py-12 text-center text-sm text-[var(--color-text-muted)]">
               No branches match &ldquo;{searchQuery.trim()}&rdquo;
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className={cn('overflow-x-auto', pageBusy && 'opacity-70')}>
               <table className="w-full min-w-[1240px] text-left text-xs">
                 <PayoutsDueTableHead />
                 <tbody>
-                  {pageRows.map((row) => {
+                  {rows.map((row) => {
                     const key = payoutDueRowKey(row);
                     const reviewKey = payoutReviewMarkKey(reviewMark(row));
                     return (
@@ -456,39 +505,58 @@ export default function PayoutsDuePanel({
             </div>
           )}
 
-          {loadingMore && (
-            <div className="flex items-center justify-center gap-2 border-t border-[var(--color-navy-border)] px-5 py-3 text-xs text-[var(--color-text-muted)]">
-              <Loader2 size={14} className="animate-spin text-[var(--color-brand)]" />
-              Loading more branches…
-            </div>
-          )}
-
-          {filteredRows.length > PAYOUTS_DUE_PAGE_SIZE && (
-            <div className="flex items-center justify-between border-t border-[var(--color-navy-border)] px-5 py-3">
-              <span className="text-xs text-[var(--color-text-muted)]">
-                Page {page} of {totalPages}
-                {filteredRows.length > 0 ? ` · ${filteredRows.length} total` : ''}
-              </span>
-              <div className="flex gap-1.5">
+          {total > PAYOUTS_DUE_PAGE_SIZE && (
+            <div className="admin-table-pagination border-t border-[var(--color-navy-border)] px-5 py-3">
+              <p className="admin-table-pagination__summary text-xs text-[var(--color-text-muted)]">
+                Showing{' '}
+                <span className="font-semibold tabular-nums text-[var(--color-text)]">
+                  {pagination.rangeStart}–{pagination.rangeEnd}
+                </span>{' '}
+                of{' '}
+                <span className="font-semibold tabular-nums text-[var(--color-text)]">{total}</span>
+                {searchActive ? ' matching' : ''} period{total === 1 ? '' : 's'}
+              </p>
+              <nav className="admin-table-pagination__nav" aria-label="Payouts due pagination">
                 <button
                   type="button"
-                  disabled={page <= 1 || loading}
+                  disabled={page <= 1 || pageBusy}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="rounded-lg border border-[var(--color-navy-border)] p-2 text-[var(--color-text)] disabled:cursor-not-allowed disabled:text-[var(--color-text-muted)]"
+                  className="admin-table-pagination__arrow"
                   aria-label="Previous page"
                 >
-                  <ChevronLeft size={14} />
+                  <ChevronLeft size={16} />
                 </button>
+                <div className="admin-table-pagination__pages">
+                  {pagination.pageList.map((item, i) =>
+                    item === 'ellipsis' ? (
+                      <span key={`ellipsis-${i}`} className="admin-table-pagination__ellipsis" aria-hidden>
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={item}
+                        type="button"
+                        disabled={pageBusy}
+                        onClick={() => setPage(item)}
+                        aria-label={`Page ${item}`}
+                        aria-current={item === page ? 'page' : undefined}
+                        className={`admin-table-pagination__page${item === page ? ' admin-table-pagination__page--active' : ''}`}
+                      >
+                        {item}
+                      </button>
+                    ),
+                  )}
+                </div>
                 <button
                   type="button"
-                  disabled={page >= totalPages || loading}
+                  disabled={page >= totalPages || pageBusy}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  className="rounded-lg border border-[var(--color-navy-border)] p-2 text-[var(--color-text)] disabled:cursor-not-allowed disabled:text-[var(--color-text-muted)]"
+                  className="admin-table-pagination__arrow"
                   aria-label="Next page"
                 >
-                  <ChevronRight size={14} />
+                  <ChevronRight size={16} />
                 </button>
-              </div>
+              </nav>
             </div>
           )}
         </>

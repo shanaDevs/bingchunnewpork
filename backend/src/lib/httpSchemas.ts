@@ -33,6 +33,16 @@ export const walletTransactionsQuerySchema = paginationQuerySchema.extend({
   to: dateQuerySchema.optional(),
 });
 
+export const PAYOUTS_DUE_PAGE_SIZE = 10;
+
+export const walletPayoutsDueQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(MAX_PAGE_LIMIT).default(PAYOUTS_DUE_PAGE_SIZE),
+  search: z.string().trim().max(120).optional(),
+  from: dateQuerySchema.optional(),
+  to: dateQuerySchema.optional(),
+});
+
 export const walletReportQuerySchema = z.object({
   from: dateQuerySchema.optional(),
   to: dateQuerySchema.optional(),

@@ -1,56 +1,40 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueries } from '@tanstack/react-query';
 import { CalendarRange, FileText } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getApiBaseUrl } from '@/lib/apiBase';
-import { adminAuthHeaders } from '@/lib/adminSession';
-import { formatMoneyAmount } from '@/lib/receipt';
-import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
 import { cn } from '@/lib/utils';
 import WalletWithdrawalModal from '@/components/admin/WalletWithdrawalModal';
 import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
 import { hasWithdrawalInvoice } from '@/components/admin/settlementTypes';
-import { openWithdrawalInvoice } from '@/lib/adminProtectedFile';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  fetchPayoutPeriodNetPreview,
-  payoutPeriodRowNeedsLiveNetPreview,
-  resolvePayoutPeriodRowDisplayAmounts,
-} from '@/components/admin/payoutPeriodRowAmounts';
-import type { PeriodPayoutCardAmounts } from '@/components/admin/periodPayoutSplitDisplay';
-import {
-  applyFirstCycleTableDisplayMask,
-  readPayoutCycleStage,
-  shouldHideFirstCyclePlatformColumns,
-} from '@/components/admin/payoutPeriodRowCycleDisplay';
-import {
-  resolveSecondCycleFullDisplayRange,
-  secondCycleFullDisplayRangeFallback,
-} from '@/components/admin/payoutSecondCycleDisplayRange';
+import { openPayoutDraftInvoice, openWithdrawalInvoice } from '@/lib/adminProtectedFile';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { WALLET_TAB_TRIGGER_CLASS } from '@/components/admin/useAdminWalletTab';
+import { payoutPeriodRowNeedsLiveNetPreview } from '@/components/admin/payoutPeriodRowAmounts';
 import {
   dueFocusToPeriodView,
-  syntheticPeriodViewWithdrawal,
   type DuePeriodFocus,
 } from '@/components/admin/payoutPeriodView';
+import type { PayoutListTab, PayoutPeriodSort } from '@/components/admin/payoutPeriodTypes';
+import {
+  isCompletedPayout,
+  periodToViewRow,
+  resolveRowBaseDisplayAmounts,
+  statusBadgeClass,
+  statusLabel,
+  viewPeriodDisplayForModal,
+} from '@/components/admin/payoutPeriodRowModel';
+import {
+  formatPayoutPeriodCell,
+  PayoutPeriodAmountCells,
+  PayoutPeriodsTableSkeleton,
+  PayoutPeriodTableHead,
+} from '@/components/admin/payoutPeriodTableUi';
+import { useBranchPayoutPeriodsData } from '@/components/admin/useBranchPayoutPeriodsData';
 
-export type PayoutPeriodStatus = 'PAID' | 'PENDING' | 'IN_PROGRESS';
-
-export type PayoutPeriodRow = {
-  key: string;
-  periodFrom: string;
-  periodTo: string;
-  /** In-progress cycles: orders/summary run through this date (today). */
-  summaryThrough?: string;
-  status: PayoutPeriodStatus;
-  amountCents: number;
-  orderCount: number;
-  breakdown?: unknown;
-  withdrawal?: WithdrawalRow | null;
-};
-
-export type PayoutPeriodSort = 'newest' | 'oldest';
+export type { PayoutPeriodRow, PayoutPeriodSort, PayoutPeriodStatus } from '@/components/admin/payoutPeriodTypes';
+export { fetchPayoutPeriods, payoutPeriodsQueryKey } from '@/components/admin/payoutPeriodsApi';
 
 type Props = {
   storeId?: string;
@@ -64,239 +48,6 @@ type Props = {
   /** When auto-opening from Payouts Due, use this if the period row is not in the table yet. */
   autoOpenDuePeriod?: DuePeriodFocus | null;
 };
-
-const AMOUNT_COLUMNS = [
-  'Branch receives',
-  'Customer convenience fee',
-  'Net platform amount',
-  'Delivery fee received',
-] as const;
-
-function statusLabel(status: PayoutPeriodStatus) {
-  if (status === 'PAID') return 'Paid';
-  if (status === 'IN_PROGRESS') return 'In progress';
-  return 'Pending';
-}
-
-function statusBadgeClass(status: PayoutPeriodStatus) {
-  if (status === 'PAID') return 'admin-status-badge--green';
-  return 'admin-status-badge--amber';
-}
-
-function previewPeriodTo(row: PayoutPeriodRow) {
-  const through = row.summaryThrough ?? row.periodTo;
-  // Guard inverted ranges (e.g. last-day boundary bugs) so summaries never run from > to.
-  if (through < row.periodFrom) return row.periodFrom;
-  return through;
-}
-
-function rowBreakdownForStage(row: PayoutPeriodRow): unknown {
-  return row.breakdown ?? row.withdrawal?.breakdown;
-}
-
-function formatPayoutPeriodCell(
-  row: PayoutPeriodRow,
-  allRows: PayoutPeriodRow[],
-  netPreviewByKey: Map<string, Record<string, unknown>>,
-) {
-  if (row.status === 'IN_PROGRESS') {
-    const through = previewPeriodTo(row);
-    return (
-      <span className="flex flex-col gap-0.5">
-        <span>{formatBiweeklyPeriodLabel(row.periodFrom, through)}</span>
-        <span className="text-[10px] font-normal text-[var(--color-text-muted)]">
-          15-day cycle closes {row.periodTo}
-        </span>
-      </span>
-    );
-  }
-
-  const stage = readPayoutCycleStage(rowBreakdownForStage(row), netPreviewByKey.get(row.key));
-  if (stage === 'SECOND') {
-    const resolved =
-      resolveSecondCycleFullDisplayRange(allRows, row) ?? secondCycleFullDisplayRangeFallback(row);
-    return formatBiweeklyPeriodLabel(resolved.displayFrom, resolved.displayTo);
-  }
-
-  return formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo);
-}
-
-function asIsoDate(value: unknown): string | null {
-  if (!value) return null;
-  if (typeof value === 'string') return value;
-  if (value instanceof Date) return value.toISOString();
-  return null;
-}
-
-function toWithdrawalRow(raw: WithdrawalRow, fallbackStoreId?: string): WithdrawalRow {
-  return {
-    ...raw,
-    storeId: raw.storeId ?? fallbackStoreId,
-    periodFrom: asIsoDate(raw.periodFrom) ?? raw.periodFrom,
-    periodTo: asIsoDate(raw.periodTo) ?? raw.periodTo,
-    createdAt: asIsoDate(raw.createdAt) ?? raw.createdAt,
-    reviewedAt: asIsoDate(raw.reviewedAt) ?? raw.reviewedAt,
-    checkDate: asIsoDate(raw.checkDate) ?? raw.checkDate,
-  };
-}
-
-export function payoutPeriodsQueryKey(storeId?: string) {
-  return ['payout-periods', storeId ?? ''] as const;
-}
-
-export async function fetchPayoutPeriods(apiBase: string, storeId?: string): Promise<PayoutPeriodRow[]> {
-  const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  const res = await fetch(`${apiBase}/admin/wallet/payout-periods${qs}`, {
-    headers: adminAuthHeaders(),
-    credentials: 'include',
-  });
-  if (!res.ok) throw new Error('Failed to load payout periods');
-  const json = await res.json();
-  return (json.data ?? []) as PayoutPeriodRow[];
-}
-
-function PayoutPeriodsTableSkeleton() {
-  return (
-    <div className="overflow-x-auto" aria-hidden>
-      <table className="w-full min-w-[960px] text-left text-xs">
-        <thead>
-          <tr className="border-b border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/50 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-            <th className="px-3 py-2.5 font-semibold">Payout Period</th>
-            {AMOUNT_COLUMNS.map((label) => (
-              <th key={label} className="px-3 py-2.5 text-right font-semibold">
-                {label}
-              </th>
-            ))}
-            <th className="px-3 py-2.5 font-semibold">Status</th>
-            <th className="px-3 py-2.5 text-right font-semibold">Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {Array.from({ length: 5 }).map((_, row) => (
-            <tr key={row} className="border-b border-[var(--color-navy-border)]/70 last:border-b-0">
-              <td className="px-3 py-3">
-                <Skeleton className="h-3.5 w-44 bg-[var(--color-navy-light)]/70" />
-              </td>
-              {AMOUNT_COLUMNS.map((label) => (
-                <td key={label} className="px-3 py-3 text-right">
-                  <Skeleton className="ml-auto h-3.5 w-20 bg-[var(--color-navy-light)]/70" />
-                </td>
-              ))}
-              <td className="px-3 py-3">
-                <Skeleton className="h-5 w-16 rounded-full bg-[var(--color-navy-light)]/70" />
-              </td>
-              <td className="px-3 py-3 text-right">
-                <Skeleton className="ml-auto h-7 w-14 rounded-lg bg-[var(--color-navy-light)]/70" />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function periodToViewRow(
-  row: PayoutPeriodRow,
-  storeId?: string,
-): {
-  withdrawal: WithdrawalRow;
-  viewPeriodOnly: boolean;
-} {
-  if (row.withdrawal) {
-    return {
-      withdrawal: toWithdrawalRow(row.withdrawal, storeId ?? row.withdrawal.storeId),
-      viewPeriodOnly: false,
-    };
-  }
-
-  return syntheticPeriodViewWithdrawal({
-    key: row.key,
-    periodFrom: row.periodFrom,
-    periodTo: previewPeriodTo(row),
-    amountCents: row.amountCents,
-    storeId,
-    breakdown: row.breakdown,
-  });
-}
-
-function viewPeriodDisplayForModal(
-  row: PayoutPeriodRow,
-  allRows: PayoutPeriodRow[],
-  netPreviewByKey: Map<string, Record<string, unknown>>,
-): { from: string; to: string; days: number } | undefined {
-  const stage = readPayoutCycleStage(rowBreakdownForStage(row), netPreviewByKey.get(row.key));
-  if (stage !== 'SECOND') return undefined;
-  const resolved =
-    resolveSecondCycleFullDisplayRange(allRows, row) ?? secondCycleFullDisplayRangeFallback(row);
-  return { from: resolved.displayFrom, to: resolved.displayTo, days: 30 };
-}
-
-function formatAmountCell(value: number | null) {
-  if (value == null) return '—';
-  return formatMoneyAmount(value);
-}
-
-function resolveRowBaseDisplayAmounts(
-  row: PayoutPeriodRow,
-  previewByKey: Map<string, Record<string, unknown>>,
-): PeriodPayoutCardAmounts {
-  const preview = previewByKey.get(row.key);
-  return resolvePayoutPeriodRowDisplayAmounts({
-    amountCents: row.amountCents,
-    breakdown: row.breakdown,
-    periodFrom: row.periodFrom,
-    periodTo: previewPeriodTo(row),
-    netPreviewData: preview,
-  });
-}
-
-function PayoutPeriodAmountCells({
-  row,
-  amounts,
-  previewLoading,
-  needsPreview,
-}: {
-  row: PayoutPeriodRow;
-  amounts: PeriodPayoutCardAmounts;
-  previewLoading: boolean;
-  needsPreview: boolean;
-}) {
-  const feeColumnsLoading = needsPreview && previewLoading;
-
-  const values = [
-    amounts.branchReceives,
-    amounts.orderConvenienceFeeLkr,
-    amounts.commissionLkr,
-    amounts.deliveryFee,
-  ];
-
-  return (
-    <>
-      {values.map((value, index) => (
-        <td
-          key={AMOUNT_COLUMNS[index]}
-          className="px-3 py-3 text-right font-semibold tabular-nums text-[var(--color-text)]"
-        >
-          {feeColumnsLoading && index > 0 ? (
-            <Skeleton className="ml-auto inline-block h-3.5 w-16 bg-[var(--color-navy-light)]/70" />
-          ) : (
-            formatAmountCell(value)
-          )}
-        </td>
-      ))}
-    </>
-  );
-}
-
-function sortPayoutPeriodRows(rows: PayoutPeriodRow[], periodSort: PayoutPeriodSort) {
-  return [...rows].sort((a, b) => {
-    const byEnd = a.periodTo.localeCompare(b.periodTo);
-    if (byEnd !== 0) return periodSort === 'oldest' ? byEnd : -byEnd;
-    const byStart = a.periodFrom.localeCompare(b.periodFrom);
-    return periodSort === 'oldest' ? byStart : -byStart;
-  });
-}
 
 export default function BranchPayoutPeriodsSection({
   storeId,
@@ -316,98 +67,29 @@ export default function BranchPayoutPeriodsSection({
     viewPeriodOnly: boolean;
     periodDisplay?: { from: string; to: string; days: number };
   } | null>(null);
+  const [listTab, setListTab] = useState<PayoutListTab>('pending');
 
   const {
-    data: payoutPeriodsData,
-    isPending,
-    isFetching,
+    rows,
+    periodsLoading,
+    previewByKey,
+    previewLoadingByKey,
+    displayRows,
+    tabRows,
+    displayAmountsByKey,
+    oldestPending,
     refetch,
-  } = useQuery({
-    queryKey: payoutPeriodsQueryKey(storeId),
-    queryFn: () => fetchPayoutPeriods(apiBase, storeId),
-    enabled: Boolean(storeId),
+  } = useBranchPayoutPeriodsData({
+    apiBase,
+    storeId,
+    periodSort,
+    focusOldestPending,
+    listTab,
   });
-
-  const rows = payoutPeriodsData ?? [];
-  /** Disabled query (no storeId) or first fetch — avoid empty state while wallet overview still loads. */
-  const periodsLoading =
-    !storeId || isPending || (isFetching && payoutPeriodsData === undefined);
-
-  const rowsNeedingPreview = useMemo(
-    () =>
-      rows.filter(
-        (row) =>
-          row.periodFrom &&
-          previewPeriodTo(row) &&
-          payoutPeriodRowNeedsLiveNetPreview(row.breakdown),
-      ),
-    [rows],
-  );
-
-  const previewQueries = useQueries({
-    queries: rowsNeedingPreview.map((row) => ({
-      queryKey: [
-        'payout-period-net-preview',
-        storeId,
-        row.periodFrom,
-        previewPeriodTo(row),
-      ] as const,
-      queryFn: () =>
-        fetchPayoutPeriodNetPreview(apiBase, storeId!, row.periodFrom, previewPeriodTo(row)),
-      enabled: Boolean(storeId),
-      staleTime: 45_000,
-    })),
-  });
-
-  const previewByKey = useMemo(() => {
-    const map = new Map<string, Record<string, unknown>>();
-    rowsNeedingPreview.forEach((row, index) => {
-      const data = previewQueries[index]?.data;
-      if (data) map.set(row.key, data);
-    });
-    return map;
-  }, [rowsNeedingPreview, previewQueries]);
-
-  const previewLoadingByKey = useMemo(() => {
-    const map = new Map<string, boolean>();
-    rowsNeedingPreview.forEach((row, index) => {
-      map.set(row.key, previewQueries[index]?.isLoading ?? false);
-    });
-    return map;
-  }, [rowsNeedingPreview, previewQueries]);
 
   useEffect(() => {
     if (refreshSignal > 0) void refetch();
   }, [refreshSignal, refetch]);
-
-  const displayRows = useMemo(
-    () => sortPayoutPeriodRows(rows, focusOldestPending ? 'oldest' : periodSort),
-    [rows, periodSort, focusOldestPending],
-  );
-
-  const displayAmountsByKey = useMemo(() => {
-    const baseByKey = new Map<string, PeriodPayoutCardAmounts>();
-    for (const row of rows) {
-      baseByKey.set(row.key, resolveRowBaseDisplayAmounts(row, previewByKey));
-    }
-
-    const displayByKey = new Map<string, PeriodPayoutCardAmounts>();
-    for (const row of rows) {
-      const windowAmounts = baseByKey.get(row.key)!;
-      const stage = readPayoutCycleStage(row.breakdown, previewByKey.get(row.key));
-      if (shouldHideFirstCyclePlatformColumns(stage, rows, row, windowAmounts)) {
-        displayByKey.set(row.key, applyFirstCycleTableDisplayMask(windowAmounts));
-      } else {
-        displayByKey.set(row.key, windowAmounts);
-      }
-    }
-    return displayByKey;
-  }, [rows, previewByKey]);
-
-  const oldestPending = useMemo(
-    () => (focusOldestPending ? displayRows.find((row) => row.status === 'PENDING') ?? null : null),
-    [displayRows, focusOldestPending],
-  );
 
   const highlightedPeriodRow = useMemo(() => {
     if (!highlightPeriod) return null;
@@ -457,19 +139,45 @@ export default function BranchPayoutPeriodsSection({
   ]);
 
   useEffect(() => {
+    if (!highlightedPeriodRow) return;
+    setListTab(isCompletedPayout(highlightedPeriodRow.status) ? 'completed' : 'pending');
+  }, [highlightedPeriodRow]);
+
+  useEffect(() => {
     if (!activeHighlight || periodsLoading) return;
     const el = highlightRowRef.current;
     if (!el) return;
     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [activeHighlight?.periodFrom, activeHighlight?.periodTo, periodsLoading, displayRows.length]);
+  }, [activeHighlight?.periodFrom, activeHighlight?.periodTo, periodsLoading, listTab, tabRows.length]);
 
   return (
     <div className="mb-7 overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
-      <div className="flex flex-wrap items-baseline gap-2 border-b border-[var(--color-navy-border)] px-4 py-3 sm:px-5">
-        <h3 className="text-sm font-semibold text-[var(--color-text)]">15-Day Payout Periods</h3>
-        <span className="text-xs text-[var(--color-text-muted)]">
-          View only · current and completed cycles · amounts in LKR
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-navy-border)] px-4 py-3 sm:px-5">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-2">
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">15-Day Payout Periods</h3>
+          <span className="text-xs text-[var(--color-text-muted)]">
+            View only · amounts in LKR
+          </span>
+        </div>
+        <Tabs
+          value={listTab}
+          onValueChange={(value) => setListTab(value as PayoutListTab)}
+        >
+          <TabsList className="branch-wallet-page__tabs h-9 w-fit justify-start gap-0.5 overflow-y-hidden rounded-full border border-[var(--color-navy-border)] bg-[var(--color-input-bg)] p-0.5">
+            <TabsTrigger
+              value="pending"
+              className={`branch-wallet-page__tab ${WALLET_TAB_TRIGGER_CLASS}`}
+            >
+              Pending Payouts
+            </TabsTrigger>
+            <TabsTrigger
+              value="completed"
+              className={`branch-wallet-page__tab ${WALLET_TAB_TRIGGER_CLASS}`}
+            >
+              Completed Payouts
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
       {periodsLoading && <PayoutPeriodsTableSkeleton />}
@@ -486,23 +194,25 @@ export default function BranchPayoutPeriodsSection({
         </div>
       )}
 
-      {!periodsLoading && displayRows.length > 0 && (
+      {!periodsLoading && rows.length > 0 && tabRows.length === 0 && (
+        <div className="flex flex-col items-center justify-center px-4 py-14 text-center">
+          <p className="text-sm font-semibold text-[var(--color-text)]">
+            {listTab === 'pending' ? 'No pending payouts' : 'No completed payouts'}
+          </p>
+          <p className="mt-1 max-w-sm text-xs text-[var(--color-text-muted)]">
+            {listTab === 'pending'
+              ? 'Open cycles, unpaid periods, and payouts in review show here.'
+              : 'Periods show here after payment is completed.'}
+          </p>
+        </div>
+      )}
+
+      {!periodsLoading && tabRows.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[960px] text-left text-xs">
-            <thead>
-              <tr className="border-b border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/50 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                <th className="px-3 py-2.5 font-semibold">Payout Period</th>
-                {AMOUNT_COLUMNS.map((label) => (
-                  <th key={label} className="px-3 py-2.5 text-right font-semibold">
-                    {label}
-                  </th>
-                ))}
-                <th className="px-3 py-2.5 font-semibold">Status</th>
-                <th className="px-3 py-2.5 text-right font-semibold">Action</th>
-              </tr>
-            </thead>
+            <PayoutPeriodTableHead />
             <tbody>
-              {displayRows.map((row) => {
+              {tabRows.map((row) => {
                 const highlighted =
                   activeHighlight != null &&
                   row.periodFrom === activeHighlight.periodFrom &&
@@ -535,6 +245,23 @@ export default function BranchPayoutPeriodsSection({
                   </td>
                   <td className="px-3 py-3 text-right">
                     <div className="inline-flex items-center justify-end gap-1.5">
+                      {row.status === 'PAYMENT_PENDING' && row.draftInvoiceUrl && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void openPayoutDraftInvoice(row.draftInvoiceUrl!).catch(() => {
+                              toast.error('Could not open the payout invoice');
+                            });
+                          }}
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded-lg border border-[var(--color-brand)] px-3 py-1.5',
+                            'text-xs font-semibold text-[var(--color-brand)] transition-colors hover:bg-[var(--color-brand-subtle)]',
+                          )}
+                        >
+                          <FileText size={12} />
+                          Invoice
+                        </button>
+                      )}
                       {row.status === 'PAID' && hasWithdrawalInvoice(row.withdrawal?.invoiceUrl) && (
                         <button
                           type="button"

@@ -6,6 +6,23 @@ export async function ensureStockAuditLogTable(): Promise<void> {
   await createIndexIfMissing('stock_audit_logs', 'stock_audit_logs_storeId_productId_idx', '`storeId`, `productId`');
   await createIndexIfMissing('stock_audit_logs', 'stock_audit_logs_createdAt_idx', '`createdAt`');
   await createIndexIfMissing('stock_audit_logs', 'stock_audit_logs_changeType_idx', '`changeType`');
+  await addColumnIfMissing('stock_audit_logs', 'adminUserName', 'TEXT NULL');
+  await backfillStockAuditAdminUserNames();
+}
+
+async function backfillStockAuditAdminUserNames(): Promise<void> {
+  try {
+    if (!(await tableHasColumn('stock_audit_logs', 'adminUserName'))) return;
+    await prisma.$executeRawUnsafe(`
+      UPDATE "stock_audit_logs" AS sal
+      SET "adminUserName" = au.name
+      FROM "admin_users" AS au
+      WHERE sal."adminUserId" = au.id
+        AND sal."adminUserName" IS NULL
+    `);
+  } catch (err) {
+    logger.warn('Stock audit admin name backfill skipped', err);
+  }
 }
 
 export async function ensureWeeklyStockColumns(): Promise<void> {

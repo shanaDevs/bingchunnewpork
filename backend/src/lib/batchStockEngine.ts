@@ -279,6 +279,21 @@ async function syncStoreProductFromBatches(
   return { onHand, weeklyBaseQty: weeklyReceivedQty };
 }
 
+async function resolveAdminUserName(
+  tx: Tx,
+  adminUserId?: string,
+  adminUserName?: string | null,
+): Promise<string | null> {
+  const provided = adminUserName?.trim();
+  if (provided) return provided;
+  if (!adminUserId) return null;
+  const admin = await tx.adminUser.findUnique({
+    where: { id: adminUserId },
+    select: { name: true },
+  });
+  return admin?.name ?? null;
+}
+
 async function writeAuditLog(
   tx: Tx,
   input: {
@@ -291,9 +306,11 @@ async function writeAuditLog(
     qtyAfter: number;
     orderId?: string;
     adminUserId?: string;
+    adminUserName?: string | null;
     note?: string;
   },
 ): Promise<void> {
+  const adminUserName = await resolveAdminUserName(tx, input.adminUserId, input.adminUserName);
   await tx.stockAuditLog.create({
     data: {
       id: randomUUID(),
@@ -306,6 +323,7 @@ async function writeAuditLog(
       qtyAfter: input.qtyAfter,
       orderId: input.orderId ?? null,
       adminUserId: input.adminUserId ?? null,
+      adminUserName,
       note: input.note ?? null,
     },
   });

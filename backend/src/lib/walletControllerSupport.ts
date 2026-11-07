@@ -75,6 +75,8 @@ import {
   withAnalyticsCache,
 } from './analyticsResponseCache';
 import { resolveBranchStoreId } from '../middleware/auth';
+import { payoutDraftInvoiceApiPath } from './payoutInReviewDraft';
+import { ensureWithdrawalInReviewEnumReady } from './withdrawalSchema';
 import { decimalFieldToCentsNumber } from './moneyDecimal';
 import {
   serializeEnrichedWalletRow,
@@ -256,11 +258,12 @@ export async function computeMergedPeriodSummary(
 export const PAYOUT_PERIODS_CACHE_TTL_MS = 45_000;
 
 export async function loadPayoutPeriodItems(storeId: string) {
+  await ensureWithdrawalInReviewEnumReady();
   const [withdrawals, unpaidWindows] = await Promise.all([
     prisma.storeWithdrawal.findMany({
       where: {
         storeId,
-        status: { in: ['PENDING', 'APPROVED'] },
+        status: { in: ['PENDING', 'APPROVED', 'IN_REVIEW'] },
         periodFrom: { not: null },
         periodTo: { not: null },
       },
@@ -276,11 +279,12 @@ export async function loadPayoutPeriodItems(storeId: string) {
     periodFrom: string;
     periodTo: string;
     summaryThrough?: string;
-    status: 'PAID' | 'PENDING' | 'IN_PROGRESS';
+    status: 'PAID' | 'PENDING' | 'IN_PROGRESS' | 'PAYMENT_PENDING';
     amountCents: number;
     orderCount: number;
     breakdown: unknown;
     withdrawal: (typeof withdrawals)[number] | null;
+    draftInvoiceUrl?: string | null;
   }> = [];
 
   for (const withdrawal of withdrawals) {
@@ -288,15 +292,24 @@ export async function loadPayoutPeriodItems(storeId: string) {
     const periodTo = withdrawalPeriodDateStr(withdrawal.periodTo);
     if (!periodFrom || !periodTo) continue;
     covered.add(periodKey(periodFrom, periodTo));
+    const isInReview = withdrawal.status === 'IN_REVIEW';
     items.push({
       key: `wd-${withdrawal.id}`,
       periodFrom,
       periodTo,
-      status: withdrawal.status === 'APPROVED' ? 'PAID' : 'PENDING',
+      status:
+        withdrawal.status === 'APPROVED'
+          ? 'PAID'
+          : isInReview
+            ? 'PAYMENT_PENDING'
+            : 'PENDING',
       amountCents: withdrawalAmountCents(withdrawal),
       orderCount: breakdownOrderCount(withdrawal.breakdown),
       breakdown: withdrawal.breakdown ?? null,
       withdrawal,
+      draftInvoiceUrl: isInReview
+        ? withdrawal.invoiceUrl ?? payoutDraftInvoiceApiPath(withdrawal.id)
+        : undefined,
     });
   }
 
@@ -818,6 +831,10 @@ export type SuperAdminPayoutDueItem = {
   orderCount: number;
   /** Period ledger snapshot for allocation columns (withdrawal JSON or computed period breakdown). */
   breakdown: unknown | null;
+  /** Set when the due row is backed by a branch withdrawal (PENDING or IN_REVIEW). */
+  withdrawalId?: string;
+  /** Oldest unpaid window for this branch across the full due list. */
+  isOldestUnpaid: boolean;
 };
 
 /** Max elapsed 15-day windows per branch in the Super Admin due queue (matches payout validation). */
@@ -860,7 +877,7 @@ async function buildStorePayoutsDueRows(
     const periodTo = withdrawalPeriodDateStr(withdrawal.periodTo);
     if (!periodFrom || !periodTo) continue;
     covered.add(periodKey(periodFrom, periodTo));
-    if (withdrawal.status !== 'PENDING') continue;
+    if (withdrawal.status !== 'PENDING' && withdrawal.status !== 'IN_REVIEW') continue;
     const netAmountCents = withdrawalAmountCents(withdrawal as never);
     if (netAmountCents <= 0) continue;
     rows.push({
@@ -872,6 +889,8 @@ async function buildStorePayoutsDueRows(
       netAmountCents,
       orderCount: breakdownOrderCount(withdrawal.breakdown),
       breakdown: withdrawal.breakdown ?? null,
+      withdrawalId: withdrawal.id,
+      isOldestUnpaid: false,
     });
   }
 
@@ -916,6 +935,7 @@ async function buildStorePayoutsDueRows(
             cycleFrom: merged.cycleFrom ?? cycleCtx.cycleFrom,
             cycleTo: merged.cycleTo ?? cycleCtx.cycleTo ?? window.to,
           },
+          isOldestUnpaid: false,
         };
       },
     ),
@@ -924,122 +944,151 @@ async function buildStorePayoutsDueRows(
   for (const row of windowRows) {
     if (row) rows.push(row);
   }
-  return rows;
+  rows.sort(
+    (a, b) => a.periodFrom.localeCompare(b.periodFrom) || a.periodTo.localeCompare(b.periodTo),
+  );
+  return rows.map((row, index) => ({ ...row, isOldestUnpaid: index === 0 }));
 }
 
-/** Branches per payouts-due page. Frontend chains pages until done. */
-export const PAYOUTS_DUE_STORE_CHUNK = 3;
+/** Stores computed together so Prisma fan-out stays bounded. */
+const PAYOUTS_DUE_STORE_CHUNK = 3;
 
 const PAYOUTS_DUE_CACHE_TTL_MS = 60_000;
 
+export const PAYOUTS_DUE_PAGE_SIZE = 10;
+
 export type SuperAdminPayoutsDuePage = {
   items: SuperAdminPayoutDueItem[];
-  nextCursor: string | null;
-  done: boolean;
+  total: number;
+  allTotal: number;
+  page: number;
+  limit: number;
+  pages: number;
 };
 
-export async function listSuperAdminPayoutsDueItems(query?: {
-  from?: string;
-  to?: string;
-  cursor?: string;
-}): Promise<SuperAdminPayoutsDuePage> {
-  const cacheKey = analyticsCacheKey(['wallet-payouts-due', query?.cursor ?? '']);
+function branchPayoutDueSearchHaystack(storeName: string): string {
+  const raw = storeName.toLowerCase();
+  const label = storeName.replace(/^Bing Chun\s*[-–]\s*/i, '').trim().toLowerCase();
+  return `${raw}\n${label}`;
+}
 
+function matchesPayoutDueSearch(storeName: string, query: string): boolean {
+  if (!query) return true;
+  return branchPayoutDueSearchHaystack(storeName).includes(query);
+}
+
+async function buildPayoutsDueRowsForStores(
+  slice: Array<{ id: string; name: string }>,
+): Promise<SuperAdminPayoutDueItem[]> {
+  if (slice.length === 0) return [];
+  const storeIds = slice.map((store) => store.id);
+  const allWithdrawals = await prisma.storeWithdrawal.findMany({
+    where: {
+      storeId: { in: storeIds },
+      status: { in: ['PENDING', 'APPROVED', 'IN_REVIEW'] },
+      periodFrom: { not: null },
+      periodTo: { not: null },
+    },
+    orderBy: { periodTo: 'desc' },
+    select: PAYOUT_PERIOD_LIST_SELECT,
+  });
+
+  const withdrawalsByStore = new Map<string, PayoutPeriodWithdrawalRow[]>();
+  for (const row of allWithdrawals) {
+    const list = withdrawalsByStore.get(row.storeId) ?? [];
+    list.push(row as PayoutPeriodWithdrawalRow);
+    withdrawalsByStore.set(row.storeId, list);
+  }
+
+  const storesNeedingEarliest = storeIds.filter(
+    (id) => (withdrawalsByStore.get(id)?.length ?? 0) === 0,
+  );
+  const earliestByStore = new Map<string, string>();
+  if (storesNeedingEarliest.length > 0) {
+    const earliestRows = await promiseAllLimited(
+      getPrismaFanOutLimit(),
+      storesNeedingEarliest.map(
+        (storeId) => async () => {
+          const earliest = await prisma.order.findFirst({
+            where: { storeId, paymentStatus: 'PAID' },
+            orderBy: { createdAt: 'asc' },
+            select: { storeId: true, createdAt: true },
+          });
+          return earliest;
+        },
+      ),
+    );
+    for (const row of earliestRows) {
+      if (!row) continue;
+      const day = withdrawalPeriodDateStr(row.createdAt);
+      if (day) earliestByStore.set(row.storeId, day);
+    }
+  }
+
+  const perStoreRows = await promiseAllLimited(
+    getPrismaFanOutLimit(),
+    slice.map(
+      (store) => () =>
+        buildStorePayoutsDueRows(
+          store.id,
+          store.name,
+          withdrawalsByStore.get(store.id) ?? [],
+          earliestByStore.get(store.id) ?? null,
+        ),
+    ),
+  );
+  return perStoreRows.flat();
+}
+
+async function loadAllSuperAdminPayoutsDueItems(): Promise<SuperAdminPayoutDueItem[]> {
+  const cacheKey = analyticsCacheKey(['wallet-payouts-due', 'all']);
   return withAnalyticsCache(cacheKey, async () => {
     const stores = await prisma.store.findMany({
       where: { isActive: true },
       select: { id: true, name: true },
     });
     stores.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-    if (stores.length === 0) {
-      return { items: [], nextCursor: null, done: true };
+    if (stores.length === 0) return [];
+
+    const items: SuperAdminPayoutDueItem[] = [];
+    for (let start = 0; start < stores.length; start += PAYOUTS_DUE_STORE_CHUNK) {
+      const slice = stores.slice(start, start + PAYOUTS_DUE_STORE_CHUNK);
+      items.push(...(await buildPayoutsDueRowsForStores(slice)));
     }
-
-    let start = 0;
-    if (query?.cursor) {
-      const cursorIndex = stores.findIndex((store) => store.id === query.cursor);
-      if (cursorIndex < 0) {
-        return { items: [], nextCursor: null, done: true };
-      }
-      start = cursorIndex + 1;
-    }
-
-    const slice = stores.slice(start, start + PAYOUTS_DUE_STORE_CHUNK);
-    if (slice.length === 0) {
-      return { items: [], nextCursor: null, done: true };
-    }
-
-    const storeIds = slice.map((store) => store.id);
-    const allWithdrawals = await prisma.storeWithdrawal.findMany({
-      where: {
-        storeId: { in: storeIds },
-        status: { in: ['PENDING', 'APPROVED'] },
-        periodFrom: { not: null },
-        periodTo: { not: null },
-      },
-      orderBy: { periodTo: 'desc' },
-      select: PAYOUT_PERIOD_LIST_SELECT,
-    });
-
-    const withdrawalsByStore = new Map<string, PayoutPeriodWithdrawalRow[]>();
-    for (const row of allWithdrawals) {
-      const list = withdrawalsByStore.get(row.storeId) ?? [];
-      list.push(row as PayoutPeriodWithdrawalRow);
-      withdrawalsByStore.set(row.storeId, list);
-    }
-
-    const storesNeedingEarliest = storeIds.filter(
-      (id) => (withdrawalsByStore.get(id)?.length ?? 0) === 0,
-    );
-    const earliestByStore = new Map<string, string>();
-    if (storesNeedingEarliest.length > 0) {
-      const earliestRows = await promiseAllLimited(
-        getPrismaFanOutLimit(),
-        storesNeedingEarliest.map(
-          (storeId) => async () => {
-            const earliest = await prisma.order.findFirst({
-              where: { storeId, paymentStatus: 'PAID' },
-              orderBy: { createdAt: 'asc' },
-              select: { storeId: true, createdAt: true },
-            });
-            return earliest;
-          },
-        ),
-      );
-      for (const row of earliestRows) {
-        if (!row) continue;
-        const day = withdrawalPeriodDateStr(row.createdAt);
-        if (day) earliestByStore.set(row.storeId, day);
-      }
-    }
-
-    const perStoreRows = await promiseAllLimited(
-      getPrismaFanOutLimit(),
-      slice.map(
-        (store) => () =>
-          buildStorePayoutsDueRows(
-            store.id,
-            store.name,
-            withdrawalsByStore.get(store.id) ?? [],
-            earliestByStore.get(store.id) ?? null,
-          ),
-      ),
-    );
-    const items: SuperAdminPayoutDueItem[] = perStoreRows.flat();
-
     items.sort(
       (a, b) =>
         a.periodFrom.localeCompare(b.periodFrom) ||
         a.periodTo.localeCompare(b.periodTo) ||
         a.storeName.localeCompare(b.storeName),
     );
-    const done = start + slice.length >= stores.length;
-    return {
-      items,
-      nextCursor: done ? null : slice[slice.length - 1].id,
-      done,
-    };
+    return items;
   }, PAYOUTS_DUE_CACHE_TTL_MS);
+}
+
+export async function listSuperAdminPayoutsDueItems(query?: {
+  from?: string;
+  to?: string;
+  page?: number;
+  limit?: number;
+  search?: string;
+}): Promise<SuperAdminPayoutsDuePage> {
+  await ensureWithdrawalInReviewEnumReady();
+  const limit = Math.min(100, Math.max(1, query?.limit ?? PAYOUTS_DUE_PAGE_SIZE));
+  const search = (query?.search ?? '').trim().toLowerCase();
+  const all = await loadAllSuperAdminPayoutsDueItems();
+  const filtered = search ? all.filter((item) => matchesPayoutDueSearch(item.storeName, search)) : all;
+  const total = filtered.length;
+  const pages = Math.max(1, Math.ceil(total / limit) || 1);
+  const page = Math.min(Math.max(1, query?.page ?? 1), pages);
+  const start = (page - 1) * limit;
+  return {
+    items: filtered.slice(start, start + limit),
+    total,
+    allTotal: all.length,
+    page,
+    limit,
+    pages,
+  };
 }
 
 export type PeriodBranchReportRow = {

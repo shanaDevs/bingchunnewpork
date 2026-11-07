@@ -125,7 +125,7 @@ describe('getSettlementReports', () => {
     expect(data.settlements[0].payoutStatus).toBe('PAID');
   });
 
-  it('filters by storeId and date range', async () => {
+  it('filters withdrawals and settlements by storeId and overlapping cycle dates', async () => {
     const req = createMockReq({
       user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
       query: { storeId: 'store-a', from: '2026-07-01', to: '2026-07-31' },
@@ -134,15 +134,89 @@ describe('getSettlementReports', () => {
 
     await getSettlementReports(req, res, next);
 
+    expect(prisma.storeWithdrawal.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          storeId: 'store-a',
+          status: { in: ['PENDING', 'APPROVED'] },
+          periodFrom: expect.objectContaining({ lte: expect.any(Date) }),
+          periodTo: expect.objectContaining({ gte: expect.any(Date) }),
+        }),
+      }),
+    );
     expect(prisma.commissionSettlement.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           storeId: 'store-a',
           status: { not: 'REJECTED' },
-          createdAt: expect.objectContaining({ gte: expect.any(Date), lte: expect.any(Date) }),
         }),
       }),
     );
+  });
+
+  it('accepts year-to-date ranges used on the settlement sheet', async () => {
+    const req = createMockReq({
+      user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
+      query: { storeId: 'store-a', from: '2026-01-01', to: '2026-11-07' },
+    });
+    const res = createMockRes();
+
+    await getSettlementReports(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: { settlements: [], count: 0 },
+    });
+  });
+
+  it('loads 15-day branch payouts onto the settlement sheet', async () => {
+    vi.mocked(prisma.storeWithdrawal.findMany).mockResolvedValue([
+      {
+        id: 'wd-1',
+        invoiceRef: 'WD-1',
+        periodFrom: new Date('2026-10-20'),
+        periodTo: new Date('2026-11-03'),
+        amount: 14443980,
+        status: 'APPROVED',
+        breakdown: {
+          grossAmount: 41214200,
+          deliveryFee: 0,
+          gatewayFee: 275975,
+          commissionFee: 645165,
+          convenienceFee: 0,
+          channelBreakdown: {},
+        },
+        store: { name: 'Nugegoda' },
+      },
+    ] as never);
+
+    const req = createMockReq({
+      user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
+      query: { storeId: 'store-a' },
+    });
+    const res = createMockRes();
+
+    await getSettlementReports(req, res, next);
+
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: {
+        settlements: [
+          expect.objectContaining({
+            id: 'wd-1',
+            branchName: 'Nugegoda',
+            payoutStatus: 'PAID',
+            grossSales: 412142,
+            payhereFees: 2759.75,
+            dartcodesCommission: 6451.65,
+            finalPayoutAmount: 144439.8,
+          }),
+        ],
+        count: 1,
+      },
+    });
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('returns an empty list when there are no settlements', async () => {
@@ -197,30 +271,27 @@ describe('getWalletLedger', () => {
     resetAnalyticsPrismaDefaults(prisma);
   });
 
-  it('computes broughtForward from prior activity and a running balance for order credits', async () => {
-    (prisma.walletTransaction.findMany as any).mockImplementation(async (args: unknown) => {
-      const a = args as { select?: unknown };
-      if (a.select) return [{ amount: 10000 }] as never; // prior txns: 100 LKR
-      return [
-        {
-          id: 'txn-1',
-          storeId: 'store-a',
-          orderId: 'order-1',
-          type: 'ORDER_PAYMENT',
-          amount: 50000, // 500 LKR
-          createdAt: new Date('2026-07-15T10:00:00'),
-          store: { name: 'Store A' },
-          reference: null,
-          paymentRef: null,
-          description: null,
-        },
-      ] as never;
-    });
-    (prisma.commissionSettlement.findMany as any).mockImplementation(async (args: unknown) => {
-      const a = args as { select?: unknown };
-      if (a.select) return [{ totalCommission: 2000 }] as never; // prior settlements: 20 LKR
-      return [] as never;
-    });
+  it('credits paid-order item sales (subtotal − discount) and a payables brought-forward', async () => {
+    vi.mocked(prisma.order.findMany).mockResolvedValue([
+      {
+        id: 'order-1',
+        storeId: 'store-a',
+        createdAt: new Date('2026-07-15T10:00:00'),
+        orderMode: 'TAKEAWAY',
+        paymentMethod: 'PAYHERE',
+        subtotal: 500,
+        discount: 0,
+        store: { name: 'Store A' },
+      },
+    ] as never);
+    (prisma.order.groupBy as any).mockResolvedValue([
+      {
+        orderMode: 'TAKEAWAY',
+        paymentMethod: 'PAYHERE',
+        _sum: { total: 80, subtotal: 80, discount: 0, loyaltyDiscount: 0 },
+      },
+    ]);
+    vi.mocked(prisma.walletTransaction.findMany).mockResolvedValue([] as never);
 
     const req = createMockReq({
       user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
@@ -249,6 +320,51 @@ describe('getWalletLedger', () => {
         meta: expect.objectContaining({ from: '2026-07-01', to: '2026-07-31' }),
       }),
     });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('does not credit delivery or convenience fees included in order.total', async () => {
+    vi.mocked(prisma.order.findMany).mockResolvedValue([
+      {
+        id: 'order-1',
+        storeId: 'store-a',
+        createdAt: new Date('2026-07-15T10:00:00'),
+        orderMode: 'DELIVERY',
+        paymentMethod: 'PAYHERE',
+        subtotal: 400,
+        discount: 0,
+        store: { name: 'Store A' },
+      },
+    ] as never);
+    vi.mocked(prisma.walletTransaction.findMany).mockResolvedValue([
+      {
+        id: 'txn-1',
+        storeId: 'store-a',
+        orderId: 'order-1',
+        type: 'ORDER_PAYMENT',
+        amount: 43634, // order.total including fees — must not be used
+        createdAt: new Date('2026-07-15T10:00:00'),
+        store: { name: 'Store A' },
+        reference: null,
+        paymentRef: null,
+        description: null,
+      },
+    ] as never);
+
+    const req = createMockReq({
+      user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
+      query: { storeId: 'store-a', from: '2026-07-01', to: '2026-07-31' },
+    });
+    const res = createMockRes();
+
+    await getWalletLedger(req, res, next);
+
+    const data = (res.json as ReturnType<typeof vi.fn>).mock.calls[0][0].data as {
+      ledger: Array<{ credit: number; runningBalance: number }>;
+      closingBalance: number;
+    };
+    expect(data.ledger[0]?.credit).toBe(400);
+    expect(data.closingBalance).toBe(400);
     expect(next).not.toHaveBeenCalled();
   });
 
