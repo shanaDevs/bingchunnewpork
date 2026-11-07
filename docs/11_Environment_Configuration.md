@@ -44,7 +44,7 @@ Do **not** commit real `.env` secrets. Use templates and CapRover/GitLab variabl
 | `PAYHERE_MERCHANT_SECRET` | Optional / **Secret** | Fallback merchant secret |
 | `PAYHERE_MODE` | Optional | `sandbox` / live |
 | `PAYHERE_NOTIFY_IP_ALLOWLIST` | Optional | Comma-separated IPs/CIDRs for `POST /api/orders/payment-notify`; empty = signature-only (no IP gate) |
-| `GOOGLE_MAPS_API_KEY` | Optional / **Secret** | Maps; else mock |
+| `GOOGLE_MAPS_API_KEY` | Optional / **Secret** | Server geocoding/places; `GET /settings/app` for web maps; `GET /stores/address/tiles` for Map Tiles session. Enable **Maps JavaScript API** + **Map Tiles API** in GCP. Browser key HTTP referrers: `http://localhost:3000/*`, `http://localhost:3100/*`, admin + delivery production origins. Else OSM/mock |
 | `GOOGLE_CLIENT_ID` | Optional | Google login audience |
 | `GOOGLE_CLIENT_SECRET` | Optional | Present in config; **unused** in ID-token flow |
 | `FACEBOOK_APP_ID` | Optional | Facebook login |

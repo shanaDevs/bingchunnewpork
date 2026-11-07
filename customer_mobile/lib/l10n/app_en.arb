@@ -45,7 +45,7 @@
   "continueBrowsing": "Continue browsing",
   "offlineBlock": "Connect to the internet to continue.",
   "genericError": "Something went wrong. Please try again.",
-  "otpRateLimited": "Too many OTP requests. Please try again after 15 minutes.",
+  "otpRateLimited": "Too many OTP requests. Please try again after 3 minutes.",
   "cupEmpty": "Your cup is empty",
   "browseMenu": "Browse menu",
   "heroBadge": "Since 2012",

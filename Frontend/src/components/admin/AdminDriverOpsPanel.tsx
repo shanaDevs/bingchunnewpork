@@ -35,7 +35,7 @@ import {
   complaintStatusLabel,
   complaintStatusVariant,
 } from '@/lib/complaints';
-import { formatBranchName, shortJobId } from '@/lib/deliveryDisplay';
+import { displayRideId, formatBranchName } from '@/lib/deliveryDisplay';
 import { formatDateTime } from '@/lib/datetime';
 import AdminReassignFailedOrderModal, {
   type AdminDeliveryFailure,
@@ -692,7 +692,7 @@ export default function AdminDriverOpsPanel({
                   return (
                     <tr key={row.id} className="border-t border-navy-border align-top">
                       <td className="px-4 py-2 text-white whitespace-nowrap font-medium">
-                        {row.job?.rideCode ?? shortJobId(row.jobId)}
+                        {displayRideId(row.job?.rideCode, row.jobId)}
                       </td>
                       <td className="px-4 py-2 whitespace-nowrap">
                         <ul className="space-y-1">
@@ -745,6 +745,8 @@ export default function AdminDriverOpsPanel({
                           </>
                         ) : status === 'done' ? (
                           <span className={adminBadgeClass('teal')}>Completed</span>
+                        ) : status === 'not_reassignable' ? (
+                          <span className="text-muted">—</span>
                         ) : (
                           <span className={adminBadgeClass('orange')}>Needs rider</span>
                         )}

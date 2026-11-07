@@ -5,13 +5,17 @@ import {
   createUniqueIndexIfMissing,
   ensureEnumTypeIfMissing,
   ensureEnumValueIfMissing,
+  runtimeSchemaPatchesAllowed,
   tableExists,
 } from './schemaPatch';
-import { primeDeliverySqlRefs } from './deliveryPg';
+import { AppError } from '../middleware/errorHandler';
+import { deliverySchemaTableSql, primeDeliverySqlRefs, qualifiedPhysicalTable } from './deliveryPg';
+import { DELIVERY_PG_SCHEMA } from '@bingchun/db';
 
 let deliveryJobsReady = false;
 let driverComplaintsReady = false;
 let driverLocationsReady = false;
+let adminJobCancellationsReady = false;
 
 async function ensureDeliveryJobsBaseTables(): Promise<void> {
   await ensureEnumTypeIfMissing('DeliveryJobStatus', [
@@ -154,6 +158,81 @@ export async function ensureDeliveryJobsTables(): Promise<void> {
   await createUniqueIndexIfMissing('delivery_jobs', 'delivery_jobs_rideCode_key', 'rideCode');
 
   deliveryJobsReady = true;
+}
+
+async function deliveryJobStatusTypeSqlRef(): Promise<string> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ schema: string }>>(
+    `SELECT n.nspname AS schema
+     FROM pg_type t
+     JOIN pg_namespace n ON n.oid = t.typnamespace
+     WHERE t.typname = 'DeliveryJobStatus'
+     ORDER BY CASE n.nspname WHEN $1 THEN 0 WHEN 'public' THEN 1 ELSE 2 END
+     LIMIT 1`,
+    DELIVERY_PG_SCHEMA,
+  );
+  const schema = rows[0]?.schema ?? DELIVERY_PG_SCHEMA;
+  return `"${schema.replace(/"/g, '""')}"."DeliveryJobStatus"`;
+}
+
+/** HQ audit rows for admin-closed delivery jobs (migration 20261107150000). */
+export async function ensureDeliveryJobAdminCancellationsSchema(): Promise<void> {
+  if (adminJobCancellationsReady) return;
+
+  if (await tableExists('delivery_job_admin_cancellations')) {
+    adminJobCancellationsReady = true;
+    return;
+  }
+
+  if (!runtimeSchemaPatchesAllowed()) {
+    throw new AppError(
+      'delivery_job_admin_cancellations table is missing. Apply Prisma migration 20261107150000.',
+      503,
+    );
+  }
+
+  await primeDeliverySqlRefs();
+  await ensureDeliveryJobsTables();
+
+  if (await tableExists('delivery_job_admin_cancellations')) {
+    adminJobCancellationsReady = true;
+    return;
+  }
+
+  const jobsRef = await qualifiedPhysicalTable('delivery_jobs');
+  const tableRef = deliverySchemaTableSql('delivery_job_admin_cancellations');
+  const statusTypeRef = await deliveryJobStatusTypeSqlRef();
+  const deliverySchema = DELIVERY_PG_SCHEMA.replace(/"/g, '""');
+
+  await prisma.$executeRawUnsafe(`CREATE SCHEMA IF NOT EXISTS "${deliverySchema}"`);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS ${tableRef} (
+      "id" TEXT PRIMARY KEY,
+      "jobId" TEXT NOT NULL,
+      "cancelledByAdminId" TEXT NOT NULL,
+      "reason" TEXT NOT NULL,
+      "meritDelta" INTEGER,
+      "previousJobStatus" ${statusTypeRef} NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "delivery_job_admin_cancellations_jobId_fkey"
+        FOREIGN KEY ("jobId") REFERENCES ${jobsRef}("id") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "delivery_job_admin_cancellations_cancelledByAdminId_fkey"
+        FOREIGN KEY ("cancelledByAdminId") REFERENCES public."admin_users"("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )
+  `);
+
+  await createIndexIfMissing(
+    'delivery_job_admin_cancellations',
+    'delivery_job_admin_cancellations_jobId_createdAt_idx',
+    'jobId, createdAt',
+  );
+  await createIndexIfMissing(
+    'delivery_job_admin_cancellations',
+    'delivery_job_admin_cancellations_cancelledByAdminId_createdAt_idx',
+    'cancelledByAdminId, createdAt',
+  );
+
+  adminJobCancellationsReady = true;
 }
 
 /** Driver complaint table from migration 20260822010000_driver_hardening. */

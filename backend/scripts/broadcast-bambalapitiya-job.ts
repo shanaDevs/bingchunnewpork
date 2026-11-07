@@ -10,7 +10,7 @@ import { signToken } from '../src/middleware/auth';
 import { config } from '../src/config';
 
 const API = `http://127.0.0.1:${config.port}/api`;
-const KNOWN_ORDER_NUMBERS = ['BC260822-7433', 'BC260822-3459'];
+const SEED_NOTE_PREFIX = 'seed-bambalapitiya-delivery-';
 
 async function main() {
   const store = await prisma.store.findFirst({
@@ -31,7 +31,7 @@ async function main() {
       storeId: store.id,
       orderMode: 'DELIVERY',
       status: 'READY',
-      orderNumber: { in: KNOWN_ORDER_NUMBERS },
+      notes: { startsWith: SEED_NOTE_PREFIX },
     },
     select: { id: true, orderNumber: true, status: true },
     orderBy: { createdAt: 'asc' },
@@ -46,7 +46,6 @@ async function main() {
         guestPhone: { contains: '762843595' },
       },
       select: { id: true, orderNumber: true, status: true },
-      take: 2,
       orderBy: { createdAt: 'desc' },
     });
   }

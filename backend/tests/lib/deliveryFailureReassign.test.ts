@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   collectForwardOrders,
   deriveFailureReassignment,
+  pickReassignedRiders,
   redeliveryJobTitle,
+  type ReassignedJobLink,
+  type VehicleFailureAttemptRef,
 } from '../../src/lib/deliveryFailureReassign';
 import { deliveredOrderDeliveryFees } from '../../src/lib/deliveryJobHelpers';
 import { pickLiveTrackingLink } from '../../src/lib/liveDriverTracking';
@@ -95,6 +98,7 @@ describe('deriveFailureReassignment', () => {
       deriveFailureReassignment({
         orderStatus: 'OUT_FOR_DELIVERY',
         originalJobId: 'job-1',
+        attemptOutcome: 'VEHICLE_FAILURE',
         jobsForOrder: [
           {
             jobId: 'job-1',
@@ -191,6 +195,128 @@ describe('deliveredOrderDeliveryFees', () => {
         { order: { status: 'CANCELLED', deliveryFee: 40, cancelledAtStatus: 'READY' } },
       ]),
     ).toBe(230);
+  });
+});
+
+describe('pickReassignedRiders', () => {
+  const failureAt = created('2026-08-31T10:00:00.000Z');
+  const attempts: VehicleFailureAttemptRef[] = [
+    { jobId: 'failed', orderId: 'o1', createdAt: failureAt },
+    { jobId: 'failed', orderId: 'o2', createdAt: created('2026-08-31T10:05:00.000Z') },
+  ];
+
+  function link(
+    orderId: string,
+    job: ReassignedJobLink['job'],
+  ): ReassignedJobLink {
+    return { orderId, job };
+  }
+
+  it('returns the takeover rider and ignores the failed job and earlier rides', () => {
+    const picked = pickReassignedRiders({
+      failedJobIds: ['failed'],
+      attempts,
+      links: [
+        link('o1', {
+          id: 'failed',
+          status: 'VEHICLE_FAILURE',
+          rideCode: 'RIDE-1',
+          createdAt: created('2026-08-31T08:00:00.000Z'),
+          driver: { id: 'stranded', name: 'Play Review Rider', phone: '0770000000' },
+        }),
+        link('o1', {
+          id: 'older',
+          status: 'COMPLETED',
+          rideCode: 'RIDE-0',
+          createdAt: created('2026-08-30T08:00:00.000Z'),
+          driver: { id: 'old', name: 'Earlier Rider', phone: '0710000000' },
+        }),
+        link('o1', {
+          id: 'takeover',
+          status: 'SCHEDULED',
+          rideCode: 'RIDE-2',
+          createdAt: created('2026-08-31T10:10:00.000Z'),
+          driver: { id: 'backup', name: 'Backup Rider', phone: '0771111111' },
+        }),
+        link('o2', {
+          id: 'takeover',
+          status: 'SCHEDULED',
+          rideCode: 'RIDE-2',
+          createdAt: created('2026-08-31T10:10:00.000Z'),
+          driver: { id: 'backup', name: 'Backup Rider', phone: '0771111111' },
+        }),
+      ],
+    });
+
+    expect(picked.get('failed')).toEqual([
+      {
+        id: 'backup',
+        name: 'Backup Rider',
+        phone: '0771111111',
+        jobId: 'takeover',
+        rideCode: 'RIDE-2',
+        status: 'SCHEDULED',
+      },
+    ]);
+  });
+
+  it('keeps the newest job when the same rider is assigned twice', () => {
+    const picked = pickReassignedRiders({
+      failedJobIds: ['failed'],
+      attempts,
+      links: [
+        link('o1', {
+          id: 'first',
+          status: 'CANCELLED',
+          rideCode: null,
+          createdAt: created('2026-08-31T10:10:00.000Z'),
+          driver: { id: 'backup', name: 'Backup Rider', phone: null },
+        }),
+        link('o1', {
+          id: 'second',
+          status: 'IN_PROGRESS',
+          rideCode: 'RIDE-3',
+          createdAt: created('2026-08-31T11:00:00.000Z'),
+          driver: { id: 'backup', name: 'Backup Rider', phone: '0771111111' },
+        }),
+      ],
+    });
+
+    expect(picked.get('failed')?.map((rider) => rider.jobId)).toEqual(['second']);
+  });
+
+  it('lists every rider when the remaining orders are split', () => {
+    const picked = pickReassignedRiders({
+      failedJobIds: ['failed'],
+      attempts,
+      links: [
+        link('o1', {
+          id: 'a',
+          status: 'ASSIGNED',
+          rideCode: 'RIDE-A',
+          createdAt: created('2026-08-31T10:20:00.000Z'),
+          driver: { id: 'a-rider', name: 'Rider A', phone: '0771' },
+        }),
+        link('o2', {
+          id: 'b',
+          status: 'ASSIGNED',
+          rideCode: 'RIDE-B',
+          createdAt: created('2026-08-31T10:30:00.000Z'),
+          driver: { id: 'b-rider', name: 'Rider B', phone: '0772' },
+        }),
+      ],
+    });
+
+    expect(picked.get('failed')?.map((rider) => rider.name)).toEqual(['Rider A', 'Rider B']);
+  });
+
+  it('returns an empty list when nobody has taken over', () => {
+    const picked = pickReassignedRiders({
+      failedJobIds: ['failed'],
+      attempts,
+      links: [],
+    });
+    expect(picked.get('failed')).toEqual([]);
   });
 });
 

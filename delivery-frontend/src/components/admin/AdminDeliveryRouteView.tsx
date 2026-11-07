@@ -10,6 +10,8 @@ import {
   Loader2,
   LocateFixed,
   MapPin,
+  Maximize2,
+  Minimize2,
   Route,
 } from 'lucide-react';
 import type { DeliveryRoutePayload, DeliveryRouteStop } from '@/lib/deliveryRoute';
@@ -279,6 +281,7 @@ export default function AdminDeliveryRouteView({
   const [actualNotice, setActualNotice] = useState<string | null>(null);
   const [selectedStopKey, setSelectedStopKey] = useState<string | null>(null);
   const [fitNonce, setFitNonce] = useState(0);
+  const [mapFullscreen, setMapFullscreen] = useState(false);
   const [focusDriverPending, setFocusDriverPending] = useState(focusDriver);
 
   const effectiveStoreId = storeId || route?.store.id || '';
@@ -323,6 +326,7 @@ export default function AdminDeliveryRouteView({
     setActualNotice(null);
     setSelectedStopKey(null);
     setFitNonce(0);
+    setMapFullscreen(false);
 
     fetchJobRoute(jobId, storeId)
       .then((data) => {
@@ -419,12 +423,37 @@ export default function AdminDeliveryRouteView({
     return { estKm, estMin, actKm, actMin };
   }, [showPathOverlay, isLiveJob, actualOverlay, liveRoute.actualDistanceKm, route]);
 
+  useEffect(() => {
+    if (!mapFullscreen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeMapFullscreen();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [mapFullscreen]);
+
   function toggleStop(key: string) {
     setSelectedStopKey((current) => (current === key ? null : key));
   }
 
+  function openMapFullscreen() {
+    setMapFullscreen(true);
+    setFitNonce((n) => n + 1);
+  }
+
+  function closeMapFullscreen() {
+    setMapFullscreen(false);
+    setFitNonce((n) => n + 1);
+  }
+
   function viewFullRoute() {
     setSelectedStopKey(null);
+    setMapFullscreen(true);
     setFitNonce((n) => n + 1);
   }
 
@@ -433,6 +462,25 @@ export default function AdminDeliveryRouteView({
     setSelectedStopKey('driver');
     setFitNonce((n) => n + 1);
   }
+
+  const routeMap =
+    route != null ? (
+      <AdminDeliveryRouteMap
+        route={route}
+        branchStore={branchStore ?? undefined}
+        highlightedStopKey={selectedStopKey}
+        fitNonce={fitNonce}
+        onStopSelect={toggleStop}
+        actualPath={actualPath}
+        driverPosition={driverPosition}
+        vehicleFailurePosition={vehicleFailurePosition}
+        pathOverlayLabel={pathOverlayLabel}
+        showLegend={showPathOverlay && actualPath.length >= 2}
+        showReturnToStore
+        completionRadiusM={BRANCH_RETURN_RADIUS_M}
+        fullscreen={mapFullscreen}
+      />
+    ) : null;
 
   return (
     <div className="card overflow-hidden">
@@ -587,24 +635,62 @@ export default function AdminDeliveryRouteView({
           </aside>
 
           <div className="route-view-split__map">
-            <AdminDeliveryRouteMap
-              route={route}
-              branchStore={branchStore ?? undefined}
-              highlightedStopKey={selectedStopKey}
-              fitNonce={fitNonce}
-              onStopSelect={toggleStop}
-              actualPath={actualPath}
-              driverPosition={driverPosition}
-              vehicleFailurePosition={vehicleFailurePosition}
-              pathOverlayLabel={pathOverlayLabel}
-              showLegend={showPathOverlay && actualPath.length >= 2}
-              showReturnToStore
-              completionRadiusM={BRANCH_RETURN_RADIUS_M}
-            />
+            {!mapFullscreen ? (
+              <div className="delivery-map-wrap relative h-full w-full">
+                <button
+                  type="button"
+                  onClick={openMapFullscreen}
+                  className="live-delivery-map__fullscreen-btn live-delivery-map__fullscreen-btn--expand"
+                  aria-label="Open map fullscreen"
+                >
+                  <Maximize2 size={16} />
+                </button>
+                {routeMap}
+              </div>
+            ) : (
+              <div className="flex h-full min-h-[360px] items-center justify-center bg-navy-light/30 text-xs text-muted">
+                Map open in full screen
+              </div>
+            )}
           </div>
         </div>
       ) : (
         <div className="p-8 text-center text-muted">Route unavailable.</div>
+      )}
+
+      {mapFullscreen && route && routeMap && (
+        <div className="live-delivery-map-fullscreen" role="dialog" aria-label="Delivery route map">
+          <div className="live-delivery-map-fullscreen__header">
+            <p className="min-w-0 truncate text-sm font-medium text-fg">{headerTitle}</p>
+            <div className="flex shrink-0 items-center gap-2">
+              {isLiveJob && (
+                <button
+                  type="button"
+                  onClick={findDriver}
+                  disabled={!liveRoute.findDriverReady}
+                  title={
+                    liveRoute.findDriverReady
+                      ? 'Center map on driver'
+                      : 'No GPS yet — rider must be online with location on.'
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <LocateFixed size={14} />
+                  Find driver
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={closeMapFullscreen}
+                className="live-delivery-map__fullscreen-btn"
+                aria-label="Exit fullscreen map"
+              >
+                <Minimize2 size={18} />
+              </button>
+            </div>
+          </div>
+          <div className="live-delivery-map-fullscreen__body">{routeMap}</div>
+        </div>
       )}
     </div>
   );

@@ -14,9 +14,47 @@ type MapsNamespace = {
   __ib__?: () => void;
 };
 
+type ServerTiles = {
+  provider: 'google' | 'osm' | string;
+  url: string;
+  attribution: string;
+};
+
 let keyRequest: Promise<string> | null = null;
 let mapsRequest: Promise<void> | null = null;
 let mapsKey = '';
+let tilesRequest: Promise<ServerTiles | null> | null = null;
+
+function parseTilesBody(body: unknown): ServerTiles | null {
+  if (!body || typeof body !== 'object') return null;
+  const root = body as { data?: ServerTiles; provider?: string; url?: string; attribution?: string };
+  const data = (root.data ?? root) as ServerTiles;
+  const provider = String(data.provider ?? '').trim();
+  const url = String(data.url ?? '').trim();
+  const attribution = String(data.attribution ?? '').trim();
+  if (provider === 'google' && url) {
+    return { provider, url, attribution: attribution || '&copy; Google' };
+  }
+  return null;
+}
+
+/** Same path as customer mobile: backend Map Tiles session (no Maps JS API in browser). */
+function readServerMapTiles(): Promise<ServerTiles | null> {
+  if (!tilesRequest) {
+    tilesRequest = fetch(`${getApiBaseUrl()}/stores/address/tiles`)
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const body = await res.json();
+        return parseTilesBody(body);
+      })
+      .catch(() => null)
+      .then((value) => {
+        if (!value) tilesRequest = null;
+        return value;
+      });
+  }
+  return tilesRequest;
+}
 
 function readGoogleMapsKey(): Promise<string> {
   if (!keyRequest) {
@@ -35,10 +73,9 @@ function readGoogleMapsKey(): Promise<string> {
   return keyRequest;
 }
 
-/** Loads the Maps JavaScript API. Map Tiles is a different product and is not enabled on this key. */
+/** Loads the Maps JavaScript API + Leaflet.GoogleMutant when server tiles are unavailable. */
 function loadGoogleMaps(key: string): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
-  // Avoid clashing with Window.google typings from Google Identity Services.
   const host = window as unknown as { google?: { maps?: MapsNamespace } };
   if (host.google?.maps?.Map && mapsKey === key) return Promise.resolve();
   if (mapsRequest && mapsKey === key) return mapsRequest;
@@ -108,7 +145,22 @@ function loadGoogleMutant(): Promise<void> {
   });
 }
 
-/** Basemap for every Leaflet map. Uses the Google Maps key from app settings or the server env. */
+function addGoogleTileLayer(map: L.Map, tiles: ServerTiles): L.Layer {
+  return L.tileLayer(tiles.url, { attribution: tiles.attribution, maxZoom: 21 }).addTo(map);
+}
+
+async function loadGoogleMutantLayer(map: L.Map): Promise<L.Layer | null> {
+  const key = await readGoogleMapsKey();
+  if (!key) return null;
+  await loadGoogleMaps(key);
+  await loadGoogleMutant();
+  const googleMutant = (L as typeof L & {
+    gridLayer: { googleMutant: (options: { type: string; maxZoom: number }) => L.GridLayer };
+  }).gridLayer.googleMutant;
+  return googleMutant({ type: 'roadmap', maxZoom: 21 }).addTo(map);
+}
+
+/** Basemap for every Leaflet map. Uses server map tiles, then Maps JS API, then OSM. */
 export default function AppMapTiles() {
   const map = useMap();
 
@@ -123,20 +175,21 @@ export default function AppMapTiles() {
 
     void (async () => {
       try {
-        const key = await readGoogleMapsKey();
+        const serverTiles = await readServerMapTiles();
         if (cancelled) return;
-        if (!key) {
-          useOsm();
+        if (serverTiles) {
+          layer = addGoogleTileLayer(map, serverTiles);
           return;
         }
-        await loadGoogleMaps(key);
+
+        const mutantLayer = await loadGoogleMutantLayer(map);
         if (cancelled) return;
-        await loadGoogleMutant();
-        if (cancelled) return;
-        const googleMutant = (L as typeof L & {
-          gridLayer: { googleMutant: (options: { type: string; maxZoom: number }) => L.GridLayer };
-        }).gridLayer.googleMutant;
-        layer = googleMutant({ type: 'roadmap', maxZoom: 21 }).addTo(map);
+        if (mutantLayer) {
+          layer = mutantLayer;
+          return;
+        }
+
+        useOsm();
       } catch (err) {
         console.error('Google map basemap failed', err);
         useOsm();

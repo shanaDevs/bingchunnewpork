@@ -80,9 +80,92 @@ export type NewJobPushPayload = {
   storeName: string;
   storeId?: string;
   orderCount: number;
+  rideCode?: string;
+  totalCups?: number;
+  estimatedDistanceKm?: number;
+  estimatedMinutes?: number;
+  deliveryFee?: number;
+  storeCity?: string;
+  dropoffName?: string;
+  dropoffAddress?: string;
+  extraStopCount?: number;
+  orderPreviewsJson?: string;
   /** Force an immediate ring even if the driver app already tracks this job. */
   forceRing?: boolean;
 };
+
+function buildNewJobPushData(payload: NewJobPushPayload): Record<string, string> {
+  const data: Record<string, string> = {
+    type: 'NEW_JOB',
+    jobId: payload.jobId,
+    title: payload.title,
+    storeName: payload.storeName,
+    orderCount: String(payload.orderCount),
+  };
+  if (payload.rideCode) data.rideCode = payload.rideCode;
+  if (payload.totalCups != null) data.totalCups = String(payload.totalCups);
+  if (payload.estimatedDistanceKm != null) data.estimatedDistanceKm = String(payload.estimatedDistanceKm);
+  if (payload.estimatedMinutes != null) data.estimatedMinutes = String(payload.estimatedMinutes);
+  if (payload.deliveryFee != null) data.deliveryFee = String(payload.deliveryFee);
+  if (payload.storeId) data.storeId = payload.storeId;
+  if (payload.storeCity) data.storeCity = payload.storeCity;
+  if (payload.dropoffName) data.dropoffName = payload.dropoffName;
+  if (payload.dropoffAddress) data.dropoffAddress = payload.dropoffAddress;
+  if (payload.extraStopCount != null) data.extraStopCount = String(payload.extraStopCount);
+  if (payload.orderPreviewsJson) data.orderPreviewsJson = payload.orderPreviewsJson;
+  if (payload.forceRing) data.forceRing = 'true';
+  return data;
+}
+
+/** Data-only NEW_JOB push to one rider — mirrors core driverPush.sendPushToDriver. */
+export async function sendNewJobDataPushToDriver(
+  driverId: string,
+  payload: NewJobPushPayload,
+): Promise<{ tokensSent: number }> {
+  try {
+    if (!(await ensureInitialized()) || !app) return { tokensSent: 0 };
+
+    const devices = await prisma.driverDevice.findMany({
+      where: { driverId, fcmToken: { not: null } },
+      select: { id: true, fcmToken: true },
+    });
+    if (devices.length === 0) return { tokensSent: 0 };
+
+    const data = buildNewJobPushData(payload);
+    const { getMessaging } = await import('firebase-admin/messaging');
+    const sent = await Promise.all(
+      devices.map(async (device) => {
+        if (!device.fcmToken) return 0;
+        try {
+          await getMessaging(app!).send({
+            token: device.fcmToken,
+            data,
+            android: { priority: 'high' },
+          });
+          return 1;
+        } catch (err: any) {
+          if (
+            err?.code === 'messaging/invalid-registration-token' ||
+            err?.code === 'messaging/registration-token-not-registered'
+          ) {
+            await prisma.driverDevice.update({ where: { id: device.id }, data: { fcmToken: null } }).catch(() => {});
+          } else {
+            logger.warn('FCM new-job send error (delivery-service)', err);
+          }
+          return 0;
+        }
+      }),
+    );
+    const tokensSent = sent.reduce<number>((n, one) => n + one, 0);
+    logger.debug(
+      `On-online job push for ${payload.jobId} to driver ${driverId}: ${tokensSent}/${devices.length} tokens`,
+    );
+    return { tokensSent };
+  } catch (err) {
+    logger.error('sendNewJobDataPushToDriver failed', { driverId, err });
+    return { tokensSent: 0 };
+  }
+}
 
 /**
  * FCM to every alert-eligible driver who can deliver for [storeId] (mirrors core

@@ -12,6 +12,8 @@ import { viewableLicenseImageUrlWithTimeout } from '../lib/spaces';
 import { meritStatusBand } from '../lib/meritPoints';
 import { computeRiderStats, isRiderStatsPeriod } from '@bingchun/delivery-domain';
 import { deriveDriverJobFlags, DRIVER_HELD_JOB_STATUSES } from '../lib/deliveryJobHelpers';
+import { replayPendingJobsForDriverGoingOnline } from '../lib/pendingJobAlerts';
+import { logger } from '../utils/logger';
 
 function accessibleStoreIdsFromDriver(driver: {
   storeId: string | null;
@@ -241,6 +243,12 @@ export async function updateDuty(req: Request, res: Response, next: NextFunction
         name: updated.name,
         dutyStatus: updated.dutyStatus,
       });
+    }
+
+    if (dutyStatus === 'ONLINE' && driver.dutyStatus !== 'ONLINE') {
+      replayPendingJobsForDriverGoingOnline(driverId, storeIds).catch((err) =>
+        logger.warn('Pending job replay on go-online failed', { driverId, err }),
+      );
     }
 
     return success(res, {
