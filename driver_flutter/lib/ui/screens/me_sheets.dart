@@ -201,6 +201,8 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
   bool _batteryUnrestricted = false;
   bool _canFsi = true;
   bool _fsiOn = RuntimeConfig.instance.fullScreenAlertsEnabled;
+  bool _bubbleOn = false;
+  bool _bubblePermitted = false;
 
   @override
   void initState() {
@@ -223,8 +225,11 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
   Future<void> _refresh() async {
     final battery = await SystemSettings.isIgnoringBatteryOptimizations();
     final fsi = await SystemSettings.canUseFullScreenIntent();
+    final bubble = await SystemSettings.quickBubbleStatus();
     if (mounted) {
       setState(() {
+        _bubbleOn = bubble.enabled;
+        _bubblePermitted = bubble.permitted;
         _batteryUnrestricted = battery;
         _canFsi = fsi;
       });
@@ -287,6 +292,34 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
             onAction: () async {
               BcFeedback.tap();
               await SystemSettings.openFullScreenIntentSettings();
+            },
+          ),
+          const SizedBox(height: 12),
+          _AlertOptionCard(
+            icon: Icons.bubble_chart_outlined,
+            iconBg: dark ? const Color(0xFF2A1E3B) : const Color(0xFFF1E8FD),
+            iconTint: dark ? const Color(0xFFC084FC) : const Color(0xFF7C3AED),
+            title: tr('Quick Action Bubble'),
+            subtitle: !_bubbleOn
+                ? tr('Off. No floating Bing Chun bubble when you leave the app.')
+                : _bubblePermitted
+                ? tr('On. When you leave the app, a floating Bing Chun bubble stays on screen. Tap it to return, drag it anywhere, or drop it on ✕ to hide it.')
+                : tr('Allow "Display over other apps" so the floating Bing Chun bubble can show when you leave the app.'),
+            done: !_bubbleOn || _bubblePermitted,
+            showStatus: _bubbleOn,
+            trailing: BcSwitch(
+              value: _bubbleOn,
+              onChanged: (v) async {
+                BcFeedback.tap();
+                setState(() => _bubbleOn = v);
+                await SystemSettings.setQuickBubbleEnabled(v);
+                if (v && !_bubblePermitted) await SystemSettings.openOverlaySettings();
+              },
+            ),
+            actionLabel: _bubbleOn && !_bubblePermitted ? tr('Allow display over other apps') : null,
+            onAction: () async {
+              BcFeedback.tap();
+              await SystemSettings.openOverlaySettings();
             },
           ),
           const SizedBox(height: 12),

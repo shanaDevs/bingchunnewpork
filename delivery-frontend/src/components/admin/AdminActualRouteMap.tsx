@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Polyline, Marker, CircleMarker, useMap } from 'react-leaflet';
+import { MapContainer, Polyline, Marker, CircleMarker, useMap } from 'react-leaflet';
+import AppMapTiles from '@/components/maps/AppMapTiles';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -113,10 +114,7 @@ export default function AdminActualRouteMap({ route, className = '' }: Props) {
   return (
     <div className={`delivery-map-wrap h-full w-full ${className}`}>
       <MapContainer center={center} zoom={13} scrollWheelZoom className="h-full w-full">
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        <AppMapTiles />
         <MapResizeTrigger />
         <FitBounds points={boundsPoints} />
         {pathPoints.length >= 2 && (

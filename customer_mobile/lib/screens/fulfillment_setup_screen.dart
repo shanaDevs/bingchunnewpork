@@ -6,6 +6,7 @@ import '../providers/fulfillment_provider.dart';
 import '../providers/auth_provider.dart';
 import '../theme/bc_theme.dart';
 import '../utils/app_toast.dart';
+import '../widgets/app_map_tiles.dart';
 import '../widgets/delivery_location_picker.dart';
 import '../widgets/bc_map_pin.dart';
 import '../widgets/pickup_store_picker.dart';
@@ -596,10 +597,7 @@ class _FulfillmentSetupScreenState extends ConsumerState<FulfillmentSetupScreen>
                           },
                         ),
                         children: [
-                          TileLayer(
-                            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                            userAgentPackageName: 'lk.bingchun.bing_chun_customer',
-                          ),
+                          const AppMapTiles(),
                           MarkerLayer(
                             markers: [
                               Marker(

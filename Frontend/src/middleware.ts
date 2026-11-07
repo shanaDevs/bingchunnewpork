@@ -11,6 +11,7 @@ function isAsset(pathname: string): boolean {
   return (
     pathname.startsWith('/_next')
     || pathname.startsWith('/api')
+    || pathname.startsWith('/cup-sticker-agent')
     || pathname.startsWith('/socket.io')
     || pathname.startsWith('/delivery-api')
     || pathname.includes('.')

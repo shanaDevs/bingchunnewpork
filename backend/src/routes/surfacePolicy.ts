@@ -51,7 +51,7 @@ export const MENU_READ: RouteRule[] = [
 ];
 
 export const SHOP_STORES: RouteRule[] = [
-  { methods: ['GET'], pattern: /^\/(address\/autocomplete|address\/geocode|address\/reverse)$/ },
+  { methods: ['GET'], pattern: /^\/(address\/autocomplete|address\/geocode|address\/reverse|address\/tiles|address\/directions|address\/place)$/ },
   { methods: ['GET'], pattern: /^\/$/ },
   { methods: ['GET'], pattern: new RegExp(`^/${ID}$`) },
   { methods: ['POST'], pattern: /^\/validate-delivery$/ },

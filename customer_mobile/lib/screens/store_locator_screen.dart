@@ -9,6 +9,7 @@ import '../providers/auth_provider.dart';
 import '../providers/fulfillment_provider.dart';
 import '../theme/bc_theme.dart';
 import '../utils/app_toast.dart';
+import '../widgets/app_map_tiles.dart';
 import '../widgets/design/bc_app_design.dart';
 
 class StoreLocatorScreen extends ConsumerStatefulWidget {
@@ -187,10 +188,7 @@ class _StoreLocatorScreenState extends ConsumerState<StoreLocatorScreen> {
                       initialZoom: _zoom,
                     ),
                     children: [
-                      TileLayer(
-                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'lk.bingchun.bing_chun_customer',
-                      ),
+                      const AppMapTiles(),
                       MarkerLayer(
                         markers: [
                           for (final store in _filteredStores)

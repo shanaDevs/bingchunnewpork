@@ -13,6 +13,7 @@
     "prisma:migrate": "npm run prisma:migrate -w @bingchun/db",
     "prisma:seed": "ts-node --transpile-only prisma/seed.ts",
     "seed:stores": "ts-node --transpile-only prisma/seed-stores.ts",
+    "sync:stores-google": "ts-node --transpile-only src/scripts/sync-stores-from-google.ts",
     "migrate:bingchun-menu": "ts-node --transpile-only prisma/migrate-bingchun-menu.ts",
     "prisma:studio": "prisma studio --schema ../packages/db/prisma/schema.prisma",
     "backfill:wallets": "ts-node --transpile-only src/scripts/backfill-wallets.ts",

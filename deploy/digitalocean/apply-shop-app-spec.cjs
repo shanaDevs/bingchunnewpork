@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Merge deploy/digitalocean/app.shop.yaml with secrets.env (REPLACE_ME → live values)
  * and write deploy/digitalocean/.generated-app.shop.yaml.
  *
@@ -41,6 +41,7 @@ const secretKeys = [
   'INTERNAL_SERVICE_SECRET',
   'DELIVERY_OTP_PEPPER',
   'DRIVER_PIN_PEPPER',
+  'GOOGLE_MAPS_API_KEY',
 ];
 
 let yaml = fs.readFileSync(specPath, 'utf8');
@@ -60,3 +61,4 @@ console.log('');
 console.log('After deploy, verify rider API on shop surface:');
 console.log('  curl -s https://bingchunsrilanka.com/health   # surface should be shop after API_SURFACE=shop');
 console.log('  curl -s -o /dev/null -w "%{http_code}" https://bingchunsrilanka.com/api/delivery/me -H "Authorization: Bearer …"');
+

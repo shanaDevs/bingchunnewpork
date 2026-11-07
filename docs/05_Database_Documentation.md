@@ -149,7 +149,7 @@ Indexes: `(userId, read)`, `(userId, createdAt)`
 | name, addressLine, city, district | String | |
 | lat, lng | Float | required |
 | phone | String? | |
-| openTime / closeTime | String | defaults 09:00 / 23:00 |
+| openTime / closeTime | String | defaults 08:00 / 23:00 |
 | isActive / isBusy | Boolean | |
 | deliveryEnabled | Boolean | default false |
 | createdAt / updatedAt | DateTime | |

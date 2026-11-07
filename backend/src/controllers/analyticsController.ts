@@ -329,7 +329,11 @@ function addOrderToSummaryBucket(
   bucket.orderCount += 1;
   bucket.grossSales += total;
   if (hints && typeof hints.subtotal === 'number') {
-    bucket.productSales += commissionableSubtotal(hints);
+    bucket.productSales += commissionableSubtotal({
+      subtotal: hints.subtotal,
+      discount: hints.discount,
+      loyaltyDiscount: hints.loyaltyDiscount,
+    });
   }
   const channel = orderCommissionChannel(orderMode, paymentMethod, hints);
   if (channel === 'deliveryOnline') bucket.delivery += total;

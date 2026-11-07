@@ -1,0 +1,11 @@
+{
+  "name": "@bingchun/cup-sticker-agent",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Local Windows agent that prints cup stickers on Xprinter for the cashier PC",
+  "scripts": {
+    "start": "node server.mjs",
+    "test-print": "node -e \"fetch('http://127.0.0.1:9177/test',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(console.log).catch(e=>{console.error(e);process.exit(1)})\""
+  }
+}
