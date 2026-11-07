@@ -5,7 +5,7 @@ import { createAdminSocket } from '@/lib/adminSocket';
 
 import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Copy, Loader2, Plus, Power, RefreshCw, Star, UserCircle2, X } from 'lucide-react';
+import { Loader2, Plus, Power, RefreshCw, Star, UserCircle2 } from 'lucide-react';
 import type { Socket } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import SearchableBranchSelect from '@/components/admin/SearchableBranchSelect';
@@ -18,6 +18,7 @@ import AdminDriverDetailSheet, {
 } from '@/components/admin/AdminDriverDetailSheet';
 import AdminTablePagination from '@/components/admin/AdminTablePagination';
 import { validateImageFile } from '@/lib/imageUpload';
+import { isValidSriLankanPhone, normalizePhone } from '@/lib/phone';
 import { ADMIN_TABLE_PAGE_SIZE, buildPageList } from '@/lib/pagination';
 import type { Driver, DriverDutyStatus } from '@/types';
 
@@ -60,17 +61,10 @@ const EMPTY_FORM: DriverFormState = {
   vehicleColor: '',
   licenseNumber: '',
   disabilities: '',
-  pin: '',
   isActive: true,
   branchIds: [],
   profilePhoto: null,
   licenseImage: null,
-};
-
-type CreatedDriverPin = {
-  id: string;
-  name: string;
-  pin: string;
 };
 
 type DriverPage = {
@@ -122,7 +116,6 @@ export default function AdminDriversPanel({
     dutyStatus: '',
   });
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
-  const [createdPin, setCreatedPin] = useState<CreatedDriverPin | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(ADMIN_TABLE_PAGE_SIZE);
   const [nameQuery, setNameQuery] = useState('');
@@ -254,11 +247,14 @@ export default function AdminDriversPanel({
   const createDriver = useMutation({
     mutationFn: async () => {
       if (form.branchIds.length === 0) throw new Error('Select at least one branch');
-      const pin = form.pin;
       const name = form.name.trim();
+      const phone = form.phone.trim();
+      if (!isValidSriLankanPhone(phone)) {
+        throw new Error('Enter a valid Sri Lankan mobile number (07XXXXXXXX)');
+      }
       const fd = new FormData();
       fd.append('name', name);
-      fd.append('phone', form.phone.trim());
+      fd.append('phone', normalizePhone(phone));
       fd.append('nicNumber', form.nicNumber.trim());
       fd.append('vehicleNumber', form.vehicleNumber.trim());
       fd.append('address', form.address.trim());
@@ -266,27 +262,21 @@ export default function AdminDriversPanel({
       fd.append('vehicleColor', form.vehicleColor.trim());
       fd.append('licenseNumber', form.licenseNumber.trim());
       fd.append('disabilities', form.disabilities.trim());
-      fd.append('pin', pin);
       fd.append('isActive', String(form.isActive));
       fd.append('branchIds', JSON.stringify(form.branchIds));
       if (form.profilePhoto) fd.append('profilePhoto', form.profilePhoto);
       if (!form.licenseImage) throw new Error('Driving licence image is required');
       fd.append('licenseImage', form.licenseImage);
       const res = await adminFetchForm('/admin/drivers', fd);
-      return { res, pin, name };
+      return res;
     },
-    onSuccess: ({ res, pin, name }) => {
-      const created = res.data as Driver & { pin?: string };
+    onSuccess: () => {
       setForm(EMPTY_FORM);
       setProfilePreview(null);
       setLicensePreview(null);
       setShowForm(false);
       refetch();
-      setCreatedPin({
-        id: created.id,
-        name: created.name || name,
-        pin: created.pin || pin,
-      });
+      toast.success('Driver registered');
     },
     onError: (e: Error) => toast.error(e.message || 'Failed to register driver'),
   });
@@ -310,14 +300,18 @@ export default function AdminDriversPanel({
   const updateDriver = useMutation({
     mutationFn: async ({ id, form }: { id: string; form: DriverEditFormState }) => {
       const hasFiles = !!form.profilePhoto || !!form.licenseImage;
+      const phone = form.phone.trim();
+      if (!isValidSriLankanPhone(phone)) {
+        throw new Error('Enter a valid Sri Lankan mobile number (07XXXXXXXX)');
+      }
+      const normalizedPhone = normalizePhone(phone);
       if (hasFiles) {
         const fd = new FormData();
         fd.append('name', form.name.trim());
-        fd.append('phone', form.phone.trim());
+        fd.append('phone', normalizedPhone);
         fd.append('nicNumber', form.nicNumber.trim());
         fd.append('vehicleNumber', form.vehicleNumber.trim());
         fd.append('branchIds', JSON.stringify(form.branchIds));
-        if (form.pin) fd.append('pin', form.pin);
         if (form.profilePhoto) fd.append('profilePhoto', form.profilePhoto);
         if (form.licenseImage) fd.append('licenseImage', form.licenseImage);
         return adminFetchForm(`/admin/drivers/${id}`, fd, 'PATCH');
@@ -326,11 +320,10 @@ export default function AdminDriversPanel({
         method: 'PATCH',
         body: JSON.stringify({
           name: form.name.trim(),
-          phone: form.phone.trim(),
+          phone: normalizedPhone,
           nicNumber: form.nicNumber.trim(),
           vehicleNumber: form.vehicleNumber.trim(),
           branchIds: form.branchIds,
-          ...(form.pin ? { pin: form.pin } : {}),
         }),
       });
     },
@@ -434,57 +427,6 @@ export default function AdminDriversPanel({
         onSubmit={() => createDriver.mutate()}
         isSubmitting={createDriver.isPending}
       />
-
-      {createdPin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="card w-full max-w-md p-5 space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-bold text-fg">Driver registered</h3>
-                <p className="text-sm text-muted mt-1">
-                  Share this PIN with <span className="text-fg font-medium">{createdPin.name}</span> now.
-                  It will not be shown again.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn-outline p-2"
-                onClick={() => setCreatedPin(null)}
-                aria-label="Close"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="rounded-xl border border-navy-border bg-navy-light px-4 py-5 text-center">
-              <p className="text-xs uppercase tracking-wide text-muted mb-2">One-time PIN</p>
-              <p className="text-3xl font-bold tracking-[0.35em] text-brand tabular-nums">{createdPin.pin}</p>
-            </div>
-            <div className="flex flex-wrap gap-2 justify-end">
-              <button
-                type="button"
-                className="btn-outline px-3 py-2 text-sm inline-flex items-center gap-1.5"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(createdPin.pin);
-                    toast.success('PIN copied');
-                  } catch {
-                    toast.error('Could not copy PIN');
-                  }
-                }}
-              >
-                <Copy size={14} /> Copy PIN
-              </button>
-              <button
-                type="button"
-                className="btn-primary px-3 py-2 text-sm"
-                onClick={() => setCreatedPin(null)}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <AdminDriverDetailSheet
         driver={selectedDriver}

@@ -367,7 +367,7 @@ abstract class AppLocalizations {
   /// No description provided for @otpRateLimited.
   ///
   /// In en, this message translates to:
-  /// **'Too many OTP requests. Please try again after 15 minutes.'**
+  /// **'Too many OTP requests. Please try again after 3 minutes.'**
   String get otpRateLimited;
 
   /// No description provided for @cupEmpty.

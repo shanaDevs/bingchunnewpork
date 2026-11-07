@@ -6,6 +6,7 @@ import {
   buildDeliveryRoutePayload,
   creditedDeliveredTotals,
   groupFailedOrderIdsByJob,
+  lkrWholeToJobFeeDecimal,
   optimizeDeliveryStops,
   invalidateJobRoute,
   isRejectAllowed,
@@ -1032,7 +1033,7 @@ async function executeVehicleFailureReport(req: Request, replay: boolean): Promi
       data: {
         status: 'VEHICLE_FAILURE',
         completedAt: new Date(),
-        totalDeliveryFees: deliveredTotal,
+        totalDeliveryFees: lkrWholeToJobFeeDecimal(deliveredTotal),
       },
     });
     await promoteNextQueuedJob(driverId).catch(() => {});

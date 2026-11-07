@@ -28,6 +28,15 @@ export type AdminDriverBranchRequest = {
   driver?: { name?: string } | null;
 };
 
+/** Admin rejection text shown to riders when status is REJECTED. */
+export function branchRequestRejectionReason(
+  row: Pick<AdminDriverBranchRequest, 'status' | 'reviewNote'>,
+): string | null {
+  if (row.status !== 'REJECTED') return null;
+  const note = row.reviewNote?.trim();
+  return note || null;
+}
+
 export function branchRequestTypeLabel(type: string): string {
   switch (type) {
     case 'ADD_BRANCH':
@@ -147,7 +156,7 @@ export default function AdminBranchRequestReviewModal({
                   value={namedBranch(request.fromStoreName, request.fromStoreId)}
                 />
               )}
-              <DetailRow label="Reason" value={request.reason?.trim() || '—'} />
+              <DetailRow label="Driver reason" value={request.reason?.trim() || '—'} />
               <DetailRow label="Requested" value={formatDateTime(request.createdAt)} />
               <DetailRow
                 label="Status"
@@ -157,8 +166,14 @@ export default function AdminBranchRequestReviewModal({
                   </span>
                 }
               />
-              {!pending && (
-                <DetailRow label="Admin note" value={request.reviewNote?.trim() || '—'} />
+              {!pending && request.status === 'REJECTED' && (
+                <DetailRow
+                  label="Rejection reason"
+                  value={branchRequestRejectionReason(request) || '—'}
+                />
+              )}
+              {!pending && request.status === 'APPROVED' && request.reviewNote?.trim() && (
+                <DetailRow label="Review note" value={request.reviewNote.trim()} />
               )}
             </dl>
           )}
@@ -166,7 +181,7 @@ export default function AdminBranchRequestReviewModal({
           {showActions && (
             <div className="mt-4">
               <label htmlFor="branch-request-review-note" className="mb-1.5 block text-xs text-muted">
-                Note (optional)
+                Rejection reason (optional)
               </label>
               <textarea
                 id="branch-request-review-note"
@@ -199,7 +214,7 @@ export default function AdminBranchRequestReviewModal({
                   type="button"
                   className="btn-primary px-3 py-1.5 text-sm"
                   disabled={submitting}
-                  onClick={() => onReview('APPROVED', note.trim() || undefined)}
+                  onClick={() => onReview('APPROVED')}
                 >
                   Approve
                 </button>

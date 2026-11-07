@@ -2,7 +2,7 @@
 
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { isBranchAdmin, isBranchScoped, isDeliveryAdmin, type AdminSession } from '@/lib/adminAuth';
-import { formatBranchName, shortJobId } from '@/lib/deliveryDisplay';
+import { displayRideId, formatBranchName } from '@/lib/deliveryDisplay';
 import {
   playBranchNewOrderSound,
   primeBranchOrderAudio,
@@ -643,7 +643,7 @@ function VehicleFailureToast({
   onFocus: () => void;
   onDismiss: () => void;
 }) {
-  const rideLabel = alert.rideCode?.trim() || shortJobId(alert.jobId);
+  const rideLabel = displayRideId(alert.rideCode?.trim() || null, alert.jobId);
   const branch = alert.storeName ? formatBranchName(alert.storeName) : null;
 
   return (

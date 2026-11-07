@@ -149,6 +149,7 @@ function RouteMapView({
   highlightedStopKey,
   boundsPoints,
   fitNonce,
+  fullscreen,
   driverPosition,
   vehicleFailurePosition,
 }: {
@@ -157,6 +158,7 @@ function RouteMapView({
   highlightedStopKey?: string | null;
   boundsPoints: [number, number][];
   fitNonce?: number;
+  fullscreen?: boolean;
   driverPosition?: { lat: number; lng: number };
   vehicleFailurePosition?: { lat: number; lng: number };
 }) {
@@ -208,9 +210,10 @@ function RouteMapView({
         map.setView(points[0], 15, { animate: false });
         return;
       }
-      map.fitBounds(L.latLngBounds(points), { padding: [72, 72], animate: true });
+      const pad = fullscreen ? 96 : 72;
+      map.fitBounds(L.latLngBounds(points), { padding: [pad, pad], animate: true });
     });
-  }, [highlightedStopKey, route, returnStore.lat, returnStore.lng, map, fitNonce]);
+  }, [highlightedStopKey, route, returnStore.lat, returnStore.lng, map, fitNonce, fullscreen]);
 
   return null;
 }
@@ -230,6 +233,7 @@ type Props = {
   vehicleFailurePosition?: { lat: number; lng: number };
   pathOverlayLabel?: 'Actual' | 'Live';
   showLegend?: boolean;
+  fullscreen?: boolean;
 };
 
 export default function AdminDeliveryRouteMap({
@@ -246,6 +250,7 @@ export default function AdminDeliveryRouteMap({
   vehicleFailurePosition,
   pathOverlayLabel = 'Actual',
   showLegend = false,
+  fullscreen = false,
 }: Props) {
   const returnStore = branchStore ?? route.store;
   const pathPoints: [number, number][] = useMemo(
@@ -322,6 +327,7 @@ export default function AdminDeliveryRouteMap({
           highlightedStopKey={highlightedStopKey}
           boundsPoints={boundsPoints}
           fitNonce={fitNonce}
+          fullscreen={fullscreen}
           driverPosition={driverPosition}
           vehicleFailurePosition={vehicleFailurePosition}
         />

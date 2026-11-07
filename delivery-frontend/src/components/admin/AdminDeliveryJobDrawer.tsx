@@ -26,6 +26,7 @@ import DeliveryRouteTimeline, {
   deliveryRouteTimelineHeadingExtra,
 } from '@/components/admin/DeliveryRouteTimeline';
 import { jobSupportsActualRouteReplay } from '@/lib/deliveryStopProgress';
+import { displayRideId } from '@/lib/deliveryDisplay';
 import {
   Table,
   TableBody,
@@ -34,6 +35,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { canAdminCancelDeliveryJob } from '@/lib/adminDeliveryQueries';
+import AdminCancelDeliveryJobModal from '@/components/admin/AdminCancelDeliveryJobModal';
+import type { DeliveryJobListItem } from '@/components/admin/AdminDeliveryJobsTable';
 
 const AdminDeliveryRouteMap = dynamic(() => import('@/components/admin/AdminDeliveryRouteMap'), {
   ssr: false,
@@ -77,6 +81,7 @@ type DeliveryStopOrder = {
 
 export type AdminDeliveryJobDetail = {
   id: string;
+  rideCode?: string | null;
   title: string;
   status: string;
   returningToBranch: boolean;
@@ -94,7 +99,15 @@ export type AdminDeliveryJobDetail = {
     lat: number;
     lng: number;
   };
-  driver?: { id: string; name: string } | null;
+  driver?: { id: string; name: string; phone?: string | null } | null;
+  reassignedRiders?: Array<{
+    id: string;
+    name: string;
+    phone?: string | null;
+    jobId: string;
+    rideCode?: string | null;
+    status: string;
+  }>;
   orderCount: number;
   deliveredCount: number;
   pickedUp: boolean;
@@ -132,15 +145,30 @@ type Props = {
   storeId: string;
   open: boolean;
   onClose: () => void;
+  hqCanCancelJobs?: boolean;
   onViewRoute?: (opts: {
     jobId: string;
     storeId: string;
     initialStatus?: string;
     focusDriver?: boolean;
   }) => void;
+  onJobClosed?: () => void;
 };
 
 const LIVE_MAP_STATUSES = new Set(['ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING']);
+
+function RiderContact({ name, phone }: { name?: string | null; phone?: string | null }) {
+  return (
+    <>
+      {name ?? 'Unassigned'}
+      {phone?.trim() ? (
+        <a href={`tel:${phone.trim()}`} className="mt-1 block text-sm font-medium text-brand hover:underline">
+          {phone.trim()}
+        </a>
+      ) : null}
+    </>
+  );
+}
 
 function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -170,10 +198,6 @@ function formatAmount(amount?: number | null): string {
 function formatDistance(km?: number | null): string {
   if (km == null) return '—';
   return `${km.toFixed(1)} km`;
-}
-
-function shortJobId(id: string): string {
-  return id.slice(0, 8).toUpperCase();
 }
 
 function formatTimelineParts(value?: string | null): { date: string; time: string } {
@@ -229,14 +253,31 @@ async function fetchActualRoute(jobId: string, storeId: string): Promise<ActualR
   );
 }
 
+function jobDetailToListItem(job: AdminDeliveryJobDetail): DeliveryJobListItem {
+  return {
+    id: job.id,
+    rideCode: job.rideCode,
+    title: job.title,
+    status: job.status,
+    orderCount: job.orderCount,
+    scheduledAt: job.scheduledAt,
+    storeId: job.store.id,
+    storeName: job.store.name,
+    driver: job.driver ?? null,
+  };
+}
+
 export default function AdminDeliveryJobDrawer({
   jobId,
   storeId,
   open,
   onClose,
+  hqCanCancelJobs = false,
   onViewRoute,
+  onJobClosed,
 }: Props) {
   const [job, setJob] = useState<AdminDeliveryJobDetail | null>(null);
+  const [closeRideOpen, setCloseRideOpen] = useState(false);
   const [route, setRoute] = useState<JobRouteResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [routeLoading, setRouteLoading] = useState(false);
@@ -463,7 +504,7 @@ export default function AdminDeliveryJobDrawer({
               <div className="min-w-0">
                 <SheetTitle className="text-lg font-semibold text-fg sm:text-xl">Job details</SheetTitle>
                 <SheetDescription className="mt-0.5 text-[13px] text-muted">
-                  {job ? `Delivery run ${shortJobId(job.id)}` : 'Loading delivery job…'}
+                  {job ? `Delivery run ${displayRideId(job.rideCode, job.id)}` : 'Loading delivery job…'}
                 </SheetDescription>
               </div>
               {job ? (
@@ -502,9 +543,52 @@ export default function AdminDeliveryJobDrawer({
                 {/* Job summary */}
                 <section>
                   <SectionHeading title="Job summary" />
+                  {hqCanCancelJobs &&
+                  canAdminCancelDeliveryJob({
+                    status: job.status,
+                    driver: job.driver,
+                    scheduledAt: job.scheduledAt,
+                  }) ? (
+                    <div className="mb-3">
+                      <button
+                        type="button"
+                        onClick={() => setCloseRideOpen(true)}
+                        className="inline-flex items-center rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+                      >
+                        Close ride (mark canceled)
+                      </button>
+                    </div>
+                  ) : null}
                   <dl className="rounded-xl border border-navy-border bg-white p-4 dark:bg-navy-light/10 sm:p-4">
                     <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-                      <SummaryItem label="Assigned rider">{job.driver?.name ?? 'Unassigned'}</SummaryItem>
+                      {job.status === 'VEHICLE_FAILURE' ? (
+                        <>
+                          <SummaryItem label="Rider">
+                            <RiderContact name={job.driver?.name} phone={job.driver?.phone} />
+                          </SummaryItem>
+                          <SummaryItem label="Reassigned rider">
+                            {(job.reassignedRiders ?? []).length === 0 ? (
+                              'Not reassigned'
+                            ) : (
+                              <ul className="space-y-2">
+                                {(job.reassignedRiders ?? []).map((rider) => (
+                                  <li key={rider.jobId}>
+                                    <RiderContact name={rider.name} phone={rider.phone} />
+                                    <p className="text-xs font-normal text-muted">
+                                      {DELIVERY_JOB_STATUS_LABEL[rider.status] ??
+                                        rider.status.replace(/_/g, ' ')}
+                                    </p>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </SummaryItem>
+                        </>
+                      ) : (
+                        <SummaryItem label="Assigned rider">
+                          <RiderContact name={job.driver?.name} phone={job.driver?.phone} />
+                        </SummaryItem>
+                      )}
                       <SummaryItem label="Branch">{job.store.name}</SummaryItem>
                       <SummaryItem label="Orders count">
                         <span className="tabular-nums">{job.orderCount}</span>
@@ -726,6 +810,17 @@ export default function AdminDeliveryJobDrawer({
           </div>
         </SheetContent>
       </Sheet>
+
+      <AdminCancelDeliveryJobModal
+        job={closeRideOpen && job ? jobDetailToListItem(job) : null}
+        storeId={resolvedStoreId}
+        open={closeRideOpen}
+        onClose={() => setCloseRideOpen(false)}
+        onSuccess={() => {
+          onJobClosed?.();
+          onClose();
+        }}
+      />
     </>
   );
 }

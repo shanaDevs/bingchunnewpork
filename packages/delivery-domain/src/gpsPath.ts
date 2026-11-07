@@ -1,5 +1,6 @@
 import { prisma } from '@bingchun/db';
 import { haversineKm } from './geo';
+import { lkrWholeToJobFeeDecimal } from './jobFees';
 
 export type LatLngPoint = { lat: number; lng: number };
 
@@ -348,7 +349,7 @@ export async function finalizeDeliveryJob(jobId: string): Promise<void> {
   });
   if (!job) return;
 
-  const totalDeliveryFees = deliveredOrderDeliveryFees(job.jobOrders);
+  const feesLkr = deliveredOrderDeliveryFees(job.jobOrders);
   const { actualDistanceKm, actualRoute } = await computeActualRouteForJob(jobId, job);
 
   await prisma.deliveryJob.update({
@@ -356,7 +357,7 @@ export async function finalizeDeliveryJob(jobId: string): Promise<void> {
     data: {
       actualDistanceKm,
       actualRoute: JSON.stringify(actualRoute.map((p) => [p.lat, p.lng])),
-      totalDeliveryFees,
+      totalDeliveryFees: lkrWholeToJobFeeDecimal(feesLkr),
       ...(job.totalDistanceKm == null ? { totalDistanceKm: actualDistanceKm } : {}),
     },
   });

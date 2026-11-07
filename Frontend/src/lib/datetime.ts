@@ -45,6 +45,13 @@ export function todayDateString(now = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE }).format(now);
 }
 
+/** Calendar date in Colombo for an instant, as YYYY-MM-DD. */
+export function dateStringInColombo(value: Date | string | number): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE }).format(
+    value instanceof Date ? value : new Date(value),
+  );
+}
+
 /** Day of week in Colombo (0 = Sunday … 6 = Saturday). */
 export function getColomboDayOfWeek(now = new Date()): number {
   const weekday = new Intl.DateTimeFormat('en-US', {

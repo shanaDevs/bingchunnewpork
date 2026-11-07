@@ -122,3 +122,19 @@ export function todayDateRange(now = new Date()): { from: Date; to: Date } {
     to: parseDateQuery(today, true)!,
   };
 }
+
+/**
+ * Re-offer a past-day unclaimed job on today's calendar (Colombo), keeping the
+ * original local time-of-day when that instant is still in the future today.
+ */
+export function rescheduleMissedJobToToday(priorScheduledAt: Date, now = new Date()): Date {
+  const { from: todayStart, to: todayEnd } = todayDateRange(now);
+  if (priorScheduledAt >= todayStart) return priorScheduledAt;
+
+  const { hour, minute } = getColomboHourMinute(priorScheduledAt);
+  const candidate = new Date(todayStart);
+  candidate.setHours(hour, minute, 0, 0);
+  if (candidate.getTime() < now.getTime()) return now;
+  if (candidate > todayEnd) return now;
+  return candidate;
+}

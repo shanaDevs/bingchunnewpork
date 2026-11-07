@@ -123,7 +123,6 @@ async function ensureCustomer() {
   return user;
 }
 
-/** Ledger row shape required by DB migrations not yet on the Prisma model. */
 async function creditWalletForPaidOrder(order: {
   id: string;
   storeId: string;
@@ -135,40 +134,28 @@ async function creditWalletForPaidOrder(order: {
   placedAt: Date;
 }): Promise<void> {
   const cents = order.total * 100;
-  const idempotencyKey = `ORDER_PAYMENT:${order.id}`;
   const description = `Order #${order.orderNumber} · (DELIVERY) · Ref: ${order.paymentRef ?? 'n/a'}`;
 
-  await prisma.$executeRaw`
-    INSERT INTO wallet_transactions (
-      id, "storeId", "orderId", type, direction, counterparty, "idempotencyKey",
-      amount, "balanceAfter", "paymentMethod", "paymentRef", description, reference,
-      "createdAt", "orderMode", "paymentGateway", "orderCreatedAt", "orderTotalCents",
-      "fundsLocation", "commissionChannel"
-    )
-    VALUES (
-      ${crypto.randomUUID()},
-      ${order.storeId},
-      ${order.id},
-      'ORDER_PAYMENT'::"WalletTransactionType",
-      'CREDIT'::"WalletTxDirection",
-      'CUSTOMER'::"WalletTxCounterparty",
-      ${idempotencyKey},
-      ${centsToDecimal(cents)},
-      ${centsToDecimal(0)},
-      ${order.paymentMethod}::"PaymentMethod",
-      ${order.paymentRef},
-      ${description},
-      ${order.orderNumber},
-      ${order.placedAt},
-      'DELIVERY'::"OrderMode",
-      ${order.paymentGateway ?? 'PAYHERE'}::"PaymentGateway",
-      ${order.placedAt},
-      ${centsToDecimal(cents)},
-      'ONLINE_WALLET'::"WalletFundsLocation",
-      'DELIVERY_ONLINE'::"WalletCommissionChannel"
-    )
-    ON CONFLICT ("idempotencyKey") DO NOTHING
-  `;
+  const dup = await prisma.walletTransaction.findFirst({
+    where: { orderId: order.id, type: 'ORDER_PAYMENT' },
+  });
+  if (dup) return;
+
+  await prisma.walletTransaction.create({
+    data: {
+      id: crypto.randomUUID(),
+      storeId: order.storeId,
+      orderId: order.id,
+      type: 'ORDER_PAYMENT',
+      amount: centsToDecimal(cents),
+      balanceAfter: centsToDecimal(0),
+      paymentMethod: order.paymentMethod as PaymentMethod,
+      paymentRef: order.paymentRef,
+      description,
+      reference: order.orderNumber,
+      createdAt: order.placedAt,
+    },
+  });
 }
 
 async function cleanExisting(storeId: string): Promise<number> {

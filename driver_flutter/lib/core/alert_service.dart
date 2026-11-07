@@ -251,13 +251,16 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     }
     final id = str(obj, 'id');
     if (id.isEmpty) return;
+    final isRebroadcast = obj['broadcastedAt'] != null;
+    final forceRing = boolOf(obj, 'forceRing');
     final scheduledAt = strOrNull(obj, 'scheduledAt');
-    if (scheduledAt != null && scheduledAt.isNotEmpty && !Format.isToday(scheduledAt)) {
+    if (!forceRing &&
+        scheduledAt != null &&
+        scheduledAt.isNotEmpty &&
+        !Format.isToday(scheduledAt)) {
       debugPrint('Skipping ring for $id — not scheduled today');
       return;
     }
-    final isRebroadcast = obj['broadcastedAt'] != null;
-    final forceRing = boolOf(obj, 'forceRing');
     if (isRebroadcast) {
       _seenJobIds.remove(id);
       _unsilence(id);
