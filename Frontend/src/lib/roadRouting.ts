@@ -1,8 +1,38 @@
+import { getApiBaseUrl } from '@/lib/apiBase';
+
 export type LatLngPoint = { lat: number; lng: number };
 
 const OSRM_BASE = 'https://router.project-osrm.org';
 
-/** Fetch a driving road path between waypoints (OSRM). Falls back to straight segments on failure. */
+async function fetchGoogleRoadPath(
+  waypoints: LatLngPoint[],
+  signal?: AbortSignal,
+): Promise<[number, number][] | null> {
+  const origin = waypoints[0];
+  const dest = waypoints[waypoints.length - 1];
+  const via = waypoints.slice(1, -1);
+  const params = new URLSearchParams({
+    originLat: String(origin.lat),
+    originLng: String(origin.lng),
+    destLat: String(dest.lat),
+    destLng: String(dest.lng),
+  });
+  if (via.length > 0) {
+    params.set('waypoints', via.map((point) => `${point.lat},${point.lng}`).join('|'));
+  }
+
+  const res = await fetch(`${getApiBaseUrl()}/stores/address/directions?${params.toString()}`, { signal });
+  if (!res.ok) return null;
+  const body = await res.json() as {
+    data?: { points?: LatLngPoint[] };
+    points?: LatLngPoint[];
+  };
+  const points = body.data?.points ?? body.points ?? [];
+  if (points.length < 2) return null;
+  return points.map((point) => [point.lat, point.lng] as [number, number]);
+}
+
+/** Driving path for the customer map. Uses Google Directions when configured, then OSRM. */
 export async function fetchRoadPath(
   waypoints: LatLngPoint[],
   signal?: AbortSignal,
@@ -12,6 +42,13 @@ export async function fetchRoadPath(
   }
 
   const fallback: [number, number][] = waypoints.map((p) => [p.lat, p.lng]);
+
+  try {
+    const googlePath = await fetchGoogleRoadPath(waypoints, signal);
+    if (googlePath) return googlePath;
+  } catch (err) {
+    if (signal?.aborted) throw err;
+  }
 
   try {
     const coords = waypoints.map((p) => `${p.lng},${p.lat}`).join(';');

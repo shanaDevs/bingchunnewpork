@@ -43,7 +43,6 @@ Future<void> _showSheet(BuildContext context, OrderActionController vm, WidgetBu
 
 const _green = [Color(0xFF34D399), Color(0xFF10B981), Color(0xFF059669)];
 const _red = [Color(0xFFF87171), Color(0xFFDC2626), Color(0xFFB91C1C)];
-const _amber = [Color(0xFFFBBF24), Color(0xFFF59E0B), Color(0xFFD97706)];
 
 Widget _errorNote(BuildContext context, String text) {
   final c = context.bc;
@@ -95,12 +94,11 @@ class _ComplaintSheetState extends State<_ComplaintSheet> {
     final len = _desc.text.trim().length;
     final ready = len >= _complaintDescMin;
     final showError = _desc.text.trim().isNotEmpty && !ready;
-    final dark = c.isDark;
     return BcSheetBody(
       header: BcSheetHeader(
         icon: Icons.feedback_outlined,
-        iconBg: dark ? const Color(0xFF2E2415) : const Color(0xFFFEF3C7),
-        iconTint: c.warning,
+        iconBg: c.brandSubtle,
+        iconTint: c.brand,
         title: tr('Raise complaint'),
         subtitle: tr('Describe the issue. Your branch admin will review it.'),
       ),
@@ -110,7 +108,7 @@ class _ComplaintSheetState extends State<_ComplaintSheet> {
           BcChoiceTile(
             label: tr(cat.label),
             selected: cat == _selected,
-            tone: BcDialogTone.warning,
+            tone: BcDialogTone.brand,
             onTap: () => setState(() => _selected = cat),
           ),
         BcSheetLabel(tr('What happened?')),
@@ -137,7 +135,7 @@ class _ComplaintSheetState extends State<_ComplaintSheet> {
         BcGradientButton(
           label: tr('Submit complaint'),
           icon: Icons.send_rounded,
-          colors: _amber,
+          colors: [c.brandLight, c.brand, c.brandDark],
           loading: vm.filingComplaint,
           enabled: ready,
           onPressed: () async {

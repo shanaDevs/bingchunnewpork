@@ -20,6 +20,7 @@ import {
   CheckCircle,
   Pencil,
   XCircle,
+  Printer,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AdminOrderEditModal from '@/components/admin/AdminOrderEditModal';
@@ -54,6 +55,11 @@ import ProductImage from '@/components/ui/ProductImage';
 import { formatScheduledLabel } from '@/lib/orderSchedule';
 import AdminOrderCancelCountdown from '@/components/admin/AdminOrderCancelCountdown';
 import { isCustomerCancelWindowActive, secondsUntil } from '@/lib/orderCancel';
+import {
+  isCupStickerPrintingEnabled,
+  tryPrintCupStickersForOrder,
+  printCupStickersForOrder,
+} from '@/lib/cupStickerPrint';
 
 type CancelReasonValue = 'OUT_OF_STOCK' | 'CUSTOMER_REQUEST' | 'PAYMENT_OR_SYSTEM_ISSUE';
 
@@ -142,6 +148,7 @@ export default function AdminOrderDrawer({ orderKey, onClose, onViewReceipt, onC
   const [otherReasonModalOpen, setOtherReasonModalOpen] = useState(false);
   const [otherReasonText, setOtherReasonText] = useState('');
   const [cancelWindowSecondsLeft, setCancelWindowSecondsLeft] = useState(0);
+  const [stickerPrinting, setStickerPrinting] = useState(false);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const contentTlRef = useRef<gsap.core.Timeline | null>(null);
@@ -315,6 +322,24 @@ export default function AdminOrderDrawer({ orderKey, onClose, onViewReceipt, onC
   const counterPaymentReady = !needsCounterPayment
     || counterPaymentValid(counterPaymentMethod, cashReceived, amountDue);
 
+  async function printStickersForCurrentOrder(source: 'accept' | 'manual') {
+    if (!order || stickerPrinting) return;
+    setStickerPrinting(true);
+    try {
+      if (source === 'accept') {
+        await tryPrintCupStickersForOrder(order);
+      } else {
+        await printCupStickersForOrder(order);
+      }
+      const cups = order.items.reduce((n, it) => n + Math.max(1, it.quantity), 0);
+      toast.success(`Printed ${cups} cup sticker${cups === 1 ? '' : 's'}`);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Cup sticker print failed');
+    } finally {
+      setStickerPrinting(false);
+    }
+  }
+
   async function updateStatus(
     newStatus: string,
     options?: { closeOnSuccess?: boolean; cancelReason?: CancelReasonValue; note?: string },
@@ -322,7 +347,7 @@ export default function AdminOrderDrawer({ orderKey, onClose, onViewReceipt, onC
     if (!order || statusLoading) return;
     setStatusLoading(true);
     try {
-      const json = await adminFetch(`/orders/${order.id}/status`, {
+      await adminFetch(`/orders/${order.id}/status`, {
         method: 'PUT',
         body: JSON.stringify({
           status: newStatus,
@@ -336,6 +361,10 @@ export default function AdminOrderDrawer({ orderKey, onClose, onViewReceipt, onC
       setOtherReasonModalOpen(false);
       setOtherReasonText('');
       toast.success(`Order #${order.orderNumber} updated`);
+      if (newStatus === 'PREPARING' && isCupStickerPrintingEnabled()) {
+        // Print after accept succeeds; do not roll back status if the printer fails.
+        void printStickersForCurrentOrder('accept');
+      }
       if (newStatus === 'CANCELLED') {
         qc.invalidateQueries({ queryKey: ['admin-delivery-jobs-active'] });
         qc.invalidateQueries({ queryKey: ['admin-delivery-jobs-completed'] });
@@ -949,6 +978,18 @@ export default function AdminOrderDrawer({ orderKey, onClose, onViewReceipt, onC
             >
               <Receipt size={15} />
               View receipt
+            </button>
+          )}
+
+          {order.status !== 'CANCELLED' && (order.items?.length ?? 0) > 0 && cancelStep === 'idle' && (
+            <button
+              type="button"
+              disabled={stickerPrinting || statusLoading || pickupLoading}
+              onClick={() => void printStickersForCurrentOrder('manual')}
+              className="btn-outline mt-2 flex min-h-[2.875rem] w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold touch-manipulation disabled:opacity-50"
+            >
+              {stickerPrinting ? <Loader2 size={18} className="animate-spin" /> : <Printer size={18} />}
+              Print cup stickers
             </button>
           )}
         </div>

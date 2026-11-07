@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, useMap } from 'react-leaflet';
+import AppMapTiles from '@/components/maps/AppMapTiles';
 import L from 'leaflet';
 import { Maximize2, Minimize2 } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
@@ -161,10 +162,7 @@ function MapContent({ store, destination, driver, phase, fullscreen }: MapConten
       className="h-full w-full"
       style={{ minHeight: fullscreen ? '100%' : 260, background: '#0d1124' }}
     >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+      <AppMapTiles />
       <MapResizeTrigger fullscreen={fullscreen} />
       <FitBounds points={points} fullscreen={fullscreen} />
       {!headingToOutlet && (

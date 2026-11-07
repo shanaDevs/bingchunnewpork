@@ -1,8 +1,10 @@
 import { prisma } from './prisma';
-import { decimalFieldToCentsNumber } from './moneyDecimal';
 import { walletBalanceCents } from './walletApiMoney';
 import { normalizeProductImageUrl, productImageUrl } from './productImages';
-import { computeBranchPayablesSummary } from './walletService';
+import {
+  branchPayablesFromDashboardWalletKpi,
+  computeDashboardWalletAvailableCents,
+} from './walletService';
 import { getOutgoingFlowsForDashboard, sumJasonInvestedLkrForRange } from './walletAnalysis';
 import { dateStringInColombo } from './datetime';
 import { chartBucketLabel } from './dashboardStatsDateRange';
@@ -63,7 +65,7 @@ export async function buildDashboardStatsFull(ctx: DashboardStatsContext) {
       wallets,
       stuckReceived,
       periodCupsAgg,
-      onlineWalletBalanceAgg,
+      dashboardWalletKpi,
       periodRefundAgg,
     ] = await promiseAllLimited(4, [
       () => prisma.order.count({ where: { ...scope, createdAt: todayRange } }),
@@ -197,10 +199,10 @@ export async function buildDashboardStatsFull(ctx: DashboardStatsContext) {
         where: { order: paidPeriodWhere },
         _sum: { quantity: true },
       }),
-      () => prisma.storeWallet.aggregate({
-        where: isBranchAdmin && scope.storeId ? { storeId: scope.storeId } : undefined,
-        _sum: { balance: true },
-      }),
+      () =>
+        computeDashboardWalletAvailableCents(
+          isBranchAdmin && scope.storeId ? scope.storeId : undefined,
+        ),
       () => isBranchAdmin && !scope.storeId
         ? Promise.resolve({ _sum: { refundAmount: null } })
         : prisma.refund.aggregate({
@@ -462,11 +464,8 @@ export async function buildDashboardStatsFull(ctx: DashboardStatsContext) {
       percent: paymentTotal > 0 ? Math.round(((p._sum.total || 0) / paymentTotal) * 100) : 0,
     }));
 
-    const onlineWalletBalance = decimalFieldToCentsNumber(onlineWalletBalanceAgg._sum.balance);
-
-    const branchPayables = await computeBranchPayablesSummary(
-      isBranchAdmin && scope.storeId ? scope.storeId : undefined,
-    );
+    const onlineWalletBalance = dashboardWalletKpi.totalCents;
+    const branchPayables = branchPayablesFromDashboardWalletKpi(dashboardWalletKpi);
 
     const walletBalances = wallets.map((w) => ({
       storeId: w.store.id,

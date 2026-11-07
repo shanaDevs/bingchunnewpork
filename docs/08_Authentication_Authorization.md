@@ -67,7 +67,7 @@ Refresh endpoints:
 - Customer: `POST /api/auth/refresh`
 - Admin: `POST /api/auth/admin/refresh`
 
-Frontend admin refreshes when token nears expiry; idle logout ~15 minutes (`useAdminSessionGuard`).
+Frontend admin refreshes when token nears expiry (`useAdminSessionGuard`); idle auto-logout is disabled — sessions continue via refresh tokens until refresh expiry.
 
 ---
 

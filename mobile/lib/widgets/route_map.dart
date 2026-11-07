@@ -4,6 +4,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../models/delivery_route.dart';
+import 'app_map_tiles.dart';
 import '../services/road_routing_service.dart';
 import '../theme/bc_theme.dart';
 
@@ -144,10 +145,7 @@ class _RouteMapState extends State<RouteMap> {
             ),
           ),
           children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'lk.bingchun.delivery',
-            ),
+            const AppMapTiles(),
             if (linePoints.length > 1)
               PolylineLayer(
                 polylines: [

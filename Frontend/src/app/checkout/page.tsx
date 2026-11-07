@@ -77,7 +77,7 @@ import {
 import { queryClient } from '@/lib/queryClient';
 import { invalidateCustomerOrderLists } from '@/lib/orderCache';
 
-const DEFAULT_OPEN_TIME = '09:00';
+const DEFAULT_OPEN_TIME = '08:00';
 const DEFAULT_CLOSE_TIME = '23:00';
 
 type SavedDeliveryInfo = NonNullable<ReturnType<typeof useCartStore.getState>['deliveryInfo']>;

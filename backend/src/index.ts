@@ -15,6 +15,7 @@ import { WEBXPAY_FORM_ACTIONS } from './lib/webxpayPayment';
 import { isCorsAllowedOrigin } from './lib/resolveFrontendUrl';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { createApiRouter } from './routes/surfaces';
+import { mountSwagger } from './docs/mountSwagger';
 import { probeSpacesReachability } from './lib/spaces';
 import { connectDb, disconnectDb } from './lib/prisma';
 import { initSocket, closeSocket } from './lib/socket';
@@ -182,6 +183,9 @@ const invoicesDir = path.join(publicDir, 'invoices');
 if (!fs.existsSync(invoicesDir)) {
   fs.mkdirSync(invoicesDir, { recursive: true });
 }
+
+// API docs before the /api router so /api/docs is not swallowed by the surface router.
+mountSwagger(app);
 
 // API routes. core mounts everything; shop, pos, and admin mount an allowlist.
 app.use('/api', createApiRouter(config.apiSurface));

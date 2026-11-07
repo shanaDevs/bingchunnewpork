@@ -4,31 +4,61 @@ import { useEffect } from 'react';
 import { ensureCustomerAccessToken } from '@/lib/customerSession';
 import { useAuthStore } from '@/store/authStore';
 
-/** Restores customer session on load and refreshes expired access tokens when possible. */
+const KEEP_ALIVE_MS = 60 * 1000;
+
+/** Restores customer session on load and refreshes access tokens before they expire. */
 export default function CustomerAuthSync() {
   useEffect(() => {
+    let cancelled = false;
+    let interval: number | undefined;
+
     const restore = async () => {
       const { isAuthenticated, logout } = useAuthStore.getState();
-      if (!isAuthenticated) return;
+      if (!isAuthenticated || cancelled) return;
 
       const ok = await ensureCustomerAccessToken();
-      if (!ok) logout();
+      if (!ok && !cancelled) logout();
+    };
+
+    const startKeepAlive = () => {
+      void restore();
+      interval = window.setInterval(() => {
+        void restore();
+      }, KEEP_ALIVE_MS);
+
+      const onVisible = () => {
+        if (document.visibilityState === 'visible') void restore();
+      };
+      window.addEventListener('visibilitychange', onVisible);
+      window.addEventListener('focus', onVisible);
+
+      return () => {
+        if (interval) clearInterval(interval);
+        window.removeEventListener('visibilitychange', onVisible);
+        window.removeEventListener('focus', onVisible);
+      };
     };
 
     const persistApi = useAuthStore.persist;
     if (!persistApi) {
-      void restore();
-      return;
+      return startKeepAlive();
     }
 
     if (persistApi.hasHydrated()) {
-      void restore();
-      return;
+      return startKeepAlive();
     }
 
-    return persistApi.onFinishHydration(() => {
-      void restore();
+    let stopKeepAlive: (() => void) | undefined;
+    const unsub = persistApi.onFinishHydration(() => {
+      stopKeepAlive = startKeepAlive();
     });
+
+    return () => {
+      cancelled = true;
+      unsub?.();
+      stopKeepAlive?.();
+      if (interval) clearInterval(interval);
+    };
   }, []);
 
   return null;
