@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart' hide Path;
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/app_container.dart';
@@ -8,8 +7,8 @@ import '../../core/format.dart';
 import '../../core/intents.dart';
 import '../../data/models/delivery_route.dart';
 import '../../tracking/location_tracker.dart';
-import '../components/app_map_tiles.dart';
 import '../components/buttons.dart';
+import '../components/map_bitmaps.dart';
 import '../components/run_kit.dart';
 import '../theme/bc_theme.dart';
 import '../../l10n/l10n.dart';
@@ -78,11 +77,12 @@ class NavigationScreen extends StatefulWidget {
   State<NavigationScreen> createState() => _NavigationScreenState();
 }
 
-class _NavigationScreenState extends State<NavigationScreen> {
-  final _map = MapController();
+class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixin {
+  GoogleMapController? _map;
   late final LocationTracker _tracker = context.read<AppContainer>().locationTracker;
   bool _mapReady = false;
   bool _zoomed = false;
+  double _zoom = _navZoom;
   DriverFix? _last;
   DriverFix? _lastFetch;
   double? _lastHeading;
@@ -100,7 +100,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
   @override
   void dispose() {
     _tracker.removeListener(_onFix);
-    _map.dispose();
+    _map?.dispose();
     super.dispose();
   }
 
@@ -120,12 +120,15 @@ class _NavigationScreenState extends State<NavigationScreen> {
     if (heading != null) _lastHeading = heading;
     _last = fix;
 
-    if (_mapReady) {
+    final map = _map;
+    if (_mapReady && map != null) {
       final center = LatLng(fix.lat, fix.lng);
-      final zoom = _zoomed ? _map.camera.zoom : _navZoom;
+      final zoom = _zoomed ? _zoom : _navZoom;
       _zoomed = true;
-      // Heading-up: rotate the map so the direction of travel points up.
-      _map.moveAndRotate(center, zoom, -(heading ?? 0));
+      // Heading-up: the camera bearing follows the direction of travel.
+      map.animateCamera(
+        CameraUpdate.newCameraPosition(CameraPosition(target: center, zoom: zoom, bearing: heading ?? 0)),
+      );
     }
     setState(() {});
 
@@ -156,8 +159,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
 
   void _recenter() {
     final fix = _tracker.lastFix;
-    if (fix == null || !_mapReady) return;
-    _map.move(LatLng(fix.lat, fix.lng), _map.camera.zoom);
+    final map = _map;
+    if (fix == null || !_mapReady || map == null) return;
+    map.animateCamera(CameraUpdate.newLatLng(LatLng(fix.lat, fix.lng)));
   }
 
   String get _summary {
@@ -176,56 +180,68 @@ class _NavigationScreenState extends State<NavigationScreen> {
     final fix = _tracker.lastFix;
     final action = widget.actionBuilder?.call(context);
     final hasHeading = _lastHeading != null;
+    final destIcon = markerIcon(
+      'nav-dest-${c.brandDark.toARGB32()}',
+      const Size(34, 44),
+      () => _DestinationPinPainter(c.brandDark),
+    );
+    final driverIcon = fix == null
+        ? null
+        : markerIcon(
+            'nav-driver-${c.brand.toARGB32()}-$hasHeading',
+            const Size(72, 72),
+            () => _NavArrowPainter(0.35, c.brand, hasHeading),
+          );
 
     return Scaffold(
       backgroundColor: c.background,
       body: Stack(
         children: [
           Positioned.fill(
-            child: FlutterMap(
-              mapController: _map,
-              options: MapOptions(
-                initialCenter: LatLng(t.lat, t.lng),
-                initialZoom: _navZoom,
-                onMapReady: () {
-                  _mapReady = true;
-                  _onFix();
-                },
-              ),
-              children: [
-                const AppMapTiles(),
+            child: GoogleMap(
+              initialCameraPosition: CameraPosition(target: LatLng(t.lat, t.lng), zoom: _navZoom),
+              onMapCreated: (controller) {
+                _map = controller;
+                _mapReady = true;
+                _onFix();
+              },
+              onCameraMove: (position) => _zoom = position.zoom,
+              zoomControlsEnabled: false,
+              myLocationButtonEnabled: false,
+              mapToolbarEnabled: false,
+              compassEnabled: false,
+              polylines: {
                 if (_roadPath.length >= 2)
-                  PolylineLayer(
-                    polylines: [
-                      Polyline(
-                        points: _roadPath.map((p) => LatLng(p.lat, p.lng)).toList(),
-                        color: c.brand,
-                        strokeWidth: 7,
-                      ),
-                    ],
+                  Polyline(
+                    polylineId: const PolylineId('nav-route'),
+                    points: _roadPath.map((p) => LatLng(p.lat, p.lng)).toList(),
+                    color: c.brand,
+                    width: 7,
                   ),
-                MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: LatLng(t.lat, t.lng),
-                      width: 34,
-                      height: 44,
-                      alignment: Alignment.topCenter,
-                      rotate: true,
-                      child: CustomPaint(painter: _DestinationPinPainter(c.brandDark)),
-                    ),
-                    if (fix != null)
-                      Marker(
-                        point: LatLng(fix.lat, fix.lng),
-                        width: 72,
-                        height: 72,
-                        // The map is heading-up, so the arrow always points up on screen.
-                        rotate: true,
-                        child: _NavDriverArrow(color: c.brand, hasHeading: hasHeading),
-                      ),
-                  ],
-                ),
-              ],
+              },
+              markers: {
+                if (destIcon != null)
+                  Marker(
+                    markerId: const MarkerId('destination'),
+                    position: LatLng(t.lat, t.lng),
+                    icon: destIcon,
+                    anchor: const Offset(0.5, 1),
+                    consumeTapEvents: true,
+                  ),
+                if (fix != null && driverIcon != null)
+                  Marker(
+                    markerId: const MarkerId('driver'),
+                    position: LatLng(fix.lat, fix.lng),
+                    icon: driverIcon,
+                    anchor: const Offset(0.5, 0.5),
+                    // Flat + heading rotation: with the camera bearing on the heading,
+                    // the arrow points up on screen.
+                    flat: true,
+                    rotation: _lastHeading ?? 0,
+                    zIndexInt: 10,
+                    consumeTapEvents: true,
+                  ),
+              },
             ),
           ),
           if (fix == null) Center(child: CircularProgressIndicator(color: c.brand)),
@@ -508,33 +524,7 @@ class _DestinationPinPainter extends CustomPainter {
   bool shouldRepaint(covariant _DestinationPinPainter old) => old.fill != fill;
 }
 
-/// Pulse plus a fixed upward arrowhead; a plain dot until a heading is known.
-class _NavDriverArrow extends StatefulWidget {
-  const _NavDriverArrow({required this.color, required this.hasHeading});
-  final Color color;
-  final bool hasHeading;
-
-  @override
-  State<_NavDriverArrow> createState() => _NavDriverArrowState();
-}
-
-class _NavDriverArrowState extends State<_NavDriverArrow> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))
-    ..repeat();
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _ctrl,
-    builder: (_, _) => CustomPaint(painter: _NavArrowPainter(_ctrl.value, widget.color, widget.hasHeading)),
-  );
-}
-
+/// Pulse ring plus an upward arrowhead; a plain dot until a heading is known.
 class _NavArrowPainter extends CustomPainter {
   _NavArrowPainter(this.t, this.color, this.hasHeading);
   final double t;

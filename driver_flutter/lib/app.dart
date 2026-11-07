@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'core/alert_service.dart';
 import 'core/app_container.dart';
 import 'core/app_lock.dart';
+import 'core/duty_service.dart';
 import 'core/feedback.dart';
 import 'core/notifications.dart';
 import 'core/ride_alert.dart';
@@ -58,6 +59,8 @@ class _BingChunDriverAppState extends State<BingChunDriverApp> {
     if (_language == L10n.current) return;
     _language = L10n.current;
     L10n.rebuildAll();
+    // The sticky "On duty" notification lives outside the widget tree — re-translate it too.
+    DutyService.refreshLanguage();
   }
 
   @override
@@ -147,6 +150,7 @@ class _AuthGateState extends State<_AuthGate> {
       });
     }
     _wasAuthed = authed;
+    SystemSettings.setQuickBubbleSignedIn(authed);
     if (!authed) return const LoginScreen();
     // Optional app lock: verify the rider before the dashboard after every cold start.
     return lock.needsUnlock ? const AppLockScreen(key: ValueKey('app-lock')) : const HomeShell();
@@ -191,6 +195,7 @@ class _HomeShellState extends State<HomeShell> {
         c.alertService.forceRing(alert);
       case AcceptRide(:final alert):
         try {
+          await ensureNoUnfinishedRide(c, claimingJobId: alert.jobId);
           await c.jobsRepository.claimJob(alert.jobId);
           c.alertService.silenceJob(alert.jobId);
           AppRoutes.openDashboardFromRoot(alert.jobId);
@@ -382,7 +387,9 @@ class _IncomingRideOverlayState extends State<_IncomingRideOverlay> {
       _error = null;
     });
     try {
-      await context.read<AppContainer>().jobsRepository.claimJob(alert.jobId);
+      final container = context.read<AppContainer>();
+      await ensureNoUnfinishedRide(container, claimingJobId: alert.jobId);
+      await container.jobsRepository.claimJob(alert.jobId);
       BcFeedback.success();
       // The card may be over the lock screen; the dashboard shows customer details,
       // so it needs an unlock. If the rider cancels, it opens after they unlock.
