@@ -2,35 +2,35 @@
 
 Prints one Bing Chun cup sticker per cup on the local **Xprinter** when the cashier accepts an order.
 
-Blank rolls already have the Bing Chun logo — the agent only prints:
+Because the admin site is HTTPS, the browser cannot call `http://127.0.0.1` directly (Chrome blocks it).  
+Instead:
 
-- `POS-17` (counter) or the online order number (web/app/chat)
-- Cup index `1/5` … `5/5`
-- Item name + time
-- English + Sinhala sweetener advisory
+1. Admin queues a print job on the server  
+2. This agent (running on the cashier PC) **polls** the server and prints locally  
 
 ## Setup (once per cashier PC)
 
-1. Plug in the Xprinter USB and confirm Windows shows **Xprinter XP-D35B** (or your model) on port **USB001**.
+1. Plug in the Xprinter USB and confirm Windows shows **Xprinter XP-D35B** (or your model).
 2. On **this same PC** (not the cloud server), double-click `start.bat`.
-3. Keep that window open while using the cashier browser on this PC.
-4. Open admin in the browser **on this PC** → sidebar → **Cup stickers** → **Test print**.
+3. Leave that window open. It should log `polling .../cup-sticker-agent/claim`.
+4. Open admin → **Settings → Printer** → status should turn green → **Test print**.
 
-The admin site (even when hosted remotely) talks directly to `http://127.0.0.1:9177` on the cashier machine. Do **not** run `start.bat` only on the server — the USB printer is on the matching local PC.
-
-Default label size is **40×30 mm**. Override if your roll differs:
+## Environment (optional)
 
 ```bat
+set BC_STICKER_API_URL=https://admin.bingchunsrilanka.com/api
+set BC_STICKER_SECRET=bingchun-cup-sticker-local
+set BC_STICKER_PRINTER=Xprinter XP-D35B
 set BC_STICKER_WIDTH_MM=40
 set BC_STICKER_HEIGHT_MM=30
-set BC_STICKER_PRINTER=Xprinter XP-D35B
+set BC_STICKER_STORE_ID=
 start.bat
 ```
 
-## API (cashier PC localhost)
+`BC_STICKER_SECRET` must match the server `CUP_STICKER_AGENT_SECRET` (or the built-in default above).
 
-Admin browser → `http://127.0.0.1:9177` (this PC):
+## Local endpoints (optional debug)
 
-- `GET  /health`
-- `POST /test`
-- `POST /print` with `{ "stickers": [ { orderLabel, cupLabel, itemName, printedAt, advisoryEn, advisorySi } ] }`
+- `GET  http://127.0.0.1:9177/health`
+- `POST http://127.0.0.1:9177/test`
+- `POST http://127.0.0.1:9177/print`

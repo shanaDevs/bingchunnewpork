@@ -112,7 +112,8 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
           <p className="mt-1 text-xs text-muted max-w-2xl leading-relaxed">
             On Accept, prints one sticker per cup (POS-#, OP-1001 pickup, OD-1001 delivery — last 4 of order #).
             Run <code className="text-cream/80">tools/cup-sticker-agent/start.bat</code> on this cashier PC
-            (the matching machine with the USB Xprinter) — not on the server. Settings are stored in this browser.
+            (USB Xprinter). The online admin queues the job; the local agent pulls it and prints.
+            Keep the bat window open. Settings are stored in this browser.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-full border border-navy-border bg-navy px-3 py-1.5 text-xs">
