@@ -1,8 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart' hide Path;
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/app_container.dart';
@@ -10,19 +9,17 @@ import '../../data/models/delivery_route.dart';
 import '../../tracking/location_tracker.dart';
 import '../theme/bc_theme.dart';
 import '../../l10n/l10n.dart';
+import 'map_bitmaps.dart';
 
 /// Delivery stops are red map pins carrying their stop number. Fixed reds rather than
-/// theme tokens: a pin sits on light OSM tiles in both themes.
+/// theme tokens: a pin sits on light map tiles in both themes.
 const _stopPinRed = Color(0xFFE53935);
 const _stopPinRedNext = Color(0xFFC62828);
 
 /// Pickup-zone ring — the admin route map's zone green.
 const pickupZoneGreen = Color(0xFF16A34A);
 
-const _osmTiles = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const _userAgentPackage = 'lk.bingchun.bing_chun_delivery';
-
-/// OpenStreetMap route view — port of RouteMapView.kt.
+/// Google Maps route view — port of RouteMapView.kt.
 ///
 /// [bottomInset]: height of UI covering the bottom of the map; the camera fit keeps
 /// the route above it. [refitKey]: change to re-run the camera fit after panning.
@@ -55,8 +52,8 @@ class RouteMap extends StatefulWidget {
   State<RouteMap> createState() => _RouteMapState();
 }
 
-class _RouteMapState extends State<RouteMap> {
-  final _map = MapController();
+class _RouteMapState extends State<RouteMap> with MarkerIconMixin {
+  GoogleMapController? _map;
   bool _ready = false;
   List<RoutePathPoint> _staticPath = const [];
   List<RoutePathPoint> _tailPath = const [];
@@ -119,7 +116,7 @@ class _RouteMapState extends State<RouteMap> {
   @override
   void dispose() {
     _tracker?.removeListener(_onFix);
-    _map.dispose();
+    _map?.dispose();
     super.dispose();
   }
 
@@ -183,20 +180,37 @@ class _RouteMapState extends State<RouteMap> {
     return circlePoints(LatLng(widget.route.store.lat, widget.route.store.lng), radius.toDouble());
   }
 
-  void _fit() {
-    if (!_ready || !mounted) return;
+  Future<void> _fit() async {
+    final map = _map;
+    if (!_ready || !mounted || map == null) return;
     final points = [..._line.map((p) => LatLng(p.lat, p.lng)), ..._zonePoints()];
     if (points.isEmpty) return;
     final border = widget.compact ? 40.0 : 80.0;
-    final padding = EdgeInsets.fromLTRB(border, border, border, border + widget.bottomInset);
     try {
-      if (points.length == 1) {
-        _map.move(points.first, 15);
+      var minLat = points.first.latitude, maxLat = minLat;
+      var minLng = points.first.longitude, maxLng = minLng;
+      for (final p in points) {
+        minLat = math.min(minLat, p.latitude);
+        maxLat = math.max(maxLat, p.latitude);
+        minLng = math.min(minLng, p.longitude);
+        maxLng = math.max(maxLng, p.longitude);
+      }
+      if (maxLat - minLat < 1e-6 && maxLng - minLng < 1e-6) {
+        await map.moveCamera(CameraUpdate.newLatLngZoom(points.first, 15));
         return;
       }
-      _map.fitCamera(CameraFit.coordinates(coordinates: points, padding: padding, maxZoom: 17));
+      // The bottom inset is applied as GoogleMap.padding, so the fit already keeps clear of it.
+      await map.moveCamera(
+        CameraUpdate.newLatLngBounds(
+          LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng)),
+          border,
+        ),
+      );
+      if (!mounted) return;
+      if (await map.getZoomLevel() > 17) await map.moveCamera(CameraUpdate.zoomTo(17));
     } catch (_) {
-      // Map not laid out yet — the next frame retries via onMapReady.
+      // Map not laid out yet (Android throws on a bounds fit before layout) — retry next frame.
+      if (mounted) WidgetsBinding.instance.addPostFrameCallback((_) => _fit());
     }
   }
 
@@ -210,65 +224,88 @@ class _RouteMapState extends State<RouteMap> {
     final fix = widget.showDriverLocation ? _tracker?.lastFix : null;
     final tracking = _tracker?.runTracking ?? false;
 
-    return FlutterMap(
-      mapController: _map,
-      options: MapOptions(
-        initialCenter: LatLng(r.store.lat, r.store.lng),
-        initialZoom: 14,
-        interactionOptions: InteractionOptions(
-          flags: widget.interactive ? InteractiveFlag.all & ~InteractiveFlag.rotate : InteractiveFlag.none,
-        ),
-        onMapReady: () {
-          _ready = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) => _fit());
-        },
-      ),
-      children: [
-        TileLayer(urlTemplate: _osmTiles, userAgentPackageName: _userAgentPackage),
+    final markers = <Marker>{};
+    void add(Marker? m) {
+      if (m != null) markers.add(m);
+    }
+
+    add(_pinMarker('store', LatLng(r.store.lat, r.store.lng), 'S', c.brandDark, next: false));
+    for (final stop in r.stops) {
+      add(_stopMarker(stop, nextSeq, c));
+    }
+    if (fix != null && tracking) {
+      final icon = markerIcon(
+        'driver-${c.brand.toARGB32()}',
+        const Size(56, 56),
+        () => _PulsePainter(0.35, 0, c.brand),
+      );
+      if (icon != null) {
+        markers.add(
+          Marker(
+            markerId: const MarkerId('driver'),
+            position: LatLng(fix.lat, fix.lng),
+            icon: icon,
+            anchor: const Offset(0.5, 0.5),
+            // Flat + rotation turns the arrow with the heading (0 = north).
+            flat: true,
+            rotation: fix.heading ?? 0,
+            zIndexInt: 10,
+            consumeTapEvents: true,
+          ),
+        );
+      }
+    }
+
+    return GoogleMap(
+      initialCameraPosition: CameraPosition(target: LatLng(r.store.lat, r.store.lng), zoom: 14),
+      onMapCreated: (controller) {
+        _map = controller;
+        _ready = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _fit());
+      },
+      padding: EdgeInsets.only(bottom: widget.bottomInset),
+      zoomControlsEnabled: false,
+      myLocationButtonEnabled: false,
+      mapToolbarEnabled: false,
+      compassEnabled: false,
+      rotateGesturesEnabled: false,
+      tiltGesturesEnabled: false,
+      scrollGesturesEnabled: widget.interactive,
+      zoomGesturesEnabled: widget.interactive,
+      polygons: {
         if (zone.isNotEmpty)
-          PolygonLayer(
-            polygons: [
-              Polygon(
-                points: zone,
-                color: pickupZoneGreen.withValues(alpha: 0.14),
-                borderColor: pickupZoneGreen,
-                borderStrokeWidth: widget.compact ? 1.5 : 2,
-                pattern: StrokePattern.dashed(segments: const [7, 5]),
-              ),
-            ],
+          Polygon(
+            polygonId: const PolygonId('pickup-zone'),
+            points: zone,
+            fillColor: pickupZoneGreen.withValues(alpha: 0.14),
+            strokeWidth: 0,
+            strokeColor: Colors.transparent,
+          ),
+      },
+      polylines: {
+        // Google polygons can't dash their outline, so the zone border is a dashed polyline.
+        if (zone.isNotEmpty)
+          Polyline(
+            polylineId: const PolylineId('pickup-zone-border'),
+            points: zone,
+            color: pickupZoneGreen,
+            width: 2,
+            patterns: [PatternItem.dash(14), PatternItem.gap(10)],
           ),
         if (line.length >= 2)
-          PolylineLayer(
-            polylines: [
-              Polyline(
-                points: line.map((p) => LatLng(p.lat, p.lng)).toList(),
-                color: c.brand,
-                strokeWidth: widget.compact ? 4 : 6,
-              ),
-            ],
+          Polyline(
+            polylineId: const PolylineId('route'),
+            points: line.map((p) => LatLng(p.lat, p.lng)).toList(),
+            color: c.brand,
+            width: widget.compact ? 4 : 6,
+            zIndex: 1,
           ),
-        MarkerLayer(
-          markers: [
-            _pinMarker(LatLng(r.store.lat, r.store.lng), 'S', c.brandDark, next: false),
-            for (final stop in r.stops) _stopMarker(stop, nextSeq, c),
-          ],
-        ),
-        if (fix != null && tracking)
-          MarkerLayer(
-            markers: [
-              Marker(
-                point: LatLng(fix.lat, fix.lng),
-                width: 80,
-                height: 80,
-                child: DriverPulse(heading: fix.heading ?? 0, color: c.brand),
-              ),
-            ],
-          ),
-      ],
+      },
+      markers: markers,
     );
   }
 
-  Marker _stopMarker(RouteStop stop, int? nextSeq, BcColors c) {
+  Marker? _stopMarker(RouteStop stop, int? nextSeq, BcColors c) {
     final s = stop.status.toUpperCase();
     final delivered = s == 'DELIVERED';
     final failed = s == 'DELIVERY_FAILED' || s == 'FAILED';
@@ -285,20 +322,23 @@ class _RouteMapState extends State<RouteMap> {
         : failed
         ? '!'
         : '${stop.sequence}';
-    return _pinMarker(LatLng(stop.lat, stop.lng), glyph, fill, next: next);
+    return _pinMarker('stop-${stop.sequence}', LatLng(stop.lat, stop.lng), glyph, fill, next: next);
   }
 
-  Marker _pinMarker(LatLng point, String label, Color fill, {required bool next}) {
+  Marker? _pinMarker(String id, LatLng point, String label, Color fill, {required bool next}) {
     final head = next ? 34.0 : (widget.compact ? 26.0 : 30.0);
     final w = head + 4;
     final h = w * 1.42;
+    final icon = markerIcon('pin-$label-${fill.toARGB32()}-$next', Size(w, h), () => _PinPainter(label, fill, next));
+    if (icon == null) return null;
     return Marker(
-      point: point,
-      width: w,
-      height: h,
+      markerId: MarkerId(id),
+      position: point,
+      icon: icon,
       // A pin points at its location, so the tip is the anchor.
-      alignment: Alignment.topCenter,
-      child: MapPin(label: label, fill: fill, next: next),
+      anchor: const Offset(0.5, 1),
+      zIndexInt: next ? 5 : 2,
+      consumeTapEvents: true,
     );
   }
 }

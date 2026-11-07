@@ -13,6 +13,7 @@ import {
   type OnlineGateway,
 } from '../lib/paymentSettings';
 import { ensureAppSchema, getConvenienceFeeRates, getConvenientFeeRate, getGatewayFeeRate, getDeliveryPlatformFeeRate, setDeliveryPlatformFeeRate, getMaxCupsPerRider, invalidatePickupOrderEditSettingsCache, invalidateGatewayFeeRateCache, invalidateDeliveryPlatformFeeRateCache, setMaxCupsPerRider, getAppDownloadSettings, setAppDownloadSettings, getWeeklyResetDay, setWeeklyResetDay, getSpinSettings, setSpinSettings, getCancelWindowMinutes, setCancelWindowMinutes, invalidateCancelWindowMinutesCache, getBranchCompletionRadiusM, setBranchCompletionRadiusM } from '../lib/appSchema';
+import { getGoogleMapsApiKey, setGoogleMapsApiKey } from '../lib/googleMapsKey';
 import { parseSpinCriteria, parseSpinDisplay } from '../lib/spinDisplay';
 import {
   getActiveCancelReasons,
@@ -278,6 +279,7 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       spinRequireLogin: spinSettings.requireLogin,
       spinDisplay: spinSettings.display,
       cancelWindowMinutes,
+      googleMapsApiKey: await getGoogleMapsApiKey(),
     });
   } catch (err) {
     next(err);
@@ -336,6 +338,7 @@ const appSettingsSchema = z.object({
     value: z.number().min(0).max(1_000_000).optional(),
   })).optional(),
   cancelWindowMinutes: z.number().int().min(1).max(120).optional(),
+  googleMapsApiKey: z.string().max(256).nullable().optional(),
 });
 
 export async function updateAppSettings(req: Request, res: Response, next: NextFunction) {
@@ -372,6 +375,7 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       spinCriteria,
       cancelWindowMinutes,
       deliveryPlatformFeeRate,
+      googleMapsApiKey,
       ...prismaData
     } = data;
 
@@ -488,6 +492,10 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       await setDeliveryPlatformFeeRate(deliveryPlatformFeeRate);
     }
 
+    const savedGoogleMapsApiKey = googleMapsApiKey !== undefined
+      ? await setGoogleMapsApiKey(googleMapsApiKey)
+      : await getGoogleMapsApiKey();
+
     invalidatePickupOrderEditSettingsCache();
     invalidateGatewayFeeRateCache();
     invalidateDeliveryPlatformFeeRateCache();
@@ -536,6 +544,7 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       spinDisplay: savedSpin.display,
       spinCriteria: savedSpin.criteria,
       cancelWindowMinutes: savedCancelWindowMinutes,
+      googleMapsApiKey: savedGoogleMapsApiKey,
     });
   } catch (err) {
     next(err);

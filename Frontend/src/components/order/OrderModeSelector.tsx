@@ -45,7 +45,7 @@ const PickupMap = dynamic(() => import('./DeliveryMap'), {
 });
 
 const TAKEAWAY_MAX_KM = 7;
-const DEFAULT_OPEN_TIME = '09:00';
+const DEFAULT_OPEN_TIME = '08:00';
 const DEFAULT_CLOSE_TIME = '23:00';
 
 function orderingFieldsFromStore(store: {

@@ -12,6 +12,9 @@ class DutyService {
 
   static bool _initialized = false;
 
+  /// Last state passed to [start], so [refreshLanguage] can redraw the same text.
+  static bool _trackingActive = false;
+
   static void init() {
     if (_initialized) return;
     _initialized = true;
@@ -36,6 +39,7 @@ class DutyService {
   static Future<void> start({bool trackingActive = false}) async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
     init();
+    _trackingActive = trackingActive;
     final text = trackingActive ? tr('Tracking active ride…') : tr('Waiting for delivery jobs…');
     try {
       if (await FlutterForegroundTask.isRunningService) {
@@ -51,6 +55,21 @@ class DutyService {
       );
     } catch (e) {
       debugPrint('Duty service start failed: $e');
+    }
+  }
+
+  /// Language switch: re-translate the ongoing "On duty" notification right away.
+  /// Otherwise it keeps the old language until the next [start] call.
+  static Future<void> refreshLanguage() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      if (!await FlutterForegroundTask.isRunningService) return;
+      await FlutterForegroundTask.updateService(
+        notificationTitle: tr('On duty'),
+        notificationText: _trackingActive ? tr('Tracking active ride…') : tr('Waiting for delivery jobs…'),
+      );
+    } catch (e) {
+      debugPrint('Duty notification refresh failed: $e');
     }
   }
 

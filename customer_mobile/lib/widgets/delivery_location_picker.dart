@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../providers/auth_provider.dart';
+import 'app_map_tiles.dart';
 import '../providers/fulfillment_provider.dart';
 import '../theme/bc_theme.dart';
 import '../utils/app_toast.dart';
@@ -653,10 +654,7 @@ class _DeliveryLocationPickerState extends ConsumerState<DeliveryLocationPicker>
                         },
                       ),
                       children: [
-                        TileLayer(
-                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'lk.bingchun.bing_chun_customer',
-                        ),
+                        const AppMapTiles(),
                         if (_routePoints.length >= 2 && !_draggingPin)
                           AnimatedBuilder(
                             animation: _pathAnim,

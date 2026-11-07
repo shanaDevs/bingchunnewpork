@@ -21,6 +21,16 @@ val keystoreProperties = Properties().apply {
 }
 val hasReleaseKey = keystoreProperties.getProperty("storeFile") != null
 
+// driver_flutter/.env (git-ignored) holds GOOGLE_MAPS_API_KEY; injected into the manifest below.
+val dotEnv = Properties().apply {
+    val f = rootProject.file("../.env")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val googleMapsApiKey = dotEnv.getProperty("GOOGLE_MAPS_API_KEY", "").trim()
+if (googleMapsApiKey.isEmpty()) {
+    logger.warn("GOOGLE_MAPS_API_KEY is missing from driver_flutter/.env — maps will render blank.")
+}
+
 // Never ship a debug-signed release: fail release builds when the key is missing.
 if (!hasReleaseKey && gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }) {
     throw GradleException(
@@ -50,6 +60,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = googleMapsApiKey
     }
 
     signingConfigs {
