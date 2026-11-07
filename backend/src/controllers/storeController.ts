@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { mapsAdapter } from '../integrations/mapsAdapter';
+import { getCustomerMapTiles, getDrivingPath, getPlaceLocation, mapsAdapter } from '../integrations/mapsAdapter';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
 import { isBranchScopedRole } from '../middleware/auth';
@@ -112,6 +112,46 @@ export async function geocodeAddress(req: Request, res: Response, next: NextFunc
     const details = await mapsAdapter.geocodeDetails(address);
     if (!details) throw new AppError('Could not find this address', 400);
     return success(res, details);
+  } catch (err) { next(err); }
+}
+
+export async function customerMapTiles(_req: Request, res: Response, next: NextFunction) {
+  try {
+    return success(res, await getCustomerMapTiles());
+  } catch (err) { next(err); }
+}
+
+export async function drivingDirections(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { originLat, originLng, destLat, destLng, waypoints } = z.object({
+      originLat: z.coerce.number(),
+      originLng: z.coerce.number(),
+      destLat: z.coerce.number(),
+      destLng: z.coerce.number(),
+      waypoints: z.string().optional(),
+    }).parse(req.query);
+
+    const via = (waypoints ?? '')
+      .split('|')
+      .map((pair) => pair.split(',').map((value) => Number(value.trim())))
+      .filter((pair) => pair.length === 2 && pair.every((value) => Number.isFinite(value)))
+      .map(([lat, lng]) => ({ lat, lng }));
+
+    const path = await getDrivingPath([
+      { lat: originLat, lng: originLng },
+      ...via,
+      { lat: destLat, lng: destLng },
+    ]);
+    return success(res, { points: path ?? [] });
+  } catch (err) { next(err); }
+}
+
+export async function placeLocation(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { placeId } = z.object({ placeId: z.string().min(2) }).parse(req.query);
+    const place = await getPlaceLocation(placeId);
+    if (!place) throw new AppError('Could not find this place', 400);
+    return success(res, place);
   } catch (err) { next(err); }
 }
 

@@ -24,6 +24,16 @@ Future<DriverFix> requireFix(AppContainer c) async {
   return fix;
 }
 
+/// One ride at a time: refuse a new claim while the rider still holds an unfinished ride
+/// (ASSIGNED / IN_PROGRESS / QUEUED). The API would otherwise accept it as QUEUED.
+/// Checks the server so a ride claimed from another surface (alert card, notification) counts.
+Future<void> ensureNoUnfinishedRide(AppContainer c, {String? claimingJobId}) async {
+  final held = await c.jobsRepository.listJobs();
+  if (held.any((j) => j.id != claimingJobId && _blockingStatuses.contains(j.status))) {
+    throw StateError(tr('Finish your current delivery before claiming another job'));
+  }
+}
+
 /// New-job rings stay muted while any job is ASSIGNED/IN_PROGRESS/QUEUED.
 Future<void> refreshAlertEligibility(AppContainer c) async {
   bool blocked;
@@ -139,6 +149,16 @@ class JobsController extends ChangeNotifier {
       error = errorMessage(e, tr('Failed to load jobs'));
       _emit();
     }
+  }
+
+  /// Re-fetch just the rider profile (e.g. opening profile details). The licence image
+  /// URL is a short-lived signed link, so a profile loaded earlier may point at an
+  /// expired one. Keeps the previous profile if the request fails.
+  Future<void> refreshProfile() async {
+    try {
+      profile = await _c.authRepository.getMe();
+      _emit();
+    } catch (_) {}
   }
 
   /// Completed runs for the History tab. Cached after the first load; pass force to refresh.
@@ -282,6 +302,8 @@ class JobsController extends ChangeNotifier {
     notice = null;
     _emit();
     try {
+      // The cached list can be stale (e.g. a ride just accepted from the alert card).
+      await ensureNoUnfinishedRide(_c, claimingJobId: jobId);
       final job = await _c.jobsRepository.claimJob(jobId);
       final queued = job.status == 'QUEUED';
       claimingId = null;

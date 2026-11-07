@@ -107,6 +107,9 @@ services:
         scope: RUN_TIME
         value: REPLACE_ME
         type: SECRET
+      - key: GOOGLE_MAPS_API_KEY
+        value: REPLACE_ME
+        type: SECRET
       - key: FRONTEND_URL
         scope: RUN_TIME
         value: "https://bingchunsrilanka.com"
@@ -233,6 +236,9 @@ workers:
         type: SECRET
       - key: DRIVER_PIN_PEPPER
         scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: GOOGLE_MAPS_API_KEY
         value: REPLACE_ME
         type: SECRET
       - key: FRONTEND_URL

@@ -160,9 +160,23 @@ function createPrismaClient() {
     }
   }
 
+  const txMaxWait = Math.max(
+    5_000,
+    Number.parseInt(process.env.PRISMA_TX_MAX_WAIT_MS || '15000', 10) || 15_000,
+  );
+  const txTimeout = Math.max(
+    10_000,
+    Number.parseInt(process.env.PRISMA_TX_TIMEOUT_MS || '45000', 10) || 45_000,
+  );
+
   const client = new PrismaClient({
     log: devLogs,
     ...(url ? { datasources: { db: { url } } } : {}),
+    // Default interactive tx is 5s — too short for remote Postgres RTT (P2028).
+    transactionOptions: {
+      maxWait: txMaxWait,
+      timeout: txTimeout,
+    },
   });
 
   // Idle sockets get dropped by PgBouncer / firewalls / DB restarts ("Socket not connected",

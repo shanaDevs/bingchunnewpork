@@ -18,7 +18,7 @@ Future<void> showAppLockSheet(BuildContext context) =>
 String appLockLabel(AppLockMethod m) => switch (m) {
   AppLockMethod.none => tr('Off'),
   AppLockMethod.pin => tr('App PIN'),
-  AppLockMethod.fingerprint => tr('Fingerprint'),
+  AppLockMethod.fingerprint => AppLock.combinedBiometric ? tr('Biometric') : tr('Fingerprint'),
   AppLockMethod.face => tr('Face unlock'),
 };
 
@@ -29,16 +29,33 @@ class _AppLockSheet extends StatefulWidget {
   State<_AppLockSheet> createState() => _AppLockSheetState();
 }
 
-class _AppLockSheetState extends State<_AppLockSheet> {
+class _AppLockSheetState extends State<_AppLockSheet> with WidgetsBindingObserver {
   BiometricSupport? _support;
   bool _busy = false;
 
   @override
   void initState() {
     super.initState();
-    context.read<AppLock>().biometricSupport().then((s) {
-      if (mounted) setState(() => _support = s);
-    });
+    WidgetsBinding.instance.addObserver(this);
+    _refreshSupport();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// The rider may add or remove a fingerprint/face in phone settings while this sheet is open.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshSupport();
+  }
+
+  Future<BiometricSupport> _refreshSupport() async {
+    final s = await context.read<AppLock>().biometricSupport();
+    if (mounted) setState(() => _support = s);
+    return s;
   }
 
   Future<void> _select(AppLockMethod target) async {
@@ -58,8 +75,25 @@ class _AppLockSheetState extends State<_AppLockSheet> {
         case AppLockMethod.fingerprint:
         case AppLockMethod.face:
           final face = target == AppLockMethod.face;
+          final combined = AppLock.combinedBiometric;
+          // Re-check right before enabling — never turn on a method the phone doesn't have set up.
+          final support = await _refreshSupport();
+          if (!mounted) return;
+          if (!(face ? support.face : support.fingerprint)) {
+            BcFeedback.error();
+            showBcSnack(
+              context,
+              tr('Set up a fingerprint or face unlock in your phone settings first.'),
+              kind: BcSnackKind.error,
+            );
+            return;
+          }
           final error = await lock.authenticateBiometric(
-            face ? tr('Verify your face to turn on face unlock') : tr('Verify your fingerprint to turn on fingerprint unlock'),
+            face
+                ? tr('Verify your face to turn on face unlock')
+                : combined
+                ? tr('Verify it is you to turn on biometric unlock')
+                : tr('Verify your fingerprint to turn on fingerprint unlock'),
           );
           if (!mounted) return;
           if (error != null) {
@@ -72,7 +106,11 @@ class _AppLockSheetState extends State<_AppLockSheet> {
           if (mounted) {
             showBcSnack(
               context,
-              face ? tr('Face unlock turned on') : tr('Fingerprint unlock turned on'),
+              face
+                  ? tr('Face unlock turned on')
+                  : combined
+                  ? tr('Biometric unlock turned on')
+                  : tr('Fingerprint unlock turned on'),
               kind: BcSnackKind.success,
             );
           }
@@ -105,6 +143,7 @@ class _AppLockSheetState extends State<_AppLockSheet> {
     final lock = context.watch<AppLock>();
     final support = _support;
     final notOnPhone = tr('Not set up on this phone');
+    final combined = AppLock.combinedBiometric;
 
     return BcSheetBody(
       header: BcSheetHeader(
@@ -163,22 +202,29 @@ class _AppLockSheetState extends State<_AppLockSheet> {
               _OptionRow(
                 icon: Icons.fingerprint_rounded,
                 tint: dark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED),
-                title: tr('Fingerprint'),
-                subtitle: support == null || support.fingerprint ? tr('Unlock with your fingerprint') : notOnPhone,
+                title: combined ? tr('Biometric') : tr('Fingerprint'),
+                subtitle: support == null || support.fingerprint
+                    ? (combined
+                          ? tr('Fingerprint or face unlock set up on this phone')
+                          : tr('Unlock with your fingerprint'))
+                    : notOnPhone,
                 selected: lock.method == AppLockMethod.fingerprint,
                 enabled: !_busy && (support?.fingerprint ?? false),
                 onTap: () => _select(AppLockMethod.fingerprint),
               ),
-              Divider(height: 1, color: c.border),
-              _OptionRow(
-                icon: Icons.face_retouching_natural_rounded,
-                tint: dark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
-                title: tr('Face ID'),
-                subtitle: support == null || support.face ? tr('Unlock by looking at your phone') : notOnPhone,
-                selected: lock.method == AppLockMethod.face,
-                enabled: !_busy && (support?.face ?? false),
-                onTap: () => _select(AppLockMethod.face),
-              ),
+              // Android: face is covered by the single Biometric option above.
+              if (!combined) ...[
+                Divider(height: 1, color: c.border),
+                _OptionRow(
+                  icon: Icons.face_retouching_natural_rounded,
+                  tint: dark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
+                  title: tr('Face ID'),
+                  subtitle: support == null || support.face ? tr('Unlock by looking at your phone') : notOnPhone,
+                  selected: lock.method == AppLockMethod.face,
+                  enabled: !_busy && (support?.face ?? false),
+                  onTap: () => _select(AppLockMethod.face),
+                ),
+              ],
             ],
           ),
         ),

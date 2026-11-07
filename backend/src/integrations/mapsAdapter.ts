@@ -1,10 +1,17 @@
-import { config } from '../config';
+import { getGoogleMapsApiKey } from '../lib/googleMapsKey';
 import { logger } from '../utils/logger';
 import { haversineKm } from '../utils/geo';
 import { nearestDeliveryArea, searchDeliveryAreas } from '../data/deliveryAreas';
 
 export interface LatLng { lat: number; lng: number }
-export interface PlaceResult { placeId: string; description: string; lat: number; lng: number }
+export interface PlaceResult {
+  placeId: string;
+  description: string;
+  mainText?: string;
+  secondaryText?: string;
+  lat: number;
+  lng: number;
+}
 export interface DistanceResult { distanceKm: number; durationMinutes: number }
 export interface GeocodeDetails {
   address: string;
@@ -270,32 +277,59 @@ class MockMapsAdapter implements MapsAdapter {
   }
 }
 
+type PlacesComponent = { longText?: string; types?: string[] };
+
+function placesComponents(components: PlacesComponent[] | undefined): AddressComponent[] {
+  return (components ?? []).map((component) => ({
+    long_name: component.longText?.trim() || '',
+    types: component.types ?? [],
+  }));
+}
+
+async function placesRequest<T>(path: string, fieldMask: string, init?: RequestInit): Promise<T | null> {
+  const key = await getGoogleMapsApiKey();
+  if (!key) return null;
+  try {
+    const res = await fetch(`https://places.googleapis.com/v1/${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask': fieldMask,
+        ...(init?.headers ?? {}),
+      },
+    });
+    if (!res.ok) return null;
+    return await res.json() as T;
+  } catch (err) {
+    logger.warn('[MAPS] Places request failed', err);
+    return null;
+  }
+}
+
 class GoogleMapsAdapter implements MapsAdapter {
   async reverseGeocode(lat: number, lng: number): Promise<string | null> {
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${config.google.mapsApiKey}`;
-    const res = await fetch(url);
-    const data = await res.json() as {
-      results?: {
-        formatted_address: string;
-        address_components?: { long_name: string; types: string[] }[];
-      }[];
-    };
-    const result = data.results?.[0];
-    if (!result) return null;
-
-    const componentTypes = new Set([
-      'neighborhood',
-      'sublocality',
-      'sublocality_level_1',
-      'locality',
-      'administrative_area_level_2',
-    ]);
-    const parts = (result.address_components ?? [])
-      .filter((c) => c.types.some((t) => componentTypes.has(t)))
-      .map((c) => c.long_name);
-
-    const uniqueParts = [...new Set([...parts, result.formatted_address])];
-    return uniqueParts.join(', ');
+    const data = await placesRequest<{
+      places?: Array<{ formattedAddress?: string; displayName?: { text?: string } }>;
+    }>(
+      'places:searchNearby',
+      'places.formattedAddress,places.displayName',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          maxResultCount: 1,
+          rankPreference: 'DISTANCE',
+          locationRestriction: {
+            circle: {
+              center: { latitude: lat, longitude: lng },
+              radius: 80,
+            },
+          },
+        }),
+      },
+    );
+    const place = data?.places?.[0];
+    return place?.formattedAddress || place?.displayName?.text || null;
   }
 
   async geocode(address: string): Promise<LatLng | null> {
@@ -304,34 +338,79 @@ class GoogleMapsAdapter implements MapsAdapter {
   }
 
   async geocodeDetails(address: string): Promise<GeocodeDetails | null> {
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&components=country:lk&key=${config.google.mapsApiKey}`;
-    const res = await fetch(url);
-    const data = await res.json() as {
-      results?: {
-        formatted_address: string;
-        geometry: { location: LatLng };
-        address_components?: AddressComponent[];
-      }[];
-    };
-    const result = data.results?.[0];
-    if (!result) return null;
-    return parseGoogleGeocodeResult(result);
+    const data = await placesRequest<{
+      places?: Array<{
+        formattedAddress?: string;
+        location?: { latitude: number; longitude: number };
+        addressComponents?: PlacesComponent[];
+      }>;
+    }>(
+      'places:searchText',
+      'places.formattedAddress,places.location,places.addressComponents',
+      {
+        method: 'POST',
+        body: JSON.stringify({ textQuery: address, regionCode: 'LK', pageSize: 1 }),
+      },
+    );
+    const place = data?.places?.[0];
+    const location = place?.location;
+    if (!place || !location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)) {
+      return null;
+    }
+    return parseGoogleGeocodeResult({
+      formatted_address: place.formattedAddress || address,
+      geometry: { location: { lat: location.latitude, lng: location.longitude } },
+      address_components: placesComponents(place.addressComponents),
+    });
   }
 
-  async autocomplete(query: string): Promise<PlaceResult[]> {
-    const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&components=country:lk&key=${config.google.mapsApiKey}`;
-    const res = await fetch(url);
-    const data = await res.json() as { predictions?: { place_id: string; description: string }[] };
-    return (data.predictions || []).map((p) => ({
-      placeId: p.place_id,
-      description: p.description,
-      lat: 0,
-      lng: 0,
-    }));
+  async autocomplete(query: string, bias?: LatLng): Promise<PlaceResult[]> {
+    const body: Record<string, unknown> = {
+      input: query,
+      includedRegionCodes: ['lk'],
+      languageCode: 'en',
+    };
+    if (bias) {
+      body.locationBias = {
+        circle: {
+          center: { latitude: bias.lat, longitude: bias.lng },
+          radius: 30000,
+        },
+      };
+    }
+    const data = await placesRequest<{
+      suggestions?: Array<{
+        placePrediction?: {
+          placeId?: string;
+          text?: { text?: string };
+          structuredFormat?: {
+            mainText?: { text?: string };
+            secondaryText?: { text?: string };
+          };
+        };
+      }>;
+    }>(
+      'places:autocomplete',
+      'suggestions.placePrediction.placeId,suggestions.placePrediction.text.text,suggestions.placePrediction.structuredFormat',
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    return (data?.suggestions ?? []).flatMap((suggestion) => {
+      const prediction = suggestion.placePrediction;
+      const description = prediction?.text?.text?.trim() || '';
+      if (!prediction?.placeId || !description) return [];
+      return [{
+        placeId: prediction.placeId,
+        description,
+        mainText: prediction.structuredFormat?.mainText?.text?.trim() || description,
+        secondaryText: prediction.structuredFormat?.secondaryText?.text?.trim() || '',
+        lat: 0,
+        lng: 0,
+      }];
+    });
   }
 
   async getDistance(origin: LatLng, dest: LatLng): Promise<DistanceResult> {
-    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin.lat},${origin.lng}&destinations=${dest.lat},${dest.lng}&key=${config.google.mapsApiKey}`;
+    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin.lat},${origin.lng}&destinations=${dest.lat},${dest.lng}&key=${await getGoogleMapsApiKey()}`;
     const res = await fetch(url);
     const data = await res.json() as {
       rows?: { elements?: { distance?: { value: number }; duration?: { value: number } }[] }[];
@@ -344,9 +423,165 @@ class GoogleMapsAdapter implements MapsAdapter {
   }
 }
 
-function createMapsAdapter(): MapsAdapter {
-  if (config.google.mapsApiKey) return new GoogleMapsAdapter();
-  return new OsmMapsAdapter();
+const googleMaps = new GoogleMapsAdapter();
+const osmMaps = new OsmMapsAdapter();
+
+async function activeMapsAdapter(): Promise<MapsAdapter> {
+  const key = await getGoogleMapsApiKey();
+  return key ? googleMaps : osmMaps;
 }
 
-export const mapsAdapter = createMapsAdapter();
+/** Uses the settings key immediately, so a saved key switches every lookup. */
+export const mapsAdapter: MapsAdapter = {
+  geocode: async (address) => (await activeMapsAdapter()).geocode(address) ?? osmMaps.geocode(address),
+  geocodeDetails: async (address) => (await activeMapsAdapter()).geocodeDetails(address) ?? osmMaps.geocodeDetails(address),
+  reverseGeocode: async (lat, lng) => (await activeMapsAdapter()).reverseGeocode(lat, lng) ?? osmMaps.reverseGeocode(lat, lng),
+  autocomplete: async (query, bias) => {
+    const primary = await (await activeMapsAdapter()).autocomplete(query, bias);
+    if (primary.length > 0) return primary;
+    return osmMaps.autocomplete(query, bias);
+  },
+  getDistance: async (origin, dest) => (await activeMapsAdapter()).getDistance(origin, dest),
+};
+
+const OSM_TILES = {
+  provider: 'osm' as const,
+  url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  attribution: '&copy; OpenStreetMap',
+};
+
+let tileSession: { key: string; session: string; expiry: number } | null = null;
+
+function decodePolyline(encoded: string): LatLng[] {
+  const points: LatLng[] = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < encoded.length) {
+    let shift = 0;
+    let result = 0;
+    let byte = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : result >> 1;
+
+    shift = 0;
+    result = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lng += (result & 1) ? ~(result >> 1) : result >> 1;
+
+    points.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+
+  return points;
+}
+
+/** Google map tiles for the customer map, or OpenStreetMap when no key is saved. */
+export async function getCustomerMapTiles(): Promise<{ provider: 'google' | 'osm'; url: string; attribution: string }> {
+  const key = await getGoogleMapsApiKey();
+  if (!key) return OSM_TILES;
+
+  const now = Date.now();
+  if (!tileSession || tileSession.key !== key || tileSession.expiry < now + 60_000) {
+    try {
+      const res = await fetch(
+        `https://tile.googleapis.com/v1/createSession?key=${encodeURIComponent(key)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mapType: 'roadmap', language: 'en-US', region: 'LK' }),
+        },
+      );
+      if (!res.ok) return OSM_TILES;
+      const data = await res.json() as { session?: string; expiry?: string };
+      if (!data.session) return OSM_TILES;
+      const expirySeconds = Number(data.expiry);
+      tileSession = {
+        key,
+        session: data.session,
+        expiry: Number.isFinite(expirySeconds) ? expirySeconds * 1000 : now + 60 * 60 * 1000,
+      };
+    } catch (err) {
+      logger.warn('[MAPS] Google tile session failed', err);
+      return OSM_TILES;
+    }
+  }
+
+  if (!tileSession) return OSM_TILES;
+
+  return {
+    provider: 'google',
+    url: `https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${encodeURIComponent(tileSession.session)}&key=${encodeURIComponent(key)}`,
+    attribution: '&copy; Google',
+  };
+}
+
+/** Driving path from the Google Directions API. Null lets the map draw a straight line. */
+export async function getDrivingPath(points: LatLng[]): Promise<LatLng[] | null> {
+  if (points.length < 2) return null;
+  const key = await getGoogleMapsApiKey();
+  if (!key) return null;
+
+  const origin = points[0];
+  const dest = points[points.length - 1];
+  const via = points.slice(1, -1);
+  const params = new URLSearchParams({
+    origin: `${origin.lat},${origin.lng}`,
+    destination: `${dest.lat},${dest.lng}`,
+    mode: 'driving',
+    key,
+  });
+  if (via.length > 0) {
+    params.set('waypoints', via.map((point) => `${point.lat},${point.lng}`).join('|'));
+  }
+
+  try {
+    const res = await fetch(`https://maps.googleapis.com/maps/api/directions/json?${params.toString()}`);
+    if (!res.ok) return null;
+    const data = await res.json() as {
+      routes?: { overview_polyline?: { points?: string } }[];
+    };
+    const encoded = data.routes?.[0]?.overview_polyline?.points;
+    if (!encoded) return null;
+    const path = decodePolyline(encoded);
+    return path.length >= 2 ? path : null;
+  } catch (err) {
+    logger.warn('[MAPS] Google directions failed', err);
+    return null;
+  }
+}
+
+/** Coordinates for a Google Place selected from customer address search. */
+export async function getPlaceLocation(placeId: string): Promise<(LatLng & { address: string }) | null> {
+  const key = await getGoogleMapsApiKey();
+  if (!key || !placeId || placeId.startsWith('area_') || placeId.startsWith('osm_')) return null;
+
+  try {
+    const data = await placesRequest<{
+      formattedAddress?: string;
+      location?: { latitude?: number; longitude?: number };
+    }>(
+      `places/${encodeURIComponent(placeId)}`,
+      'location,formattedAddress',
+    );
+    const lat = data?.location?.latitude;
+    const lng = data?.location?.longitude;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return {
+      lat: lat as number,
+      lng: lng as number,
+      address: data?.formattedAddress || '',
+    };
+  } catch (err) {
+    logger.warn('[MAPS] Google place details failed', err);
+    return null;
+  }
+}

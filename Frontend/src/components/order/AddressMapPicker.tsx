@@ -26,6 +26,8 @@ export interface AddressSelection {
 interface PlaceSuggestion {
   placeId: string;
   description: string;
+  mainText?: string;
+  secondaryText?: string;
   lat: number;
   lng: number;
 }
@@ -123,8 +125,13 @@ export function AddressMapPicker({
 
     let cancelled = false;
     setSearching(true);
+    const params = new URLSearchParams({ q: debouncedSearch });
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      params.set('lat', String(lat));
+      params.set('lng', String(lng));
+    }
     void api
-      .get<PlaceSuggestion[]>(`/stores/address/autocomplete?q=${encodeURIComponent(debouncedSearch)}`)
+      .get<PlaceSuggestion[]>(`/stores/address/autocomplete?${params.toString()}`)
       .then((results) => {
         if (!cancelled) {
           setSuggestions(results);
@@ -141,7 +148,7 @@ export function AddressMapPicker({
     return () => {
       cancelled = true;
     };
-  }, [debouncedSearch]);
+  }, [debouncedSearch, lat, lng]);
 
   const resolveCoords = useCallback(
     async (newLat: number, newLng: number) => {
@@ -215,6 +222,29 @@ export function AddressMapPicker({
     if (place.lat && place.lng) {
       await resolveCoords(place.lat, place.lng);
       return;
+    }
+
+    if (place.placeId && !place.placeId.startsWith('area_') && !place.placeId.startsWith('osm_')) {
+      setResolving(true);
+      try {
+        const placeHit = await api.get<{ address: string; lat: number; lng: number }>(
+          `/stores/address/place?placeId=${encodeURIComponent(place.placeId)}`,
+        );
+        if (placeHit.lat && placeHit.lng) {
+          const nextAddress = placeHit.address || place.description;
+          setResolvedAddress(nextAddress);
+          setSearchQuery(nextAddress);
+          setLat(placeHit.lat);
+          setLng(placeHit.lng);
+          onChange({ address: nextAddress, lat: placeHit.lat, lng: placeHit.lng });
+          onLocationResolved?.();
+          return;
+        }
+      } catch {
+        /* Fall through to a text geocode of the suggestion. */
+      } finally {
+        setResolving(false);
+      }
     }
 
     setResolving(true);
@@ -309,19 +339,28 @@ export function AddressMapPicker({
       </div>
 
       {showSuggestions && suggestions.length > 0 && (
-        <ul className="address-suggestions absolute z-40 left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl border border-navy-border bg-navy-card shadow-xl">
-          {suggestions.map((place) => (
-            <li key={place.placeId}>
-              <button
-                type="button"
-                onClick={() => void selectSuggestion(place)}
-                className="w-full text-left px-3 py-2.5 text-sm text-fg hover:bg-brand-subtle transition-colors flex items-start gap-2"
-              >
-                <MapPin size={14} className="text-brand shrink-0 mt-0.5" aria-hidden />
-                <span className="line-clamp-2">{place.description}</span>
-              </button>
-            </li>
-          ))}
+        <ul className="address-suggestions absolute z-40 left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl border border-navy-border bg-white shadow-xl">
+          {suggestions.map((place) => {
+            const title = place.mainText || place.description.split(',')[0]?.trim() || place.description;
+            const detail = place.secondaryText || place.description.slice(title.length).replace(/^,\s*/, '');
+            return (
+              <li key={place.placeId}>
+                <button
+                  type="button"
+                  onClick={() => void selectSuggestion(place)}
+                  className="w-full text-left px-3 py-2.5 hover:bg-brand-subtle transition-colors flex items-start gap-2.5"
+                >
+                  <MapPin size={16} className="text-brand shrink-0 mt-0.5" aria-hidden />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-slate-900 truncate">{title}</span>
+                    {detail ? (
+                      <span className="block text-xs text-slate-500 truncate">{detail}</span>
+                    ) : null}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
