@@ -66,7 +66,10 @@ export function loyaltySpinSubtitle(
   return `You're in! ${loyaltySpin.winChanceNumerator} in ${loyaltySpin.winChanceDenominator} chance to win a prize on each spin.`;
 }
 
-/** Show spin FAB, header button, and auto-popup only when the customer may spin now. */
+/**
+ * Show spin FAB, header button, and auto-popup only when the customer may spin now.
+ * Guests included: the API answers canSpin false for them when the admin's criteria need a sign-in.
+ */
 export function shouldShowSpinEntryPoints(
   eligibility: SpinEligibility | null | undefined,
 ): boolean {
@@ -92,10 +95,8 @@ export function shouldShowSpinFab(
 /** Home (or configured pages) auto popup when the customer can spin. */
 export function shouldAutoOpenSpinPopup(
   eligibility: SpinEligibility | null | undefined,
-  opts?: { isAuthenticated?: boolean; pathname?: string },
+  opts?: { pathname?: string },
 ): boolean {
-  // Guests must never get the auto popup (signed-out users).
-  if (!opts?.isAuthenticated) return false;
   if (!shouldShowSpinEntryPoints(eligibility)) return false;
   const display = resolveDisplay(eligibility);
   if (!display.autoPopup) return false;

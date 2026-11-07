@@ -9,8 +9,8 @@ import { OfferCard } from "./OfferCard";
 import { OffersMotion } from "./OffersMotion";
 import { toOffer } from "./offers.data";
 
-/** Cards shown on the home page; the rest are on the promotions page. */
-const MAX_OFFERS = 6;
+/** Cards shown on the home page: one row, as in the prototype. The rest are on the promotions page. */
+const MAX_OFFERS = 3;
 
 /**
  * The live home promotions (the same ones the app's offers slider used, for the chosen store), drawn

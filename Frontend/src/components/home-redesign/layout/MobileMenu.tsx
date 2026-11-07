@@ -3,6 +3,7 @@
 import { ArrowUpRight, ChevronRight, Clock, MapPin, Phone, UserRound } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { Container } from "@/components/home-redesign/ui/Container";
 import { contactInfo, mainNav } from "@/components/home-redesign/config/site";
@@ -115,6 +116,7 @@ type MobileMenuProps = {
  * The page is kept from scrolling while it is open.
  */
 export function MobileMenu({ open, onClose, originRef, renderRow }: MobileMenuProps) {
+  const pathname = usePathname();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const timeline = useRef<gsap.core.Timeline | null>(null);
   const openRef = useRef(open);
@@ -216,8 +218,8 @@ export function MobileMenu({ open, onClose, originRef, renderRow }: MobileMenuPr
 
         <Container as="nav" aria-label="Main" className="relative mt-2 sm:mt-6">
           <ul>
-            {mainNav.map((item, index) => {
-              const isCurrent = index === 0;
+            {mainNav.map((item) => {
+              const isCurrent = item.href === pathname;
               return (
                 <li key={item.label} className="overflow-hidden border-b border-white/15">
                   <Link

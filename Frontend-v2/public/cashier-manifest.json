@@ -1,0 +1,40 @@
+{
+  "id": "/admin/pos",
+  "name": "Bing Chun Cashier",
+  "short_name": "Cashier",
+  "description": "Bing Chun in-store cashier for counter orders.",
+  "start_url": "/admin/pos",
+  "scope": "/admin",
+  "display": "standalone",
+  "background_color": "#0a0b1e",
+  "theme_color": "#307ef2",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["business", "food"],
+  "lang": "en-LK"
+}

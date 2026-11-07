@@ -164,7 +164,7 @@ export default function HomeDesktopLayout({
             <p className="home-desktop__rewards-points">
               {points.toLocaleString()} <span>Available Points</span>
             </p>
-            <Link href="/account/loyalty" className="home-desktop__rewards-btn">
+            <Link href="/account/rewards" className="home-desktop__rewards-btn">
               Redeem Now
             </Link>
             <div className="home-desktop__rewards-progress">

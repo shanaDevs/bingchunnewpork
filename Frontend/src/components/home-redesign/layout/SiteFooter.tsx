@@ -40,8 +40,9 @@ function TikTokIcon() {
   );
 }
 
+// Colours are !important: the app's light theme restyles every `footer a` (globals.css), which would win otherwise.
 const linkClass =
-  "font-medium text-brand-900/80 decoration-sun-400 decoration-2 underline-offset-[6px] transition-colors hover:text-brand-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-600";
+  "font-medium text-brand-900/80! decoration-sun-400 decoration-2 underline-offset-[6px] transition-colors hover:text-brand-600! hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-600";
 
 /** One contact line: a small brand-blue icon beside the text, nudged down to sit on the first line. */
 function ContactItem({ icon: Icon, children }: { icon: typeof Phone; children: ReactNode }) {
@@ -63,8 +64,9 @@ const socialIcons = { Facebook: FacebookIcon, Instagram: InstagramIcon, TikTok: 
  */
 export function SiteFooter() {
   return (
-    // FooterMotion reveals the content on scroll; the `data-footer-*` attributes are its hooks.
-    <FooterMotion className="relative isolate overflow-hidden border-t-0! bg-brand-50 text-brand-900">
+    // FooterMotion reveals the content on scroll; the `data-footer-*` attributes are its hooks. The border and
+    // background are !important to beat the app's light-theme `footer` rule (globals.css).
+    <FooterMotion className="relative isolate overflow-hidden border-t-0! bg-brand-50! text-brand-900">
       {/* White wave from the page above into the footer, echoing the hero's bottom wave. */}
       <svg
         aria-hidden="true"
@@ -78,11 +80,13 @@ export function SiteFooter() {
         />
       </svg>
 
-      <Container className="pt-20 pb-6 max-sm:pt-14 max-sm:pb-5 sm:pt-24">
+      {/* Phones: the bottom padding also clears the bottom nav (--bottom-nav-space is 0 from md up). */}
+      <Container className="pt-20 pb-[calc(var(--bottom-nav-space)+1.5rem)] max-sm:pt-14 max-sm:pb-[calc(var(--bottom-nav-space)+1.25rem)] sm:pt-24">
         <div className="grid grid-cols-2 gap-x-8 gap-y-12 max-sm:gap-y-8 sm:grid-cols-3 lg:grid-cols-[1.6fr_1fr_1fr_1fr]">
           <div data-footer-col className="col-span-2 sm:col-span-3 lg:col-span-1">
             <div data-footer-item>
-              <Wordmark className="text-brand-700" />
+              {/* A link, so its colour is !important too (see linkClass). */}
+              <Wordmark className="text-brand-700!" />
             </div>
             <p data-footer-item className="mt-4 max-w-xs text-lg text-brand-900/80 max-sm:mt-3 max-sm:text-base">
               A little happiness in every sip.
@@ -97,7 +101,7 @@ export function SiteFooter() {
                       aria-label={`Bing Chun on ${label}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="grid size-11 place-items-center rounded-full bg-white text-brand-600 shadow-sm ring-1 ring-brand-100 transition-colors ring-inset hover:bg-brand-600 hover:text-snow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                      className="grid size-11 place-items-center rounded-full bg-white text-brand-600! shadow-sm ring-1 ring-brand-100 transition-colors ring-inset hover:bg-brand-600 hover:text-snow! focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
                     >
                       <Icon />
                     </a>
