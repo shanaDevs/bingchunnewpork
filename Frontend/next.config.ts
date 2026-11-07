@@ -105,7 +105,8 @@ function buildConnectSrc(): string {
 
 const CONNECT_SRC = buildConnectSrc();
 
-const GOOGLE_MAPS_HOSTS = 'https://maps.googleapis.com https://maps.gstatic.com';
+const GOOGLE_MAPS_HOSTS =
+  'https://maps.googleapis.com https://maps.gstatic.com https://tile.googleapis.com';
 
 const SHOP_CSP = [
   "default-src 'self'",

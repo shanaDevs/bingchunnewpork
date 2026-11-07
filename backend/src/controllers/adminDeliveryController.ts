@@ -1403,17 +1403,46 @@ export async function listPendingDeliveryOrders(req: Request, res: Response, nex
   }
 }
 
+const LIVE_MAP_JOB_STATUSES = ['ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING'] as const;
+
 export async function listLiveDrivers(req: Request, res: Response, next: NextFunction) {
   try {
     const storeId = await adminStoreIdOptional(req, req.query.storeId as string | undefined);
+    const activeJobOnBranch = storeId
+      ? {
+          deliveryJobs: {
+            some: { storeId, status: { in: [...LIVE_MAP_JOB_STATUSES] } },
+          },
+        }
+      : {
+          deliveryJobs: {
+            some: { status: { in: [...LIVE_MAP_JOB_STATUSES] } },
+          },
+        };
+
     const drivers = await prisma.adminUser.findMany({
       where: {
         role: { name: 'DELIVERY_DRIVER' },
         isActive: true,
-        dutyStatus: { in: ['ONLINE', 'ON_DELIVERY'] },
-        ...(storeId
-          ? { OR: [{ storeId }, { accessibleStores: { some: { id: storeId } } }] }
-          : {}),
+        AND: [
+          {
+            OR: [
+              { dutyStatus: { in: ['ONLINE', 'ON_DELIVERY'] } },
+              activeJobOnBranch,
+            ],
+          },
+          ...(storeId
+            ? [
+                {
+                  OR: [
+                    { storeId },
+                    { accessibleStores: { some: { id: storeId } } },
+                    activeJobOnBranch,
+                  ],
+                },
+              ]
+            : []),
+        ],
       },
       select: {
         id: true,

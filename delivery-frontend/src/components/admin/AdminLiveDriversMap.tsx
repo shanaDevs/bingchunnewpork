@@ -41,6 +41,7 @@ export type LiveDriverMarker = {
   heading?: number | null;
   updatedAt?: string;
   path?: LivePathPoint[];
+  locationApproximate?: boolean;
 };
 
 export type LiveDestinationMarker = {
@@ -106,6 +107,21 @@ function FocusDriver({
   return null;
 }
 
+function MapResizeTrigger({ trigger }: { trigger: number }) {
+  const map = useMap();
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        map.invalidateSize({ animate: false });
+      } catch {
+        /* ignore */
+      }
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [map, trigger]);
+  return null;
+}
+
 const TAIL_POINT_LIMIT = 10;
 
 function tailPositions(path: LivePathPoint[]): [number, number][] {
@@ -124,6 +140,7 @@ interface Props {
   zoomPosition?: 'topleft' | 'topright';
   focusPosition?: [number, number] | null;
   focusNonce?: number;
+  resizeNonce?: number;
 }
 
 export default function AdminLiveDriversMap({
@@ -138,6 +155,7 @@ export default function AdminLiveDriversMap({
   zoomPosition = 'topleft',
   focusPosition = null,
   focusNonce = 0,
+  resizeNonce = 0,
 }: Props) {
   const points = useMemo<[number, number][]>(
     () => [
@@ -156,6 +174,7 @@ export default function AdminLiveDriversMap({
         <ZoomControl position={zoomPosition} />
         <FitBounds points={points} mode={fitBoundsMode} />
         <FocusDriver position={focusPosition} nonce={focusNonce} />
+        <MapResizeTrigger trigger={resizeNonce} />
         {stores.map((store) => (
           <Marker key={store.id} position={[store.lat, store.lng]} icon={storeIcon}>
             <Popup>
@@ -210,11 +229,13 @@ export default function AdminLiveDriversMap({
                 <Popup>
                   <strong>{driver.driverName}</strong>
                   {driver.storeName && <div>{driver.storeName}</div>}
-                  {driver.updatedAt && (
+                  {driver.locationApproximate ? (
+                    <div className="text-xs text-amber-600">No GPS yet — shown near branch</div>
+                  ) : driver.updatedAt ? (
                     <div className="text-xs opacity-70">
                       Updated {new Date(driver.updatedAt).toLocaleTimeString()}
                     </div>
-                  )}
+                  ) : null}
                 </Popup>
               </Marker>
             </Fragment>
