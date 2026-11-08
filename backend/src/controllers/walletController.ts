@@ -19,23 +19,21 @@ import {
   listWalletSecurityAuditLogs,
   parseWalletSecurityAuditListQuery,
 } from '../lib/walletSecurityAuditSchema';
-import { z } from 'zod';
 import { resolveBranchCancellationGatewayFeeLkr } from '../lib/refundPaymentStructure';
 import { isWalletCreditPaymentMethod } from '../lib/orderPayment';
 import { ensureWalletSettlementColumns } from '../lib/walletSchema';
-import { ensureWithdrawalSchema } from '../lib/withdrawalSchema';
+import { ensureWithdrawalInReviewEnumReady, ensureWithdrawalSchema } from '../lib/withdrawalSchema';
 import {
   listWithdrawalsUnsettledForDartCodes,
 } from '../lib/settlementWithdrawalQuery';
 import { fetchSummarizedPaidOrderRevenue } from '../lib/walletRevenue';
-import { getWalletAnalysis } from '../lib/walletAnalysis';
+import { getWalletAnalysis, invalidateWalletAnalysisCache } from '../lib/walletAnalysis';
 import { recalculateWalletBalance, syncMissingWalletPayments } from '../lib/walletSync';
 import {
   centsToDecimal,
   decimalFieldToCentsNumber,
   lkrToCents,
   parseDecimalFromDb,
-  zLkrToCentsInput,
 } from '../lib/moneyDecimal';
 import { insertWalletLedgerRow } from '../lib/walletTransactionInsert';
 import { parseLockedStoreWallet, walletDataAfterBalanceDelta, walletDataAfterDebit } from '../lib/walletStoreUpdates';
@@ -78,6 +76,7 @@ import {
   analyticsCacheKey,
   invalidateAnalyticsCache,
   invalidateAnalyticsCacheByPrefix,
+  invalidateDashboardStatsCache,
   withAnalyticsCache,
 } from '../lib/analyticsResponseCache';
 import {
@@ -104,127 +103,41 @@ import {
 } from '../lib/walletControllerSupport';
 import type { WithdrawalStatus } from '@prisma/client';
 import {
+  createInReviewPayoutDraft,
+  listInReviewPayoutMarks,
+  removeInReviewPayoutDraft,
+} from '../lib/payoutInReviewDraft';
+import {
+  loadReviewStoreNames,
+  renderBranchPayoutReviewInvoice,
+  renderBranchPayoutReviewZip,
+  resolveInReviewWithdrawalId,
+  type PayoutReviewPeriodRef,
+} from '../lib/payoutReviewInvoice';
+import { findInReviewWithdrawalForPeriod } from '../lib/withdrawalPayoutPeriod';
+import {
   walletAnalysisQuerySchema,
+  walletPayoutsDueQuerySchema,
   walletReportQuerySchema,
   walletTransactionsQuerySchema,
   walletWithdrawalsListQuerySchema,
 } from '../lib/httpSchemas';
-
-const adjustSchema = z.object({
-  type: z.enum(['ADJUSTMENT', 'PAYOUT', 'REFUND', 'CREDIT', 'DEBIT']),
-  amount: z.number().int().positive(),
-  description: z.string().trim().min(1, 'A reason is required').max(500),
-  reference: z.string().max(255).optional(),
-  isCredit: z.boolean().optional(),
-  direction: z.enum(['IN', 'OUT']).optional(),
-  password: z.string().min(1, 'PIN is required'),
-});
-
-const settleRangeSchema = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  description: z.string().max(500).optional(),
-});
-
-const adminPinField = z.string().min(1, 'PIN is required');
-
-const walletPinSchema = z.object({
-  password: adminPinField,
-});
-
-const withdrawalRequestSchema = z.object({
-  amount: zLkrToCentsInput(z).pipe(z.number().int().positive()),
-  periodDays: z.coerce.number().refine((n) => (PAYOUT_PERIOD_DAYS as readonly number[]).includes(n), {
-    message: `periodDays must be one of: ${PAYOUT_PERIOD_DAYS.join(', ')}`,
-  }),
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  remarks: z.string().max(500).optional(),
-  isAdvance: z.boolean().optional().default(false),
-  /** Admin password (PIN) — required to initiate a payout request. */
-  password: adminPinField,
-});
-
-const withdrawalRejectSchema = z.object({
-  reason: z.string().max(500).optional(),
-});
-
-const netPreviewQuerySchema = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  periodDays: z.coerce.number().optional(),
-  storeId: z.string().min(1).optional(),
-});
-
-const approveWithdrawalBodySchema = z
-  .object({
-    paymentMethod: z.enum(['BANK_TRANSFER', 'CASH', 'CHECK']),
-    checkNumber: z.string().max(64).optional(),
-    checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    /** Admin password (PIN) — required to approve a payout request. */
-    password: adminPinField,
-  })
-  .superRefine((data, ctx) => {
-    if (data.paymentMethod !== 'CHECK') return;
-    if (!data.checkNumber?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Check number is required',
-        path: ['checkNumber'],
-      });
-    }
-    if (!data.checkDate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Check date is required',
-        path: ['checkDate'],
-      });
-    }
-  });
-
-const initiatePayoutBodySchema = z
-  .object({
-    amount: zLkrToCentsInput(z).pipe(z.number().int().positive()),
-    periodDays: z.coerce.number().refine((n) => (PAYOUT_PERIOD_DAYS as readonly number[]).includes(n), {
-      message: `periodDays must be one of: ${PAYOUT_PERIOD_DAYS.join(', ')}`,
-    }),
-    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    remarks: z.string().max(500).optional(),
-    isAdvance: z
-      .union([z.boolean(), z.enum(['true', 'false'])])
-      .optional()
-      .transform((v) => v === true || v === 'true'),
-    paymentMethod: z.enum(['BANK_TRANSFER', 'CASH', 'CHECK']),
-    checkNumber: z.string().max(64).optional(),
-    checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    /** Admin password (PIN) — required to initiate a direct branch payout. */
-    password: adminPinField,
-    /**
-     * Preferred proof transport: base64 JSON (multipart to App Platform was returning
-     * edge 504 before the handler ran).
-     */
-    proofBase64: z.string().min(8).max(6_000_000).optional(),
-    proofFileName: z.string().min(1).max(255).optional(),
-    proofMimeType: z.string().min(3).max(100).optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.paymentMethod !== 'CHECK') return;
-    if (!data.checkNumber?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Check number is required',
-        path: ['checkNumber'],
-      });
-    }
-    if (!data.checkDate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Check date is required',
-        path: ['checkDate'],
-      });
-    }
-  });
+import {
+  adjustSchema,
+  approveWithdrawalBodySchema,
+  attachWithdrawalProofBodySchema,
+  initiatePayoutBodySchema,
+  netPreviewQuerySchema,
+  payoutDraftInvoiceQuerySchema,
+  payoutReviewPeriodSchema,
+  payoutReviewZipSchema,
+  settleRangeSchema,
+  settleWalletBodySchema,
+  setPayoutReviewSchema,
+  walletPinSchema,
+  withdrawalRejectSchema,
+  withdrawalRequestSchema,
+} from '../lib/walletControllerSchemas';
 
 export async function listWallets(req: Request, res: Response) {
   await ensureWithdrawalSchema();
@@ -266,32 +179,42 @@ export async function getPayoutPeriodInfoHandler(req: Request, res: Response, ne
 // GET /admin/wallet/payouts-due
 // Super Admin queue: all elapsed unpaid branch payout periods (oldest first).
 // Optional query `from`/`to` are ignored (wallet month filter does not scope this list).
-// Optional `cursor` paginates active branches.
+// `page` / `limit` (default 10) paginate due periods. Optional `search` filters by branch name.
 // ──────────────────────────────────────────────────────────────────────────────
 function invalidateWalletPayoutsDueCache(): void {
   invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-payouts-due']));
+}
+
+function invalidateBranchPayablesBalanceCaches(storeId: string): void {
+  invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
+  invalidateWalletAnalysisCache();
+  invalidateDashboardStatsCache();
 }
 
 export async function getPayoutsDueHandler(req: Request, res: Response, next: NextFunction) {
   try {
     if (req.user?.role !== 'SYSTEM_ADMIN') throw new AppError('Forbidden', 403);
 
-    const from = typeof req.query.from === 'string' ? req.query.from : undefined;
-    const to = typeof req.query.to === 'string' ? req.query.to : undefined;
-    const cursor = typeof req.query.cursor === 'string' && req.query.cursor ? req.query.cursor : undefined;
+    const { page, limit, search, from, to } = walletPayoutsDueQuerySchema.parse(req.query);
 
-    // Schema patch once per process; do not block every page behind DDL checks.
-    void ensureWithdrawalSchema().catch(() => undefined);
+    await ensureWithdrawalInReviewEnumReady();
 
     // PgBouncer can drop idle sockets mid fan-out; reconnect once and retry.
-    const page = await retryOnceOnDisconnect(
-      async () => listSuperAdminPayoutsDueItems({ from, to, ...(cursor ? { cursor } : {}) }),
+    const result = await retryOnceOnDisconnect(
+      async () =>
+        listSuperAdminPayoutsDueItems({
+          page,
+          limit,
+          ...(search ? { search } : {}),
+          ...(from ? { from } : {}),
+          ...(to ? { to } : {}),
+        }),
       async () => {
         await prisma.$disconnect().catch(() => undefined);
         await prisma.$connect();
       },
     );
-    res.json({ success: true, data: page });
+    res.json({ success: true, data: result });
   } catch (err) {
     next(err);
   }
@@ -453,13 +376,6 @@ export async function getWithdrawalProofUrlHandler(req: Request, res: Response, 
   }
 }
 
-const attachWithdrawalProofBodySchema = z.object({
-  password: adminPinField,
-  proofBase64: z.string().min(8).max(6_000_000),
-  proofFileName: z.string().min(1).max(255).optional(),
-  proofMimeType: z.string().min(3).max(100).optional(),
-});
-
 /** Attach / replace settlement proof on an already-approved payout (JSON base64). */
 export async function attachWithdrawalProofHandler(req: Request, res: Response, next: NextFunction) {
   try {
@@ -578,7 +494,7 @@ export async function requestWithdrawalHandler(req: Request, res: Response, next
       withdrawalId: withdrawal.id,
     });
 
-    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
+    invalidateBranchPayablesBalanceCaches(storeId);
     invalidateWalletPayoutsDueCache();
 
     res.status(201).json({ success: true, data: serializeWithdrawal(withdrawal) });
@@ -682,7 +598,7 @@ export async function approveWithdrawalHandler(req: Request, res: Response, next
       withdrawalId: withdrawal.id,
     });
 
-    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', withdrawal.storeId]));
+    invalidateBranchPayablesBalanceCaches(withdrawal.storeId);
     invalidateWalletPayoutsDueCache();
 
     res.json({ success: true, data: serializeWithdrawal(final) });
@@ -705,7 +621,7 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
 
     await verifyAdminPin(user.sub, data.password);
 
-    const amountCents = data.amount;
+    let amountCents = data.amount;
     const periodDays = data.periodDays as (typeof PAYOUT_PERIOD_DAYS)[number];
     const periodBounds =
       data.from && data.to ? { from: data.from, to: data.to } : null;
@@ -727,14 +643,30 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
     }
     const proofFile = assertSettlementProofFile(uploadedProof);
 
+    let draftWithdrawalId: string | undefined = data.withdrawalId;
+    let inReviewDraft: Awaited<ReturnType<typeof findInReviewWithdrawalForPeriod>> = null;
+    if (periodBounds) {
+      inReviewDraft = data.withdrawalId
+        ? await prisma.storeWithdrawal.findFirst({
+            where: { id: data.withdrawalId, storeId, status: 'IN_REVIEW' },
+          })
+        : await findInReviewWithdrawalForPeriod(storeId, periodBounds.from, periodBounds.to);
+      if (inReviewDraft) {
+        draftWithdrawalId = inReviewDraft.id;
+        amountCents = withdrawalAmountCents(inReviewDraft);
+      }
+    }
+
     const [prevalidated, wallet, store] = await Promise.all([
-      validatePayoutRequest(
-        storeId,
-        amountCents,
-        periodDays,
-        data.isAdvance ?? false,
-        periodBounds,
-      ),
+      inReviewDraft
+        ? Promise.resolve(null)
+        : validatePayoutRequest(
+            storeId,
+            amountCents,
+            periodDays,
+            data.isAdvance ?? false,
+            periodBounds,
+          ),
       getOrCreateWallet(storeId),
       prisma.store.findUnique({
         where: { id: storeId },
@@ -758,7 +690,8 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
         checkNumber: data.paymentMethod === 'CHECK' ? data.checkNumber?.trim() : null,
         checkDate,
         ...(periodBounds ? { periodBounds } : {}),
-        prevalidated,
+        ...(draftWithdrawalId ? { draftWithdrawalId } : {}),
+        ...(prevalidated ? { prevalidated } : {}),
       },
     );
 
@@ -769,7 +702,7 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
       withdrawalId: updated.id,
     });
 
-    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
+    invalidateBranchPayablesBalanceCaches(storeId);
     invalidateWalletPayoutsDueCache();
 
     // Respond as soon as the payout is committed. Spaces proof + invoice PDF must not
@@ -843,7 +776,7 @@ export async function rejectWithdrawalHandler(req: Request, res: Response, next:
       reason: data.reason,
     });
 
-    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', withdrawal.storeId]));
+    invalidateBranchPayablesBalanceCaches(withdrawal.storeId);
     invalidateWalletPayoutsDueCache();
 
     res.json({ success: true, data: serializeWithdrawal(withdrawal) });
@@ -874,7 +807,7 @@ export async function cancelWithdrawalHandler(req: Request, res: Response, next:
       withdrawalId: withdrawal.id,
     });
 
-    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', withdrawal.storeId]));
+    invalidateBranchPayablesBalanceCaches(withdrawal.storeId);
     invalidateWalletPayoutsDueCache();
 
     res.json({ success: true, data: serializeWithdrawal(withdrawal) });
@@ -1180,9 +1113,8 @@ export async function settleWallet(req: Request, res: Response, next: NextFuncti
     await ensureWalletSettlementColumns();
 
     const storeId = resolveStoreId(req);
-    const data = settleRangeSchema.parse(req.body ?? {});
-    const pin = z.object({ password: adminPinField }).parse(req.body ?? {});
-    await verifyAdminPin(user.sub, pin.password);
+    const data = settleWalletBodySchema.parse(req.body ?? {});
+    await verifyAdminPin(user.sub, data.password);
 
     const wallet = await getOrCreateWallet(storeId);
     assertRangeAfterLastSettled(wallet.lastSettledAt ?? null, data.from);
@@ -1630,7 +1562,7 @@ export async function syncWallets(req: Request, res: Response, next: NextFunctio
 
     const result = await syncMissingWalletPayments(scopeStoreId);
     if (scopeStoreId) {
-      invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', scopeStoreId]));
+      invalidateBranchPayablesBalanceCaches(scopeStoreId);
     } else {
       invalidateWalletPayoutsDueCache();
     }
@@ -1649,6 +1581,162 @@ export async function syncWallets(req: Request, res: Response, next: NextFunctio
           : 'Wallet is already up to date',
       data: result,
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+function assertPayoutReviewAdmin(req: Request): void {
+  if (req.user?.role !== 'SYSTEM_ADMIN') throw new AppError('Forbidden', 403);
+}
+
+function attachmentDisposition(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+function sendAttachment(res: Response, buffer: Buffer, contentType: string, filename: string): void {
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Disposition', attachmentDisposition(filename));
+  res.setHeader('Content-Length', buffer.length);
+  res.send(buffer);
+}
+
+// GET /admin/wallet/payout-reviews
+export async function listPayoutReviewsHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    assertPayoutReviewAdmin(req);
+    await ensureWithdrawalInReviewEnumReady();
+    const rows = await listInReviewPayoutMarks();
+    res.json({
+      success: true,
+      data: rows.map((row) => ({
+        storeId: row.storeId,
+        periodFrom: row.periodFrom,
+        periodTo: row.periodTo,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// PUT /admin/wallet/payout-reviews
+export async function setPayoutReviewHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    assertPayoutReviewAdmin(req);
+    const body = setPayoutReviewSchema.parse(req.body);
+    if (body.periodFrom > body.periodTo) throw new AppError('Invalid payout period', 400);
+    await ensureWithdrawalSchema();
+    if (body.inReview) {
+      const names = await loadReviewStoreNames([body.storeId]);
+      const storeName = names.get(body.storeId);
+      if (!storeName) throw new AppError('Branch not found', 404);
+      await createInReviewPayoutDraft({
+        storeId: body.storeId,
+        storeName,
+        periodFrom: body.periodFrom,
+        periodTo: body.periodTo,
+        markedById: req.user!.sub,
+      });
+      invalidateBranchPayablesBalanceCaches(body.storeId);
+      invalidateWalletPayoutsDueCache();
+    } else {
+      await removeInReviewPayoutDraft(body.storeId, body.periodFrom, body.periodTo);
+      invalidateBranchPayablesBalanceCaches(body.storeId);
+      invalidateWalletPayoutsDueCache();
+    }
+    res.json({ success: true, data: { ...body } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function resolveReviewItems(items: PayoutReviewPeriodRef[]) {
+  for (const item of items) {
+    if (item.periodFrom > item.periodTo) throw new AppError('Invalid payout period', 400);
+  }
+  const names = await loadReviewStoreNames(items.map((item) => item.storeId));
+  return items.map((item) => {
+    const storeName = names.get(item.storeId);
+    if (!storeName) throw new AppError('Branch not found', 404);
+    return { ...item, storeName };
+  });
+}
+
+// GET /admin/wallet/payout-review-invoice
+export async function getPayoutReviewInvoiceHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    assertPayoutReviewAdmin(req);
+    const query = payoutReviewPeriodSchema.parse({
+      storeId: req.query.storeId,
+      periodFrom: req.query.periodFrom,
+      periodTo: req.query.periodTo,
+    });
+    const [item] = await resolveReviewItems([query]);
+    const withdrawalId =
+      (await resolveInReviewWithdrawalId(item!.storeId, item!.periodFrom, item!.periodTo)) ?? undefined;
+    const file = await renderBranchPayoutReviewInvoice({
+      ...item!,
+      withdrawalId,
+    });
+    sendAttachment(res, file.buffer, 'application/pdf', file.filename);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /admin/wallet/payout-draft-invoice — branch or Super Admin; frozen draft PDF.
+export async function getPayoutDraftInvoiceHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    await ensureWithdrawalSchema();
+    const query = payoutDraftInvoiceQuerySchema.parse(req.query);
+    let storeId = query.storeId;
+    let periodFrom = query.periodFrom;
+    let periodTo = query.periodTo;
+    let withdrawalId = query.withdrawalId;
+
+    if (withdrawalId) {
+      const draft = await prisma.storeWithdrawal.findFirst({
+        where: { id: withdrawalId, status: 'IN_REVIEW' },
+        select: { storeId: true, periodFrom: true, periodTo: true },
+      });
+      if (!draft?.periodFrom || !draft.periodTo) throw new AppError('Payout draft not found', 404);
+      storeId = draft.storeId;
+      periodFrom = toDateStr(draft.periodFrom);
+      periodTo = toDateStr(draft.periodTo);
+    }
+
+    if (!storeId || !periodFrom || !periodTo) {
+      throw new AppError('storeId, periodFrom, and periodTo are required', 400);
+    }
+
+    await assertStoreAccess(req, storeId);
+    const names = await loadReviewStoreNames([storeId]);
+    const storeName = names.get(storeId);
+    if (!storeName) throw new AppError('Branch not found', 404);
+    const file = await renderBranchPayoutReviewInvoice({
+      storeId,
+      storeName,
+      periodFrom,
+      periodTo,
+      withdrawalId,
+    });
+    sendAttachment(res, file.buffer, 'application/pdf', file.filename);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// POST /admin/wallet/payout-review-zip
+export async function downloadPayoutReviewZipHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    assertPayoutReviewAdmin(req);
+    const body = payoutReviewZipSchema.parse(req.body);
+    const items = await resolveReviewItems(body.items);
+    const zip = await renderBranchPayoutReviewZip(items);
+    const stamp = new Date().toISOString().slice(0, 10);
+    sendAttachment(res, zip, 'application/zip', `branch-payouts-${stamp}.zip`);
   } catch (err) {
     next(err);
   }

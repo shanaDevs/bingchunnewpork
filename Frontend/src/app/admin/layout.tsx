@@ -35,7 +35,7 @@ import { hasMenuReadAccess } from '@/lib/adminPermissions';
 import { deliveryFrontendHref, isExternalHref } from '@/lib/deliveryFrontendUrl';
 import { adminAuthHeaders, clearAdminAuth, installAdminFetch, refreshAdminAuth } from '@/lib/adminSession';
 import { useAdminSessionGuard } from '@/hooks/useAdminSessionGuard';
-import { getColomboDayOfWeek } from '@/lib/datetime';
+import { formatDate, getColomboDayOfWeek } from '@/lib/datetime';
 import { confirmDialog } from '@/store/confirmStore';
 
 const SIDEBAR_COLLAPSED_KEY = 'bc_admin_sidebar_collapsed';
@@ -707,6 +707,11 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
                 {branchIsClosed ? <DoorOpen size={16} /> : <DoorClosed size={16} />}
                 {branchIsClosed ? 'Open Branch' : 'Close Branch'}
               </button>
+            )}
+            {pathname === '/admin/orders' && (
+              <p className="hidden whitespace-nowrap text-xs font-semibold text-fg sm:block sm:text-sm">
+                {formatDate(new Date(), { day: 'numeric' })}
+              </p>
             )}
             <ThemeToggle />
             <AdminNotificationBell adminUser={adminUser} />

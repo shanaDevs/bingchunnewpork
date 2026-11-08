@@ -13,7 +13,7 @@ import {
   paymentMethodLabel,
 } from './format';
 import { collectPdfBuffer } from './parsing';
-import { resolvePayoutStatement } from './payoutStatement';
+import { enrichWithdrawalInvoiceInputForRender, resolvePayoutStatement } from './payoutStatement';
 import { withdrawalInvoiceRef } from './refs';
 import type { GenerateWithdrawalInvoiceInput, InvoicePageLayout } from './types';
 import {
@@ -32,7 +32,18 @@ import {
   WD_LAYOUT,
 } from './withdrawalPdfDrawing';
 
-function paymentFooterLines(input: GenerateWithdrawalInvoiceInput, checkDateLabel: string | null): string[] {
+function paymentFooterLines(
+  input: GenerateWithdrawalInvoiceInput,
+  checkDateLabel: string | null,
+  forReview: boolean,
+): string[] {
+  if (forReview) {
+    return [
+      'Status      : Payment Pending',
+      'Payment     : Not processed',
+      'Share this copy for approval before uploading the bank slip.',
+    ];
+  }
   const lines = [
     `Method      : ${paymentMethodLabel(input.paymentMethod)}`,
     'Virtual wallet : Branch wallet payout',
@@ -44,22 +55,51 @@ function paymentFooterLines(input: GenerateWithdrawalInvoiceInput, checkDateLabe
   return lines;
 }
 
-function statusLabel(input: GenerateWithdrawalInvoiceInput): string {
+function statusLabel(input: GenerateWithdrawalInvoiceInput, forReview: boolean): string {
+  if (forReview) return 'Payment Pending  \u2022  Awaiting payment';
   return `Paid  \u2022  ${paymentMethodLabel(input.paymentMethod)}`;
 }
+
+export type RenderWithdrawalInvoiceOptions = {
+  /** Live withdrawal snapshot — backfills Payout 1 wallet on Payout 2 invoices when missing from invoiceData. */
+  withdrawalBreakdown?: unknown;
+  cycleStage?: string | null;
+  /** Pre-payment copy. Amount rows stay on the payout snapshot; status is not Paid. */
+  forReview?: boolean;
+  /** Overrides the stored WD-INV reference. Paid invoices leave this unset. */
+  invoiceRef?: string | null;
+};
 
 /** Render the 2-page WD-INV payout invoice from stored input. */
 export async function renderWithdrawalInvoiceToBuffer(
   input: GenerateWithdrawalInvoiceInput,
+  renderOpts?: RenderWithdrawalInvoiceOptions,
 ): Promise<Buffer> {
-  const invoiceRef = withdrawalInvoiceRef(input.withdrawalId);
+  const enriched =
+    renderOpts?.withdrawalBreakdown != null
+      ? enrichWithdrawalInvoiceInputForRender(input, {
+          breakdown: renderOpts.withdrawalBreakdown,
+          cycleStage: renderOpts.cycleStage,
+        })
+      : input;
+  const statementOpts =
+    renderOpts?.withdrawalBreakdown != null
+      ? {
+          withdrawalBreakdown: renderOpts.withdrawalBreakdown,
+          cycleStage: renderOpts.cycleStage,
+        }
+      : undefined;
+  const forReview = renderOpts?.forReview === true;
+  const invoiceRef = renderOpts?.invoiceRef?.trim() || withdrawalInvoiceRef(input.withdrawalId);
   const branchName = branchDisplayName(input.storeName);
   const dateLabel = formatInvoiceDate(input.approvedAt);
   const checkDateLabel = input.checkDate ? formatInvoiceDate(input.checkDate) : null;
-  const periodLabel =
-    input.periodFrom && input.periodTo
+  const explicitPeriodLabel = input.periodLabel?.trim();
+  const periodLabel = explicitPeriodLabel
+    ? explicitPeriodLabel
+    : input.periodFrom && input.periodTo
       ? formatInvoicePeriodLabel(input.periodFrom, input.periodTo)
-      : input.periodLabel ?? null;
+      : null;
 
   const doc = new PDFDocument({ margin: 0, size: 'A4' });
   registerWithdrawalFonts(doc);
@@ -71,7 +111,7 @@ export async function renderWithdrawalInvoiceToBuffer(
   const contentW = pageW - marginX * 2;
   const layout: InvoicePageLayout = { pageW, pageH, marginX, contentW };
   const footer = computeWithdrawalFooterLayout(pageH);
-  const payLines = paymentFooterLines(input, checkDateLabel);
+  const payLines = paymentFooterLines(input, checkDateLabel, forReview);
 
   drawWhitePage(doc, pageW, pageH);
   let y = WD_LAYOUT.contentTop;
@@ -80,7 +120,7 @@ export async function renderWithdrawalInvoiceToBuffer(
   y = drawBilledTo(doc, layout, y, {
     branchName,
     periodLabel,
-    statusLabel: statusLabel(input),
+    statusLabel: statusLabel(input, forReview),
   });
 
   y = drawSectionTitle(doc, marginX, y, contentW, 'Platform sales');
@@ -95,7 +135,7 @@ export async function renderWithdrawalInvoiceToBuffer(
   );
   y += WD_LAYOUT.sectionGap;
 
-  const summaryRows = buildInvoiceSummaryRows(input);
+  const summaryRows = buildInvoiceSummaryRows(enriched, statementOpts);
   const notesBlockH = measureNotesBlockHeight(doc, contentW);
   const summaryRowH = resolvePage1SummaryRowH(pageH, y, summaryRows, notesBlockH);
 
@@ -119,7 +159,7 @@ export async function renderWithdrawalInvoiceToBuffer(
   y = WD_LAYOUT.contentTop - 6;
   y = drawPage2Pill(doc, layout, y);
 
-  const statement = resolvePayoutStatement(input);
+  const statement = resolvePayoutStatement(enriched, statementOpts);
   const sections = buildPage2PayoutSections(statement);
   for (const section of sections) {
     y = drawSectionTitle(doc, marginX, y, contentW, section.title, true);

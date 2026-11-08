@@ -22,7 +22,7 @@ const PRESET_PERIODS: Array<{ id: Exclude<DashboardPeriod, 'custom'>; label: str
 type Props = {
   period: DashboardPeriod;
   customRange: DateRange | undefined;
-  onPeriodChange: (period: Exclude<DashboardPeriod, 'custom'>) => void;
+  onPeriodChange: (period: DashboardPeriod) => void;
   onCustomRangeChange: (range: DateRange | undefined) => void;
   compact?: boolean;
   className?: string;
@@ -94,20 +94,32 @@ export default function DashboardPeriodFilter({
         );
       })}
 
-      <Popover open={customOpen} onOpenChange={setCustomOpen}>
+      <Popover
+        open={customOpen}
+        onOpenChange={(open) => {
+          setCustomOpen(open);
+          if (open && period !== 'custom') {
+            onPeriodChange('custom');
+          }
+        }}
+      >
         <PopoverTrigger
+          type="button"
           className={cn(buttonClass, compact && customActive && 'max-w-[7.5rem] truncate')}
-          style={pillStyle(customActive)}
+          style={pillStyle(period === 'custom' || customOpen || !!(customRange?.from || customRange?.to))}
         >
           {customLabel}
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="end" sideOffset={8}>
           <Calendar
             mode="range"
-            defaultMonth={customRange?.from}
+            defaultMonth={customRange?.from ?? customRange?.to ?? new Date()}
             selected={customRange}
             onSelect={(range) => {
               onCustomRangeChange(range);
+              if (range?.from) {
+                onPeriodChange('custom');
+              }
               if (range?.from && range?.to) {
                 setCustomOpen(false);
               }

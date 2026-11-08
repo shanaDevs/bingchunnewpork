@@ -1,6 +1,7 @@
 import type { Order, OrderStatus } from '@/types';
 import { getStatusLabel } from '@/lib/orderStatus';
 import { formatMoneyAmount } from '@/lib/receipt';
+import { cancellationReasonLabel, OTHER_CANCEL_REASON_VALUE } from '@/lib/cancellationReasons';
 
 /**
  * Friendly partial-refund phrases by percentage band (fallback when amount is unknown).
@@ -24,24 +25,59 @@ export const ORDER_CANCEL_REASON_LABELS: Record<string, string> = {
   PAYMENT_OR_SYSTEM_ISSUE: 'Payment or System Issue / Duplicate Order',
 };
 
-/** Human-readable cancellation summary for admin order lists. */
-export function formatOrderCancellationReason(params: {
-  status: string;
+export type OrderRejectReasonInput = {
+  status?: string | null;
   cancelReason?: string | null;
   cancelledBy?: string | null;
   cancellationNote?: string | null;
-}): string | null {
-  if (params.status !== 'CANCELLED') return null;
+  paymentStatus?: string | null;
+  refundCancellationReason?: string | null;
+  refundCustomReasonText?: string | null;
+};
 
-  const parts: string[] = [];
+function refundRejectReason(params: OrderRejectReasonInput): string | null {
+  const custom = params.refundCustomReasonText?.trim();
+  if (params.refundCancellationReason === OTHER_CANCEL_REASON_VALUE && custom) return custom;
+  if (custom && !params.refundCancellationReason) return custom;
+  if (!params.refundCancellationReason) return null;
+  return cancellationReasonLabel(params.refundCancellationReason);
+}
+
+/** Pull a staff/customer reject reason out of the CANCELLED status-event note. */
+export function parseReasonFromCancelNote(note?: string | null): string | null {
+  const trimmed = note?.trim() ?? '';
+  if (!trimmed) return null;
+  const tagged = trimmed.match(/\|\s*Reason:\s*(.+)$/i) ?? trimmed.match(/(?:^|\.\s+)Reason:\s*(.+)$/i);
+  if (tagged?.[1]?.trim()) return tagged[1].trim();
+  if (/^cancelled by customer\b/i.test(trimmed) && /refund/i.test(trimmed)) return null;
+  return trimmed;
+}
+
+/**
+ * Reject-reason cell for cancelled-order tables.
+ * Prefers the customer-selected / staff-typed reason over the generic admin category.
+ */
+export function resolveOrderRejectReason(params: OrderRejectReasonInput): string {
+  const fromNote = parseReasonFromCancelNote(params.cancellationNote);
+  if (fromNote) return fromNote;
+
+  const cancelledByCustomer = (params.cancelledBy ?? '').trim().toLowerCase() === 'customer';
+  const fromRefund = refundRejectReason(params);
+  if (cancelledByCustomer && fromRefund) return fromRefund;
+
   if (params.cancelReason) {
-    parts.push(ORDER_CANCEL_REASON_LABELS[params.cancelReason] ?? params.cancelReason);
+    return ORDER_CANCEL_REASON_LABELS[params.cancelReason] ?? params.cancelReason;
   }
-  const note = params.cancellationNote?.trim();
-  if (note) parts.push(note);
+  if (fromRefund) return fromRefund;
+  if (params.paymentStatus === 'REFUNDED') return 'Refunded';
+  return '—';
+}
 
-  if (parts.length > 0) return parts.join(' · ');
-
+/** Human-readable cancellation summary for admin order lists. */
+export function formatOrderCancellationReason(params: OrderRejectReasonInput & { status: string }): string | null {
+  if (params.status !== 'CANCELLED') return null;
+  const reason = resolveOrderRejectReason(params);
+  if (reason !== '—') return reason;
   const by = params.cancelledBy?.trim().toLowerCase();
   if (by === 'customer') return 'Customer cancellation';
   if (by) return `Cancelled by ${by}`;

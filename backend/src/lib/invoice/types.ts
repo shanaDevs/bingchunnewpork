@@ -128,6 +128,8 @@ export type InvoicePayoutStatement = {
   bankPenaltyOrderCount: number;
   jasonPayoutTopUpCents: number;
   branchNetPayoutCents: number;
+  /** Payout 2: online wallet collected in Payout 1 (cents) — display only on invoice. */
+  priorOnlineWalletAmountCents: number;
 };
 
 export type WithdrawalTableRow = {

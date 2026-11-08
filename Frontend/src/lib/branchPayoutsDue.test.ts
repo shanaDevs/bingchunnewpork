@@ -49,4 +49,11 @@ describe('isOldestUnpaidBranchPayoutRow', () => {
     expect(isOldestUnpaidBranchPayoutRow(all[1], all)).toBe(false);
     expect(isOldestUnpaidBranchPayoutRow(all[2], all)).toBe(true);
   });
+
+  it('prefers the API isOldestUnpaid flag on a partial page', () => {
+    const later = { ...all[1], isOldestUnpaid: false };
+    expect(isOldestUnpaidBranchPayoutRow(later, [later])).toBe(false);
+    const flagged = { ...all[1], isOldestUnpaid: true };
+    expect(isOldestUnpaidBranchPayoutRow(flagged, [flagged])).toBe(true);
+  });
 });

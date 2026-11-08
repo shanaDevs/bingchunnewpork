@@ -103,7 +103,7 @@ import {
   resolveStoreOrderingHours,
 } from '../lib/storeOrderingHours';
 import { fetchStoreOrderingHours } from '../lib/storeOrderingSchema';
-import { computeConvenientFee, getConvenienceFeeRates, getPickupOrderEditSettings, getCancelWindowMinutes, type PickupOrderEditSettings } from '../lib/appSchema';
+import { computeConvenientFee, getConvenienceFeeRates, getPickupOrderEditSettings, getCancelWindowMinutes, getPickupMaxOrderAmount, isPickupOrderOverMaxAmount, type PickupOrderEditSettings } from '../lib/appSchema';
 import {
   OTHER_CANCEL_REASON_VALUE,
   validateActiveCancellationReason,
@@ -120,6 +120,7 @@ import {
 } from '../services/inventoryReservationService';
 import { notifyMessagingOrderStatus } from '../services/messaging/messagingNotificationService';
 import {
+  appendReasonToCancelNote,
   buildCustomerCancelNote,
   getCustomerCancelEligibility,
   withCustomerCancelRefundFields,
@@ -946,6 +947,17 @@ export async function placeOrder(req: Request, res: Response, next: NextFunction
       }
     }
     const total = Math.max(0, subtotal + deliveryFee + convenientFee - discount - loyaltyDiscount);
+
+    if (data.orderMode === 'TAKEAWAY') {
+      const pickupMaxOrderAmount = await getPickupMaxOrderAmount();
+      if (isPickupOrderOverMaxAmount(total, pickupMaxOrderAmount)) {
+        throw new AppError(
+          `Pickup orders above LKR ${pickupMaxOrderAmount!.toLocaleString('en-LK')} cannot be placed online`,
+          400,
+        );
+      }
+    }
+
     const orderNumber = generateOrderNumber();
     const trackToken = generateTrackToken();
 
@@ -1971,12 +1983,19 @@ export async function cancelOrderByCustomer(req: Request, res: Response, next: N
     const partialRefundPercentage = tier === 'partial'
       ? await getRefundPercentageForStatus(existing.status)
       : null;
-    const note = buildCustomerCancelNote(tier, {
-      deliveryFee: existing.deliveryFee,
-      convenientFee: existing.convenientFee,
-      paymentMethod: existing.paymentMethod,
-      paymentStatus: existing.paymentStatus,
-    }, partialRefundPercentage);
+    const reasonLabel =
+      validatedReason.value === OTHER_CANCEL_REASON_VALUE
+        ? customReasonText?.trim() || validatedReason.label
+        : validatedReason.label;
+    const note = appendReasonToCancelNote(
+      buildCustomerCancelNote(tier, {
+        deliveryFee: existing.deliveryFee,
+        convenientFee: existing.convenientFee,
+        paymentMethod: existing.paymentMethod,
+        paymentStatus: existing.paymentStatus,
+      }, partialRefundPercentage),
+      reasonLabel,
+    );
 
     const orderStatusAtCancel = existing.status as OrderStatus;
 
@@ -2814,6 +2833,8 @@ export async function getAllOrders(req: Request, res: Response, next: NextFuncti
             select: {
               id: true,
               status: true,
+              cancellationReason: true,
+              customReasonText: true,
             },
           },
         },

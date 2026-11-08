@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
+import { verifyAdminPin } from '../lib/verifyAdminPin';
 import {
   getPaymentSettings,
   getEnabledMethodsForCheckout,
@@ -12,7 +13,36 @@ import {
   type PaymentMethodConfig,
   type OnlineGateway,
 } from '../lib/paymentSettings';
-import { ensureAppSchema, getConvenienceFeeRates, getConvenientFeeRate, getGatewayFeeRate, getDeliveryPlatformFeeRate, setDeliveryPlatformFeeRate, getMaxCupsPerRider, invalidatePickupOrderEditSettingsCache, invalidateGatewayFeeRateCache, invalidateDeliveryPlatformFeeRateCache, setMaxCupsPerRider, getAppDownloadSettings, setAppDownloadSettings, getWeeklyResetDay, setWeeklyResetDay, getSpinSettings, setSpinSettings, getCancelWindowMinutes, setCancelWindowMinutes, invalidateCancelWindowMinutesCache, getBranchCompletionRadiusM, setBranchCompletionRadiusM } from '../lib/appSchema';
+import {
+  ensureAppSchema,
+  getConvenienceFeeRates,
+  getConvenientFeeRate,
+  getGatewayFeeRate,
+  getCommissionSlabs,
+  setCommissionSlabs,
+  invalidateCommissionSlabsCache,
+  getDeliveryPlatformFeeRate,
+  setDeliveryPlatformFeeRate,
+  getMaxCupsPerRider,
+  invalidatePickupOrderEditSettingsCache,
+  invalidateGatewayFeeRateCache,
+  invalidateDeliveryPlatformFeeRateCache,
+  setMaxCupsPerRider,
+  getAppDownloadSettings,
+  setAppDownloadSettings,
+  getWeeklyResetDay,
+  setWeeklyResetDay,
+  getSpinSettings,
+  setSpinSettings,
+  getCancelWindowMinutes,
+  setCancelWindowMinutes,
+  invalidateCancelWindowMinutesCache,
+  getBranchCompletionRadiusM,
+  setBranchCompletionRadiusM,
+  getPickupMaxOrderAmount,
+  setPickupMaxOrderAmount,
+  invalidatePickupMaxOrderAmountCache,
+} from '../lib/appSchema';
 import { getGoogleMapsApiKey, setGoogleMapsApiKey } from '../lib/googleMapsKey';
 import { parseSpinCriteria, parseSpinDisplay } from '../lib/spinDisplay';
 import {
@@ -130,11 +160,13 @@ const updateSchema = z.object({
   webxpayApiPassword: z.string().optional(),
   webxpayMode: z.enum(['sandbox', 'live']).optional(),
   webxpayReturnUrl: z.string().optional(),
+  password: z.string().min(1, 'PIN is required'),
 });
 
 export async function updateAdminPaymentSettings(req: Request, res: Response, next: NextFunction) {
   try {
     const data = updateSchema.parse(req.body);
+    await verifyAdminPin(req.user?.sub, data.password);
     const updated = await updatePaymentSettings({
       paymentMethods: (data.paymentMethods || {}) as Record<string, PaymentMethodConfig>,
       activeOnlineGateway: data.activeOnlineGateway as OnlineGateway | undefined,
@@ -242,7 +274,7 @@ export async function updateAdminMessagingSettings(req: Request, res: Response, 
 export async function getAppSettings(_req: Request, res: Response, next: NextFunction) {
   try {
     await ensureAppSchema();
-    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, , , branchCompletionRadiusM] = await Promise.all([
+    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, gatewayFeeRate, , branchCompletionRadiusM, commissionSlabs, pickupMaxOrderAmount] = await Promise.all([
       getConvenienceFeeRates(),
       prisma.appSetting.findUnique({ where: { id: 'default' } }),
       getMaxCupsPerRider(),
@@ -254,6 +286,8 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       getGatewayFeeRate(),
       getDeliveryPlatformFeeRate(),
       getBranchCompletionRadiusM(),
+      getCommissionSlabs(),
+      getPickupMaxOrderAmount(),
     ]);
     return success(res, {
       convenientFeeRate: feeRates.delivery,
@@ -262,6 +296,14 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       pickupConvenientFeePercent: Math.round(feeRates.pickup * 1000) / 10,
       deliveryConvenientFeeRate: feeRates.delivery,
       deliveryConvenientFeePercent: Math.round(feeRates.delivery * 1000) / 10,
+      gatewayFeeRate,
+      gatewayFeePercent: Math.round(gatewayFeeRate * 1000) / 10,
+      commissionSlabs: commissionSlabs.map((slab) => ({
+        upTo: slab.upTo,
+        rate: slab.rate,
+        ratePercent: Math.round(slab.rate * 1000) / 10,
+        label: slab.label,
+      })),
       pickupAllowAddItemsPaidOnline: row?.pickupAllowAddItemsPaidOnline ?? true,
       pickupAllowEditCashUnpaid: row?.pickupAllowEditCashUnpaid ?? true,
       maxCupsPerRider,
@@ -279,6 +321,7 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       spinRequireLogin: spinSettings.requireLogin,
       spinDisplay: spinSettings.display,
       cancelWindowMinutes,
+      pickupMaxOrderAmount,
       googleMapsApiKey: await getGoogleMapsApiKey(),
     });
   } catch (err) {
@@ -290,6 +333,17 @@ const appSettingsSchema = z.object({
   convenientFeeRate: z.number().min(0).max(1).optional(),
   pickupConvenientFeeRate: z.number().min(0).max(1).optional(),
   gatewayFeeRate: z.number().min(0).max(1).optional(),
+  commissionSlabs: z
+    .array(
+      z.object({
+        upTo: z.number().finite().min(0),
+        rate: z.number().finite().min(0).max(1),
+        label: z.string().max(120).optional(),
+      }),
+    )
+    .min(2)
+    .max(6)
+    .optional(),
   deliveryPlatformFeeRate: z.number().min(0).max(1).optional(),
   pickupAllowAddItemsPaidOnline: z.boolean().optional(),
   pickupAllowEditCashUnpaid: z.boolean().optional(),
@@ -338,13 +392,25 @@ const appSettingsSchema = z.object({
     value: z.number().min(0).max(1_000_000).optional(),
   })).optional(),
   cancelWindowMinutes: z.number().int().min(1).max(120).optional(),
+  pickupMaxOrderAmount: z.number().int().min(0).max(50_000_000).nullable().optional(),
   googleMapsApiKey: z.string().max(256).nullable().optional(),
+  password: z.string().min(1).optional(),
 });
 
 export async function updateAppSettings(req: Request, res: Response, next: NextFunction) {
   try {
     await ensureAppSchema();
     const data = appSettingsSchema.parse(req.body);
+    const paymentSettingsPatch =
+      data.convenientFeeRate !== undefined ||
+      data.pickupConvenientFeeRate !== undefined ||
+      data.gatewayFeeRate !== undefined ||
+      data.deliveryPlatformFeeRate !== undefined ||
+      data.commissionSlabs !== undefined;
+    if (paymentSettingsPatch && req.user?.role === 'SYSTEM_ADMIN') {
+      const password = data.password ?? '';
+      await verifyAdminPin(req.user?.sub, password);
+    }
     const {
       maxCupsPerRider,
       branchCompletionRadiusM,
@@ -374,8 +440,11 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       spinDisplay,
       spinCriteria,
       cancelWindowMinutes,
+      pickupMaxOrderAmount,
       deliveryPlatformFeeRate,
+      commissionSlabs,
       googleMapsApiKey,
+      password: _pinForVerification,
       ...prismaData
     } = data;
 
@@ -488,21 +557,45 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       invalidateCancelWindowMinutesCache();
     }
 
+    let savedPickupMaxOrderAmount = await getPickupMaxOrderAmount();
+    if (pickupMaxOrderAmount !== undefined) {
+      if (req.user?.role !== 'SYSTEM_ADMIN') {
+        throw new AppError('Only system admin can update pickup order amount limit', 403);
+      }
+      const nextAmount =
+        pickupMaxOrderAmount == null || pickupMaxOrderAmount <= 0 ? null : pickupMaxOrderAmount;
+      if (savedPickupMaxOrderAmount !== nextAmount) {
+        const password = typeof req.body?.password === 'string' ? req.body.password : '';
+        await verifyAdminPin(req.user?.sub, password);
+      }
+      savedPickupMaxOrderAmount = await setPickupMaxOrderAmount(pickupMaxOrderAmount);
+      invalidatePickupMaxOrderAmountCache();
+    }
+
     if (deliveryPlatformFeeRate != null) {
       await setDeliveryPlatformFeeRate(deliveryPlatformFeeRate);
     }
 
+    if (data.commissionSlabs != null) {
+      try {
+        await setCommissionSlabs(data.commissionSlabs);
+      } catch (err) {
+        throw new AppError(err instanceof Error ? err.message : 'Invalid commission slabs', 400);
+      }
+    }
     const savedGoogleMapsApiKey = googleMapsApiKey !== undefined
       ? await setGoogleMapsApiKey(googleMapsApiKey)
       : await getGoogleMapsApiKey();
 
     invalidatePickupOrderEditSettingsCache();
     invalidateGatewayFeeRateCache();
+    invalidateCommissionSlabsCache();
     invalidateDeliveryPlatformFeeRateCache();
     invalidateDeliveryMilestoneSettingsCache();
     const savedRates = await getConvenienceFeeRates();
     const savedGatewayFeeRate = await getGatewayFeeRate();
     const savedDeliveryPlatformFeeRate = await getDeliveryPlatformFeeRate();
+    const savedCommissionSlabs = await getCommissionSlabs();
     return success(res, {
       convenientFeeRate: savedRates.delivery,
       convenientFeePercent: Math.round(savedRates.delivery * 1000) / 10,
@@ -512,6 +605,12 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       deliveryConvenientFeePercent: Math.round(savedRates.delivery * 1000) / 10,
       gatewayFeeRate: savedGatewayFeeRate,
       gatewayFeePercent: Math.round(savedGatewayFeeRate * 1000) / 10,
+      commissionSlabs: savedCommissionSlabs.map((slab) => ({
+        upTo: slab.upTo,
+        rate: slab.rate,
+        ratePercent: Math.round(slab.rate * 1000) / 10,
+        label: slab.label,
+      })),
       deliveryPlatformFeeRate: savedDeliveryPlatformFeeRate,
       deliveryPlatformFeePercent: Math.round(savedDeliveryPlatformFeeRate * 1000) / 10,
       pickupAllowAddItemsPaidOnline: updated.pickupAllowAddItemsPaidOnline,
@@ -544,6 +643,7 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
       spinDisplay: savedSpin.display,
       spinCriteria: savedSpin.criteria,
       cancelWindowMinutes: savedCancelWindowMinutes,
+      pickupMaxOrderAmount: savedPickupMaxOrderAmount,
       googleMapsApiKey: savedGoogleMapsApiKey,
     });
   } catch (err) {

@@ -1,4 +1,4 @@
-import { resolveFinalNetPayoutPayLkr } from '@/components/admin/resolvePayoutReportValues';
+import { resolveReportNetPayoutFinalPayLkr } from '@/components/admin/resolvePayoutReportValues';
 import type { PayoutReportValues } from '@/components/admin/resolvePayoutReportValues';
 import {
   computeFinalPayoutLkr,
@@ -74,11 +74,20 @@ export function resolvePayableWalletLkrForPayout(params: {
 export function branchPayoutDisplayFromReportValues(
   reportValues: PayoutReportValues,
 ): BranchPayoutDisplay {
+  const totalBranchPayoutLkr = resolveReportNetPayoutFinalPayLkr(reportValues);
+  /** Payout 2 report walkthrough already includes Jason before gateway — do not add again. */
+  const jasonInSecondCycleWalkthrough =
+    reportValues.cycleStage === 'SECOND' && reportValues.jasonDiscountsLkr > 0.001;
+  const jasonTopUpLkr = jasonInSecondCycleWalkthrough ? 0 : reportValues.sharedPromoJasonLkr;
+  const periodWalletNetLkr = jasonInSecondCycleWalkthrough
+    ? totalBranchPayoutLkr
+    : reportValues.branchNetPayoutLkr;
+
   return {
-    totalBranchPayoutLkr: resolveFinalNetPayoutPayLkr(reportValues),
-    periodWalletNetLkr: reportValues.branchNetPayoutLkr,
-    walletRequestLkr: reportValues.branchNetPayoutLkr,
-    jasonTopUpLkr: reportValues.sharedPromoJasonLkr,
+    totalBranchPayoutLkr,
+    periodWalletNetLkr,
+    walletRequestLkr: periodWalletNetLkr,
+    jasonTopUpLkr,
     scope: 'fullPeriod',
   };
 }

@@ -198,6 +198,9 @@ export function needsRestockToActivate(item: StockItem): boolean {
 /** Default low-stock threshold used when an item does not provide one. */
 export const LOW_STOCK_THRESHOLD = 25;
 
+/** Prefill for weekly target in branch stock settings when not yet configured. */
+export const DEFAULT_WEEKLY_TARGET_QTY = 200;
+
 export function canActivateWithQty(qty: number, item?: Pick<StockItem, 'lowStockThreshold'>): boolean {
   const threshold = item?.lowStockThreshold ?? LOW_STOCK_THRESHOLD;
   return qty > threshold;

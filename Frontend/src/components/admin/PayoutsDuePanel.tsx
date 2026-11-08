@@ -1,159 +1,75 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useQueries } from '@tanstack/react-query';
-import { CheckCircle, ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CheckCircle, ChevronLeft, ChevronRight, Download, FileText, Loader2, Search } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { formatMoneyAmount } from '@/lib/receipt';
 import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
+import { formatBranchName } from '@/lib/deliveryDisplay';
 import { cn } from '@/lib/utils';
 import { getApiBaseUrl } from '@/lib/apiBase';
+import { payoutPeriodRowNeedsLiveNetPreview } from '@/components/admin/payoutPeriodRowAmounts';
+import { readPayoutCycleStage } from '@/components/admin/payoutPeriodRowCycleDisplay';
+import { resolveListedPayoutPeriodDisplay } from '@/components/admin/payoutSecondCycleDisplayRange';
+import type { PeriodPayoutCardAmounts } from '@/components/admin/periodPayoutSplitDisplay';
 import {
-  fetchPayoutPeriodNetPreview,
-  resolvePayoutPeriodRowDisplayAmounts,
-} from '@/components/admin/payoutPeriodRowAmounts';
+  PayoutsDueTableHead,
+  PayoutsDueTableSkeleton,
+  PAYOUTS_DUE_ALLOCATION_COLUMNS,
+} from '@/components/admin/payoutsDueTableShared';
+import {
+  payoutDueRowKey,
+  usePayoutDueAmountMaps,
+} from '@/components/admin/usePayoutDueAmountMaps';
 import { Skeleton } from '@/components/ui/skeleton';
-import { isOldestUnpaidBranchPayoutRow } from '@/lib/branchPayoutsDue';
+import {
+  branchPayoutsDueQueryKey,
+  fetchBranchPayoutsDue,
+  isOldestUnpaidBranchPayoutRow,
+  PAYOUTS_DUE_PAGE_SIZE,
+} from '@/lib/branchPayoutsDue';
+import { buildAdminMetaPagination } from '@/lib/pagination';
+import {
+  downloadPayoutReviewPdf,
+  downloadPayoutReviewZip,
+  fetchPayoutReviews,
+  payoutReviewMarkKey,
+  payoutReviewPdfFilename,
+  setPayoutInReview,
+  type PayoutReviewMark,
+} from '@/lib/payoutReviewDownload';
+import { payoutPeriodsQueryKey } from '@/components/admin/BranchPayoutPeriodsSection';
+import type { PayoutDueRow } from '@/components/admin/payoutDueTypes';
 
-export type PayoutDueRow = {
-  storeId: string;
-  storeName: string;
-  periodFrom: string;
-  periodTo: string;
-  days: number;
-  netAmountCents: number;
-  orderCount: number;
-  breakdown?: unknown | null;
-};
+export type { PayoutDueRow } from '@/components/admin/payoutDueTypes';
+export { PAYOUTS_DUE_PAGE_SIZE };
 
 type Props = {
-  rows: PayoutDueRow[];
-  loading?: boolean;
-  loadingMore?: boolean;
+  enabled?: boolean;
   onView?: (row: PayoutDueRow) => void;
   onReviewAndPay: (row: PayoutDueRow) => void;
+  onTotalChange?: (total: number) => void;
 };
 
-const ALLOCATION_COLUMNS = [
-  'Branch payout',
-  'Customer convenience fee',
-  'Platform commission',
-  'Delivery fee received',
-] as const;
-
-const PAYOUTS_DUE_TABLE_COL_COUNT = 3 + ALLOCATION_COLUMNS.length + 2;
-
-const PAYOUTS_DUE_SKELETON_WIDTHS = [
-  'w-28',
-  'w-36',
-  'w-10',
-  'w-16',
-  'w-16',
-  'w-16',
-  'w-16',
-  'w-14',
-  'w-20',
-] as const;
-
-function PayoutsDueTableSkeleton({ rows = 6 }: { rows?: number }) {
-  return (
-    <>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-navy-border)] px-4 py-3 sm:px-5">
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-4 w-24 bg-[var(--color-navy-light)]/70" />
-          <Skeleton className="h-3 w-40 bg-[var(--color-navy-light)]/70" />
-        </div>
-        <Skeleton className="h-8 w-full max-w-[220px] rounded-[12px] bg-[var(--color-navy-light)]/70 sm:w-[220px]" />
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1100px] text-left text-xs">
-          <thead>
-            <tr className="border-b border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/50 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-              <th scope="col" className="px-3 py-2.5 font-semibold whitespace-nowrap">
-                Branch
-              </th>
-              <th scope="col" className="px-3 py-2.5 font-semibold whitespace-nowrap">
-                Period
-              </th>
-              <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
-                Orders
-              </th>
-              {ALLOCATION_COLUMNS.map((label) => (
-                <th
-                  key={label}
-                  scope="col"
-                  className="px-3 py-2.5 text-right font-semibold whitespace-nowrap"
-                >
-                  {label}
-                </th>
-              ))}
-              <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
-                Wallet view
-              </th>
-              <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
-                Action
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: rows }).map((_, row) => (
-              <tr
-                key={row}
-                className="border-b border-[var(--color-navy-border)]/70 last:border-b-0"
-              >
-                {Array.from({ length: PAYOUTS_DUE_TABLE_COL_COUNT }).map((__, col) => (
-                  <td
-                    key={col}
-                    className={
-                      col >= 2 && col <= 6 ? 'px-3 py-3 text-right' : 'px-3 py-3'
-                    }
-                  >
-                    <Skeleton
-                      className={cn(
-                        'h-3.5 bg-[var(--color-navy-light)]/70',
-                        PAYOUTS_DUE_SKELETON_WIDTHS[col] ?? 'w-20',
-                        col >= 2 && col <= 6 && 'ml-auto',
-                        col >= 7 && 'ml-auto inline-block',
-                      )}
-                    />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
-}
-
-function branchLabel(name: string) {
-  return name.replace(/^Bing Chun\s*[-–]\s*/i, '').trim() || name;
-}
-
-export const PAYOUTS_DUE_PAGE_SIZE = 10;
-
-function payoutDueRowKey(row: PayoutDueRow) {
-  return `${row.storeId}-${row.periodFrom}-${row.periodTo}`;
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
 }
 
 function PayoutDueAllocationCells({
-  row,
-  netPreviewData,
+  amounts,
   previewLoading,
+  needsPreview,
 }: {
-  row: PayoutDueRow;
-  netPreviewData?: Record<string, unknown>;
+  amounts: PeriodPayoutCardAmounts;
   previewLoading: boolean;
+  needsPreview: boolean;
 }) {
-  const needsPreview = row.breakdown == null;
-  const amounts = resolvePayoutPeriodRowDisplayAmounts({
-    amountCents: row.netAmountCents,
-    breakdown: row.breakdown,
-    periodFrom: row.periodFrom,
-    periodTo: row.periodTo,
-    netPreviewData: needsPreview ? netPreviewData : undefined,
-  });
-
   const feeColumnsLoading = needsPreview && previewLoading;
   const values = [
     amounts.branchReceives,
@@ -166,11 +82,13 @@ function PayoutDueAllocationCells({
     <>
       {values.map((value, index) => (
         <td
-          key={ALLOCATION_COLUMNS[index]}
+          key={PAYOUTS_DUE_ALLOCATION_COLUMNS[index]}
           className="px-3 py-3 text-right font-semibold tabular-nums text-[var(--color-text)]"
         >
           {feeColumnsLoading && index > 0 ? (
             <Skeleton className="ml-auto inline-block h-3.5 w-16 bg-[var(--color-navy-light)]/70" />
+          ) : value == null ? (
+            '—'
           ) : (
             formatMoneyAmount(value)
           )}
@@ -180,84 +98,305 @@ function PayoutDueAllocationCells({
   );
 }
 
-export default function PayoutsDuePanel({
-  rows,
-  loading,
-  loadingMore = false,
+function PayoutDueTableRow({
+  row,
+  storeRows,
+  amounts,
+  netPreview,
+  previewLoading,
+  payEnabled,
+  inReview,
+  reviewBusy,
+  downloadBusy,
+  reviewsReady,
+  reviewsError,
+  onToggleReview,
+  onDownload,
   onView,
   onReviewAndPay,
+}: {
+  row: PayoutDueRow;
+  storeRows: PayoutDueRow[];
+  amounts: PeriodPayoutCardAmounts;
+  netPreview?: Record<string, unknown> | null;
+  previewLoading: boolean;
+  payEnabled: boolean;
+  inReview: boolean;
+  reviewBusy: boolean;
+  downloadBusy: boolean;
+  reviewsReady: boolean;
+  reviewsError: boolean;
+  onToggleReview: (row: PayoutDueRow, inReview: boolean) => void;
+  onDownload: (row: PayoutDueRow, filename: string) => void;
+  onView?: (row: PayoutDueRow) => void;
+  onReviewAndPay: (row: PayoutDueRow) => void;
+}) {
+  const branchName = formatBranchName(row.storeName);
+  const cycleStage = readPayoutCycleStage(row.breakdown, netPreview);
+  const periodDisplay = resolveListedPayoutPeriodDisplay({
+    row,
+    rows: storeRows,
+    cycleStage,
+    breakdown: row.breakdown,
+    periodDays: row.days,
+  });
+  const payNote = !payEnabled
+    ? 'Pay earlier period first'
+    : reviewsError
+      ? 'Review status unavailable'
+      : !reviewsReady
+        ? 'Loading review status…'
+        : !inReview
+          ? 'Save as draft first'
+          : null;
+
+  return (
+    <tr
+      className={cn(
+        'border-b border-[var(--color-navy-border)]/70 last:border-b-0 hover:bg-[var(--color-input-bg)]/40',
+        inReview && 'bg-amber-500/[0.06]',
+      )}
+    >
+      <td className="px-3 py-3">
+        <input
+          type="checkbox"
+          checked={inReview}
+          disabled={!reviewsReady || reviewBusy}
+          aria-label={`Save ${branchName} payout as draft`}
+          onChange={(event) => onToggleReview(row, event.target.checked)}
+          className="h-4 w-4 accent-[var(--color-brand)] disabled:cursor-not-allowed"
+        />
+      </td>
+      <td className="px-3 py-3 font-medium text-[var(--color-text)]">{branchName}</td>
+      <td className="px-3 py-3 whitespace-nowrap text-[var(--color-text-muted)]">
+        {formatBiweeklyPeriodLabel(periodDisplay.displayFrom, periodDisplay.displayTo)}
+        <span className="ml-1.5 text-[10px] font-semibold text-[var(--color-text)]">
+          {periodDisplay.displayDays} days
+        </span>
+      </td>
+      <td className="px-3 py-3 text-right tabular-nums text-[var(--color-text)]">
+        {row.orderCount}
+      </td>
+      <PayoutDueAllocationCells
+        amounts={amounts}
+        previewLoading={previewLoading}
+        needsPreview={payoutPeriodRowNeedsLiveNetPreview(row.breakdown)}
+      />
+      <td className="px-3 py-3 text-right">
+        <button
+          type="button"
+          onClick={() => onView?.(row)}
+          aria-label={`Wallet view for ${branchName}`}
+          className={cn(
+            'inline-flex items-center rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5',
+            'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
+          )}
+        >
+          View
+        </button>
+      </td>
+      <td className="px-3 py-3 text-right">
+        <button
+          type="button"
+          disabled={!inReview || downloadBusy}
+          title={!inReview ? 'Save as draft first' : undefined}
+          onClick={() =>
+            onDownload(
+              row,
+              payoutReviewPdfFilename(
+                row.storeName,
+                periodDisplay.displayFrom,
+                periodDisplay.displayTo,
+                cycleStage,
+              ),
+            )
+          }
+          aria-label={`Download payout PDF for ${branchName}`}
+          className={cn(
+            'inline-flex items-center gap-1 rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5',
+            'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
+            'disabled:cursor-not-allowed disabled:opacity-60',
+          )}
+        >
+          {downloadBusy ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+          PDF
+        </button>
+      </td>
+      <td className="px-3 py-3 text-right">
+        {payNote == null ? (
+          <button
+            type="button"
+            onClick={() => onReviewAndPay(row)}
+            className={cn(
+              'inline-flex items-center rounded-lg border border-[var(--color-brand)] px-3 py-1.5',
+              'text-xs font-semibold text-[var(--color-brand)] transition-colors hover:bg-[var(--color-brand-subtle)]',
+            )}
+          >
+            Review & Pay
+          </button>
+        ) : (
+          <span
+            className="inline-flex max-w-[9.5rem] flex-col items-end gap-0.5 text-[10px] font-medium text-[var(--color-text-muted)]"
+            title={payNote ?? undefined}
+          >
+            <span className="rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5 text-xs font-semibold opacity-50">
+              Review & Pay
+            </span>
+            {payNote}
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+export default function PayoutsDuePanel({
+  enabled = true,
+  onView,
+  onReviewAndPay,
+  onTotalChange,
 }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
-  const count = rows.length;
+  const [reviewBusyKey, setReviewBusyKey] = useState<string | null>(null);
+  const [downloadBusyKey, setDownloadBusyKey] = useState<string | null>(null);
+  const [downloadingAll, setDownloadingAll] = useState(false);
+  const debouncedSearch = useDebouncedValue(searchQuery.trim(), 300);
   const apiBase = getApiBaseUrl();
-
-  const filteredRows = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((row) => {
-      const raw = row.storeName.toLowerCase();
-      const label = branchLabel(row.storeName).toLowerCase();
-      return raw.includes(q) || label.includes(q);
-    });
-  }, [rows, searchQuery]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAYOUTS_DUE_PAGE_SIZE));
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     setPage(1);
-  }, [rows, searchQuery]);
+  }, [debouncedSearch]);
+
+  const dueQuery = useQuery({
+    queryKey: branchPayoutsDueQueryKey(page, debouncedSearch),
+    queryFn: ({ signal }) =>
+      fetchBranchPayoutsDue(
+        apiBase,
+        { page, limit: PAYOUTS_DUE_PAGE_SIZE, search: debouncedSearch },
+        signal,
+      ),
+    enabled,
+    staleTime: 45_000,
+    placeholderData: keepPreviousData,
+  });
+
+  const pageData = dueQuery.data;
+  const rows = pageData?.items ?? [];
+  const total = pageData?.total ?? 0;
+  const allTotal = pageData?.allTotal ?? total;
+  const totalPages = Math.max(1, pageData?.pages ?? 1);
+  const loading = dueQuery.isLoading || (dueQuery.isFetching && !dueQuery.isFetched);
+  const pageFetching = dueQuery.isFetching && dueQuery.isFetched;
+  const count = allTotal;
 
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+    if (pageData && page > pageData.pages) setPage(pageData.pages);
+  }, [page, pageData]);
 
-  const pageRows = useMemo(() => {
-    const start = (page - 1) * PAYOUTS_DUE_PAGE_SIZE;
-    return filteredRows.slice(start, start + PAYOUTS_DUE_PAGE_SIZE);
-  }, [filteredRows, page]);
+  useEffect(() => {
+    if (!pageData) return;
+    onTotalChange?.(pageData.allTotal);
+  }, [pageData, onTotalChange]);
+
+  const reviewsQuery = useQuery({
+    queryKey: ['branch-payout-reviews'],
+    queryFn: fetchPayoutReviews,
+    staleTime: 15_000,
+    enabled,
+  });
+  const inReviewKeys = useMemo(
+    () => new Set((reviewsQuery.data ?? []).map((mark) => payoutReviewMarkKey(mark))),
+    [reviewsQuery.data],
+  );
+
+  const pagination = buildAdminMetaPagination(total, page, PAYOUTS_DUE_PAGE_SIZE, totalPages);
 
   const canReviewAndPay = useMemo(
     () => (row: PayoutDueRow) => isOldestUnpaidBranchPayoutRow(row, rows),
     [rows],
   );
 
-  const rowsNeedingPreview = useMemo(
-    () => pageRows.filter((row) => row.breakdown == null),
-    [pageRows],
-  );
+  const { displayAmountsByDueKey, previewByKey, previewLoadingByKey, resolveDueRowBaseAmounts } =
+    usePayoutDueAmountMaps(rows, rows, apiBase);
 
-  const previewQueries = useQueries({
-    queries: rowsNeedingPreview.map((row) => ({
-      queryKey: ['payout-due-net-preview', row.storeId, row.periodFrom, row.periodTo] as const,
-      queryFn: () => fetchPayoutPeriodNetPreview(apiBase, row.storeId, row.periodFrom, row.periodTo),
-      staleTime: 45_000,
-    })),
-  });
+  function reviewMark(row: PayoutDueRow): PayoutReviewMark {
+    return {
+      storeId: row.storeId,
+      periodFrom: row.periodFrom.slice(0, 10),
+      periodTo: row.periodTo.slice(0, 10),
+    };
+  }
 
-  const previewByKey = useMemo(() => {
-    const map = new Map<string, Record<string, unknown>>();
-    rowsNeedingPreview.forEach((row, index) => {
-      const data = previewQueries[index]?.data;
-      if (data) map.set(payoutDueRowKey(row), data);
+  async function toggleReview(row: PayoutDueRow, next: boolean) {
+    const mark = reviewMark(row);
+    const key = payoutReviewMarkKey(mark);
+    const previous = reviewsQuery.data ?? [];
+    setReviewBusyKey(key);
+    queryClient.setQueryData<PayoutReviewMark[]>(['branch-payout-reviews'], (current = []) => {
+      const without = current.filter((item) => payoutReviewMarkKey(item) !== key);
+      return next ? [...without, mark] : without;
     });
-    return map;
-  }, [previewQueries, rowsNeedingPreview]);
+    try {
+      await setPayoutInReview(mark, next);
+      void queryClient.invalidateQueries({ queryKey: payoutPeriodsQueryKey(row.storeId) });
+    } catch (err) {
+      queryClient.setQueryData(['branch-payout-reviews'], previous);
+      toast.error(err instanceof Error ? err.message : 'Could not update review status');
+    } finally {
+      setReviewBusyKey(null);
+    }
+  }
 
-  const previewLoadingByKey = useMemo(() => {
-    const map = new Map<string, boolean>();
-    rowsNeedingPreview.forEach((row, index) => {
-      const query = previewQueries[index];
-      map.set(payoutDueRowKey(row), Boolean(query?.isLoading || query?.isFetching));
-    });
-    return map;
-  }, [previewQueries, rowsNeedingPreview]);
+  async function downloadOne(row: PayoutDueRow, filename: string) {
+    const key = payoutDueRowKey(row);
+    setDownloadBusyKey(key);
+    try {
+      await downloadPayoutReviewPdf(reviewMark(row), filename);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not download the payout invoice');
+    } finally {
+      setDownloadBusyKey(null);
+    }
+  }
+
+  async function downloadAllListed() {
+    if (downloadingAll) return;
+    setDownloadingAll(true);
+    try {
+      const listed = await fetchBranchPayoutsDue(apiBase, {
+        page: 1,
+        limit: 100,
+        search: debouncedSearch,
+      });
+      const draftRows = listed.items.filter((row) =>
+        inReviewKeys.has(payoutReviewMarkKey(reviewMark(row))),
+      );
+      if (draftRows.length === 0) {
+        toast.error('No saved drafts match the current list.');
+        return;
+      }
+      if (draftRows.length > 40) {
+        toast.error('Download all is limited to 40 drafts. Narrow the branch search first.');
+        return;
+      }
+      await downloadPayoutReviewZip(draftRows.map(reviewMark));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not download the payout invoices');
+    } finally {
+      setDownloadingAll(false);
+    }
+  }
+
+  const searchActive = debouncedSearch.length > 0;
+  const pageBusy = pageFetching && dueQuery.isPlaceholderData;
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
-      {(loading || loadingMore) && count === 0 && <PayoutsDueTableSkeleton />}
+      {loading && count === 0 && !searchActive && <PayoutsDueTableSkeleton />}
 
-      {!loading && !loadingMore && count === 0 && (
+      {!loading && count === 0 && !searchActive && (
         <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-400">
             <CheckCircle size={28} />
@@ -269,7 +408,7 @@ export default function PayoutsDuePanel({
         </div>
       )}
 
-      {!loading && count > 0 && (
+      {(count > 0 || searchActive || (loading && searchActive)) && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-navy-border)] px-4 py-3 sm:px-5">
             <div className="flex flex-wrap items-baseline gap-2">
@@ -278,7 +417,21 @@ export default function PayoutsDuePanel({
                 {count} period{count === 1 ? '' : 's'} · oldest first · 15-day cycle
               </span>
             </div>
-            <div className="relative w-full max-w-[220px] sm:w-auto">
+            <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
+              <button
+                type="button"
+                disabled={downloadingAll || total === 0 || pageBusy}
+                onClick={() => void downloadAllListed()}
+                className={cn(
+                  'inline-flex h-8 items-center gap-1.5 rounded-[12px] border border-[var(--color-navy-border)] px-3',
+                  'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
+                  'disabled:cursor-not-allowed disabled:opacity-60',
+                )}
+              >
+                {downloadingAll ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                Download all
+              </button>
+              <div className="relative w-full max-w-[220px] sm:w-auto">
               <Search
                 size={13}
                 className="pointer-events-none absolute top-1/2 left-2.5 z-[2] -translate-y-1/2 text-muted"
@@ -293,147 +446,117 @@ export default function PayoutsDuePanel({
                 className="input-field h-8 w-full rounded-[12px] py-0 pr-3 text-xs"
               />
             </div>
+            </div>
           </div>
 
-          {filteredRows.length === 0 ? (
+          {reviewsQuery.isError && (
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--color-navy-border)] px-4 py-2 text-xs text-amber-700 sm:px-5">
+              <span>Could not load payout draft status.</span>
+              <button
+                type="button"
+                onClick={() => void reviewsQuery.refetch()}
+                className="font-semibold text-[var(--color-brand)] hover:underline"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {loading && rows.length === 0 ? (
+            <div className="flex items-center justify-center gap-2 px-5 py-12 text-xs text-[var(--color-text-muted)]">
+              <Loader2 size={14} className="animate-spin text-[var(--color-brand)]" />
+              Loading payouts…
+            </div>
+          ) : total === 0 && searchActive ? (
             <div className="px-5 py-12 text-center text-sm text-[var(--color-text-muted)]">
               No branches match &ldquo;{searchQuery.trim()}&rdquo;
             </div>
           ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-left text-xs">
-              <thead>
-                <tr className="border-b border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/50 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                  <th scope="col" className="px-3 py-2.5 font-semibold whitespace-nowrap">
-                    Branch
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 font-semibold whitespace-nowrap">
-                    Period
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
-                    Orders
-                  </th>
-                  {ALLOCATION_COLUMNS.map((label) => (
-                    <th
-                      key={label}
-                      scope="col"
-                      className="px-3 py-2.5 text-right font-semibold whitespace-nowrap"
-                    >
-                      {label}
-                    </th>
-                  ))}
-                  <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
-                    Wallet view
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageRows.map((row) => {
-                  const key = payoutDueRowKey(row);
-                  const payEnabled = canReviewAndPay(row);
-                  return (
-                  <tr
-                    key={key}
-                    className="border-b border-[var(--color-navy-border)]/70 last:border-b-0 hover:bg-[var(--color-input-bg)]/40"
-                  >
-                    <td className="px-3 py-3 font-medium text-[var(--color-text)]">
-                      {branchLabel(row.storeName)}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-[var(--color-text-muted)]">
-                      {formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo)}
-                      <span className="ml-1.5 text-[10px] font-semibold text-[var(--color-text)]">
-                        {row.days} days
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-[var(--color-text)]">
-                      {row.orderCount}
-                    </td>
-                    <PayoutDueAllocationCells
-                      row={row}
-                      netPreviewData={previewByKey.get(key)}
-                      previewLoading={previewLoadingByKey.get(key) ?? false}
-                    />
-                    <td className="px-3 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => onView?.(row)}
-                        aria-label={`Wallet view for ${branchLabel(row.storeName)}`}
-                        className={cn(
-                          'inline-flex items-center rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5',
-                          'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
-                        )}
-                      >
-                        View
-                      </button>
-                    </td>
-                    <td className="px-3 py-3 text-right">
-                      {payEnabled ? (
-                        <button
-                          type="button"
-                          onClick={() => onReviewAndPay(row)}
-                          className={cn(
-                            'inline-flex items-center rounded-lg border border-[var(--color-brand)] px-3 py-1.5',
-                            'text-xs font-semibold text-[var(--color-brand)] transition-colors hover:bg-[var(--color-brand-subtle)]',
-                          )}
-                        >
-                          Review & Pay
-                        </button>
-                      ) : (
-                        <span
-                          className="inline-flex max-w-[9.5rem] flex-col items-end gap-0.5 text-[10px] font-medium text-[var(--color-text-muted)]"
-                          title="Pay the earlier period for this branch first"
-                        >
-                          <span className="rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5 text-xs font-semibold opacity-50">
-                            Review & Pay
-                          </span>
-                          Pay earlier period first
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          )}
-
-          {loadingMore && (
-            <div className="flex items-center justify-center gap-2 border-t border-[var(--color-navy-border)] px-5 py-3 text-xs text-[var(--color-text-muted)]">
-              <Loader2 size={14} className="animate-spin text-[var(--color-brand)]" />
-              Loading more branches…
+            <div className={cn('overflow-x-auto', pageBusy && 'opacity-70')}>
+              <table className="w-full min-w-[1240px] text-left text-xs">
+                <PayoutsDueTableHead />
+                <tbody>
+                  {rows.map((row) => {
+                    const key = payoutDueRowKey(row);
+                    const reviewKey = payoutReviewMarkKey(reviewMark(row));
+                    return (
+                      <PayoutDueTableRow
+                        key={key}
+                        row={row}
+                        storeRows={rows.filter((candidate) => candidate.storeId === row.storeId)}
+                        amounts={displayAmountsByDueKey.get(key) ?? resolveDueRowBaseAmounts(row)}
+                        netPreview={previewByKey.get(key)}
+                        previewLoading={previewLoadingByKey.get(key) ?? false}
+                        payEnabled={canReviewAndPay(row)}
+                        inReview={inReviewKeys.has(reviewKey)}
+                        reviewBusy={reviewBusyKey === reviewKey}
+                        downloadBusy={downloadBusyKey === key || downloadingAll}
+                        reviewsReady={reviewsQuery.isSuccess}
+                        reviewsError={reviewsQuery.isError}
+                        onToggleReview={(target, next) => void toggleReview(target, next)}
+                        onDownload={(target, filename) => void downloadOne(target, filename)}
+                        onView={onView}
+                        onReviewAndPay={onReviewAndPay}
+                      />
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
 
-          {filteredRows.length > PAYOUTS_DUE_PAGE_SIZE && (
-            <div className="flex items-center justify-between border-t border-[var(--color-navy-border)] px-5 py-3">
-              <span className="text-xs text-[var(--color-text-muted)]">
-                Page {page} of {totalPages}
-                {filteredRows.length > 0 ? ` · ${filteredRows.length} total` : ''}
-              </span>
-              <div className="flex gap-1.5">
+          {total > PAYOUTS_DUE_PAGE_SIZE && (
+            <div className="admin-table-pagination border-t border-[var(--color-navy-border)] px-5 py-3">
+              <p className="admin-table-pagination__summary text-xs text-[var(--color-text-muted)]">
+                Showing{' '}
+                <span className="font-semibold tabular-nums text-[var(--color-text)]">
+                  {pagination.rangeStart}–{pagination.rangeEnd}
+                </span>{' '}
+                of{' '}
+                <span className="font-semibold tabular-nums text-[var(--color-text)]">{total}</span>
+                {searchActive ? ' matching' : ''} period{total === 1 ? '' : 's'}
+              </p>
+              <nav className="admin-table-pagination__nav" aria-label="Payouts due pagination">
                 <button
                   type="button"
-                  disabled={page <= 1 || loading}
+                  disabled={page <= 1 || pageBusy}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="rounded-lg border border-[var(--color-navy-border)] p-2 text-[var(--color-text)] disabled:cursor-not-allowed disabled:text-[var(--color-text-muted)]"
+                  className="admin-table-pagination__arrow"
                   aria-label="Previous page"
                 >
-                  <ChevronLeft size={14} />
+                  <ChevronLeft size={16} />
                 </button>
+                <div className="admin-table-pagination__pages">
+                  {pagination.pageList.map((item, i) =>
+                    item === 'ellipsis' ? (
+                      <span key={`ellipsis-${i}`} className="admin-table-pagination__ellipsis" aria-hidden>
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={item}
+                        type="button"
+                        disabled={pageBusy}
+                        onClick={() => setPage(item)}
+                        aria-label={`Page ${item}`}
+                        aria-current={item === page ? 'page' : undefined}
+                        className={`admin-table-pagination__page${item === page ? ' admin-table-pagination__page--active' : ''}`}
+                      >
+                        {item}
+                      </button>
+                    ),
+                  )}
+                </div>
                 <button
                   type="button"
-                  disabled={page >= totalPages || loading}
+                  disabled={page >= totalPages || pageBusy}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  className="rounded-lg border border-[var(--color-navy-border)] p-2 text-[var(--color-text)] disabled:cursor-not-allowed disabled:text-[var(--color-text-muted)]"
+                  className="admin-table-pagination__arrow"
                   aria-label="Next page"
                 >
-                  <ChevronRight size={14} />
+                  <ChevronRight size={16} />
                 </button>
-              </div>
+              </nav>
             </div>
           )}
         </>

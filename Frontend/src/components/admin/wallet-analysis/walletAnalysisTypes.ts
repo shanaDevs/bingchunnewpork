@@ -35,7 +35,7 @@ export type WalletAnalysisSnapshot = {
   from: string;
   to: string;
   tank: { balance: number; capacity: number };
-  /** Pickup online + delivery online + all-time retained refunds (LKR). */
+  /** Cumulative pickup + delivery online from day one, LKR (not reduced by payouts). */
   onlineAvailableBalance?: number;
   health: { percent: number; slices: WalletAnalysisHealthSlice[] };
   excludedFees?: WalletAnalysisExcludedFees;

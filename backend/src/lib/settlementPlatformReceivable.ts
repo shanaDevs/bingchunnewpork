@@ -39,6 +39,62 @@ export type SettlementPlatformReceivableDetail = {
   platformInvoiceUrl: string;
 };
 
+async function loadWithdrawalPlatformReceivableDetail(
+  withdrawalId: string,
+  allowedStoreIds: string[],
+): Promise<SettlementPlatformReceivableDetail> {
+  const withdrawal = await prisma.storeWithdrawal.findFirst({
+    where: {
+      id: withdrawalId,
+      status: 'APPROVED',
+      ...(allowedStoreIds.length === 1
+        ? { storeId: allowedStoreIds[0]! }
+        : allowedStoreIds.length > 0
+          ? { storeId: { in: allowedStoreIds } }
+          : {}),
+    },
+    include: {
+      store: { select: { name: true } },
+      commissionSettlement: { select: { id: true, statementRef: true, paymentMethod: true, status: true, createdAt: true } },
+    },
+  });
+
+  if (!withdrawal) throw new AppError('Branch payout not found', 404);
+  if (!withdrawal.periodFrom || !withdrawal.periodTo) {
+    throw new AppError('Branch payout period is missing', 404);
+  }
+
+  const linkedSettlement = withdrawal.commissionSettlement;
+  if (linkedSettlement) {
+    return loadSettlementPlatformReceivableDetail(linkedSettlement.id, allowedStoreIds);
+  }
+
+  const stored = await resolveStoredPlatformProviderReceivable(withdrawal.breakdown);
+  const platformReceivable = dartCodesReceivesLkrFromBreakdown(stored);
+
+  return {
+    id: withdrawal.id,
+    statementRef: `WD-${withdrawal.id.slice(0, 8).toUpperCase()}`,
+    storeId: withdrawal.storeId,
+    storeName: withdrawal.store.name,
+    storeWithdrawalId: withdrawal.id,
+    paymentMethod: withdrawal.paymentMethod
+      ? settlementPaymentMethodLabel(withdrawal.paymentMethod)
+      : '—',
+    status: 'VERIFIED',
+    period: {
+      from: dateStringInColombo(withdrawal.periodFrom),
+      to: dateStringInColombo(withdrawal.periodTo),
+    },
+    submittedAt: (withdrawal.reviewedAt ?? withdrawal.createdAt).toISOString(),
+    platformReceivable,
+    platformProviderReceivable: { lkr: stored.lkr },
+    platformDiscountPaybackEnabled: paybackEnabledFromBreakdown(withdrawal.breakdown),
+    sharedPromoPlatformLkr: sharedPromoPlatformLkrFromBreakdown(withdrawal.breakdown),
+    platformInvoiceUrl: '',
+  };
+}
+
 export async function loadSettlementPlatformReceivableDetail(
   settlementId: string,
   allowedStoreIds: string[],
@@ -90,4 +146,28 @@ export async function loadSettlementPlatformReceivableDetail(
     sharedPromoPlatformLkr: sharedPromoPlatformLkrFromBreakdown(breakdown),
     platformInvoiceUrl: platformProviderSettlementInvoiceApiPath(settlement.id),
   };
+}
+
+/** Settlement id or approved branch withdrawal id (super-admin platform payout history). */
+export async function loadPlatformPayoutReceivableDetail(
+  id: string,
+  allowedStoreIds: string[],
+): Promise<SettlementPlatformReceivableDetail> {
+  await ensureCommissionSettlementTable();
+
+  const settlement = await prisma.commissionSettlement.findFirst({
+    where: {
+      id,
+      ...(allowedStoreIds.length === 1
+        ? { storeId: allowedStoreIds[0]! }
+        : allowedStoreIds.length > 0
+          ? { storeId: { in: allowedStoreIds } }
+          : {}),
+    },
+    select: { id: true },
+  });
+  if (settlement) {
+    return loadSettlementPlatformReceivableDetail(id, allowedStoreIds);
+  }
+  return loadWithdrawalPlatformReceivableDetail(id, allowedStoreIds);
 }

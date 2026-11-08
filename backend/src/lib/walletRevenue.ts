@@ -282,7 +282,7 @@ export type CommissionChannelRevenueSummary = {
 };
 
 /** Mirrors orderCommissionChannel without payment hints (groupBy has no gateway metadata). */
-function commissionChannelForPaidOrderGroup(
+export function commissionChannelForPaidOrderGroup(
   orderMode: string,
   paymentMethod: string,
 ): keyof CommissionChannelRevenueCents | null {
@@ -332,6 +332,30 @@ export function summarizeCommissionChannelRevenueFromGroups(
   }
 
   return { channelRevenueCents, netCents };
+}
+
+const ONLINE_PAYABLES_CHANNELS: ReadonlySet<keyof CommissionChannelRevenueCents> = new Set([
+  'pickupOnlineIn',
+  'deliveryOnlineIn',
+]);
+
+/**
+ * Branch-wallet payables credit for one paid order (same basis as Revenue Summary):
+ * subtotal − promo discount. Online cents feed All-Time Available Balance.
+ */
+export function paidOrderPayablesCreditCents(order: {
+  orderMode: string;
+  paymentMethod: string;
+  subtotal: number;
+  discount: number;
+}): { totalCents: number; onlineCents: number } {
+  const channel = commissionChannelForPaidOrderGroup(order.orderMode, order.paymentMethod);
+  if (!channel) return { totalCents: 0, onlineCents: 0 };
+  const totalCents = Math.round(Math.max(0, order.subtotal - order.discount) * 100);
+  return {
+    totalCents,
+    onlineCents: ONLINE_PAYABLES_CHANNELS.has(channel) ? totalCents : 0,
+  };
 }
 
 export type SummarizedPaidOrderRevenue = ReturnType<typeof summarizeOrderRevenueFromGroups> & {

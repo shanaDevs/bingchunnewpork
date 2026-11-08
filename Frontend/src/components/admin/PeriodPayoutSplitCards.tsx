@@ -13,6 +13,7 @@ import {
   formatPayoutAllocationPeriodLabel,
   resolvePeriodPayoutCardAmounts,
 } from '@/components/admin/periodPayoutSplitDisplay';
+import { PAYOUT_FIRST_CYCLE_COMMISSION_CARD_SUBTITLE } from '@/components/admin/payoutFirstCycleCopy';
 
 type Props = {
   payoutSplit: PeriodPayoutSplitLkr | null;
@@ -26,36 +27,46 @@ type Props = {
   advanceAmountLkr?: number;
   branchPayout?: BranchPayoutDisplay | null;
   branchReceiveDifference?: BranchReceiveDifference | null;
+  cycleStage?: 'FIRST' | 'SECOND';
   className?: string;
 };
 
 type MetricCardVariant = 'platform' | 'neutral';
 
+const METRIC_CARD_VARIANT_STYLES: Record<
+  MetricCardVariant,
+  { shell: string; iconRing: string; titleClass: string; amountClass: string }
+> = {
+  platform: {
+    shell: 'border-[#fecaca] bg-[#fef2f2] dark:border-red-900/50 dark:bg-red-950/20',
+    iconRing: 'border-red-500 text-red-500',
+    titleClass: 'text-red-500',
+    amountClass: 'text-red-500',
+  },
+  neutral: {
+    shell: 'border-[#e2e8f0] bg-white dark:border-slate-700 dark:bg-slate-900',
+    iconRing: 'border-[#cbd5e1] text-[#64748b]',
+    titleClass: 'text-[#64748b] dark:text-slate-400',
+    amountClass: 'text-[#1e293b] dark:text-slate-100',
+  },
+};
+
 function PayoutMetricCard({
   icon: Icon,
   title,
   amount,
+  amountLabel,
   subtitle,
   variant,
 }: {
   icon: LucideIcon;
   title: string;
   amount: number;
+  amountLabel?: string;
   subtitle: string;
   variant: MetricCardVariant;
 }) {
-  const shell =
-    variant === 'platform'
-      ? 'border-[#fecaca] bg-[#fef2f2] dark:border-red-900/50 dark:bg-red-950/20'
-      : 'border-[#e2e8f0] bg-white dark:border-slate-700 dark:bg-slate-900';
-
-  const iconRing =
-    variant === 'platform' ? 'border-red-500 text-red-500' : 'border-[#cbd5e1] text-[#64748b]';
-
-  const titleClass = variant === 'platform' ? 'text-red-500' : 'text-[#64748b] dark:text-slate-400';
-
-  const amountClass =
-    variant === 'platform' ? 'text-red-500' : 'text-[#1e293b] dark:text-slate-100';
+  const { shell, iconRing, titleClass, amountClass } = METRIC_CARD_VARIANT_STYLES[variant];
 
   return (
     <div className={`flex gap-4 rounded-xl border p-4 ${shell}`}>
@@ -66,7 +77,9 @@ function PayoutMetricCard({
       </div>
       <div>
         <p className={`text-[10px] font-bold uppercase tracking-wide ${titleClass}`}>{title}</p>
-        <p className={`text-[16px] font-bold ${amountClass}`}>{formatMoneyAmount(amount)}</p>
+        <p className={`text-[16px] font-bold ${amountClass}`}>
+          {amountLabel ?? formatMoneyAmount(amount)}
+        </p>
         <p className="mt-1 text-[10px] text-[#64748b] dark:text-slate-400">{subtitle}</p>
       </div>
     </div>
@@ -85,16 +98,18 @@ export default function PeriodPayoutSplitCards({
   advanceAmountLkr = 0,
   branchPayout = null,
   branchReceiveDifference = null,
+  cycleStage,
   className = 'mb-6',
 }: Props) {
+  const isFirstCyclePayout = cycleStage === 'FIRST';
   const { branchReceives, commissionLkr, orderConvenienceFeeLkr, deliveryFee } =
     resolvePeriodPayoutCardAmounts({
-    payoutSplit,
-    branchReceivesLkr,
-    platformCommissionLkr,
-    periodNetLkr,
-    deliveryFeeLkr,
-  });
+      payoutSplit,
+      branchReceivesLkr,
+      platformCommissionLkr: isFirstCyclePayout ? 0 : platformCommissionLkr,
+      periodNetLkr,
+      deliveryFeeLkr,
+    });
 
   const branchDisplay = coalesceBranchPayoutDisplay({
     branchPayout,
@@ -125,15 +140,20 @@ export default function PeriodPayoutSplitCards({
           icon={User}
           variant="platform"
           title="Customer convenience fee"
-          amount={orderConvenienceFeeLkr}
+          amount={orderConvenienceFeeLkr ?? 0}
           subtitle="Platform share for this period"
         />
         <PayoutMetricCard
           icon={Percent}
           variant="platform"
           title="Platform commission"
-          amount={commissionLkr}
-          subtitle="Platform commission for this period"
+          amount={commissionLkr ?? 0}
+          amountLabel={isFirstCyclePayout ? '—' : undefined}
+          subtitle={
+            isFirstCyclePayout
+              ? PAYOUT_FIRST_CYCLE_COMMISSION_CARD_SUBTITLE
+              : 'Platform commission for this period'
+          }
         />
         <PayoutMetricCard
           icon={Truck}

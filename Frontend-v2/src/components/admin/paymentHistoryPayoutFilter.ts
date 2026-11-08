@@ -1,7 +1,6 @@
-export type PayoutPeriodRow = {
-  periodFrom: string;
-  periodTo: string;
-};
+import type { PayoutPeriodRow } from '@/components/admin/payoutPeriodTypes';
+
+export type { PayoutPeriodRow };
 
 /** True when the settlement billing window overlaps [from, to] (inclusive YMD). */
 export function payoutSettlementPeriodOverlaps(

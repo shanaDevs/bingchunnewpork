@@ -220,6 +220,7 @@ export function platformProviderReceivableInputFromBreakdownCents(
     refundConvenienceFee?: number;
     rejectedRefundConvenienceFee?: number;
     gatewayRatePct?: number;
+    cycleStage?: 'FIRST' | 'SECOND';
   },
 ): PlatformProviderReceivableInput {
   const payback = breakdown.platformPaybackTotal ?? 0;
@@ -228,15 +229,27 @@ export function platformProviderReceivableInputFromBreakdownCents(
     breakdown.platformDiscountPaybackEnabled ??
     (payback > 0);
   const sppcCents = breakdown.sharedPromoPlatformContributionAmount ?? 0;
+  /** FIRST 15-day branch payout: convenience is platform-retained but not payable until full cycle (SECOND). */
+  const normalConvenienceFeeCents =
+    breakdown.cycleStage === 'FIRST' ? 0 : (breakdown.convenienceFee ?? 0);
   return {
     commissionFeeCents: breakdown.commissionFee ?? 0,
     platformPaybackCents: Math.max(payback, owned),
     loyaltyDiscountCents: breakdown.periodLoyaltyDiscountTotal ?? 0,
     sharedPromoPlatformCents: sppcCents,
-    normalConvenienceFeeCents: breakdown.convenienceFee ?? 0,
+    normalConvenienceFeeCents,
     completedRefundConvenienceFeeCents: breakdown.refundConvenienceFee ?? 0,
     rejectedRefundConvenienceFeeCents: breakdown.rejectedRefundConvenienceFee ?? 0,
     gatewayRatePct: breakdown.gatewayRatePct ?? 1.9,
     paybackEnabled,
   };
+}
+
+/** Locked withdrawal breakdown (cents) → receivable LKR using current cycle rules. */
+export function computePlatformProviderReceivableLkrFromBreakdownCents(
+  breakdown: Parameters<typeof platformProviderReceivableInputFromBreakdownCents>[0],
+): PlatformProviderReceivableLkr {
+  return platformProviderReceivableToLkr(
+    computePlatformProviderReceivable(platformProviderReceivableInputFromBreakdownCents(breakdown)),
+  );
 }
