@@ -14,8 +14,9 @@ class BcErrorState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
+    // Centred, but scrolls instead of overflowing when the box it's given is short.
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,

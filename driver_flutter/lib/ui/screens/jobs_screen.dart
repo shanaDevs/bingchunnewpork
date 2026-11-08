@@ -272,7 +272,7 @@ class _JobsTabState extends State<JobsTab> {
           const BcJobsSkeleton()
         else if (fatalError)
           SizedBox(
-            height: 280,
+            height: 320,
             child: BcErrorState(message: vm.error!, onRetry: vm.load),
           )
         else ...[
