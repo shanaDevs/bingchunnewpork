@@ -1,6 +1,6 @@
 'use client';
 
-import { hasPositiveLkr, roundLkr } from '@/components/admin/settlementTypes';
+import { hasPositiveLkr } from '@/components/admin/settlementTypes';
 import type { PayoutReportValues } from '@/components/admin/resolvePayoutReportValues';
 import { plainAmount, signedAmount } from '@/components/admin/payoutFinancialReportFormatting';
 import {
@@ -10,6 +10,13 @@ import {
   ReportRow,
   SectionInfoPopover,
 } from '@/components/admin/payoutFinancialReportUi';
+import {
+  PAYOUT_FIRST_ONLINE_COLLECTIONS_SECTION_HINT,
+  PAYOUT_FIRST_ONLINE_COLLECTIONS_TITLE,
+  PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL,
+  PAYOUT_FIRST_ONLINE_DELIVERY_SUBTOTAL_LABEL,
+  PAYOUT_FIRST_ONLINE_PICKUP_SUBTOTAL_LABEL,
+} from '@/components/admin/payoutFirstCycleCopy';
 
 export function DiscountDetailsInfoPopover({ values }: { values: PayoutReportValues }) {
   return (
@@ -135,6 +142,38 @@ export function TotalSaleInfoPopover({ values }: { values: PayoutReportValues })
 export function OnlineWalletInfoPopover({ values }: { values: PayoutReportValues }) {
   const pickupNetLkr = values.onlinePickupNetLkr;
   const deliveryNetLkr = values.onlineDeliveryNetLkr;
+  const isFirstCyclePayout = values.cycleStage === 'FIRST';
+
+  if (isFirstCyclePayout) {
+    return (
+      <SectionInfoPopover ariaLabel="Online order subtotal calculation details">
+        <InfoPopoverHeader
+          title={PAYOUT_FIRST_ONLINE_COLLECTIONS_TITLE}
+          description={PAYOUT_FIRST_ONLINE_COLLECTIONS_SECTION_HINT}
+        />
+        <InfoFormulaLine>
+          {PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL} = {PAYOUT_FIRST_ONLINE_PICKUP_SUBTOTAL_LABEL}{' '}
+          + {PAYOUT_FIRST_ONLINE_DELIVERY_SUBTOTAL_LABEL} = {plainAmount(pickupNetLkr)} +{' '}
+          {plainAmount(deliveryNetLkr)} = {plainAmount(values.onlinePaymentsCollectedLkr)}
+        </InfoFormulaLine>
+        <div className="space-y-2 border-t border-[#e2e8f0] pt-2.5 dark:border-slate-700">
+          <ReportRow
+            label={PAYOUT_FIRST_ONLINE_PICKUP_SUBTOTAL_LABEL}
+            value={plainAmount(pickupNetLkr)}
+          />
+          <ReportRow
+            label={PAYOUT_FIRST_ONLINE_DELIVERY_SUBTOTAL_LABEL}
+            value={plainAmount(deliveryNetLkr)}
+          />
+          <ReportRow
+            label={PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL}
+            value={plainAmount(values.onlinePaymentsCollectedLkr)}
+            bold
+          />
+        </div>
+      </SectionInfoPopover>
+    );
+  }
 
   return (
     <SectionInfoPopover ariaLabel="Online Wallet Amount calculation details">
@@ -226,6 +265,14 @@ export function RefundsInfoPopover({ values }: { values: PayoutReportValues }) {
 }
 
 export function NetPlatformAmountInfoPopover({ values }: { values: PayoutReportValues }) {
+  if (values.cycleStage === 'FIRST') {
+    return (
+      <SectionInfoPopover ariaLabel="Net Platform Amount — Payout 1">
+        <InfoPopoverHeader title="Net Platform Amount" />
+      </SectionInfoPopover>
+    );
+  }
+
   const parts: string[] = [plainAmount(values.commissionLkr)];
   if (hasPositiveLkr(values.platformDiscountsReportLkr)) {
     parts.push(`− ${plainAmount(values.platformDiscountsReportLkr)}`);
@@ -260,73 +307,6 @@ export function NetPlatformAmountInfoPopover({ values }: { values: PayoutReportV
           />
         ) : null}
         <ReportRow label="Net Platform Amount" value={plainAmount(values.netPlatformAmountLkr)} bold />
-      </div>
-    </SectionInfoPopover>
-  );
-}
-
-export function NetBranchPayoutInfoPopover({ values }: { values: PayoutReportValues }) {
-  const walletLkr = values.onlinePaymentsCollectedLkr;
-  const jasonLkr = values.jasonDiscountsLkr;
-  const walletPlusJasonLkr = roundLkr(walletLkr + jasonLkr);
-  const gatewayRatePct = values.gatewayRatePct;
-
-  return (
-    <SectionInfoPopover ariaLabel="Net Branch Payout calculation details">
-      <InfoPopoverHeader
-        title="Net Branch Payout"
-        description="Branch wallet net for the period after platform commission, gateway fees, and adjustments listed below (including Jason discounts where applicable)."
-      />
-      <div className="space-y-2">
-        <ReportRow label="Online Wallet Amount" value={plainAmount(walletLkr)} />
-        <ReportRow label="+ Jason Discounts" value={signedAmount(jasonLkr, '+')} />
-        <InfoFormulaLine>
-          Online Wallet Amount + Jason Discounts = {plainAmount(walletLkr)} +{' '}
-          {plainAmount(jasonLkr)} = {plainAmount(walletPlusJasonLkr)}
-        </InfoFormulaLine>
-        <ReportRow
-          label="Online Wallet Amount + Jason Discounts"
-          value={plainAmount(walletPlusJasonLkr)}
-          bold
-        />
-
-        {hasPositiveLkr(values.gatewayLkr) ? (
-          <>
-            <InfoFormulaLine>
-              Payment Gateway Fee = Online Wallet Amount × {gatewayRatePct}% ={' '}
-              {plainAmount(walletLkr)} × {gatewayRatePct}% = {plainAmount(values.gatewayLkr)}
-            </InfoFormulaLine>
-            <ReportRow
-              label="− Payment Gateway Fee"
-              value={signedAmount(values.gatewayLkr, '−')}
-              valueTone="red"
-            />
-          </>
-        ) : null}
-
-        {hasPositiveLkr(values.nonReturningRefundsBranchGrossLkr) ? (
-          <ReportRow
-            label="+ Non-returning refunds (Branch)"
-            value={signedAmount(values.nonReturningRefundsBranchGrossLkr, '+')}
-          />
-        ) : null}
-        {hasPositiveLkr(values.netPlatformAmountLkr) ? (
-          <ReportRow
-            label="− Net Platform Amount"
-            value={signedAmount(values.netPlatformAmountLkr, '−')}
-            valueTone="red"
-          />
-        ) : null}
-        {hasPositiveLkr(values.cancelledByBranchGatewayFeeLkr) ? (
-          <ReportRow
-            label="− Bank penalty (branch cancellation)"
-            value={signedAmount(values.cancelledByBranchGatewayFeeLkr, '−')}
-            valueTone="red"
-          />
-        ) : null}
-        <InfoFormulaLine>
-          Net Branch Payout (before Jason top-up) = {plainAmount(values.branchNetPayoutLkr)}
-        </InfoFormulaLine>
       </div>
     </SectionInfoPopover>
   );

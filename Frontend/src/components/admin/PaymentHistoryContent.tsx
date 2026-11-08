@@ -64,11 +64,13 @@ import {
 
 type PayoutRow = {
   id: string;
+  payoutSource?: 'commissionSettlement' | 'branchWithdrawal';
   statementRef: string;
   paidAt: string;
   amount: number;
   platformReceivable?: number;
   platformInvoiceUrl?: string;
+  platformReceivableSettlementId?: string;
   paymentMethod: string;
   hasReceipt?: boolean;
   receiptUrl: string | null;
@@ -77,6 +79,7 @@ type PayoutRow = {
   periodFrom: string;
   periodTo: string;
   storeWithdrawalId?: string;
+  walletTransactionId?: string;
   isAdvance?: boolean;
   storeName?: string;
 };
@@ -375,6 +378,14 @@ export default function PaymentHistoryContent({
     setSelectedPayoutId(row.id);
     if (showPlatformPayoutHistoryTab && payoutHistoryView === 'platform') {
       void openPlatformPayoutBreakdown(row.id);
+      return;
+    }
+    if (row.payoutSource === 'branchWithdrawal') {
+      if (hasWithdrawalInvoice(row.invoiceUrl)) {
+        void openWithdrawalInvoice(row.invoiceUrl).catch(() => {
+          toast.error('Could not open payout invoice');
+        });
+      }
       return;
     }
     void openSettlement(row.id);
@@ -841,18 +852,26 @@ export default function PaymentHistoryContent({
                     <td className="px-4 py-2.5 text-right">
                       {showPlatformPayoutHistoryTab && payoutHistoryView === 'platform' ? (
                         row.storeWithdrawalId ? (
+                          row.platformReceivableSettlementId ? (
                           <button
                             type="button"
                             className="text-[13px] font-medium text-[var(--color-brand)] hover:underline"
                             onClick={(e) => {
                               e.stopPropagation();
-                              void openPlatformProviderSettlementInvoice(row.id).catch(() => {
+                              void openPlatformProviderSettlementInvoice(
+                                row.platformReceivableSettlementId!,
+                              ).catch(() => {
                                 toast.error('Could not open invoice');
                               });
                             }}
                           >
                             View Invoice
                           </button>
+                          ) : (
+                            <span className="text-xs text-[var(--color-text-muted)]">
+                              Process payment
+                            </span>
+                          )
                         ) : (
                           <span className="text-xs text-[var(--color-text-muted)]">—</span>
                         )

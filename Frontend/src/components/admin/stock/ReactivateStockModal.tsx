@@ -6,6 +6,9 @@ import toast from 'react-hot-toast';
 import { Minus, Package, Plus, Power, X } from 'lucide-react';
 import ProductImage from '@/components/ui/ProductImage';
 import { todayDateString } from '@/lib/datetime';
+import { getApiBaseUrl } from '@/lib/apiBase';
+import { confirmDialog } from '@/store/confirmStore';
+import AdminPinGateModal from '@/components/admin/AdminPinGateModal';
 import { adminStockFetch, hasWeeklyTargetConfigured, type StockBatchRow, type StockItem } from '@/lib/stockApi';
 
 interface ReactivateStockModalProps {
@@ -27,6 +30,7 @@ export default function ReactivateStockModal({
   const [activeQty, setActiveQty] = useState(0);
   const [restoreQty, setRestoreQty] = useState('0');
   const [isZeroStockReactivation, setIsZeroStockReactivation] = useState(false);
+  const [pinGateOpen, setPinGateOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,7 +99,7 @@ export default function ReactivateStockModal({
   }, [activeQty, frozenBatchCount, frozenQty]);
 
   const reactivate = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (password: string) => {
       if (!qtyValid) {
         throw new Error(
           maxQty === null
@@ -132,6 +136,7 @@ export default function ReactivateStockModal({
         body: JSON.stringify({
           isAvailable: true,
           storeId,
+          password,
           ...(maxQty !== null ? { overrideQty: effectiveQty } : {}),
         }),
       });
@@ -170,6 +175,21 @@ export default function ReactivateStockModal({
       : effectiveQty === 0
         ? 'Activate with 0 stock'
         : 'Activate & Restore';
+
+  async function handleActivateClick() {
+    if (loading || reactivate.isPending || !qtyValid) return;
+    const confirmed = await confirmDialog({
+      title: 'Activate product?',
+      message:
+        effectiveQty === 0
+          ? `${item.name} will be visible to customers again with 0 stock.`
+          : `${item.name} will be visible to customers again with ${effectiveQty} units.`,
+      confirmLabel: 'Continue',
+      cancelLabel: 'Cancel',
+    });
+    if (!confirmed) return;
+    setPinGateOpen(true);
+  }
 
   const lowStockThreshold = item.lowStockThreshold ?? 25;
   const showLowStockHint =
@@ -296,12 +316,28 @@ export default function ReactivateStockModal({
             type="button"
             className="btn-primary px-4 py-2"
             disabled={loading || reactivate.isPending || !qtyValid}
-            onClick={() => reactivate.mutate()}
+            onClick={() => void handleActivateClick()}
           >
             {submitLabel}
           </button>
         </div>
       </div>
+
+      <AdminPinGateModal
+        open={pinGateOpen}
+        onClose={() => {
+          if (!reactivate.isPending) setPinGateOpen(false);
+        }}
+        onVerified={(pin) => {
+          reactivate.mutate(pin);
+        }}
+        apiBase={getApiBaseUrl()}
+        busy={reactivate.isPending}
+        elevated
+        titleId="stock-reactivate-pin-title"
+        inputId="stock-reactivate-pin"
+        description="Enter your admin PIN to activate this product."
+      />
     </div>
   );
 }

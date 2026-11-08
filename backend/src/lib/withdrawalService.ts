@@ -4,13 +4,14 @@ import { AppError } from '../middleware/errorHandler';
 import {
   getOrCreateWallet,
   getWalletSummary,
+  withdrawableAllTimeBalanceCents,
   type PeriodBreakdown,
 } from './walletService';
 import { creditPlatformEarning } from './platformEarningsService';
 import { ensurePlatformEarningsSchema } from './platformEarningsSchema';
 import { ensurePlatformPaybackSchema } from './platformPaybackSchema';
-import { buildPeriodChannelPreview } from './periodChannelPreview';
-import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
+import { buildPeriodChannelPreview, channelPreviewFromPeriodBreakdown } from './periodChannelPreview';
+import { sumFirstPayoutOnlineWalletBaseFromBreakdown } from './commission';
 import {
   computeFinalPayoutAmountCents,
   parseSharedPromoFromBreakdown,
@@ -38,9 +39,13 @@ import { toUtcDateStr, todayUtcDateStr } from './utcDateString';
 import {
   computePeriodBreakdownForPayout,
   computePeriodNetAmountCents,
+  resolveCycleContextForWindow,
 } from './withdrawalPeriodNet';
 import { runWithdrawalApprovalSideEffects } from './withdrawalApprovalSideEffects';
+import { withdrawalInvoiceApiPath } from './withdrawalInvoice';
 import {
+  findCompletablePeriodWithdrawal,
+  findInReviewWithdrawalForPeriod,
   getNextPayoutStartDate,
   isValidPayoutPeriodDays,
   listElapsedPayoutWindows,
@@ -205,6 +210,8 @@ export async function requestWithdrawal(
         requestedById,
         isAdvance,
         breakdown,
+        cycleStage: breakdown.cycleStage ?? 'FIRST',
+        cyclePairId: breakdown.cyclePairId ?? null,
       },
     });
   } catch (err) {
@@ -244,6 +251,19 @@ const WITHDRAWAL_SNAPSHOT_NUMERIC_KEYS = [
   'periodLoyaltyDiscountTotal',
 ] as const satisfies readonly (keyof PeriodBreakdown)[];
 
+/** Jason discounts are funded by Jason's investment — do not debit them from the branch online wallet. */
+function onlineWalletDebitCentsFromRequestedAmount(
+  amountCents: number,
+  periodNetCents: number,
+  jasonCents: number,
+): number {
+  const jason = Math.max(0, jasonCents);
+  if (jason > 0 && Math.abs(amountCents - periodNetCents) <= 1) {
+    return Math.max(0, amountCents - jason);
+  }
+  return amountCents;
+}
+
 function assertWithdrawalBreakdownSnapshot(period: PeriodBreakdown): void {
   for (const key of WITHDRAWAL_SNAPSHOT_NUMERIC_KEYS) {
     const value = period[key];
@@ -261,12 +281,27 @@ export async function buildStoredWithdrawalBreakdown(
 ): Promise<StoredWithdrawalBreakdown> {
   assertWithdrawalBreakdownSnapshot(period);
   const branchRequestAmountCents = opts?.branchRequestAmountCents ?? period.netAmount;
-  const finalPayoutAmount = computeFinalPayoutAmountCents(
-    branchRequestAmountCents,
-    period.sharedPromoJasonContributionAmount ?? 0,
-  );
+  /**
+   * Net payout (final pay) for payables / branch receivable must follow the server period
+   * breakdown — especially `period.netAmount` after `refreshSecondPayoutGatewayAndNet` — plus
+   * Jason top-up. Do not derive this from the client-submitted wallet-debit (`branchRequest`);
+   * Initiate Payout can send a rounded branch-wallet line that is not identical to stored net.
+   */
+  const netCents = Math.round(period.netAmount);
+  const jasonCents = period.sharedPromoJasonContributionAmount ?? 0;
+  /** Payout 2 period net already includes Jason in the walkthrough — do not add it again. */
+  const finalPayoutAmount =
+    period.cycleStage === 'SECOND'
+      ? netCents
+      : computeFinalPayoutAmountCents(netCents, jasonCents);
   const platformProviderReceivable = await resolvePlatformProviderReceivableFromBreakdown(period);
   const { channelBreakdown: _ignoredChannelBreakdown, ...periodFields } = period;
+  const firstPayoutOnlineSubtotalCents =
+    period.cycleStage === 'FIRST'
+      ? Math.round(sumFirstPayoutOnlineWalletBaseFromBreakdown(channelBreakdown) * 100)
+      : period.cycleStage === 'SECOND' && period.priorOnlineWalletAmountCents != null
+        ? period.priorOnlineWalletAmountCents
+        : undefined;
   return {
     ...periodFields,
     periodNetAmount: period.netAmount,
@@ -274,6 +309,9 @@ export async function buildStoredWithdrawalBreakdown(
     finalPayoutAmount,
     channelBreakdown,
     platformProviderReceivable,
+    ...(firstPayoutOnlineSubtotalCents != null
+      ? { firstPayoutOnlineSubtotalCents }
+      : {}),
   };
 }
 
@@ -304,19 +342,26 @@ async function resolveValidatedPayoutBounds(
     throw new AppError('Payout period cannot be in the future', 400);
   }
 
-  const nextStart = await getNextPayoutStartDate(storeId);
-  if (nextStart && fromStr !== nextStart) {
-    throw new AppError(
-      `Payout period must start on ${nextStart} (the day after your last payout request).`,
-      400,
-    );
-  }
+  const completingExisting =
+    periodBounds?.from && periodBounds?.to
+      ? (await findCompletablePeriodWithdrawal(storeId, fromStr, toStr)) != null
+      : false;
 
-  if (periodBounds?.from && periodBounds?.to) {
-    const elapsed = await listElapsedPayoutWindows(storeId, periodDays, 24);
-    const eligible = elapsed.some((window) => window.from === fromStr && window.to === toStr);
-    if (!eligible) {
-      throw new AppError('Selected payout period is not eligible for settlement', 400);
+  if (!completingExisting) {
+    const nextStart = await getNextPayoutStartDate(storeId);
+    if (nextStart && fromStr !== nextStart) {
+      throw new AppError(
+        `Payout period must start on ${nextStart} (the day after your last payout request).`,
+        400,
+      );
+    }
+
+    if (periodBounds?.from && periodBounds?.to) {
+      const elapsed = await listElapsedPayoutWindows(storeId, periodDays, 24);
+      const eligible = elapsed.some((window) => window.from === fromStr && window.to === toStr);
+      if (!eligible) {
+        throw new AppError('Selected payout period is not eligible for settlement', 400);
+      }
     }
   }
 
@@ -342,22 +387,34 @@ export async function validatePayoutRequest(
   }
 
   const { fromStr, toStr } = await resolveValidatedPayoutBounds(storeId, periodDays, periodBounds);
+  const cycle = await resolveCycleContextForWindow(storeId, fromStr, toStr);
 
-  // PR #27 calc path: available + channel rows come from channel preview (matches Initiate UI).
-  // Period net still comes from computePeriodBreakdownForPayout. Keep both in parallel.
-  const [orderAvailable, periodWithDiscountReport, channelPreview] = await Promise.all([
-    computePeriodOrderAvailableCents(storeId, fromStr, toStr),
-    computePeriodBreakdownForPayout(storeId, fromStr, toStr),
-    buildPeriodChannelPreview(storeId, fromStr, toStr),
+  const [walletSummary, periodWithDiscountReport] = await Promise.all([
+    getWalletSummary(storeId),
+    computePeriodBreakdownForPayout(storeId, fromStr, toStr, cycle),
   ]);
-  if (amount > orderAvailable.remainingCents) {
+  const channelPreview = channelPreviewFromPeriodBreakdown(
+    periodWithDiscountReport,
+    fromStr,
+    toStr,
+  );
+  const remainingAvailableCents = withdrawableAllTimeBalanceCents(
+    walletSummary.allTimeAvailableBalanceCents,
+    walletSummary.pendingWithdrawalTotal,
+  );
+  const periodNet = periodWithDiscountReport.netAmount;
+  const jasonCents = periodWithDiscountReport.sharedPromoJasonContributionAmount ?? 0;
+  const onlineWalletDebitCents = onlineWalletDebitCentsFromRequestedAmount(
+    amount,
+    periodNet,
+    jasonCents,
+  );
+  if (onlineWalletDebitCents > remainingAvailableCents) {
     throw new AppError(
-      `Insufficient available balance. Available: LKR ${(orderAvailable.remainingCents / 100).toFixed(2)}`,
+      `Insufficient available balance. Available: LKR ${(remainingAvailableCents / 100).toFixed(2)}`,
       400,
     );
   }
-
-  const periodNet = periodWithDiscountReport.netAmount;
 
   const PAYOUT_AMOUNT_TOLERANCE_CENTS = 1;
   if (!isAdvance && amount > periodNet + PAYOUT_AMOUNT_TOLERANCE_CENTS) {
@@ -370,7 +427,7 @@ export async function validatePayoutRequest(
   return {
     fromStr,
     toStr,
-    remainingAvailableCents: orderAvailable.remainingCents,
+    remainingAvailableCents,
     breakdown: await buildStoredWithdrawalBreakdown(
       periodWithDiscountReport,
       channelPreview.breakdown,
@@ -407,26 +464,71 @@ export async function initiateAndApproveWithdrawal(
   isAdvance = false,
   extras?: ApproveWithdrawalExtras & { prevalidated?: ValidatedPayoutRequest },
 ): Promise<StoreWithdrawal> {
-  // Prefer caller-supplied validation (allows Spaces upload to run in parallel).
-  const { fromStr, toStr, breakdown, remainingAvailableCents } =
-    extras?.prevalidated ??
-    (await validatePayoutRequest(
-      storeId,
-      amount,
-      periodDays,
-      isAdvance,
-      extras?.periodBounds ?? null,
-    ));
+  let inReviewDraft: StoreWithdrawal | null = null;
+  if (extras?.periodBounds) {
+    if (extras.draftWithdrawalId) {
+      inReviewDraft = await prisma.storeWithdrawal.findFirst({
+        where: { id: extras.draftWithdrawalId, storeId, status: 'IN_REVIEW' },
+      });
+    }
+    if (!inReviewDraft) {
+      inReviewDraft = await findInReviewWithdrawalForPeriod(
+        storeId,
+        extras.periodBounds.from,
+        extras.periodBounds.to,
+      );
+    }
+  }
+
+  let fromStr: string;
+  let toStr: string;
+  let breakdown: StoredWithdrawalBreakdown;
+  let remainingAvailableCents: number;
+  let payoutRequestCents: number;
+
+  if (inReviewDraft?.breakdown) {
+    payoutRequestCents = withdrawalAmountCents(inReviewDraft);
+    breakdown = inReviewDraft.breakdown as StoredWithdrawalBreakdown;
+    fromStr = toUtcDateStr(inReviewDraft.periodFrom!);
+    toStr = toUtcDateStr(inReviewDraft.periodTo!);
+    const walletSummary = await getWalletSummary(storeId);
+    remainingAvailableCents = withdrawableAllTimeBalanceCents(
+      walletSummary.allTimeAvailableBalanceCents,
+      walletSummary.pendingWithdrawalTotal,
+    );
+  } else {
+    // Prefer caller-supplied validation (allows Spaces upload to run in parallel).
+    const validated =
+      extras?.prevalidated ??
+      (await validatePayoutRequest(
+        storeId,
+        amount,
+        periodDays,
+        isAdvance,
+        extras?.periodBounds ?? null,
+      ));
+    fromStr = validated.fromStr;
+    toStr = validated.toStr;
+    breakdown = validated.breakdown;
+    remainingAvailableCents = validated.remainingAvailableCents;
+    payoutRequestCents = amount;
+  }
+
   const periodFrom = new Date(`${fromStr}T00:00:00.000Z`);
   const periodTo = new Date(`${toStr}T23:59:59.999Z`);
 
   const sppc = parseSharedPromoFromBreakdown(breakdown);
   const sppcJasonCents = sppc.sharedPromoJasonContributionAmount;
-  const paymentCents = resolveFinalPayoutAmountFromBreakdown(breakdown, amount);
+  const paymentCents = resolveFinalPayoutAmountFromBreakdown(breakdown, payoutRequestCents);
+  const onlineWalletDebitCents = onlineWalletDebitCentsFromRequestedAmount(
+    payoutRequestCents,
+    breakdown.netAmount,
+    sppcJasonCents,
+  );
   const jasonNet = await computeJasonNetBalance();
   assertJasonBalanceCoversContribution(jasonNet, sppcJasonCents);
 
-  const withdrawalId = crypto.randomUUID();
+  const withdrawalId = inReviewDraft?.id ?? crypto.randomUUID();
   const txnId = crypto.randomUUID();
   const now = new Date();
   const { checkNumber: checkNum, checkDate: checkDt } = resolveCheckPaymentFields(paymentMethod, extras);
@@ -438,13 +540,13 @@ export async function initiateAndApproveWithdrawal(
   const availableCents = remainingAvailableCents;
   const approvedWithdrawal = await prisma.$transaction(async (tx) => {
     const locked = await lockStoreWallet(tx, storeId);
-    if (amount > availableCents) {
+    if (onlineWalletDebitCents > availableCents) {
       throw new AppError(
         `Insufficient available balance. Available: LKR ${(availableCents / 100).toFixed(2)}`,
         400,
       );
     }
-    const afterDebit = walletDataAfterDebit(locked, amount);
+    const afterDebit = walletDataAfterDebit(locked, onlineWalletDebitCents);
     const lockedBalance = Number(afterDebit.balance.toFixed(0));
 
     await createApprovalWalletLedgerEntries(tx, {
@@ -466,30 +568,47 @@ export async function initiateAndApproveWithdrawal(
       },
     });
 
-    // Single create (APPROVED) — avoids create-then-update P2025 under PgBouncer
-    // when an interactive transaction briefly loses the row mid-flight.
-    // walletTransactionId FK requires PAYOUT row above to exist first.
-    await tx.storeWithdrawal.create({
-      data: {
-        id: withdrawalId,
-        storeId,
-        amount: centsToDecimal(amount),
-        status: 'APPROVED',
-        remarks: remarks?.trim() || null,
-        periodFrom,
-        periodTo,
-        requestedById: initiatorId,
-        reviewedById: initiatorId,
-        reviewedAt: now,
-        walletTransactionId: txnId,
-        paymentMethod,
-        proofUrl,
-        checkNumber: checkNum,
-        checkDate: checkDt,
-        isAdvance,
-        breakdown,
-      },
-    });
+    const approvalData = {
+      amount: centsToDecimal(payoutRequestCents),
+      status: 'APPROVED' as WithdrawalStatus,
+      remarks: remarks?.trim() || null,
+      periodFrom,
+      periodTo,
+      reviewedById: initiatorId,
+      reviewedAt: now,
+      walletTransactionId: txnId,
+      paymentMethod,
+      proofUrl,
+      checkNumber: checkNum,
+      checkDate: checkDt,
+      isAdvance,
+      breakdown,
+      cycleStage: breakdown.cycleStage ?? 'FIRST',
+      cyclePairId: breakdown.cyclePairId ?? null,
+      invoiceUrl: withdrawalInvoiceApiPath(withdrawalId),
+    };
+
+    if (inReviewDraft) {
+      const updated = await tx.storeWithdrawal.updateMany({
+        where: { id: inReviewDraft.id, status: 'IN_REVIEW' },
+        data: approvalData,
+      });
+      if (updated.count !== 1) {
+        throw new AppError('Payout draft is no longer in review', 409);
+      }
+    } else {
+      // Single create (APPROVED) — avoids create-then-update P2025 under PgBouncer
+      // when an interactive transaction briefly loses the row mid-flight.
+      // walletTransactionId FK requires PAYOUT row above to exist first.
+      await tx.storeWithdrawal.create({
+        data: {
+          id: withdrawalId,
+          storeId,
+          ...approvalData,
+          requestedById: initiatorId,
+        },
+      });
+    }
 
     return tx.storeWithdrawal.findUniqueOrThrow({
       where: { id: withdrawalId },
@@ -511,6 +630,8 @@ export type ApproveWithdrawalExtras = {
   checkDate?: Date | null;
   /** Super Admin initiate from Payouts Due — settle this exact elapsed window. */
   periodBounds?: PayoutPeriodBounds;
+  /** Optional draft row from Payouts Due — backend still resolves by store+period when omitted. */
+  draftWithdrawalId?: string;
 };
 
 function resolveApprovalPayoutAmounts(withdrawal: StoreWithdrawal): {

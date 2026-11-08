@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
-import { requireBranchStoreId } from '../middleware/auth';
+import { isBranchScopedRole, requireBranchStoreId } from '../middleware/auth';
 import {
   receiveBatch,
   adjustBatch,
@@ -31,7 +31,7 @@ import { normalizeProductImageUrl } from '../lib/productImages';
 import { assertReceivedAtIsToday } from '../lib/datetime';
 
 async function resolveStoreId(req: Request, queryStoreId?: string): Promise<string> {
-  if (req.user?.role === 'STORE_MANAGER' || req.user?.role === 'CASHIER') {
+  if (isBranchScopedRole(req.user?.role)) {
     return requireBranchStoreId(req);
   }
   if (!queryStoreId) throw new AppError('storeId is required', 400);
@@ -117,7 +117,7 @@ export async function receiveStockBatch(req: Request, res: Response, next: NextF
       select: { weeklyTargetQty: true },
     });
     if (!storeProduct) throw new AppError('Branch stock row not found', 404);
-    if (req.user?.role === 'STORE_MANAGER' && storeProduct.weeklyTargetQty <= 0) {
+    if (isBranchScopedRole(req.user?.role) && storeProduct.weeklyTargetQty <= 0) {
       throw new AppError('Set a weekly target before receiving stock', 400);
     }
 
@@ -137,6 +137,101 @@ export async function receiveStockBatch(req: Request, res: Response, next: NextF
     });
 
     return success(res, { productId, storeId, ...result });
+  } catch (err) {
+    if (err instanceof AppError) {
+      next(err);
+      return;
+    }
+    if (err instanceof Error) {
+      next(new AppError(err.message, 400));
+      return;
+    }
+    next(err);
+  }
+}
+
+function resolveRestockToTargetBatchType(input: {
+  isAvailable: boolean;
+  isFirstReceive: boolean;
+  onlineAvailableBefore: number;
+  thresholds: ReturnType<typeof getEffectiveThresholds>;
+}): 'RESET' | 'EMERGENCY' {
+  const { isAvailable, isFirstReceive, onlineAvailableBefore, thresholds } = input;
+  if (isFirstReceive) return 'RESET';
+
+  const isLowStockOnline = onlineAvailableBefore < thresholds.lowStockThreshold;
+  if (isLowStockOnline && isAvailable) return 'EMERGENCY';
+  if (isLowStockOnline) return 'EMERGENCY';
+  return 'RESET';
+}
+
+export async function restockToWeeklyTarget(req: Request, res: Response, next: NextFunction) {
+  try {
+    const productId = req.params.productId as string;
+    const body = z
+      .object({
+        storeId: z.string().optional(),
+      })
+      .parse(req.body ?? {});
+
+    const storeId = await resolveStoreId(req, body.storeId);
+    const adminUserId = req.user?.sub;
+    if (!adminUserId) throw new AppError('Unauthorized', 401);
+
+    const product = await prisma.product.findUnique({ where: { id: productId } });
+    if (!product) throw new AppError('Product not found', 404);
+
+    const storeProduct = await prisma.storeProduct.findUnique({
+      where: { storeId_productId: { storeId, productId } },
+    });
+    if (!storeProduct) throw new AppError('Branch stock row not found', 404);
+    if (storeProduct.weeklyTargetQty <= 0) {
+      throw new AppError('Set a weekly target before restocking to order level', 400);
+    }
+
+    const onHand = storeProduct.stock;
+    const weeklyTarget = storeProduct.weeklyTargetQty;
+    const receivedQty = weeklyTarget - onHand;
+    if (receivedQty <= 0) {
+      throw new AppError('On-hand quantity is already at or above the weekly target', 400);
+    }
+
+    const isFirstReceive = !(await prisma.stockBatch.findFirst({
+      where: { storeId, productId },
+      select: { id: true },
+    }));
+
+    const thresholds = getEffectiveThresholds(storeProduct);
+    const reserved = await getActiveReservedQuantity(storeId, productId);
+    const onlineAvailableBefore = Math.max(
+      0,
+      Math.max(0, onHand - reserved) - thresholds.onlineOutOfStockThreshold,
+    );
+
+    const batchType = resolveRestockToTargetBatchType({
+      isAvailable: storeProduct.isAvailable,
+      isFirstReceive,
+      onlineAvailableBefore,
+      thresholds,
+    });
+
+    const result = await receiveBatch({
+      storeId,
+      productId,
+      receivedQty,
+      unitCost: product.cost,
+      note: `Restock to order level (weekly target ${weeklyTarget})`,
+      adminUserId,
+      batchType,
+    });
+
+    return success(res, {
+      productId,
+      storeId,
+      receivedQty,
+      weeklyTargetQty: weeklyTarget,
+      ...result,
+    });
   } catch (err) {
     if (err instanceof AppError) {
       next(err);
@@ -273,7 +368,7 @@ export async function patchBatch(req: Request, res: Response, next: NextFunction
     });
     if (!batch) throw new AppError('Batch not found', 404);
 
-    if (req.user?.role === 'STORE_MANAGER') {
+    if (isBranchScopedRole(req.user?.role)) {
       const storeId = await requireBranchStoreId(req);
       if (batch.storeId !== storeId) {
         throw new AppError('Forbidden', 403);
@@ -320,7 +415,7 @@ export async function updateProductStockSettings(req: Request, res: Response, ne
     if (!row) throw new AppError('Branch stock row not found', 404);
 
     if (
-      req.user?.role === 'STORE_MANAGER' &&
+      isBranchScopedRole(req.user?.role) &&
       row.weeklyTargetQty <= 0 &&
       body.weeklyTargetQty !== undefined &&
       body.weeklyTargetQty <= 0

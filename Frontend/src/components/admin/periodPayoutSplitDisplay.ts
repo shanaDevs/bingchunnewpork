@@ -2,8 +2,9 @@ import type { PeriodPayoutSplitLkr } from '@/components/admin/settlementTypes';
 
 export type PeriodPayoutCardAmounts = {
   branchReceives: number;
-  commissionLkr: number;
-  orderConvenienceFeeLkr: number;
+  /** null = not shown for FIRST-cycle payout rows in period tables */
+  commissionLkr: number | null;
+  orderConvenienceFeeLkr: number | null;
   deliveryFee: number;
 };
 

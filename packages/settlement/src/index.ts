@@ -1,6 +1,7 @@
 export {
   computePlatformProviderReceivable,
   computePlatformProviderReceivableLkr,
+  computePlatformProviderReceivableLkrFromBreakdownCents,
   platformProviderReceivableToLkr,
   platformProviderReceivableInputFromBreakdownCents,
   platformProviderReceivableInputFromLkr,

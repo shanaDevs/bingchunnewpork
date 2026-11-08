@@ -1,8 +1,8 @@
-import { prisma } from './prisma';
-import { walletBalanceCents } from './walletApiMoney';
+import { getPrismaFanOutLimit, prisma } from './prisma';
 import { normalizeProductImageUrl, productImageUrl } from './productImages';
 import {
   branchPayablesFromDashboardWalletKpi,
+  computeBranchPayablesBreakdown,
   computeDashboardWalletAvailableCents,
 } from './walletService';
 import { getOutgoingFlowsForDashboard, sumJasonInvestedLkrForRange } from './walletAnalysis';
@@ -467,11 +467,25 @@ export async function buildDashboardStatsFull(ctx: DashboardStatsContext) {
     const onlineWalletBalance = dashboardWalletKpi.totalCents;
     const branchPayables = branchPayablesFromDashboardWalletKpi(dashboardWalletKpi);
 
+    const payablesByStore = new Map(
+      (
+        await promiseAllLimited(
+          getPrismaFanOutLimit(),
+          wallets.map(
+            (w) => (): Promise<{ storeId: string; cents: number }> =>
+              computeBranchPayablesBreakdown(w.storeId).then((breakdown) => ({
+                storeId: w.storeId,
+                cents: breakdown.allTimeAvailableBalanceCents,
+              })),
+          ),
+        )
+      ).map((row) => [row.storeId, row.cents]),
+    );
     const walletBalances = wallets.map((w) => ({
       storeId: w.store.id,
       storeName: w.store.name.replace('Bing Chun - ', ''),
       city: w.store.city,
-      balance: walletBalanceCents(w),
+      balance: payablesByStore.get(w.storeId) ?? 0,
     }));
 
     const totalPayable = branchPayables.totalRemaining;

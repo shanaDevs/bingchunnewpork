@@ -53,6 +53,8 @@ import {
   PICKUP_ONLINE_PAYMENT_THRESHOLD,
   requiresOnlinePaymentForPickup,
   filterCheckoutPaymentMethods,
+  activePickupMaxOrderAmount,
+  isPickupOrderOverMaxAmount,
 } from '@/lib/pickupPayment';
 import {
   isCheckoutReservationActive,
@@ -200,6 +202,16 @@ function CheckoutPage() {
     enabled: isAuthenticated && orderMode === 'DELIVERY',
   });
 
+  const { data: appSettings } = useQuery({
+    queryKey: ['app-settings-checkout'],
+    queryFn: () =>
+      api.get<{ pickupMaxOrderAmount?: number | null }>('/settings/app'),
+    enabled: isTakeaway,
+    staleTime: 60_000,
+  });
+
+  const pickupMaxOrderAmount = activePickupMaxOrderAmount(appSettings?.pickupMaxOrderAmount);
+
   const { data: paymentConfig } = useQuery({
     queryKey: ['payment-methods', orderMode, sub],
     queryFn: () =>
@@ -320,6 +332,8 @@ function CheckoutPage() {
   const usePoints = redeemEnabled ? redeemCalc.points : 0;
   const pointsRedeemActive = redeemEnabled;
   const total = Math.max(0, remainingBeforeLoyalty - loyaltyDiscount);
+  const pickupOverMaxAmount =
+    isTakeaway && isPickupOrderOverMaxAmount(total, pickupMaxOrderAmount);
 
   useEffect(() => {
     if (!hasPromoApplied) return;
@@ -690,6 +704,12 @@ function CheckoutPage() {
       toast.error('Please select a payment method');
       return;
     }
+    if (pickupOverMaxAmount && pickupMaxOrderAmount != null) {
+      toast.error(
+        `Pickup orders above LKR ${pickupMaxOrderAmount.toLocaleString()} cannot be placed online`,
+      );
+      return;
+    }
     if (isTakeaway && requiresOnlinePaymentForPickup(sub) && paymentMethod === 'CASH_AT_COUNTER') {
       toast.error(
         `Takeaway orders of LKR ${PICKUP_ONLINE_PAYMENT_THRESHOLD.toLocaleString()} or more must be paid online`,
@@ -958,7 +978,12 @@ function CheckoutPage() {
   const hasRealContactName =
     !isPlaceholderCustomerName(guestName) || !isPlaceholderCustomerName(user?.name);
   const canSubmitOrder =
-    canPlaceOrder && canPay && sessionReady && hasVerifiedContact && hasRealContactName;
+    canPlaceOrder &&
+    canPay &&
+    sessionReady &&
+    hasVerifiedContact &&
+    hasRealContactName &&
+    !pickupOverMaxAmount;
 
   if (!cartHydrated) {
     return (
@@ -1594,6 +1619,16 @@ function CheckoutPage() {
                 <span className="text-fg">Total</span>
                 <span className="text-brand text-lg tabular-nums">{formatMoney(total)}</span>
               </div>
+              {pickupOverMaxAmount && pickupMaxOrderAmount != null && (
+                <div className="mt-3 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-sm">
+                  <p className="font-semibold text-amber-200">Pickup order total exceeds the online limit</p>
+                  <p className="text-amber-100/90 mt-1 text-xs">
+                    The maximum for pickup orders placed online is LKR{' '}
+                    {pickupMaxOrderAmount.toLocaleString()}. Reduce your order or contact the store
+                    for help.
+                  </p>
+                </div>
+              )}
             </div>
 
             <PromoOffersPanel
@@ -1652,6 +1687,8 @@ function CheckoutPage() {
             >
               {placing
                 ? 'Placing Order...'
+                : pickupOverMaxAmount
+                  ? 'Pickup total over online limit'
                 : !hasVerifiedContact
                   ? 'Verify phone to place order'
                   : paymentMethod === 'PAYHERE'

@@ -18,14 +18,45 @@ export const GATEWAY_FEE_RATE = 0.019;
 export const ONLINE_PROVIDER_FEE_RATE = GATEWAY_FEE_RATE;
 
 /** Rolling payout window slab tiers — rate applies to period commissionable base (excludes delivery & convenience fees). */
-export const COMMISSION_SLABS = [
+export const DEFAULT_COMMISSION_SLABS = [
   { upTo: 1_000_000, rate: 0.065, label: 'Up to LKR 1,000,000' },
-  { upTo: 2_000_000, rate: 0.055, label: 'LKR 1,000,001 – 2,000,000' },
-  { upTo: 3_000_000, rate: 0.05, label: 'LKR 2,000,001 – 3,000,000' },
-  { upTo: Infinity, rate: 0.045, label: 'Above LKR 3,000,000' },
+  { upTo: Infinity, rate: 0.05, label: 'Above LKR 1,000,000' },
 ] as const;
 
-export type CommissionSlab = (typeof COMMISSION_SLABS)[number];
+/** @deprecated Use DEFAULT_COMMISSION_SLABS or getCommissionSlabs() */
+export const COMMISSION_SLABS = DEFAULT_COMMISSION_SLABS;
+
+export type CommissionSlab = {
+  upTo: number;
+  rate: number;
+  label: string;
+};
+
+export function serializeCommissionSlabsForApi(slabs: readonly CommissionSlab[]) {
+  return slabs.map((s) => ({
+    upTo: Number.isFinite(s.upTo) ? s.upTo : null,
+    rate: s.rate,
+    label: s.label,
+  }));
+}
+
+export function normalizeCommissionSlabs(
+  input: readonly { upTo: number; rate: number; label?: string }[] | null | undefined,
+): readonly CommissionSlab[] {
+  if (!input?.length) return DEFAULT_COMMISSION_SLABS;
+  const sorted = [...input].sort((a, b) => a.upTo - b.upTo);
+  return sorted.map((row, index) => ({
+    upTo: row.upTo,
+    rate: row.rate,
+    label:
+      row.label ??
+      (Number.isFinite(row.upTo) && row.upTo < Infinity
+        ? index === 0
+          ? `Up to LKR ${row.upTo.toLocaleString('en-LK')}`
+          : `Above LKR ${sorted[index - 1]?.upTo.toLocaleString('en-LK')}`
+        : `Above LKR ${sorted[index - 1]?.upTo.toLocaleString('en-LK')}`),
+  }));
+}
 
 export type CommissionChannel = 'pickupCash' | 'pickupCard' | 'pickupOnline' | 'deliveryOnline';
 
@@ -116,24 +147,33 @@ export function resolvePayHereOrderComponents(
   return { revenueSubtotal, deliveryFee, convenienceFee, total };
 }
 
-export function getSlabIndex(monthlyBase: number): number {
-  for (let i = 0; i < COMMISSION_SLABS.length; i++) {
-    if (monthlyBase <= COMMISSION_SLABS[i].upTo) return i;
+export function getSlabIndex(
+  monthlyBase: number,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
+): number {
+  for (let i = 0; i < slabs.length; i++) {
+    if (monthlyBase <= slabs[i].upTo) return i;
   }
-  return COMMISSION_SLABS.length - 1;
+  return slabs.length - 1;
 }
 
-export function getEffectiveRate(monthlyBase: number): number {
-  return COMMISSION_SLABS[getSlabIndex(monthlyBase)].rate;
+export function getEffectiveRate(
+  monthlyBase: number,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
+): number {
+  return slabs[getSlabIndex(monthlyBase, slabs)].rate;
 }
 
-export function buildSlabInfo(monthlyBase: number): SlabInfo {
-  const slabIndex = getSlabIndex(monthlyBase);
+export function buildSlabInfo(
+  monthlyBase: number,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
+): SlabInfo {
+  const slabIndex = getSlabIndex(monthlyBase, slabs);
   return {
     monthlyBase,
-    effectiveRate: COMMISSION_SLABS[slabIndex].rate,
+    effectiveRate: slabs[slabIndex].rate,
     slabIndex,
-    slabs: COMMISSION_SLABS,
+    slabs,
   };
 }
 
@@ -229,13 +269,21 @@ export function monthsInRange(from: string, to: string): string[] {
   return periodsInRange(from, to);
 }
 
-export function computePlatformCommission(base: number, monthlyBase: number): number {
-  return base * getEffectiveRate(monthlyBase);
+export function computePlatformCommission(
+  base: number,
+  monthlyBase: number,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
+): number {
+  return base * getEffectiveRate(monthlyBase, slabs);
 }
 
 /** Per-order commission in cents (half-up to nearest cent when stored). */
-export function computePlatformCommissionCents(base: number, monthlyBase: number): number {
-  return Math.round(computePlatformCommission(base, monthlyBase) * 100);
+export function computePlatformCommissionCents(
+  base: number,
+  monthlyBase: number,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
+): number {
+  return Math.round(computePlatformCommission(base, monthlyBase, slabs) * 100);
 }
 
 export function computeProviderFee(orderSubtotal: number, rate = GATEWAY_FEE_RATE): number {
@@ -417,9 +465,10 @@ function applyChannelRate(breakdown: Record<CommissionChannel, ChannelBreakdown>
 export function accumulateCommissionBreakdown(
   orders: CommissionOrderFields[],
   monthlyBase: number,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
 ): Record<CommissionChannel, ChannelBreakdown> {
   const breakdown = emptyCommissionBreakdown();
-  const effectiveRate = getEffectiveRate(monthlyBase);
+  const effectiveRate = getEffectiveRate(monthlyBase, slabs);
 
   for (const order of orders) {
     const channel = orderCommissionChannel(order.orderMode, order.paymentMethod);
@@ -427,7 +476,7 @@ export function accumulateCommissionBreakdown(
 
     const base = commissionableSubtotal(order);
     breakdown[channel].revenueSubtotal += base;
-    breakdown[channel].commission += computePlatformCommission(base, monthlyBase);
+    breakdown[channel].commission += computePlatformCommission(base, monthlyBase, slabs);
     breakdown[channel].orderCount += 1;
     breakdown[channel].rate = effectiveRate;
   }
@@ -440,9 +489,10 @@ export function accumulateSettlementBreakdown(
   windowBase: number,
   convenienceFeeRates: ConvenienceFeeRates | number = DEFAULT_CONVENIENCE_FEE_RATE,
   gatewayFeeRate = GATEWAY_FEE_RATE,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
 ): Record<CommissionChannel, ChannelSettlementRow> {
   const breakdown = emptySettlementBreakdown(gatewayFeeRate);
-  const effectiveRate = getEffectiveRate(windowBase);
+  const effectiveRate = getEffectiveRate(windowBase, slabs);
 
   for (const order of orders) {
     const channel = orderCommissionChannel(order.orderMode, order.paymentMethod);
@@ -450,7 +500,7 @@ export function accumulateSettlementBreakdown(
 
     const base = commissionableSubtotal(order);
     breakdown[channel].revenueSubtotal += base;
-    breakdown[channel].commission += computePlatformCommission(base, windowBase);
+    breakdown[channel].commission += computePlatformCommission(base, windowBase, slabs);
     breakdown[channel].orderCount += 1;
     breakdown[channel].rate = effectiveRate;
     breakdown[channel].grossSalesTotal += base;
@@ -492,6 +542,7 @@ export function accumulateSettlementBreakdown(
 export function accumulateCommissionBreakdownMultiMonth(
   orders: Array<CommissionOrderFields & { createdAt: Date | string; storeId: string }>,
   monthlyBaseLookup: Record<string, number>,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
 ): Record<CommissionChannel, ChannelBreakdown> {
   const breakdown = emptyCommissionBreakdown();
 
@@ -500,11 +551,11 @@ export function accumulateCommissionBreakdownMultiMonth(
     if (!channel) continue;
 
     const monthlyBase = monthlyBaseLookup[storePeriodKey(order.storeId, order.createdAt)] ?? 0;
-    const effectiveRate = getEffectiveRate(monthlyBase);
+    const effectiveRate = getEffectiveRate(monthlyBase, slabs);
 
     const base = commissionableSubtotal(order);
     breakdown[channel].revenueSubtotal += base;
-    breakdown[channel].commission += computePlatformCommission(base, monthlyBase);
+    breakdown[channel].commission += computePlatformCommission(base, monthlyBase, slabs);
     breakdown[channel].orderCount += 1;
     breakdown[channel].rate = effectiveRate;
   }
@@ -516,13 +567,15 @@ export function accumulateCommissionBreakdownMultiMonth(
 export function computeAllTimeCommission(
   orders: Array<CommissionOrderFields & { createdAt: Date | string; storeId: string }>,
   monthlyBaseLookup: Record<string, number>,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
 ): number {
-  const breakdown = accumulateCommissionBreakdownMultiMonth(orders, monthlyBaseLookup);
+  const breakdown = accumulateCommissionBreakdownMultiMonth(orders, monthlyBaseLookup, slabs);
   return sumBreakdownCommission(breakdown);
 }
 
 export function buildPeriodSlabInfoList(
   periodBaseLookup: Record<string, number>,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
 ): PeriodSlabInfo[] {
   return Object.entries(periodBaseLookup)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -530,7 +583,7 @@ export function buildPeriodSlabInfoList(
       const period = storePeriod.includes('|') ? storePeriod.split('|')[1]! : storePeriod;
       return {
         period,
-        ...buildSlabInfo(monthlyBase),
+        ...buildSlabInfo(monthlyBase, slabs),
       };
     });
 }
@@ -538,8 +591,9 @@ export function buildPeriodSlabInfoList(
 /** @deprecated Use buildPeriodSlabInfoList */
 export function buildMonthlySlabInfoList(
   monthlyBaseLookup: Record<string, number>,
+  slabs: readonly CommissionSlab[] = DEFAULT_COMMISSION_SLABS,
 ): MonthlySlabInfo[] {
-  return buildPeriodSlabInfoList(monthlyBaseLookup).map(({ period, ...rest }) => ({
+  return buildPeriodSlabInfoList(monthlyBaseLookup, slabs).map(({ period, ...rest }) => ({
     month: period,
     period,
     ...rest,
@@ -577,6 +631,38 @@ export function sumOnlinePaymentsCollectedFromBreakdown(
   return (
     (breakdown.pickupOnline.revenueSubtotal ?? 0) +
     (breakdown.deliveryOnline.revenueSubtotal ?? 0)
+  );
+}
+
+/** Payout 1 gateway fee base — pickup + delivery online revenue after discounts. */
+export function sumFirstPayoutOnlineWalletBaseFromBreakdown(
+  breakdown: Record<CommissionChannel, ChannelSettlementRow>,
+): number {
+  return sumOnlinePaymentsCollectedFromBreakdown(breakdown);
+}
+
+/** Payout 2 — branch wallet before PayHere gateway fee (cents). Matches admin report walkthrough. */
+export function computeBranchWalletBeforeGatewayCents(params: {
+  onlinePaymentsCollectedCents: number;
+  priorOnlineWalletAmountCents: number;
+  netPlatformEarningCents: number;
+  jasonContributionCents?: number;
+  nonReturningRefundsBranchGrossCents?: number;
+}): number {
+  const {
+    onlinePaymentsCollectedCents,
+    priorOnlineWalletAmountCents,
+    netPlatformEarningCents,
+    jasonContributionCents = 0,
+    nonReturningRefundsBranchGrossCents = 0,
+  } = params;
+  return Math.max(
+    0,
+    onlinePaymentsCollectedCents +
+      jasonContributionCents -
+      priorOnlineWalletAmountCents +
+      nonReturningRefundsBranchGrossCents -
+      netPlatformEarningCents,
   );
 }
 

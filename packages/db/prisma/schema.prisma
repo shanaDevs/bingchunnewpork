@@ -610,10 +610,11 @@ model StockAuditLog {
   qtyBefore   Int
   qtyChange   Int
   qtyAfter    Int
-  orderId     String?
-  adminUserId String?
-  note        String?         @db.Text
-  createdAt   DateTime        @default(now())
+  orderId       String?
+  adminUserId   String?
+  adminUserName String?
+  note          String?         @db.Text
+  createdAt     DateTime        @default(now())
 
   store       Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
   product     Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -1334,6 +1335,7 @@ model AppSetting {
   convenientFeeRate            Float   @default(0.075)
   pickupConvenientFeeRate      Float   @default(0.06)
   gatewayFeeRate               Float   @default(0.019)
+  commissionSlabsJson          Json?
   deliveryPlatformFeeRate      Float   @default(0)
   pickupAllowAddItemsPaidOnline Boolean @default(true)
   pickupAllowEditCashUnpaid    Boolean @default(true)
@@ -1365,6 +1367,9 @@ model AppSetting {
   spinDisplayJson              Json?
   spinCriteriaJson             Json?
   cancelWindowMinutes          Int       @default(10)
+  weeklyResetDay               Int?
+  /// Max payable LKR total for takeaway orders placed online; null or 0 = no cap.
+  pickupMaxOrderAmount         Int?
   /// Default geofence (meters) for completing a ride at the assigned branch.
   branchCompletionRadiusM      Int       @default(100)
 
@@ -1397,8 +1402,16 @@ enum SettlementPaymentMethod {
   @@schema("public")
 }
 
+enum PayoutCycleStage {
+  FIRST
+  SECOND
+
+  @@schema("public")
+}
+
 enum WithdrawalStatus {
   PENDING
+  IN_REVIEW
   APPROVED
   REJECTED
   CANCELLED
@@ -1447,6 +1460,8 @@ model StoreWithdrawal {
   invoiceData         Json?
   breakdown           Json?
   isAdvance           Boolean                   @default(false)
+  cycleStage          PayoutCycleStage          @default(FIRST)
+  cyclePairId         String?
   requestedById       String
   reviewedById        String?
   reviewedAt          DateTime?
@@ -1456,11 +1471,14 @@ model StoreWithdrawal {
 
   store             Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
   walletTransaction WalletTransaction? @relation(fields: [walletTransactionId], references: [id])
+  cyclePair         StoreWithdrawal?   @relation("PayoutCyclePair", fields: [cyclePairId], references: [id], onDelete: SetNull)
+  pairedSecondPayouts StoreWithdrawal[] @relation("PayoutCyclePair")
   commissionSettlement CommissionSettlement?
   platformEarning   PlatformEarning?
 
   @@index([storeId, createdAt])
   @@index([storeId, status])
+  @@index([cyclePairId])
   @@schema("public")
 
   @@map("store_withdrawals")

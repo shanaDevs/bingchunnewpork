@@ -290,10 +290,28 @@ describe('getCustomerLoyalty', () => {
     });
   });
 
+  it('accepts higher loyalty thresholds within the configured maximum', async () => {
+    vi.mocked(prisma.order.groupBy).mockResolvedValue([] as never);
+
+    const req = createMockReq({
+      user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
+      query: { loyaltyThreshold: '255' },
+    });
+    const res = createMockRes();
+
+    await getCustomerLoyalty(req, res, next);
+
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: { loyaltyThreshold: 255, customers: [], summary: { total: 0, newCount: 0, loyalCount: 0 } },
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('forwards validation errors for an out-of-range loyalty threshold', async () => {
     const req = createMockReq({
       user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
-      query: { loyaltyThreshold: '1000' },
+      query: { loyaltyThreshold: '100000' },
     });
     const res = createMockRes();
 

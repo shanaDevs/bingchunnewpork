@@ -32,7 +32,14 @@ export async function getWithdrawalInvoiceHandler(
     const withdrawalId = uuidParamSchema.parse(req.params.withdrawalId);
     const withdrawal = await prisma.storeWithdrawal.findUnique({
       where: { id: withdrawalId },
-      select: { id: true, storeId: true, invoiceRef: true, invoiceData: true },
+      select: {
+        id: true,
+        storeId: true,
+        invoiceRef: true,
+        invoiceData: true,
+        breakdown: true,
+        cycleStage: true,
+      },
     });
 
     if (!withdrawal) throw new AppError('Invoice not found', 404);
@@ -42,7 +49,10 @@ export async function getWithdrawalInvoiceHandler(
     const input = parseWithdrawalInvoiceInput(withdrawal.invoiceData);
     if (!input) throw new AppError('Invalid invoice data', 500);
 
-    const buffer = await renderWithdrawalInvoiceToBuffer(input);
+    const buffer = await renderWithdrawalInvoiceToBuffer(input, {
+      withdrawalBreakdown: withdrawal.breakdown,
+      cycleStage: withdrawal.cycleStage,
+    });
     const ref = withdrawal.invoiceRef ?? withdrawalInvoiceRef(withdrawal.id);
     sendPdf(res, buffer, `${ref}.pdf`);
   } catch (err) {

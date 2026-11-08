@@ -3,9 +3,10 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
+import { verifyAdminPin } from '../lib/verifyAdminPin';
 import { normalizeProductImageUrl } from '../lib/productImages';
 import { syncStoreProducts } from '../lib/storeInventory';
-import { requireBranchStoreId } from '../middleware/auth';
+import { isBranchScopedRole, requireBranchStoreId } from '../middleware/auth';
 import {
   getEffectiveThresholds,
   isOnlineOutOfStockByQty,
@@ -17,7 +18,7 @@ import { enrichStockRowsForList } from './batchStockController';
 import { isNeverStockedAtBranch } from '../lib/menuBranchStock';
 
 async function resolveStoreId(req: Request, queryStoreId?: string): Promise<string> {
-  if (req.user?.role === 'STORE_MANAGER') {
+  if (isBranchScopedRole(req.user?.role)) {
     return requireBranchStoreId(req);
   }
   if (!queryStoreId) throw new AppError('storeId is required', 400);
@@ -155,11 +156,12 @@ export async function listBranchStock(req: Request, res: Response, next: NextFun
 export async function updateBranchStock(req: Request, res: Response, next: NextFunction) {
   try {
     const productId = req.params.productId as string;
-    const { isAvailable, storeId: bodyStoreId, weeklyBaseQty, overrideQty } = z.object({
+    const { isAvailable, storeId: bodyStoreId, weeklyBaseQty, overrideQty, password } = z.object({
       isAvailable: z.boolean(),
       storeId: z.string().optional(),
       weeklyBaseQty: z.number().int().positive().optional(),
       overrideQty: z.number().int().min(0).optional(),
+      password: z.string().optional(),
     }).parse(req.body);
 
     const storeId = await resolveStoreId(req, bodyStoreId);
@@ -167,6 +169,22 @@ export async function updateBranchStock(req: Request, res: Response, next: NextF
 
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product) throw new AppError('Product not found', 404);
+
+    const existing = await prisma.storeProduct.findUnique({
+      where: { storeId_productId: { storeId, productId } },
+      select: { isAvailable: true },
+    });
+    const currentlyAvailable = existing?.isAvailable ?? false;
+    if (isAvailable !== currentlyAvailable) {
+      const branchDeactivated = isAvailable
+        ? (await getBranchDeactivatedAtByProductId(storeId, [productId])).has(productId)
+        : false;
+      // PIN-gate power-button deactivate and branch-inactive reactivate only.
+      // Receive/adjust activation of out-of-stock (not branch-deactivated) products stays unchanged.
+      if (!isAvailable || branchDeactivated) {
+        await verifyAdminPin(adminUserId, password ?? '');
+      }
+    }
 
     const row = await setBranchProductAvailability({
       storeId,
