@@ -8,6 +8,7 @@ import '../components/buttons.dart';
 import '../components/inputs.dart';
 import '../components/run_kit.dart';
 import '../components/sheet_kit.dart';
+import '../components/profile_kit.dart';
 import '../theme/bc_theme.dart';
 import '../../l10n/l10n.dart';
 
@@ -77,7 +78,7 @@ class _RejectJobDialogState extends State<_RejectJobDialog> {
             Text(
               '${_note.text.length}/$_rejectNoteMax',
               textAlign: TextAlign.end,
-              style: BcType.tiny.copyWith(color: _note.text.trim().isEmpty ? c.errorSoft : c.textMuted),
+              style: BcType.tiny.copyWith(color: _note.text.trim().isEmpty ? c.errorSoft : c.mutedForeground),
             ),
           ],
         ],
@@ -186,8 +187,8 @@ class _ClaimJobSheetState extends State<_ClaimJobSheet> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: c.card,
-              border: Border.all(color: c.brand.withValues(alpha: 0.35), width: 2),
-              boxShadow: [BoxShadow(color: c.brand.withValues(alpha: 0.2), blurRadius: 10, offset: const Offset(0, 3))],
+              border: Border.all(color: c.primaryStrong.withValues(alpha: 0.35), width: 2),
+              boxShadow: [BoxShadow(color: c.primaryStrong.withValues(alpha: 0.2), blurRadius: 10, offset: const Offset(0, 3))],
             ),
             // Logo fills the circle edge to edge (zoomed slightly so no square corners show).
             child: ClipOval(
@@ -204,14 +205,10 @@ class _ClaimJobSheetState extends State<_ClaimJobSheet> {
         children: [
           if (fee != null && fee > 0) ...[
             Container(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(11),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(BcRadius.card),
-                gradient: LinearGradient(
-                  colors: c.isDark ? [const Color(0xFF064E3B), const Color(0xFF065F46)] : _claimGreens,
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                color: c.success,
               ),
               child: Row(
                 children: [
@@ -219,10 +216,10 @@ class _ClaimJobSheetState extends State<_ClaimJobSheet> {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(14),
+                      color: c.successForeground.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(BcRadius.md),
                     ),
-                    child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 23),
+                    child: Icon(Icons.account_balance_wallet_rounded, color: c.successForeground, size: 23),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -231,14 +228,14 @@ class _ClaimJobSheetState extends State<_ClaimJobSheet> {
                       children: [
                         Text(
                           tr('Delivery Fee'),
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 12.5),
+                          style: TextStyle(color: c.successForeground.withValues(alpha: 0.9), fontSize: 13),
                         ),
                         FittedBox(
                           fit: BoxFit.scaleDown,
                           alignment: Alignment.centerLeft,
                           child: Text(
                             Format.money(fee),
-                            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800),
+                            style: TextStyle(color: c.successForeground, fontSize: 24, fontWeight: FontWeight.w800),
                           ),
                         ),
                       ],
@@ -254,7 +251,7 @@ class _ClaimJobSheetState extends State<_ClaimJobSheet> {
               if (stops != null && stops > 0)
                 RunFactTile(
                   icon: Icons.location_on_rounded,
-                  tint: c.brand,
+                  tint: c.primaryStrong,
                   value: '$stops',
                   label: stops == 1 ? tr('Stop') : tr('Stops'),
                 ),
@@ -279,7 +276,7 @@ class _ClaimJobSheetState extends State<_ClaimJobSheet> {
             ),
           ],
           const SizedBox(height: 18),
-          BcGradientButton(
+          RunPrimaryButton(
             label: widget.confirmLabel,
             icon: Icons.check_circle_rounded,
             loading: _submitting,
@@ -293,8 +290,6 @@ class _ClaimJobSheetState extends State<_ClaimJobSheet> {
     );
   }
 }
-
-const _claimGreens = [Color(0xFF34D399), Color(0xFF10B981), Color(0xFF059669)];
 
 const _vehicleFailureNoteMax = 250;
 
@@ -349,14 +344,13 @@ class _VehicleFailureSheetState extends State<_VehicleFailureSheet> {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final dark = c.isDark;
-    final red = dark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+    final red = c.errorStrong;
     return PopScope(
       canPop: !_submitting,
       child: BcSheetBody(
         header: BcSheetHeader(
           icon: Icons.build_outlined,
-          iconBg: dark ? const Color(0xFF3E171E) : const Color(0xFFFEE2E2),
+          iconBg: c.errorSoftBg,
           iconTint: red,
           title: tr('Report vehicle failure?'),
           subtitle: tr('Admin will send another rider to you'),
@@ -364,8 +358,8 @@ class _VehicleFailureSheetState extends State<_VehicleFailureSheet> {
         ),
         children: [
           BcSheetCard(
-            color: dark ? const Color(0xFF2A1417) : const Color(0xFFFEF2F2),
-            borderColor: dark ? const Color(0xFF4A1B22) : const Color(0xFFFEE2E2),
+            color: c.errorSoftBg,
+            borderColor: c.error.withValues(alpha: 0.25),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -377,9 +371,9 @@ class _VehicleFailureSheetState extends State<_VehicleFailureSheet> {
                       'This removes the ride from My active job. Admin will send another rider to your current location. You will not continue this run or return to the branch on it.',
                     ),
                     style: TextStyle(
-                      fontSize: 12.5,
+                      fontSize: 13,
                       height: 1.45,
-                      color: dark ? const Color(0xFFFCA5A5) : const Color(0xFF7F1D1D),
+                      color: c.errorStrong,
                     ),
                   ),
                 ),
@@ -398,11 +392,11 @@ class _VehicleFailureSheetState extends State<_VehicleFailureSheet> {
             Text(_error!, style: BcType.caption.copyWith(color: c.errorSoft, fontSize: 12)),
           ],
           const SizedBox(height: 18),
-          BcGradientButton(
+          RunPrimaryButton(
             label: _submitting ? tr('Reporting…') : tr('Report failure'),
             icon: Icons.error_outline_rounded,
             loading: _submitting,
-            colors: const [Color(0xFFF87171), Color(0xFFDC2626), Color(0xFFB91C1C)],
+            colors: [c.error],
             onPressed: _submit,
           ),
           const SizedBox(height: 8),
@@ -433,13 +427,14 @@ Future<bool> showBranchRequestSheet(
   required String? homeStoreId,
   required Future<void> Function(String type, String toStoreId, String? reason) onSubmit,
 }) async {
-  final result = await showBcSheet<bool>(
-    context,
-    builder: (_) => _BranchRequestSheet(
-      stores: stores,
-      accessibleStoreIds: accessibleStoreIds,
-      homeStoreId: homeStoreId,
-      onSubmit: onSubmit,
+  final result = await Navigator.of(context).push<bool>(
+    MaterialPageRoute<bool>(
+      builder: (_) => _BranchRequestSheet(
+        stores: stores,
+        accessibleStoreIds: accessibleStoreIds,
+        homeStoreId: homeStoreId,
+        onSubmit: onSubmit,
+      ),
     ),
   );
   return result ?? false;
@@ -534,184 +529,138 @@ class _BranchRequestSheetState extends State<_BranchRequestSheet> {
               .where((s) => s.name.toLowerCase().contains(q) || (s.city?.toLowerCase().contains(q) ?? false))
               .toList();
 
-    return PopScope(
-      canPop: !_submitting,
-      child: BcSheetBody(
-        header: BcSheetHeader(
-          icon: Icons.swap_horiz_rounded,
-          title: tr('Request branch change'),
-          subtitle: tr('Super admin will review this request. Only one pending request at a time.'),
-          onClose: _submitting ? () {} : () => Navigator.of(context).pop(false),
-        ),
+    Widget label(String text) => Padding(
+      padding: const EdgeInsets.only(top: 22, bottom: 8, left: 2),
+      child: Text(text, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: c.foreground)),
+    );
+
+    // QuickDrop ChoiceList: one bordered card, rows split by hairlines, radio on the right.
+    Widget group<T>({
+      required List<(T, String, IconData)> rows,
+      required T? value,
+      required ValueChanged<T> onChanged,
+    }) => Container(
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(BcRadius.lg),
+        border: Border.all(color: c.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
         children: [
-          BcSheetLabel(tr('Request type')),
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: c.isDark ? const Color(0xFF1E293B) : const Color(0xFFE9EFF8),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                for (final (value, label, icon) in _branchRequestTypes)
-                  Expanded(
-                    child: Semantics(
-                      button: true,
-                      selected: value == _type,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => setState(() {
-                          _type = value;
-                          _query.clear();
-                        }),
-                        child: AnimatedContainer(
-                          duration: BcMotion.standard,
-                          padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
-                          decoration: BoxDecoration(
-                            color: value == _type ? c.card : Colors.transparent,
-                            borderRadius: BorderRadius.circular(11),
-                            boxShadow: value == _type
-                                ? const [BoxShadow(color: Color(0x140A2647), blurRadius: 6, offset: Offset(0, 2))]
-                                : null,
-                          ),
-                          child: Column(
-                            children: [
-                              Icon(icon, size: 19, color: value == _type ? c.brand : c.textMuted),
-                              const SizedBox(height: 3),
-                              FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  tr(label),
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: value == _type ? FontWeight.w700 : FontWeight.w500,
-                                    color: value == _type ? c.brand : c.textMuted,
-                                  ),
-                                ),
-                              ),
-                            ],
+          for (var i = 0; i < rows.length; i++) ...[
+            if (i > 0) Divider(height: 1, color: c.border),
+            Semantics(
+              button: true,
+              selected: rows[i].$1 == value,
+              child: InkWell(
+                onTap: () => onChanged(rows[i].$1),
+                child: Container(
+                  color: rows[i].$1 == value ? c.primarySoft : null,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                  child: Row(
+                    children: [
+                      Icon(rows[i].$3, size: 20, color: c.primaryStrong),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          rows[i].$2,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: rows[i].$1 == value ? FontWeight.w800 : FontWeight.w500,
+                            color: c.foreground,
                           ),
                         ),
                       ),
-                    ),
+                      BcRadioDot(selected: rows[i].$1 == value),
+                    ],
                   ),
-              ],
+                ),
+              ),
             ),
+          ],
+        ],
+      ),
+    );
+
+    return PopScope(
+      canPop: !_submitting,
+      child: QdPage(
+        title: tr('Request branch change'),
+        footer: RunPrimaryButton(
+          label: _submitting ? tr('Submitting…') : tr('Send request'),
+          icon: Icons.send_rounded,
+          loading: _submitting,
+          enabled: !_submitting && _selected != null && options.isNotEmpty,
+          onPressed: _submit,
+        ),
+        children: [
+          label(tr('Request type')),
+          group<String>(
+            rows: [for (final (v, l, i) in _branchRequestTypes) (v, tr(l), i)],
+            value: _type,
+            onChanged: (v) => setState(() {
+              _type = v;
+              _query.clear();
+            }),
           ),
-          BcSheetLabel(tr('Branch')),
+          label(tr('Requested branch')),
           if (options.isEmpty)
-            BcSheetCard(
-              child: Text(switch (_type) {
+            Text(
+              switch (_type) {
                 'ADD_BRANCH' => tr('No other branches available to add.'),
                 'REMOVE_BRANCH' => tr('No removable branches (cannot remove home).'),
                 _ => tr('You only have one assigned branch, so you cannot change your home branch.'),
-              }, style: BcType.caption.copyWith(color: c.errorSoft, fontSize: 12.5)),
+              },
+              style: TextStyle(fontSize: 14, color: c.mutedForeground, height: 1.4),
             )
           else ...[
-            BcTextField(
-              controller: _query,
-              placeholder: tr('Search by name or city'),
-              trailing: Icon(Icons.search_rounded, color: c.textMuted),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 10),
+            if (options.length > 6) ...[
+              BcTextField(
+                controller: _query,
+                placeholder: tr('Search by name or city'),
+                trailing: Icon(Icons.search_rounded, color: c.mutedForeground),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 10),
+            ],
             if (filtered.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                child: Text(
-                  tr('No branches match that search.'),
-                  style: BcType.caption.copyWith(color: c.textMuted, fontSize: 12.5),
-                ),
-              )
+              Text(tr('No branches match that search.'), style: TextStyle(fontSize: 14, color: c.mutedForeground))
             else
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 280),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: filtered.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) {
-                    final s = filtered[i];
-                    final sel = s.id == _selected;
-                    return Semantics(
-                      selected: sel,
-                      button: true,
-                      child: Material(
-                        color: sel ? c.brandSubtle : c.card,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          side: BorderSide(color: sel ? c.brand : c.border, width: sel ? 1.5 : 1),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: InkWell(
-                          onTap: () => setState(() => _selected = s.id),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 36,
-                                  height: 36,
-                                  decoration: BoxDecoration(
-                                    color: sel ? c.card : c.brandSubtle,
-                                    borderRadius: BorderRadius.circular(11),
-                                  ),
-                                  child: Icon(Icons.storefront_outlined, color: c.brand, size: 18),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        s.name,
-                                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: c.text),
-                                      ),
-                                      if (s.city?.trim().isNotEmpty ?? false)
-                                        Text(s.city!, style: BcType.tiny.copyWith(color: c.textMuted)),
-                                    ],
-                                  ),
-                                ),
-                                AnimatedSwitcher(
-                                  duration: BcMotion.fast,
-                                  child: Icon(
-                                    sel ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
-                                    key: ValueKey(sel),
-                                    color: sel ? c.brand : c.border,
-                                    size: 22,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+              group<String>(
+                rows: [
+                  for (final s in filtered)
+                    (s.id, (s.city?.trim().isNotEmpty ?? false) ? '${s.name} · ${s.city}' : s.name, Icons.storefront_outlined),
+                ],
+                value: _selected,
+                onChanged: (v) => setState(() => _selected = v),
               ),
           ],
-          BcSheetLabel(tr('Reason (optional)')),
+          label(tr('Reason')),
           BcTextField(
             controller: _reason,
-            placeholder: tr('Tell the admin why'),
-            maxLines: 3,
+            placeholder: tr('Why would you like to change branch?'),
+            maxLines: 4,
             inputFormatters: [LengthLimitingTextInputFormatter(500)],
           ),
           if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: BcType.caption.copyWith(color: c.errorSoft, fontSize: 12)),
+            const SizedBox(height: 10),
+            Text(_error!, style: TextStyle(fontSize: 13, color: c.errorStrong, fontWeight: FontWeight.w600)),
           ],
           const SizedBox(height: 18),
-          BcGradientButton(
-            label: _submitting ? tr('Submitting…') : tr('Submit request'),
-            icon: Icons.send_rounded,
-            loading: _submitting,
-            enabled: !_submitting && _selected != null && options.isNotEmpty,
-            onPressed: _submit,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline_rounded, size: 20, color: c.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  tr('Your branches change only after support approves the request.'),
+                  style: TextStyle(fontSize: 14, color: c.mutedForeground, height: 1.4),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 4),
-          BcTextButton(label: tr('Cancel'), onPressed: _submitting ? null : () => Navigator.of(context).pop(false)),
         ],
       ),
     );

@@ -153,6 +153,8 @@ class DriverComplaint {
   final String description;
   final String status;
   final String createdAt;
+  final String? orderId;
+  final String? resolvedAt;
 
   const DriverComplaint({
     required this.id,
@@ -160,6 +162,8 @@ class DriverComplaint {
     required this.description,
     required this.status,
     required this.createdAt,
+    this.orderId,
+    this.resolvedAt,
   });
 
   factory DriverComplaint.fromJson(Json j) => DriverComplaint(
@@ -168,6 +172,8 @@ class DriverComplaint {
     description: str(j, 'description'),
     status: str(j, 'status'),
     createdAt: str(j, 'createdAt'),
+    orderId: strOrNull(j, 'orderId'),
+    resolvedAt: strOrNull(j, 'resolvedAt'),
   );
 }
 
@@ -181,6 +187,9 @@ class JobStore {
   final bool deliveryOtpRequired;
   final int completionRadiusM;
 
+  /// Branch phone, for the "Call branch" button (empty when the branch has none).
+  final String phone;
+
   const JobStore({
     required this.id,
     required this.name,
@@ -190,6 +199,7 @@ class JobStore {
     required this.lng,
     this.deliveryOtpRequired = false,
     this.completionRadiusM = 100,
+    this.phone = '',
   });
 
   factory JobStore.fromJson(Json j) => JobStore(
@@ -201,6 +211,7 @@ class JobStore {
     lng: dbl(j, 'lng'),
     deliveryOtpRequired: boolOf(j, 'deliveryOtpRequired'),
     completionRadiusM: intOf(j, 'completionRadiusM', 100),
+    phone: str(j, 'phone'),
   );
 }
 
@@ -316,6 +327,15 @@ class JobOrder {
   bool get isFailed => deliveryFailed || status == 'DELIVERY_FAILED';
   bool get isCancelled => status == 'CANCELLED';
   bool get isPending => !isDelivered && status != 'CANCELLED' && !isFailed;
+
+  /// Customer instructions to show the rider. Internal test/seed markers written by
+  /// simulation scripts ("Simulated order (scripts/sim-new-job.ts)", "seed-…") are hidden.
+  String? get displayNotes {
+    final n = notes?.trim();
+    if (n == null || n.isEmpty) return null;
+    if (RegExp(r'^(simulated order|seed-)', caseSensitive: false).hasMatch(n) || n.contains('scripts/')) return null;
+    return n;
+  }
   int get itemCount => items.fold(0, (sum, i) => sum + i.quantity);
 }
 

@@ -13,11 +13,15 @@ import 'map_bitmaps.dart';
 
 /// Delivery stops are red map pins carrying their stop number. Fixed reds rather than
 /// theme tokens: a pin sits on light map tiles in both themes.
-const _stopPinRed = Color(0xFFE53935);
-const _stopPinRedNext = Color(0xFFC62828);
+/// QuickDrop map-style.ts pin colours.
+const _stopPinBlue = Color(0xFF2563EB);
+const _stopPinFocus = Color(0xFFFACC15);
+const _stopPinFocusInk = Color(0xFF101828);
+const _stopPinDone = Color(0xFF94A3B8);
+const _routeViolet = Color(0xFF7C3AED);
 
 /// Pickup-zone ring — the admin route map's zone green.
-const pickupZoneGreen = Color(0xFF16A34A);
+const pickupZoneGreen = Color(0xFFF97316); // branch orange
 
 /// Google Maps route view — port of RouteMapView.kt.
 ///
@@ -235,9 +239,9 @@ class _RouteMapState extends State<RouteMap> with MarkerIconMixin {
     }
     if (fix != null && tracking) {
       final icon = markerIcon(
-        'driver-${c.brand.toARGB32()}',
+        'driver-${c.primaryStrong.toARGB32()}',
         const Size(56, 56),
-        () => _PulsePainter(0.35, 0, c.brand),
+        () => _PulsePainter(0.35, 0, c.primaryStrong),
       );
       if (icon != null) {
         markers.add(
@@ -294,11 +298,19 @@ class _RouteMapState extends State<RouteMap> with MarkerIconMixin {
           ),
         if (line.length >= 2)
           Polyline(
+            polylineId: const PolylineId('route-casing'),
+            points: line.map((p) => LatLng(p.lat, p.lng)).toList(),
+            color: Colors.white,
+            width: widget.compact ? 7 : 10,
+            zIndex: 1,
+          ),
+        if (line.length >= 2)
+          Polyline(
             polylineId: const PolylineId('route'),
             points: line.map((p) => LatLng(p.lat, p.lng)).toList(),
-            color: c.brand,
+            color: _routeViolet,
             width: widget.compact ? 4 : 6,
-            zIndex: 1,
+            zIndex: 2,
           ),
       },
       markers: markers,
@@ -311,12 +323,12 @@ class _RouteMapState extends State<RouteMap> with MarkerIconMixin {
     final failed = s == 'DELIVERY_FAILED' || s == 'FAILED';
     final next = stop.sequence == nextSeq && !delivered && !failed;
     final fill = delivered
-        ? c.success
+        ? _stopPinDone
         : failed
-        ? c.danger
+        ? c.errorStrong
         : next
-        ? _stopPinRedNext
-        : _stopPinRed;
+        ? _stopPinFocus
+        : _stopPinBlue;
     final glyph = delivered
         ? '✓'
         : failed
@@ -408,7 +420,7 @@ class _PinPainter extends CustomPainter {
       text: TextSpan(
         text: label,
         style: TextStyle(
-          color: Colors.white,
+          color: fill == _stopPinFocus ? _stopPinFocusInk : Colors.white,
           fontWeight: FontWeight.w700,
           fontSize: label.length > 1 ? radius * 2 * 0.42 : radius * 2 * 0.52,
         ),
@@ -510,13 +522,13 @@ class MapControlButton extends StatelessWidget {
         color: c.card,
         shape: const CircleBorder(),
         elevation: 4,
-        shadowColor: const Color(0x330A2647),
+        shadowColor: c.foreground.withValues(alpha: 0.2),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
           child: Tooltip(
             message: label,
-            child: SizedBox(width: 44, height: 44, child: Icon(icon, color: c.brand, size: 21)),
+            child: SizedBox(width: 44, height: 44, child: Icon(icon, color: c.primaryStrong, size: 21)),
           ),
         ),
       ),
@@ -550,8 +562,8 @@ class MiniRouteMap extends StatelessWidget {
       child: Container(
         height: height,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
+          borderRadius: BorderRadius.circular(BcRadius.lg),
+          border: Border.all(color: context.bc.border),
         ),
         clipBehavior: Clip.antiAlias,
         child: Stack(
@@ -583,22 +595,22 @@ class MiniRouteMap extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFDCFCE7).withValues(alpha: 0.95),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFBBF7D0)),
+                    color: context.bc.successSoft.withValues(alpha: 0.95),
+                    borderRadius: BorderRadius.circular(BcRadius.md),
+                    border: Border.all(color: context.bc.success.withValues(alpha: 0.3)),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.gps_fixed, color: Color(0xFF16A34A), size: 20),
-                      SizedBox(width: 6),
+                      Icon(Icons.gps_fixed, color: context.bc.successStrong, size: 20),
+                      const SizedBox(width: 6),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             tr('GPS active'),
-                            style: TextStyle(color: Color(0xFF166534), fontWeight: FontWeight.w700, fontSize: 12),
+                            style: TextStyle(color: context.bc.successStrong, fontWeight: FontWeight.w700, fontSize: 12),
                           ),
-                          Text(tr('Tracking this run'), style: TextStyle(color: Color(0xFF15803D), fontSize: 10)),
+                          Text(tr('Tracking this run'), style: TextStyle(color: context.bc.successStrong, fontSize: 11)),
                         ],
                       ),
                     ],

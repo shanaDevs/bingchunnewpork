@@ -28,7 +28,26 @@ class NavTarget {
   final String label;
   final NavTargetKind? kind;
 
-  const NavTarget({required this.lat, required this.lng, required this.label, this.kind});
+  /// Street address and phone shown in the nav header (empty when unknown).
+  final String address;
+  final String phone;
+
+  /// Customer stops: 1-based order number shown in the header.
+  final int? stopNumber;
+
+  /// Between legs: the next stop is shown ("Up next") but the rider hasn't set off yet.
+  final bool upNext;
+
+  const NavTarget({
+    required this.lat,
+    required this.lng,
+    required this.label,
+    this.kind,
+    this.address = '',
+    this.phone = '',
+    this.stopNumber,
+    this.upNext = false,
+  });
 }
 
 /// Dialer / maps launchers — port of Intents.kt. Returns an error message on failure.

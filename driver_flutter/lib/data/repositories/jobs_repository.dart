@@ -90,6 +90,9 @@ class JobsRepository {
     (_) {},
   );
 
+  Future<List<DriverComplaint>> listComplaints() =>
+      _api.call(() => _api.core.get<dynamic>('delivery/me/complaints'), (d) => _list(d, DriverComplaint.fromJson));
+
   /// Reports the driver's vehicle has broken down mid-ride so admin can send a replacement rider.
   Future<void> reportVehicleFailure(double lat, double lng, {String? note}) => _api.callNullable(
     () =>

@@ -23,6 +23,9 @@ class RideAlert {
   final String dropoffAddress;
   final int extraStopCount;
 
+  /// Local preview from Settings. Never sent to or claimed on the server.
+  final bool isTest;
+
   const RideAlert({
     required this.jobId,
     this.rideCode,
@@ -38,7 +41,26 @@ class RideAlert {
     this.dropoffName = '',
     this.dropoffAddress = '',
     this.extraStopCount = 0,
+    this.isTest = false,
   });
+
+  /// Sample offer for Settings → Send a test alert.
+  factory RideAlert.test() => RideAlert(
+    jobId: 'test-alert',
+    rideCode: 'TEST',
+    title: tr('Test alert'),
+    storeName: tr('Sample store'),
+    storeCity: tr('Sample city'),
+    orderCount: 2,
+    totalCups: 4,
+    estimatedDistanceKm: 3.2,
+    estimatedMinutes: 12,
+    deliveryFee: 500,
+    dropoffName: tr('Sample customer'),
+    dropoffAddress: tr('123 Sample Street'),
+    extraStopCount: 1,
+    isTest: true,
+  );
 
   String get displayRideId => Format.displayRideId(rideCode, jobId);
 

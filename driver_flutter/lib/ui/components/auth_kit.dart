@@ -1,318 +1,225 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/endpoints.dart';
+import '../../core/feedback.dart';
+import '../../l10n/l10n.dart';
+import '../screens/terms_screen.dart';
 import '../theme/bc_theme.dart';
 import 'language_switch.dart';
-import 'scenery.dart';
-import '../../l10n/l10n.dart';
+import 'qd_brand.dart';
+import 'qd_kit.dart';
+import 'sheet_kit.dart';
 
-/// Sign-in page frame shared by the phone, code and "not a rider" steps:
-/// illustrated wave hero, then a card with a notched badge overlapping its top edge.
-class BcAuthScaffold extends StatefulWidget {
+/// Sign-in page frame shared by the phone, code and "not a rider" steps (QuickDrop style):
+/// the brand blue fading into the page behind a top row (wordmark or back button + language
+/// toggle) and the [hero] block, then the [body], with the help footer pinned to the bottom.
+class BcAuthScaffold extends StatelessWidget {
   const BcAuthScaffold({
     super.key,
-    required this.kicker,
-    required this.subtitle,
-    required this.badge,
-    required this.card,
+    required this.hero,
+    required this.body,
     this.onBack,
+    this.onLogoTap,
   });
 
-  final String kicker;
-  final String subtitle;
-  final Widget badge;
-  final Widget card;
+  /// Greeting / scene shown on the blue fade, under the top row.
+  final Widget hero;
 
-  /// Shows a back arrow in the hero when set.
+  /// Form content on the page background (12-16px side padding is added here).
+  final Widget body;
+
+  /// Shows a glass back button instead of the wordmark when set.
   final VoidCallback? onBack;
 
-  @override
-  State<BcAuthScaffold> createState() => _BcAuthScaffoldState();
-}
-
-class _BcAuthScaffoldState extends State<BcAuthScaffold> {
-  bool _appeared = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _appeared = true);
-    });
-  }
+  /// Tap on the wordmark (hidden debug gesture).
+  final VoidCallback? onLogoTap;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final top = MediaQuery.paddingOf(context).top;
-    final width = MediaQuery.sizeOf(context).width;
+    final mq = MediaQuery.of(context);
+    final fade = [...c.authFade]..[c.authFade.length - 1] = c.background;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
         backgroundColor: c.background,
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Soft wave decoration at the bottom of the page.
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 180,
-              child: CustomPaint(painter: _BottomWavePainter(c.brand.withValues(alpha: c.isDark ? 0.10 : 0.06))),
-            ),
-            SingleChildScrollView(
-              padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom + 24),
-              child: Column(
-                children: [
-                  // ---------------- Hero ----------------
-                  SizedBox(
-                    height: top + 360,
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: ClipPath(
-                            clipper: const HeroWaveClipper(depth: 70),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [const Color(0xFF0B3EA8), c.brandDark, c.brand],
-                                  stops: const [0, 0.45, 1],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                              ),
-                              child: Stack(
-                                children: [
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: HeroSwooshPainter(Colors.white.withValues(alpha: 0.08)),
-                                    ),
-                                  ),
-                                  Positioned.fill(
-                                    child: AnimatedOpacity(
-                                      opacity: _appeared ? 1 : 0,
-                                      duration: BcMotion.slow,
-                                      child: HeroScenery(riderHeight: width * 0.44, riderRight: 0, riderBottom: 40),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
+        body: LayoutBuilder(
+          builder: (context, box) => SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: box.maxHeight),
+              child: IntrinsicHeight(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      padding: EdgeInsets.only(top: mq.padding.top + 8),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: fade,
+                          stops: BcColors.authFadeStops,
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
                         ),
-                        if (widget.onBack != null)
-                          Positioned(
-                            top: top + 6,
-                            left: 6,
-                            child: IconButton(
-                              tooltip: tr('Back'),
-                              onPressed: widget.onBack,
-                              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-                            ),
-                          ),
-                        // Language can be picked before signing in.
-                        Positioned(top: top + 12, right: 16, child: const BcLanguageSwitch(onDark: true)),
-                        Positioned(
-                          left: 24,
-                          top: top + 64,
-                          right: width * 0.40,
-                          child: AnimatedSlide(
-                            offset: _appeared ? Offset.zero : const Offset(0, 0.08),
-                            duration: BcMotion.slow,
-                            curve: Curves.easeOut,
-                            child: AnimatedOpacity(
-                              opacity: _appeared ? 1 : 0,
-                              duration: BcMotion.slow,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    widget.kicker,
-                                    style: TextStyle(fontSize: 15, color: Colors.white.withValues(alpha: 0.85)),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  RichText(
-                                    text: TextSpan(
-                                      style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w800, height: 1.1),
-                                      children: [
-                                        TextSpan(
-                                          text: tr('Delivery '),
-                                          style: TextStyle(color: Colors.white),
-                                        ),
-                                        TextSpan(
-                                          text: tr('Staff'),
-                                          style: TextStyle(color: c.brandLight.withValues(alpha: 0.95)),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    widget.subtitle,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      height: 1.4,
-                                      color: Colors.white.withValues(alpha: 0.85),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Container(
-                                    width: 46,
-                                    height: 5,
-                                    decoration: BoxDecoration(
-                                      color: c.brandLight,
-                                      borderRadius: BorderRadius.circular(99),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // ---------------- Card ----------------
-                  Transform.translate(
-                    offset: const Offset(0, -40),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        alignment: Alignment.topCenter,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Container(
-                            margin: const EdgeInsets.only(top: 48),
-                            padding: const EdgeInsets.fromLTRB(20, 64, 20, 22),
-                            decoration: BoxDecoration(
-                              color: c.card,
-                              borderRadius: BorderRadius.circular(24),
-                              border: Border.all(color: c.border),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: c.isDark ? const Color(0x33000000) : const Color(0x1A0A2647),
-                                  blurRadius: 30,
-                                  offset: const Offset(0, 12),
-                                ),
-                              ],
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: SizedBox(
+                              height: 44,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  if (onBack != null)
+                                    _GlassBack(onTap: onBack!)
+                                  else
+                                    GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onTap: onLogoTap,
+                                      child: const QdWordmark(inverse: true),
+                                    ),
+                                  const BcLanguageSwitch(onDark: true),
+                                ],
+                              ),
                             ),
-                            child: widget.card,
                           ),
-                          AnimatedScale(
-                            scale: _appeared ? 1 : 0.8,
-                            duration: BcMotion.slow,
-                            curve: Curves.easeOutBack,
-                            child: widget.badge,
-                          ),
+                          hero,
                         ],
                       ),
                     ),
-                  ),
-                ],
+                    Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: body),
+                    const Spacer(),
+                    const SizedBox(height: 20),
+                    const BcAuthFooter(),
+                  ],
+                ),
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// Notched circular badge that sits on the card's top edge — logo by default,
-/// or a tinted icon for status steps.
-class BcAuthBadge extends StatelessWidget {
-  const BcAuthBadge({super.key, this.icon, this.tint});
+class _GlassBack extends StatelessWidget {
+  const _GlassBack({required this.onTap});
+  final VoidCallback onTap;
 
-  /// Null shows the brand logo.
-  final IconData? icon;
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: tr('Back'),
+    child: GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white.withValues(alpha: 0.2),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+        ),
+        child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
+      ),
+    ),
+  );
+}
+
+/// Icon tile for status steps (not a rider ...).
+class BcAuthBadge extends StatelessWidget {
+  const BcAuthBadge({super.key, required this.icon, this.tint});
+
+  final IconData icon;
   final Color? tint;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final color = tint ?? c.brand;
-    return SizedBox(
-      width: 116,
-      height: 104,
-      child: Stack(
-        alignment: Alignment.center,
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            width: 104,
-            height: 104,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: c.background),
-          ),
-          Container(
-            width: 84,
-            height: 84,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.12)),
-          ),
-          Container(
-            width: 72,
-            height: 72,
-            padding: const EdgeInsets.all(3),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: icon == null ? Colors.white : color,
-              boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 14, offset: const Offset(0, 6))],
-            ),
-            child: icon == null
-                ? ClipOval(child: Image.asset('assets/images/logo.png', fit: BoxFit.cover, semanticLabel: 'Bing Chun'))
-                : Icon(icon, color: Colors.white, size: 34),
-          ),
-          Positioned(left: 4, bottom: 18, child: _Dot(color: color)),
-          Positioned(right: 2, top: 30, child: _Dot(color: color)),
-        ],
+    final color = tint ?? c.primary;
+    return Container(
+      width: 64,
+      height: 64,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(64 * 0.28),
+        color: color.withValues(alpha: 0.14),
       ),
+      child: Icon(icon, color: color, size: 32),
     );
   }
 }
 
-class _Dot extends StatelessWidget {
-  const _Dot({required this.color});
-  final Color color;
+/// Greeting text block on the blue fade: optional light first line, big title, subtitle.
+class BcAuthGreeting extends StatelessWidget {
+  const BcAuthGreeting({
+    super.key,
+    this.lead,
+    required this.title,
+    this.titleSize = 44,
+    this.subtitle,
+    this.extra,
+    this.center = false,
+  });
 
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 7,
-    height: 7,
-    decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-  );
-}
-
-/// Card title + muted helper line used at the top of every sign-in card.
-class BcAuthCardHeader extends StatelessWidget {
-  const BcAuthCardHeader({super.key, required this.title, required this.message});
-
+  final String? lead;
   final String title;
-  final Widget message;
+  final double titleSize;
+  final String? subtitle;
+  final Widget? extra;
+  final bool center;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
+    final align = center ? CrossAxisAlignment.center : CrossAxisAlignment.start;
+    final ta = center ? TextAlign.center : TextAlign.start;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: align,
       children: [
+        if (lead != null)
+          Text(
+            lead!,
+            textAlign: ta,
+            style: BcType.subtitle.copyWith(
+              fontFamily: BcFonts.heading,
+              fontSize: 22,
+              fontWeight: FontWeight.w600,
+              height: 28 / 22,
+              color: c.heroSubtitle,
+            ),
+          ),
         Text(
           title,
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: c.text),
+          textAlign: ta,
+          style: BcType.displayHero.copyWith(
+            fontFamily: BcFonts.heading,
+            fontSize: titleSize,
+            fontWeight: FontWeight.w800,
+            height: (titleSize + 8) / titleSize,
+            letterSpacing: -1.2,
+            color: c.heroTitle,
+          ),
         ),
-        const SizedBox(height: 8),
-        DefaultTextStyle.merge(
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13.5, height: 1.45, color: c.textMuted),
-          child: message,
-        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            subtitle!,
+            textAlign: ta,
+            style: TextStyle(fontSize: 15, height: 22 / 15, fontWeight: FontWeight.w500, color: c.heroSubtitle),
+          ),
+        ],
+        ?extra,
       ],
     );
   }
 }
 
-/// Brand-gradient call-to-action with a trailing arrow (or [icon]).
+/// QuickDrop primary action: full-width action-blue pill with a soft blue glow.
 class BcAuthButton extends StatelessWidget {
   const BcAuthButton({
     super.key,
@@ -320,13 +227,13 @@ class BcAuthButton extends StatelessWidget {
     required this.onPressed,
     this.loading = false,
     this.enabled = true,
-    this.icon = Icons.arrow_forward_rounded,
+    this.icon = Icons.keyboard_double_arrow_right_rounded,
   });
 
   final String label;
   final bool loading;
   final bool enabled;
-  final IconData icon;
+  final IconData? icon;
   final VoidCallback onPressed;
 
   @override
@@ -335,43 +242,50 @@ class BcAuthButton extends StatelessWidget {
     final active = enabled && !loading;
     return AnimatedOpacity(
       duration: BcMotion.fast,
-      opacity: active || loading ? 1 : 0.55,
+      opacity: active || loading ? 1 : 0.5,
       child: Container(
-        height: 56,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(BcRadius.button + 2),
-          gradient: LinearGradient(colors: [c.brandLight, c.brand, c.brandDark]),
-          boxShadow: active
-              ? [BoxShadow(color: c.brand.withValues(alpha: 0.35), blurRadius: 16, offset: const Offset(0, 8))]
-              : null,
+          borderRadius: BorderRadius.circular(BcRadius.full),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF1677FF).withValues(alpha: c.isDark ? 0.22 : 0.32),
+              blurRadius: 24,
+              offset: const Offset(0, 10),
+            ),
+          ],
         ),
         child: Material(
-          type: MaterialType.transparency,
-          borderRadius: BorderRadius.circular(BcRadius.button + 2),
+          color: c.action,
+          borderRadius: BorderRadius.circular(BcRadius.full),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: active ? onPressed : null,
-            child: Center(
-              child: loading
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                    )
-                  : Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            label,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white),
+            child: SizedBox(
+              height: 58,
+              child: Center(
+                child: loading
+                    ? SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: c.actionForeground),
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              label,
+                              overflow: TextOverflow.ellipsis,
+                              style: BcType.button.copyWith(fontSize: 17, color: c.actionForeground),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        Icon(icon, color: Colors.white, size: 20),
-                      ],
-                    ),
+                          if (icon != null) ...[
+                            const SizedBox(width: 8),
+                            Icon(icon, color: c.actionForeground, size: 22),
+                          ],
+                        ],
+                      ),
+              ),
             ),
           ),
         ),
@@ -380,35 +294,107 @@ class BcAuthButton extends StatelessWidget {
   }
 }
 
-class _BottomWavePainter extends CustomPainter {
-  _BottomWavePainter(this.color);
-  final Color color;
+/// "Need help? Contact Support • Terms & Privacy", pinned at the bottom of every sign-in step.
+class BcAuthFooter extends StatelessWidget {
+  const BcAuthFooter({super.key});
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final p = Paint()..color = color;
-    canvas.drawPath(
-      Path()
-        ..moveTo(0, h * 0.35)
-        ..cubicTo(w * 0.3, h * 0.05, w * 0.55, h * 0.75, w, h * 0.4)
-        ..lineTo(w, h)
-        ..lineTo(0, h)
-        ..close(),
-      p,
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final link = BcType.caption.copyWith(fontSize: 14, fontWeight: FontWeight.w700, color: c.primaryStrong);
+    Widget tap(String label, VoidCallback onTap) => InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text(label, style: link)),
     );
-    canvas.drawPath(
-      Path()
-        ..moveTo(0, h * 0.65)
-        ..cubicTo(w * 0.35, h * 0.40, w * 0.65, h * 0.95, w, h * 0.7)
-        ..lineTo(w, h)
-        ..lineTo(0, h)
-        ..close(),
-      p,
+    return Container(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + MediaQuery.paddingOf(context).bottom),
+      decoration: BoxDecoration(border: Border(top: BorderSide(color: c.border))),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        children: [
+          Text(tr('Need help?'), style: BcType.caption.copyWith(fontSize: 14, color: c.mutedForeground)),
+          tap(tr('Contact Support'), () => showContactSupportSheet(context)),
+          Text('•', style: BcType.caption.copyWith(fontSize: 14, color: c.mutedForeground)),
+          tap(tr('Terms & Privacy'), () {
+            BcFeedback.tap();
+            Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const TermsScreen()));
+          }),
+        ],
+      ),
     );
   }
+}
 
-  @override
-  bool shouldRepaint(covariant _BottomWavePainter old) => old.color != color;
+/// Contact Support sheet (works before sign-in): call, WhatsApp, email.
+Future<void> showContactSupportSheet(BuildContext context) {
+  BcFeedback.tap();
+  return showBcSheet<void>(
+    context,
+    builder: (sheetContext) {
+      final c = sheetContext.bc;
+      Future<void> open(Uri uri) async {
+        BcFeedback.tap();
+        final ok = await launchUrl(uri, mode: LaunchMode.externalApplication).catchError((_) => false);
+        if (!ok && sheetContext.mounted) {
+          ScaffoldMessenger.of(sheetContext).showSnackBar(SnackBar(content: Text(tr('Could not open this on your phone.'))));
+        }
+      }
+
+      Widget action(IconData icon, String title, String sub, Color tint, Uri uri) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Material(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(BcRadius.card),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(BcRadius.card),
+            onTap: () => open(uri),
+            child: Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(BcRadius.card),
+                border: Border.all(color: c.border),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(color: tint.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(13)),
+                    child: Icon(icon, color: tint, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: BcType.bodyStrong.copyWith(color: c.foreground)),
+                        Text(sub, style: BcType.caption.copyWith(color: c.mutedForeground)),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded, color: c.iconMuted),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      return BcSheetBody(
+        header: BcSheetHeader(
+          icon: Icons.support_agent_rounded,
+          title: tr('Contact Support'),
+          subtitle: tr('We are here to help riders'),
+        ),
+        children: [
+          action(Icons.call_rounded, tr('Call'), SupportContact.display, c.call, Uri.parse('tel:${SupportContact.phone}')),
+          action(Icons.chat_rounded, 'WhatsApp', tr('Chat with the support team'), c.success, Uri.parse(SupportContact.whatsapp)),
+          action(Icons.mail_outline_rounded, tr('Email'), SupportContact.email, c.primary, Uri.parse('mailto:${SupportContact.email}')),
+        ],
+      );
+    },
+  );
 }

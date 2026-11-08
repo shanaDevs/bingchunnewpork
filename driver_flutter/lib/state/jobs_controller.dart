@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/app_container.dart';
 import '../core/events.dart';
+import '../core/offer_outcomes.dart';
 import '../data/json.dart';
 import '../data/models/delivery_job.dart';
 import '../data/models/driver.dart';
@@ -12,6 +13,15 @@ import '../tracking/location_tracker.dart';
 import '../l10n/l10n.dart';
 
 /// Pre-pickup vehicle/order failure is blocked — reject the claimed job instead.
+/// The last active-job detail Home loaded, so screens pushed above the shell (which can't
+/// see [JobsController]) can open with data instead of a blank spinner.
+class ActiveJobCache {
+  ActiveJobCache._();
+  static DeliveryJobDetail? _detail;
+  static void put(DeliveryJobDetail? detail) => _detail = detail;
+  static DeliveryJobDetail? peek(String jobId) => _detail?.id == jobId ? _detail : null;
+}
+
 const rejectJobBeforeFailureMessage = 'reject job if you want to remove the accepted job';
 
 const _heldStatuses = {'IN_PROGRESS', 'ASSIGNED', 'RETURNING', 'QUEUED'};
@@ -137,6 +147,7 @@ class JobsController extends ChangeNotifier {
       loading = false;
       jobs = list;
       activeJobDetail = detail;
+      ActiveJobCache.put(detail);
       profile = p;
       banner = (p != null && !p.isOnline) ? tr('Go online to receive jobs') : null;
       _emit();
@@ -305,6 +316,7 @@ class JobsController extends ChangeNotifier {
       // The cached list can be stale (e.g. a ride just accepted from the alert card).
       await ensureNoUnfinishedRide(_c, claimingJobId: jobId);
       final job = await _c.jobsRepository.claimJob(jobId);
+      OfferOutcomes.instance.record(jobId, OfferOutcome.accepted);
       final queued = job.status == 'QUEUED';
       claimingId = null;
       notice = queued ? queuedNotice : null;
@@ -323,6 +335,7 @@ class JobsController extends ChangeNotifier {
     } on ApiException catch (e) {
       // Claiming a second run while one is live queues it — a success, not a failure.
       if (e.code == 'QUEUED' || e.code == 'JOB_QUEUED') {
+        OfferOutcomes.instance.record(jobId, OfferOutcome.accepted);
         claimingId = null;
         notice = queuedNotice;
         _emit();
@@ -352,6 +365,7 @@ class JobsController extends ChangeNotifier {
     _c.alertService.beginPostRejectHold(jobId, storeId);
     try {
       await _c.jobsRepository.rejectJob(jobId, reason);
+      OfferOutcomes.instance.record(jobId, OfferOutcome.declined);
       _c.alertService.clearSeen(jobId);
       await refreshAlertEligibility(_c);
       claimingId = null;

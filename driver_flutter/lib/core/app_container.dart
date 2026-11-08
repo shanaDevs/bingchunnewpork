@@ -9,6 +9,8 @@ import 'alert_service.dart';
 import 'app_lock.dart';
 import 'device_requirements.dart';
 import 'events.dart';
+import 'inbox.dart';
+import 'offer_outcomes.dart';
 import 'push.dart';
 import 'runtime_config.dart';
 
@@ -36,6 +38,8 @@ class AppContainer {
     await store.init();
     final container = AppContainer._(store);
     await container.appLock.init();
+    await NotificationInbox.instance.load();
+    await OfferOutcomes.instance.load();
     return container;
   }
 

@@ -13,12 +13,17 @@ import '../../data/network/api_client.dart';
 import '../../data/models/delivery_job.dart';
 import '../../state/auth_controller.dart';
 import '../../state/jobs_controller.dart';
+import '../../data/models/driver.dart';
+import '../app_routes.dart';
 import '../components/headers.dart';
 import '../components/job_cards.dart';
 import '../components/sheet_kit.dart';
 import '../components/snack.dart';
+import '../components/qd_kit.dart';
 import '../components/tab_scaffold.dart';
 import '../theme/bc_theme.dart';
+import 'report_breakdown_screen.dart';
+import 'report_issue_sheet.dart';
 import 'job_sheets.dart';
 import '../../l10n/l10n.dart';
 
@@ -40,6 +45,8 @@ class _JobsTabState extends State<JobsTab> {
   bool _newJobFlash = false;
   Timer? _flashTimer;
   StreamSubscription<void>? _newJobSub;
+  DriverShiftEntry? _lastShift;
+  bool _wasOnline = false;
 
   @override
   void initState() {
@@ -47,6 +54,7 @@ class _JobsTabState extends State<JobsTab> {
     final vm = context.read<JobsController>();
     vm.load();
     vm.startPollingWhileOnline();
+    _loadLastShift(vm);
     _newJobSub = vm.newJobEvents.listen((_) {
       BcFeedback.newJob();
       setState(() => _newJobFlash = true);
@@ -64,6 +72,35 @@ class _JobsTabState extends State<JobsTab> {
     super.dispose();
   }
 
+  Future<void> _loadLastShift(JobsController vm) async {
+    try {
+      final shifts = await vm.getShiftHistory();
+      final done = shifts.where((s) => s.endedAt != null).toList()
+        ..sort((a, b) => jobsScheduledMillis(b.startedAt).compareTo(jobsScheduledMillis(a.startedAt)));
+      if (mounted) setState(() => _lastShift = done.firstOrNull);
+    } catch (_) {
+      // Last shift is decorative; ignore failures.
+    }
+  }
+
+  /// "Report an issue" chooser: delivery failure per collected order, vehicle breakdown
+  /// (hands the job to another rider) or support.
+  Future<void> _openReportSheet(JobsController vm) async {
+    final detail = vm.activeJobDetail;
+    final choice = await showReportIssueSheet(context, orders: reportableOrders(detail));
+    if (!mounted || choice == null) return;
+    switch (choice.kind) {
+      case 'order':
+        final order = detail?.orders.where((o) => o.orderId == choice.orderId).firstOrNull;
+        if (detail == null || order == null) return;
+        if (await reportOrderDeliveryFailure(context, jobId: detail.id, order: order)) vm.load();
+      case 'breakdown':
+        await _reportIssue(vm);
+      case 'support':
+        await openSupport(context);
+    }
+  }
+
   Future<void> _reportIssue(JobsController vm) async {
     final active = vm.jobs.where((j) => _heldStatuses.contains(j.status)).firstOrNull;
     final messenger = ScaffoldMessenger.of(context);
@@ -73,7 +110,13 @@ class _JobsTabState extends State<JobsTab> {
       );
       return;
     }
-    final reported = await showVehicleFailureDialog(context, vm.reportVehicleFailure);
+    final job = active;
+    final reported = await ReportBreakdownScreen.open(
+      context,
+      onSubmit: vm.reportVehicleFailure,
+      rideLabel: Format.rideIdLabel(job.rideCode, job.id).replaceFirst('·', '•'),
+    );
+    if (!mounted) return;
     if (reported) {
       BcFeedback.success();
       messenger.showSnackBar(
@@ -110,7 +153,6 @@ class _JobsTabState extends State<JobsTab> {
   Future<void> _openSettingsMenu(JobsController vm) async {
     BcFeedback.tap();
     final c = context.bc;
-    final dark = c.isDark;
     final choice = await showBcSheet<String>(
       context,
       builder: (ctx) => BcSheetBody(
@@ -124,8 +166,8 @@ class _JobsTabState extends State<JobsTab> {
             children: [
               BcListRow(
                 icon: Icons.build_outlined,
-                iconBg: dark ? const Color(0xFF3E171E) : const Color(0xFFFEE2E2),
-                iconTint: c.danger,
+                iconBg: c.errorSoftBg,
+                iconTint: c.error,
                 title: tr('Report vehicle issue'),
                 subtitle: tr('Breakdown during an active ride'),
                 onTap: () => Navigator.of(ctx).pop('report'),
@@ -175,7 +217,6 @@ class _JobsTabState extends State<JobsTab> {
     final alerts = context.watch<AlertService>();
 
     final driverName = vm.profile?.name ?? auth.driver?.name ?? tr('Driver');
-    final storeName = vm.profile?.store?.name ?? auth.driver?.storeName ?? '';
 
     final active = vm.jobs.where((j) => _heldStatuses.contains(j.status)).toList()
       ..sort((a, b) => jobsScheduledMillis(b.scheduledAt).compareTo(jobsScheduledMillis(a.scheduledAt)));
@@ -187,29 +228,24 @@ class _JobsTabState extends State<JobsTab> {
     final fatalError = vm.error != null && vm.jobs.isEmpty && vm.profile == null;
     _toastMessages(vm, fatalError);
 
+    // Refresh the last-shift card when the rider goes offline (a shift just ended).
+    if (_wasOnline && !vm.isOnline) _loadLastShift(vm);
+    _wasOnline = vm.isOnline;
+
+    final branches = <StoreRef>[
+      ...?vm.profile?.accessibleStores,
+    ];
+    if (branches.isEmpty && vm.profile?.store != null) branches.add(vm.profile!.store!);
+    final homeStoreId = vm.profile?.store?.id ?? vm.profile?.storeId;
+
     return _HomeScaffold(
       header: HomeHeader(
         driverName: driverName,
-        branchName: Format.shortBranchName(storeName),
-        photoUrl: vm.profile?.profilePhotoUrl,
-        alertCount: alerting.length,
         isOnline: vm.isOnline,
-        onBranchTap: () {
+        dutyLoading: vm.dutyLoading,
+        onToggleDuty: (online) {
           BcFeedback.tap();
-          widget.onOpenProfile?.call();
-        },
-        onNotificationsTap: () {
-          BcFeedback.tap();
-          final n = alerting.length;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                n == 0
-                    ? tr('All delivery notifications active')
-                    : trn(n, '{n} new ride alert waiting — see Up next', '{n} new ride alerts waiting — see Up next'),
-              ),
-            ),
-          );
+          vm.setOnline(online);
         },
         onSettingsTap: () => _openSettingsMenu(vm),
       ),
@@ -226,21 +262,11 @@ class _JobsTabState extends State<JobsTab> {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: BcInlineBanner(
                     message: tr('New cup run available'),
-                    color: c.brand,
+                    color: c.primary,
                     icon: Icons.local_shipping_outlined,
                   ),
                 )
               : const SizedBox(width: double.infinity),
-        ),
-        BcDutyDock(
-          isOnline: vm.isOnline,
-          activeCount: active.length,
-          loading: vm.dutyLoading,
-          newJobPulse: _newJobFlash,
-          onToggleDuty: (online) {
-            BcFeedback.tap();
-            vm.setOnline(online);
-          },
         ),
         if (firstLoad)
           const BcJobsSkeleton()
@@ -250,20 +276,20 @@ class _JobsTabState extends State<JobsTab> {
             child: BcErrorState(message: vm.error!, onRetry: vm.load),
           )
         else ...[
-          if (active.isNotEmpty) ...[
-            SectionHeader(title: tr('Active deliveries'), count: active.length, trailing: tr('In progress')),
-            for (final job in active)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: ActiveJobCard(
-                  job: job,
-                  detail: vm.activeJobDetail?.id == job.id ? vm.activeJobDetail : null,
-                  onOpen: () => widget.onOpenJob(job),
-                ),
+          for (final job in active)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: ActiveJobCard(
+                job: job,
+                detail: vm.activeJobDetail?.id == job.id ? vm.activeJobDetail : null,
+                onOpen: () => widget.onOpenJob(job),
+                onViewDetails: () => AppRoutes.openJobDetail(context, job.id),
+                onReportIssue: () => _openReportSheet(vm),
               ),
-          ],
+            ),
+          if (active.isEmpty && scheduled.isEmpty) NoOtherJobsCard(isOnline: vm.isOnline),
           if (scheduled.isNotEmpty) ...[
-            SectionHeader(title: tr('Up next'), count: scheduled.length, trailing: tr('Scheduled runs')),
+            QdSectionTitle(tr('Up next'), topGap: active.isEmpty ? 0 : 8),
             for (final job in scheduled)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -288,14 +314,28 @@ class _JobsTabState extends State<JobsTab> {
                 ),
               ),
           ],
-          if (active.isEmpty && scheduled.isEmpty) NoOtherJobsCard(isOnline: vm.isOnline),
+          if (active.isEmpty) ...[
+            const SizedBox(height: 12),
+            AssignedBranchesCard(
+              branches: branches,
+              homeStoreId: homeStoreId,
+              onTap: () {
+                BcFeedback.tap();
+                widget.onOpenProfile?.call();
+              },
+            ),
+            if (!vm.isOnline) ...[
+              const SizedBox(height: 12),
+              LastShiftCard(shift: _lastShift),
+            ],
+          ],
         ],
       ],
     );
   }
 }
 
-/// Light home layout: header scrolls with content on the page background (no gradient band).
+/// Home layout: the tall brand hero scrolls with the content on the page background.
 class _HomeScaffold extends StatelessWidget {
   const _HomeScaffold({required this.header, required this.children, required this.onRefresh});
 
@@ -311,7 +351,7 @@ class _HomeScaffold extends StatelessWidget {
       child: ColoredBox(
         color: c.background,
         child: RefreshIndicator(
-          color: c.brand,
+          color: c.primary,
           edgeOffset: MediaQuery.paddingOf(context).top,
           onRefresh: onRefresh,
           child: CustomScrollView(
@@ -319,7 +359,7 @@ class _HomeScaffold extends StatelessWidget {
             slivers: [
               SliverToBoxAdapter(child: header),
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                padding: const EdgeInsets.fromLTRB(10, 12, 10, 24),
                 sliver: SliverList.list(children: children),
               ),
             ],

@@ -10,6 +10,7 @@ import 'core/app_lock.dart';
 import 'core/duty_service.dart';
 import 'core/feedback.dart';
 import 'core/notifications.dart';
+import 'core/offer_outcomes.dart';
 import 'core/ride_alert.dart';
 import 'core/runtime_config.dart';
 import 'core/system_settings.dart';
@@ -19,6 +20,7 @@ import 'l10n/l10n.dart';
 import 'state/auth_controller.dart';
 import 'state/jobs_controller.dart';
 import 'ui/app_routes.dart';
+import 'ui/components/app_bottom_nav.dart';
 import 'ui/components/device_lock_overlay.dart';
 import 'ui/screens/app_lock_screen.dart';
 import 'ui/screens/history_screen.dart';
@@ -39,18 +41,27 @@ class BingChunDriverApp extends StatefulWidget {
   State<BingChunDriverApp> createState() => _BingChunDriverAppState();
 }
 
-class _BingChunDriverAppState extends State<BingChunDriverApp> {
+class _BingChunDriverAppState extends State<BingChunDriverApp> with WidgetsBindingObserver {
   AppLanguage _language = L10n.current;
 
   @override
   void initState() {
     super.initState();
     RuntimeConfig.instance.addListener(_onConfig);
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final lock = widget.container.appLock;
+    if (state == AppLifecycleState.paused) lock.onBackground();
+    if (state == AppLifecycleState.resumed) lock.onForeground();
   }
 
   @override
   void dispose() {
     RuntimeConfig.instance.removeListener(_onConfig);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -82,7 +93,7 @@ class _BingChunDriverAppState extends State<BingChunDriverApp> {
             _ => ThemeMode.light,
           };
           return MaterialApp(
-            title: tr('Bing Chun Delivery'),
+            title: tr('QuickDrop Rider'),
             locale: rc.language.locale,
             supportedLocales: L10n.supportedLocales,
             localizationsDelegates: const [
@@ -168,6 +179,7 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _tab = 0;
   StreamSubscription<NotificationTap>? _tapSub;
+  StreamSubscription<int>? _tabSub;
 
   @override
   void initState() {
@@ -175,6 +187,9 @@ class _HomeShellState extends State<HomeShell> {
     // Ask once after login so new-job alerts can be posted (Android 13+ / iOS).
     BcNotifications.requestPermission();
     _tapSub = BcNotifications.taps.listen(_onNotificationTap);
+    _tabSub = AppRoutes.tabRequests.listen((i) {
+      if (mounted) setState(() => _tab = i);
+    });
     final launch = BcNotifications.launchTap;
     if (launch != null) {
       BcNotifications.launchTap = null;
@@ -185,6 +200,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void dispose() {
     _tapSub?.cancel();
+    _tabSub?.cancel();
     super.dispose();
   }
 
@@ -197,6 +213,7 @@ class _HomeShellState extends State<HomeShell> {
         try {
           await ensureNoUnfinishedRide(c, claimingJobId: alert.jobId);
           await c.jobsRepository.claimJob(alert.jobId);
+          if (!alert.isTest) OfferOutcomes.instance.record(alert.jobId, OfferOutcome.accepted);
           c.alertService.silenceJob(alert.jobId);
           AppRoutes.openDashboardFromRoot(alert.jobId);
         } catch (_) {
@@ -231,91 +248,16 @@ class _HomeShellState extends State<HomeShell> {
             _tab == 1
                 ? HistoryScreen(onOpenJob: openJob, onViewJobs: () => setState(() => _tab = 0))
                 : const SizedBox(),
-            _tab == 2 ? const StatsScreen() : const SizedBox(),
+            _tab == 2 ? StatsScreen(onOpenJobs: () => setState(() => _tab = 1)) : const SizedBox(),
             _tab == 3 ? const MeScreen() : const SizedBox(),
           ],
         ),
-        bottomNavigationBar: _FloatingBottomNav(
+        bottomNavigationBar: AppBottomNav(
           current: _tab,
           onSelect: (i) {
             BcFeedback.tap();
             setState(() => _tab = i);
           },
-        ),
-      ),
-    );
-  }
-}
-
-/// Floating frosted capsule bottom navigation.
-class _FloatingBottomNav extends StatelessWidget {
-  const _FloatingBottomNav({required this.current, required this.onSelect});
-  final int current;
-  final ValueChanged<int> onSelect;
-
-  static const _items = [
-    ('Jobs', Icons.two_wheeler_outlined),
-    ('History', Icons.history),
-    ('Stats', Icons.trending_up),
-    ('Me', Icons.person_outline),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    // Docked (not floating over content): the bar owns its own space so nothing scrolls under it.
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        border: Border(top: BorderSide(color: c.border)),
-        boxShadow: const [BoxShadow(color: Color(0x140A2647), blurRadius: 16, offset: Offset(0, -4))],
-      ),
-      padding: EdgeInsets.fromLTRB(12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
-      child: SizedBox(
-        child: Row(
-          children: [
-            for (var i = 0; i < _items.length; i++) ...[
-              Expanded(
-                child: Semantics(
-                  button: true,
-                  selected: i == current,
-                  label: tr(_items[i].$1),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => onSelect(i),
-                    child: AnimatedContainer(
-                      duration: BcMotion.standard,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      decoration: BoxDecoration(
-                        color: i == current ? c.brandSubtle : Colors.transparent,
-                        borderRadius: BorderRadius.circular(26),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          AnimatedScale(
-                            scale: i == current ? 1.05 : 1,
-                            duration: BcMotion.fast,
-                            child: Icon(_items[i].$2, size: 24, color: i == current ? c.brand : c.textMuted),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            tr(_items[i].$1),
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: i == current ? c.brand : c.textMuted,
-                              fontWeight: i == current ? FontWeight.w700 : FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              if (i < _items.length - 1) const SizedBox(width: 4),
-            ],
-          ],
         ),
       ),
     );
@@ -377,11 +319,17 @@ class _IncomingRideOverlayState extends State<_IncomingRideOverlay> {
   }
 
   static RideAlert? _currentAlert(AlertService alerts) =>
+      alerts.testAlert ??
       alerts.ringingAlert ??
       (alerts.postRejectHoldActive ? null : (alerts.activeAlerts.isEmpty ? null : alerts.activeAlerts.first));
   void _syncLockScreen() => SystemSettings.setRideAlertActive(_currentAlert(_alerts) != null);
 
   Future<void> _accept(AlertService alerts, RideAlert alert) async {
+    // Test alert: just close it — never reaches the server.
+    if (alert.isTest) {
+      alerts.endTestAlert();
+      return;
+    }
     setState(() {
       _acceptingId = alert.jobId;
       _error = null;
@@ -390,6 +338,7 @@ class _IncomingRideOverlayState extends State<_IncomingRideOverlay> {
       final container = context.read<AppContainer>();
       await ensureNoUnfinishedRide(container, claimingJobId: alert.jobId);
       await container.jobsRepository.claimJob(alert.jobId);
+      OfferOutcomes.instance.record(alert.jobId, OfferOutcome.accepted);
       BcFeedback.success();
       // The card may be over the lock screen; the dashboard shows customer details,
       // so it needs an unlock. If the rider cancels, it opens after they unlock.
@@ -431,7 +380,14 @@ class _IncomingRideOverlayState extends State<_IncomingRideOverlay> {
             accepting: _acceptingId == alert.jobId,
             error: _errorFor == alert.jobId ? _error : null,
             onAccept: () => _accept(alerts, alert),
-            onDismiss: () => alerts.silenceJob(alert.jobId),
+            onDismiss: () {
+              if (alert.isTest) {
+                alerts.endTestAlert();
+                return;
+              }
+              OfferOutcomes.instance.record(alert.jobId, OfferOutcome.declined);
+              alerts.silenceJob(alert.jobId);
+            },
           ),
         );
       },

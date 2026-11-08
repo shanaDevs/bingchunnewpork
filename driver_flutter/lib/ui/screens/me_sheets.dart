@@ -33,7 +33,6 @@ class _ShiftHistorySheetState extends State<_ShiftHistorySheet> {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final dark = c.isDark;
     return FutureBuilder<List<DriverShiftEntry>>(
       future: _future,
       builder: (context, snap) {
@@ -82,8 +81,8 @@ class _ShiftHistorySheetState extends State<_ShiftHistorySheet> {
         return BcSheetBody(
           header: BcSheetHeader(
             icon: Icons.schedule_outlined,
-            iconBg: dark ? const Color(0xFF1E293B) : const Color(0xFFE0EDFD),
-            iconTint: dark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB),
+            iconBg: c.primarySoft,
+            iconTint: c.primaryStrong,
             title: tr('Shift history'),
             subtitle: tr('When you went on and off duty'),
           ),
@@ -101,7 +100,7 @@ class _TimelineCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => BcSheetCard(
-    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+    padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
     child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
   );
 }
@@ -243,8 +242,8 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
     return BcSheetBody(
       header: BcSheetHeader(
         icon: Icons.notifications_active_outlined,
-        iconBg: dark ? const Color(0xFF3B1E22) : const Color(0xFFFDE8E8),
-        iconTint: dark ? const Color(0xFFF87171) : const Color(0xFFDC2626),
+        iconBg: c.primarySoft,
+        iconTint: c.primaryStrong,
         title: tr('Job Alerts & Reliability'),
         subtitle: tr('Never miss incoming delivery rides'),
       ),
@@ -252,8 +251,8 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
         if (Platform.isAndroid) ...[
           _AlertOptionCard(
             icon: Icons.battery_alert_outlined,
-            iconBg: dark ? const Color(0xFF2E2415) : const Color(0xFFFEF3C7),
-            iconTint: dark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
+            iconBg: c.primarySoft,
+            iconTint: c.primaryStrong,
             title: tr('Background Running'),
             subtitle: _batteryUnrestricted
                 ? tr('Battery optimizations disabled. The app can alert you when minimized.')
@@ -269,8 +268,8 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
           const SizedBox(height: 12),
           _AlertOptionCard(
             icon: Icons.fullscreen,
-            iconBg: dark ? const Color(0xFF1E293B) : const Color(0xFFE0EDFD),
-            iconTint: dark ? const Color(0xFF60A5FA) : const Color(0xFF1D4ED8),
+            iconBg: c.primarySoft,
+            iconTint: c.primaryStrong,
             title: tr('Full-Screen Ride Alerts'),
             subtitle: !_fsiOn
                 ? tr('Off. New rides will NOT show over the lock screen, only as a small notification. Turn on so you never miss a ride.')
@@ -297,14 +296,14 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
           const SizedBox(height: 12),
           _AlertOptionCard(
             icon: Icons.bubble_chart_outlined,
-            iconBg: dark ? const Color(0xFF2A1E3B) : const Color(0xFFF1E8FD),
-            iconTint: dark ? const Color(0xFFC084FC) : const Color(0xFF7C3AED),
+            iconBg: c.primarySoft,
+            iconTint: c.primaryStrong,
             title: tr('Quick Action Bubble'),
             subtitle: !_bubbleOn
-                ? tr('Off. No floating Bing Chun bubble when you leave the app.')
+                ? tr('Off. No floating QuickDrop bubble when you leave the app.')
                 : _bubblePermitted
-                ? tr('On. When you leave the app, a floating Bing Chun bubble stays on screen. Tap it to return, drag it anywhere, or drop it on ✕ to hide it.')
-                : tr('Allow "Display over other apps" so the floating Bing Chun bubble can show when you leave the app.'),
+                ? tr('On. When you leave the app, a floating QuickDrop bubble stays on screen. Tap it to return, drag it anywhere, or drop it on ✕ to hide it.')
+                : tr('Allow "Display over other apps" so the floating QuickDrop bubble can show when you leave the app.'),
             done: !_bubbleOn || _bubblePermitted,
             showStatus: _bubbleOn,
             trailing: BcSwitch(
@@ -326,10 +325,10 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
         ],
         _AlertOptionCard(
           icon: Icons.notifications_active_outlined,
-          iconBg: dark ? const Color(0xFF3B1E22) : const Color(0xFFFDE8E8),
-          iconTint: dark ? const Color(0xFFF87171) : const Color(0xFFDC2626),
+          iconBg: c.primarySoft,
+          iconTint: c.primaryStrong,
           title: tr('System Notification Sounds'),
-          subtitle: tr('Ensure Bing Chun notification channels are set to High Priority with sound.'),
+          subtitle: tr('Ensure QuickDrop notification channels are set to High Priority with sound.'),
           done: true,
           showStatus: false,
           actionLabel: tr('Open app notification settings'),
@@ -364,12 +363,12 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
                     Text(
                       Platform.isIOS
                           ? tr(
-                              '1. Allow notifications and Time Sensitive alerts.\n2. Keep Background App Refresh on for Bing Chun.\n3. Set Location to "Always" while delivering.',
+                              '1. Allow notifications and Time Sensitive alerts.\n2. Keep Background App Refresh on for QuickDrop.\n3. Set Location to "Always" while delivering.',
                             )
                           : tr(
                               '1. Enable \'Autostart\' in Security / App Info.\n2. Set Battery Saver to \'No restrictions\'.\n3. Lock the app in Recent Apps so the OS does not kill it.',
                             ),
-                      style: TextStyle(fontSize: 12.5, color: c.textMuted, height: 19 / 12.5),
+                      style: TextStyle(fontSize: 13, color: c.textMuted, height: 19 / 12.5),
                     ),
                   ],
                 ),
@@ -442,7 +441,7 @@ class _AlertOptionCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       subtitle,
-                      style: TextStyle(fontSize: 12.5, color: c.textMuted, height: 17 / 12.5),
+                      style: TextStyle(fontSize: 13, color: c.textMuted, height: 17 / 12.5),
                     ),
                   ],
                 ),

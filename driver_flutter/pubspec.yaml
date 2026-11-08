@@ -95,18 +95,28 @@ flutter:
     # GOOGLE_MAPS_API_KEY: read natively by ios/Runner/AppDelegate.swift (Android reads it in Gradle).
     - .env
 
-  # Brand display font (SIL Open Font License). Latin subset — Chinese falls back
-  # to the system font automatically.
+  # QuickDrop typography (SIL Open Font License): Plus Jakarta Sans for body text,
+  # Inter for titles. Chinese glyphs fall back to the system CJK font.
   fonts:
     - family: PlusJakartaSans
       fonts:
-        - asset: assets/fonts/PlusJakartaSans-500.ttf
+        - asset: assets/fonts/PlusJakartaSans_400Regular.ttf
+          weight: 400
+        - asset: assets/fonts/PlusJakartaSans_500Medium.ttf
           weight: 500
-        - asset: assets/fonts/PlusJakartaSans-600.ttf
+        - asset: assets/fonts/PlusJakartaSans_600SemiBold.ttf
           weight: 600
-        - asset: assets/fonts/PlusJakartaSans-700.ttf
+        - asset: assets/fonts/PlusJakartaSans_700Bold.ttf
           weight: 700
-        - asset: assets/fonts/PlusJakartaSans-800.ttf
+        - asset: assets/fonts/PlusJakartaSans_800ExtraBold.ttf
+          weight: 800
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter_600SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter_700Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Inter_800ExtraBold.ttf
           weight: 800
 
   # An image asset can refer to one or more resolution-specific "variants", see

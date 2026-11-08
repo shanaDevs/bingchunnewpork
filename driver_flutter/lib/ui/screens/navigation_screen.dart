@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 
@@ -7,15 +8,19 @@ import '../../core/format.dart';
 import '../../core/intents.dart';
 import '../../data/models/delivery_route.dart';
 import '../../tracking/location_tracker.dart';
-import '../components/buttons.dart';
+import '../components/app_bottom_nav.dart';
+import '../components/call_confirm.dart';
+import '../components/job_cards.dart';
+import '../components/qd_kit.dart';
+import '../components/sheet_kit.dart';
 import '../components/map_bitmaps.dart';
-import '../components/run_kit.dart';
 import '../theme/bc_theme.dart';
 import '../../l10n/l10n.dart';
 
 const _navZoom = 18.0;
 const _minRefetchDelta = 0.0002; // ~20m
 const _minHeadingDelta = 0.00004; // ~4m
+const _arrivedMetres = 40.0;
 
 /// The one contextual action shown on the nav screen — port of NavPrimaryAction (Intents.kt).
 /// Rebuilt from current state on every frame via [NavigationScreen.actionBuilder].
@@ -45,14 +50,52 @@ class NavCustomerStop extends NavPrimaryAction {
   const NavCustomerStop({required this.callEnabled, required this.onCall, this.onOpenOrder});
 }
 
+/// A generic "slide to confirm" action (e.g. confirm a delivery).
+class NavSlideAction extends NavPrimaryAction {
+  final String label;
+  final bool enabled;
+  final bool loading;
+  final String? hint;
+  final VoidCallback onConfirm;
+  const NavSlideAction({
+    required this.label,
+    required this.onConfirm,
+    this.enabled = true,
+    this.loading = false,
+    this.hint,
+  });
+}
+
+/// A generic full-width button action (e.g. start delivery).
+class NavButtonAction extends NavPrimaryAction {
+  final String label;
+  final IconData icon;
+  final bool enabled;
+  final bool loading;
+  final VoidCallback onTap;
+  const NavButtonAction({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.enabled = true,
+    this.loading = false,
+  });
+}
+
 /// Full-screen in-app navigation to a single destination — port of InAppNavigationScreen.kt.
 ///
 /// [actionBuilder] is called on every rebuild so the action reflects current state;
 /// wrap the route in the caller's providers so it can `watch` them.
 class NavigationScreen extends StatefulWidget {
-  const NavigationScreen({super.key, required this.target, this.actionBuilder});
+  const NavigationScreen({super.key, required this.target, this.actionBuilder, this.trailing, this.onOpenDestination});
 
   final NavTarget target;
+
+  /// Optional control opposite the back button (e.g. report a problem).
+  final Widget? trailing;
+
+  /// Tapping the destination panel (customers: opens the order). Shows a chevron when set.
+  final VoidCallback? onOpenDestination;
   final NavPrimaryAction? Function(BuildContext context)? actionBuilder;
 
   /// Pushes the nav screen; [wrap] re-provides the caller's state (e.g. a controller).
@@ -132,6 +175,7 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
     }
     setState(() {});
 
+    if (widget.target.upNext) return;
     final lf = _lastFetch;
     if (lf != null &&
         _roadPath.length >= 2 &&
@@ -157,20 +201,11 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
     });
   }
 
-  void _recenter() {
-    final fix = _tracker.lastFix;
-    final map = _map;
-    if (fix == null || !_mapReady || map == null) return;
-    map.animateCamera(CameraUpdate.newLatLng(LatLng(fix.lat, fix.lng)));
-  }
-
-  String get _summary {
-    final d = _distanceM;
-    final s = _durationS;
-    if (d == null || s == null) return tr('Locating…');
-    final distance = d >= 1000 ? '${(d / 1000).toStringAsFixed(1)} km' : '${d.toInt()} m';
-    final minutes = (s / 60).floor().clamp(1, 1 << 30);
-    return tr('{distance} · ~{minutes} min', {'distance': distance, 'minutes': minutes});
+  Future<void> _openGoogleMaps() async {
+    final t = widget.target;
+    final messenger = ScaffoldMessenger.of(context);
+    final err = await Intents.navigateTo(t.lat, t.lng, label: t.label);
+    if (err != null) messenger.showSnackBar(SnackBar(content: Text(err)));
   }
 
   @override
@@ -181,20 +216,59 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
     final action = widget.actionBuilder?.call(context);
     final hasHeading = _lastHeading != null;
     final destIcon = markerIcon(
-      'nav-dest-${c.brandDark.toARGB32()}',
+      'nav-dest-${c.action.toARGB32()}',
       const Size(34, 44),
-      () => _DestinationPinPainter(c.brandDark),
+      () => _DestinationPinPainter(c.action),
     );
     final driverIcon = fix == null
         ? null
         : markerIcon(
-            'nav-driver-${c.brand.toARGB32()}-$hasHeading',
+            'nav-driver-${c.primaryStrong.toARGB32()}-$hasHeading',
             const Size(72, 72),
-            () => _NavArrowPainter(0.35, c.brand, hasHeading),
+            () => _NavArrowPainter(0.35, c.primaryStrong, hasHeading),
           );
+
+    final top = MediaQuery.paddingOf(context).top;
+    final remainingM = fix == null ? null : Geolocator.distanceBetween(fix.lat, fix.lng, t.lat, t.lng);
+    final arrived =
+        !t.upNext && (action is NavConfirmPickup && action.enabled) ||
+        (remainingM != null && remainingM <= _arrivedMetres);
+    final eyebrow = switch (t.kind) {
+      NavKindPickup() => tr('Heading to pickup'),
+      NavKindReturn() => tr('Heading back to branch'),
+      _ when t.upNext && t.stopNumber != null => tr('Up next · order {n}', {'n': t.stopNumber!}),
+      _ when t.stopNumber != null => tr('Heading to order {n}', {'n': t.stopNumber!}),
+      _ => tr('Heading to delivery'),
+    };
+    final markerIconData = switch (t.kind) {
+      NavKindPickup() => Icons.storefront_outlined,
+      NavKindReturn() => Icons.flag_outlined,
+      _ => Icons.place_outlined,
+    };
+    final address = t.address.trim().replaceAll(RegExp(r'^,\s*|,\s*$'), '').isEmpty
+        ? switch (t.kind) {
+            NavKindPickup() => tr('Pickup Location'),
+            NavKindReturn() => tr('Return to branch'),
+            _ => tr('Drop-off Location'),
+          }
+        : t.address;
+    final a = action;
+    final canCall = a is NavCustomerStop ? a.callEnabled : t.phone.trim().isNotEmpty;
+    final onCall = t.phone.trim().isNotEmpty
+        ? () => confirmAndCall(context, name: t.label, phone: t.phone)
+        : (a is NavCustomerStop ? a.onCall : () {});
+
+    final awayText = remainingM == null
+        ? null
+        : (remainingM >= 1000 ? '${(remainingM / 1000).toStringAsFixed(1)} km' : '${remainingM.round()} m');
+    final etaMinutes = _durationS == null ? null : (_durationS! / 60).floor().clamp(1, 1 << 30);
+    final etaDistance = _distanceM == null
+        ? null
+        : (_distanceM! >= 1000 ? '${(_distanceM! / 1000).toStringAsFixed(1)} km' : '${_distanceM!.toInt()} m');
 
     return Scaffold(
       backgroundColor: c.background,
+      bottomNavigationBar: const AppBottomNav.overShell(),
       body: Stack(
         children: [
           Positioned.fill(
@@ -211,11 +285,11 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
               mapToolbarEnabled: false,
               compassEnabled: false,
               polylines: {
-                if (_roadPath.length >= 2)
+                if (!t.upNext && _roadPath.length >= 2)
                   Polyline(
                     polylineId: const PolylineId('nav-route'),
                     points: _roadPath.map((p) => LatLng(p.lat, p.lng)).toList(),
-                    color: c.brand,
+                    color: c.primaryStrong,
                     width: 7,
                   ),
               },
@@ -244,148 +318,235 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
               },
             ),
           ),
-          if (fix == null) Center(child: CircularProgressIndicator(color: c.brand)),
-          // Guidance card: where we're heading and how far, over the top of the map.
+          if (fix == null) Center(child: CircularProgressIndicator(color: c.primaryStrong)),
+          // Header pinned to the top edge: back, where to, how far / how long, the destination.
           Positioned(
-            top: MediaQuery.paddingOf(context).top + 10,
-            left: 12,
-            right: 12,
-            child: Row(
-              children: [
-                _CircleButton(
-                  icon: Icons.arrow_back_rounded,
-                  tooltip: tr('Back'),
-                  color: c.text,
-                  onTap: () => Navigator.of(context).pop(),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(18),
-                      gradient: LinearGradient(
-                        colors: [const Color(0xFF0B3EA8), c.brandDark, c.brand],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      boxShadow: [
-                        BoxShadow(color: c.brand.withValues(alpha: 0.3), blurRadius: 14, offset: const Offset(0, 5)),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(Icons.navigation_rounded, color: Colors.white, size: 21),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _summary,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800),
-                              ),
-                              Text(
-                                tr('to {place}', {'place': t.label}),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12.5),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Destination panel docked to the bottom.
-          Positioned(
+            top: 0,
             left: 0,
             right: 0,
-            bottom: 0,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 12, bottom: 12),
-                  child: _CircleButton(
-                    icon: Icons.my_location_rounded,
-                    tooltip: tr('Recenter'),
-                    color: c.brand,
-                    onTap: _recenter,
-                  ),
-                ),
-                Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: c.card,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: c.isDark ? const Color(0x55000000) : const Color(0x260A2647),
-                        blurRadius: 24,
-                        offset: const Offset(0, -4),
-                      ),
-                    ],
-                  ),
-                  padding: EdgeInsets.fromLTRB(16, 10, 16, 14 + MediaQuery.paddingOf(context).bottom),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+            child: Container(
+              padding: EdgeInsets.fromLTRB(12, top + 10, 12, 12),
+              decoration: BoxDecoration(
+                color: c.surface,
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(BcRadius.xl)),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 24, offset: const Offset(0, 8)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
                     children: [
-                      Center(
-                        child: Container(
-                          width: 40,
-                          height: 4,
-                          margin: const EdgeInsets.only(bottom: 12),
-                          decoration: BoxDecoration(color: c.border, borderRadius: BorderRadius.circular(99)),
+                      QdBackButton(onTap: () => Navigator.of(context).maybePop()),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: arrived ? c.success : c.primary,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    eyebrow,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: c.mutedForeground,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            if (t.upNext)
+                              Text(
+                                awayText == null ? tr('Locating…') : tr('{distance} away', {'distance': awayText}),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: BcType.subtitle.copyWith(
+                                  color: c.foreground,
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              )
+                            else if (arrived)
+                              Text(
+                                tr('You\'ve arrived'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: BcType.subtitle.copyWith(
+                                  color: c.successStrong,
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              )
+                            else if (etaMinutes == null)
+                              Text(
+                                tr('Locating…'),
+                                style: BcType.subtitle.copyWith(
+                                  color: c.foreground,
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              )
+                            else
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.baseline,
+                                textBaseline: TextBaseline.alphabetic,
+                                children: [
+                                  Text(
+                                    tr('{n} min', {'n': etaMinutes}),
+                                    style: BcType.subtitle.copyWith(
+                                      color: c.foreground,
+                                      fontSize: 26,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      etaDistance ?? '',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w600,
+                                        color: c.mutedForeground,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ],
                         ),
                       ),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: RunCardHeader(
-                              icon: switch (t.kind) {
-                                NavKindPickup() => Icons.storefront_rounded,
-                                NavKindReturn() => Icons.flag_rounded,
-                                _ => Icons.person_pin_circle_rounded,
-                              },
-                              title: t.label,
-                              subtitle: switch (t.kind) {
-                                NavKindPickup() => tr('Pickup Location'),
-                                NavKindReturn() => tr('Return to branch'),
-                                _ => tr('Drop-off Location'),
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          GoogleMapsIconButton(
-                            onTap: () async {
-                              final messenger = ScaffoldMessenger.of(context);
-                              final err = await Intents.navigateTo(t.lat, t.lng, label: t.label);
-                              if (err != null) messenger.showSnackBar(SnackBar(content: Text(err)));
-                            },
-                          ),
-                        ],
-                      ),
-                      if (action != null) ...[const SizedBox(height: 14), _NavActionRow(action: action)],
+                      if (widget.trailing != null) ...[const SizedBox(width: 12), widget.trailing!],
                     ],
                   ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 10, 8),
+                    decoration: BoxDecoration(color: c.highlight, borderRadius: BorderRadius.circular(BcRadius.md)),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: widget.onOpenDestination,
+                            borderRadius: BorderRadius.circular(BcRadius.sm),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(shape: BoxShape.circle, color: c.inverse),
+                                  child: Icon(markerIconData, size: 20, color: c.inverseForeground),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        t.label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: c.highlightForeground,
+                                        ),
+                                      ),
+                                      Text(
+                                        address,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: c.highlightForeground.withValues(alpha: 0.75),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (widget.onOpenDestination != null)
+                                  Icon(
+                                    Icons.chevron_right_rounded,
+                                    size: 22,
+                                    color: c.highlightForeground.withValues(alpha: 0.5),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (canCall) ...[
+                          const SizedBox(width: 8),
+                          Material(
+                            color: c.call,
+                            shape: const CircleBorder(),
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: onCall,
+                              child: Tooltip(
+                                message: tr('Call'),
+                                child: SizedBox(
+                                  width: 44,
+                                  height: 44,
+                                  child: Icon(Icons.call_rounded, color: c.callForeground, size: 22),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // Bottom: the directions button over the map, then the one next step.
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 12,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Material(
+                    color: c.inverse,
+                    shape: const CircleBorder(),
+                    elevation: 4,
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: _openGoogleMaps,
+                      child: Tooltip(
+                        message: tr('Open in Google Maps'),
+                        child: SizedBox(
+                          width: 56,
+                          height: 56,
+                          child: Icon(Icons.directions_rounded, color: c.primary, size: 28),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
+                if (a != null) ...[const SizedBox(height: 12), _NavActionRow(action: a)],
               ],
             ),
           ),
@@ -403,90 +564,99 @@ class _NavActionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.bc;
     final a = action;
+    Widget floating(Widget child) => DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(BcRadius.full),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 24, offset: const Offset(0, 8))],
+      ),
+      child: child,
+    );
     switch (a) {
       case NavConfirmPickup():
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (a.geofenceHint != null) ...[
-              RunNote(
-                icon: a.enabled ? Icons.check_circle_outline_rounded : Icons.info_outline_rounded,
-                color: a.enabled ? c.success : c.brand,
-                text: a.geofenceHint!,
+            if (a.geofenceHint != null && !a.enabled) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(BcRadius.md)),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 18, color: c.primaryStrong),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(a.geofenceHint!, style: TextStyle(fontSize: 13, color: c.foreground)),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 10),
             ],
-            RunPrimaryButton(
-              label: tr('Confirm pickup'),
-              icon: Icons.check_circle_rounded,
-              loading: a.loading,
-              enabled: a.enabled,
-              locked: !a.enabled,
-              onPressed: a.onConfirm,
+            floating(
+              BcSlideToConfirm(
+                label: tr('Slide to confirm pickup'),
+                color: c.error,
+                foreground: c.errorForeground,
+                enabled: a.enabled,
+                loading: a.loading,
+                onConfirm: a.onConfirm,
+              ),
             ),
           ],
         );
       case NavCompleteRide():
-        return RunPrimaryButton(
-          label: tr('Complete Ride'),
-          icon: Icons.flag_circle_rounded,
-          loading: a.loading,
-          enabled: a.enabled,
-          locked: !a.enabled,
-          onPressed: a.onComplete,
+        return floating(
+          BcSlideToConfirm(
+            label: tr('Slide to complete ride'),
+            color: c.error,
+            foreground: c.errorForeground,
+            enabled: a.enabled,
+            loading: a.loading,
+            onConfirm: a.onComplete,
+          ),
         );
-      case NavCustomerStop():
-        return Row(
+      case NavSlideAction():
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: RunOutlineButton(
-                label: tr('Call'),
-                icon: Icons.call_rounded,
-                color: c.success,
-                enabled: a.callEnabled,
-                onPressed: a.onCall,
-                height: 52,
-              ),
-            ),
-            if (a.onOpenOrder != null) ...[
-              const SizedBox(width: 10),
-              Expanded(
-                child: RunPrimaryButton(
-                  label: tr('Open order'),
-                  icon: Icons.receipt_long_rounded,
-                  onPressed: a.onOpenOrder,
+            if (a.hint != null && !a.enabled) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(BcRadius.md)),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 18, color: c.primaryStrong),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(a.hint!, style: TextStyle(fontSize: 13, color: c.foreground)),
+                    ),
+                  ],
                 ),
               ),
+              const SizedBox(height: 10),
             ],
+            floating(
+              BcSlideToConfirm(
+                label: a.label,
+                color: c.error,
+                foreground: c.errorForeground,
+                enabled: a.enabled,
+                loading: a.loading,
+                onConfirm: a.onConfirm,
+              ),
+            ),
           ],
         );
+      case NavButtonAction():
+        return floating(
+          PillButton(label: a.label, icon: a.icon, height: 56, loading: a.loading, onTap: a.enabled ? a.onTap : null),
+        );
+      case NavCustomerStop():
+        if (a.onOpenOrder == null) return const SizedBox.shrink();
+        return floating(
+          PillButton(label: tr('Open order'), icon: Icons.receipt_long_rounded, height: 56, onTap: a.onOpenOrder),
+        );
     }
-  }
-}
-
-class _CircleButton extends StatelessWidget {
-  const _CircleButton({required this.icon, required this.tooltip, required this.color, required this.onTap});
-  final IconData icon;
-  final String tooltip;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: context.bc.card,
-      shape: const CircleBorder(),
-      elevation: 4,
-      shadowColor: const Color(0x330A2647),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Tooltip(
-          message: tooltip,
-          child: SizedBox(width: 46, height: 46, child: Icon(icon, color: color, size: 22)),
-        ),
-      ),
-    );
   }
 }
 

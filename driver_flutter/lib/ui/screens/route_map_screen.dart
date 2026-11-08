@@ -1,3 +1,4 @@
+import '../components/app_bottom_nav.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -136,19 +137,19 @@ class _RouteMapBodyState extends State<_RouteMapBody> {
 
         Widget content;
         if (vm.loading && job == null) {
-          content = Center(child: CircularProgressIndicator(color: c.brand));
+          content = Center(child: CircularProgressIndicator(color: c.primaryStrong));
         } else if (job == null) {
           content = Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Text(vm.error ?? tr('Not found'), style: TextStyle(color: c.textMuted)),
+              child: Text(vm.error ?? tr('Not found'), style: TextStyle(color: c.mutedForeground)),
             ),
           );
         } else if (route == null) {
           content = Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Text(tr('Route unavailable'), style: BcType.body.copyWith(color: c.textMuted)),
+              child: Text(tr('Route unavailable'), style: BcType.body.copyWith(color: c.mutedForeground)),
             ),
           );
         } else {
@@ -189,7 +190,7 @@ class _RouteMapBodyState extends State<_RouteMapBody> {
                         _MapChip(
                           icon: Icons.location_on_rounded,
                           label: trn(route.summary.stopCount, '{n} stop', '{n} stops'),
-                          tint: c.brand,
+                          tint: c.primaryStrong,
                         ),
                         _MapChip(
                           icon: Icons.route_rounded,
@@ -228,14 +229,14 @@ class _RouteMapBodyState extends State<_RouteMapBody> {
                         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
                         boxShadow: [
                           BoxShadow(
-                            color: c.isDark ? const Color(0x55000000) : const Color(0x260A2647),
+                            color: c.foreground.withValues(alpha: c.isDark ? 0.35 : 0.12),
                             blurRadius: 24,
                             offset: const Offset(0, -4),
                           ),
                         ],
                       ),
                       child: Padding(
-                        padding: EdgeInsets.fromLTRB(16, 10, 16, 14 + MediaQuery.paddingOf(context).bottom),
+                        padding: EdgeInsets.fromLTRB(12, 8, 12, 10 + MediaQuery.paddingOf(context).bottom),
                         child: inProgressNav
                             ? Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -270,6 +271,8 @@ class _RouteMapBodyState extends State<_RouteMapBody> {
                                           lng: nextStop.lng!,
                                           label: nextStop.customerName,
                                           kind: NavKindCustomerStop(nextStop.orderId),
+                                          address: '${nextStop.addressLine}, ${nextStop.city}',
+                                          phone: nextStop.customerPhone,
                                         ),
                                         actionBuilder: (ctx) => NavCustomerStop(
                                           callEnabled: nextStop.customerPhone.trim().isNotEmpty,
@@ -357,7 +360,11 @@ class _RouteMapBodyState extends State<_RouteMapBody> {
             ],
           );
         }
-        return Scaffold(backgroundColor: c.background, body: content);
+        return Scaffold(
+          backgroundColor: c.background,
+          bottomNavigationBar: const AppBottomNav.overShell(),
+          body: content,
+        );
       },
     );
   }
@@ -393,13 +400,13 @@ class _FloatingHeader extends StatelessWidget {
           color: c.card,
           shape: const CircleBorder(),
           elevation: 4,
-          shadowColor: const Color(0x330A2647),
+          shadowColor: c.foreground.withValues(alpha: 0.2),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: () => Navigator.of(context).maybePop(),
             child: Tooltip(
               message: tr('Back'),
-              child: SizedBox(width: 46, height: 46, child: Icon(Icons.arrow_back_rounded, color: c.text)),
+              child: SizedBox(width: 46, height: 46, child: Icon(Icons.arrow_back_rounded, color: c.foreground)),
             ),
           ),
         ),
@@ -410,11 +417,11 @@ class _FloatingHeader extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(18),
               gradient: LinearGradient(
-                colors: [const Color(0xFF0B3EA8), c.brandDark, c.brand],
+                colors: c.brandDeepGradient,
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              boxShadow: [BoxShadow(color: c.brand.withValues(alpha: 0.3), blurRadius: 14, offset: const Offset(0, 5))],
+              boxShadow: bcShadow(c),
             ),
             child: Row(
               children: [
@@ -461,7 +468,7 @@ class _MapChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: c.card,
         borderRadius: BorderRadius.circular(99),
-        boxShadow: const [BoxShadow(color: Color(0x220A2647), blurRadius: 10, offset: Offset(0, 3))],
+        boxShadow: bcShadow(c),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -475,7 +482,7 @@ class _MapChip extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(color: c.text, fontSize: 12.5, fontWeight: FontWeight.w700),
+            style: TextStyle(color: c.foreground, fontSize: 13, fontWeight: FontWeight.w700),
           ),
         ],
       ),

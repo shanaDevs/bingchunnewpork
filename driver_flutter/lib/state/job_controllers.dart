@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/app_container.dart';
 import '../core/events.dart';
+import '../core/offer_outcomes.dart';
 import '../data/models/delivery_job.dart';
 import '../data/models/delivery_route.dart';
 import '../data/network/api_exception.dart';
@@ -65,7 +66,9 @@ class JobDetailController extends ChangeNotifier {
   Future<bool> assign(String jobId) => _act(() => _c.jobsRepository.assignJob(jobId));
   Future<bool> claim(String jobId) => _act(() async {
     await ensureNoUnfinishedRide(_c, claimingJobId: jobId);
-    return _c.jobsRepository.claimJob(jobId);
+    final j = await _c.jobsRepository.claimJob(jobId);
+    OfferOutcomes.instance.record(jobId, OfferOutcome.accepted);
+    return j;
   });
   Future<bool> start(String jobId) => _act(() => _c.jobsRepository.startJob(jobId));
   Future<bool> pickup(String jobId) => _act(() async {
@@ -87,6 +90,7 @@ class JobDetailController extends ChangeNotifier {
     _c.alertService.beginPostRejectHold(jobId, job?.store.id ?? '');
     try {
       await _c.jobsRepository.rejectJob(jobId, reason);
+      OfferOutcomes.instance.record(jobId, OfferOutcome.declined);
       await _c.alertService.stopTracking();
       _c.alertService.clearSeen(jobId);
       refreshAlertEligibility(_c);
@@ -140,7 +144,10 @@ class JobDetailController extends ChangeNotifier {
 
 /// Port of DashboardViewModel — the live run screen.
 class DashboardController extends ChangeNotifier {
-  DashboardController(this._c) {
+  /// [seed] is a job detail already in memory (e.g. Home's active job), shown at once
+  /// while the fresh copy loads, so the screen never opens blank.
+  DashboardController(this._c, {DeliveryJobDetail? seed}) {
+    job = seed;
     _sub = JobRefreshBus.events.listen((id) {
       if (id == _loadedId) load(id, force: true);
     });
@@ -169,22 +176,35 @@ class DashboardController extends ChangeNotifier {
     _emit();
     try {
       final j = await _c.jobsRepository.getJob(jobId);
-      DeliveryRoute? r;
-      try {
-        r = await _c.jobsRepository.getJobRoute(jobId, j);
-      } catch (_) {
-        r = route;
-      }
       if (j.isActive) _beginTracking(jobId);
+      // Show the job as soon as it arrives; the route follows without blocking the screen.
       loading = false;
       job = j;
-      route = r;
+      _emit();
+      try {
+        route = await _c.jobsRepository.getJobRoute(jobId, j);
+      } catch (_) {
+        // keep the previous route, if any
+      }
       _emit();
     } catch (e) {
       loading = false;
       error = errorMessage(e, tr('Failed to load dashboard'));
       _emit();
     }
+  }
+
+  /// Vehicle broke down mid-run: flag it with the rider's location so support can send a
+  /// replacement. Throws a [StateError] with a message to show.
+  Future<void> reportVehicleFailure(String jobId, String? note) async {
+    final active = await _c.jobsRepository.getActiveJob();
+    if (active?.canReject ?? false) throw StateError(rejectJobBeforeFailureMessage);
+    final fix = await _c.locationTracker.getCurrentLocation();
+    if (fix == null) throw StateError(tr('Could not get your location. Enable GPS and try again.'));
+    await _c.jobsRepository.reportVehicleFailure(fix.lat, fix.lng, note: note);
+    await _c.alertService.stopTracking();
+    JobRefreshBus.refresh(jobId);
+    JobRefreshBus.dropRide(jobId);
   }
 
   Future<void> start(String jobId) async {
@@ -261,6 +281,7 @@ class DashboardController extends ChangeNotifier {
     _c.alertService.beginPostRejectHold(jobId, job?.store.id ?? '');
     try {
       await _c.jobsRepository.rejectJob(jobId, reason);
+      OfferOutcomes.instance.record(jobId, OfferOutcome.declined);
       _c.alertService.clearSeen(jobId);
       acting = false;
       _emit();

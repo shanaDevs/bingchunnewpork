@@ -67,7 +67,7 @@ class _ServerUrlDialogState extends State<ServerUrlDialog> {
           BcTextField(controller: _store, label: 'Store ID (optional)'),
           if (_error != null) ...[
             const SizedBox(height: 10),
-            Text(_error!, style: BcType.caption.copyWith(color: c.danger)),
+            Text(_error!, style: BcType.caption.copyWith(color: c.errorStrong)),
           ],
           const SizedBox(height: 10),
           // Quick fill from endpoints.dart — Localhost (this PC via adb reverse) or Hosted (production).

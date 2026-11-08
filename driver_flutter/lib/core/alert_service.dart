@@ -4,6 +4,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:vibration/vibration.dart';
 
 import '../data/json.dart';
 import '../data/local/secure_store.dart';
@@ -17,7 +18,9 @@ import 'duty_service.dart';
 import 'events.dart';
 import 'format.dart';
 import 'notifications.dart';
+import 'offer_outcomes.dart';
 import 'ride_alert.dart';
+import 'runtime_config.dart';
 
 /// Runs while the driver is ON DUTY — port of DriverAlertService.kt.
 ///
@@ -73,7 +76,10 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   int _consecutiveFailures = 0;
   bool _appInForeground = true;
 
-  AudioPlayer? _alertPlayer;
+  final _ring = _RingFeedback('new_job_alert');
+  final _testRing = _RingFeedback('test_job_alert');
+  RideAlert? _testAlert;
+  Timer? _testTimer;
   AudioPlayer? _cancelPlayer;
   SharedPreferences? _prefs;
 
@@ -90,6 +96,8 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
       : const [];
   Set<String> get activeAlertJobIds => activeAlerts.map((a) => a.jobId).toSet();
   RideAlert? get ringingAlert => alertEligible ? _ringingAlert : null;
+  /// Local preview of the full-screen alert (Settings → Send a test alert). Never touches the server.
+  RideAlert? get testAlert => _testAlert;
   bool get postRejectHoldActive => _isPostRejectHoldActive;
   List<CancelledOrderAlert> get pendingCancellations => List.unmodifiable(_pendingCancellations);
   bool get isRunning => _running;
@@ -133,6 +141,7 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     }
     _activeAlerts.clear();
     _pauseRingCycle();
+    endTestAlert();
     _postRejectTimer?.cancel();
     _stopCancelSound();
     _trackingJobId = null;
@@ -221,6 +230,7 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     final jobs = await jobsRepository.listJobs();
     final availableIds = jobs.where((j) => j.status == 'SCHEDULED').map((j) => j.id).toSet();
     for (final id in _activeAlerts.keys.where((id) => !availableIds.contains(id)).toList()) {
+      _recordMissed(id);
       _silenceJob(id);
     }
     if (_seenJobIds.length > 500) {
@@ -298,7 +308,18 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     final obj = _payload(raw);
     if (obj == null) return;
     final id = str(obj, 'id').isNotEmpty ? str(obj, 'id') : str(obj, 'jobId');
-    if (id.isNotEmpty) _silenceJob(id);
+    if (id.isNotEmpty) {
+      _recordMissed(id);
+      _silenceJob(id);
+    }
+  }
+
+  /// An offered job left the open pool with no rider action (taken by someone else, withdrawn,
+  /// expired). Deferred so the rider's own claim/reject response can record first; the first
+  /// outcome per job wins. Test alerts never enter [_activeAlerts].
+  void _recordMissed(String jobId) {
+    if (!_activeAlerts.containsKey(jobId)) return;
+    Timer(const Duration(seconds: 6), () => OfferOutcomes.instance.record(jobId, OfferOutcome.missed));
   }
 
   void _onSocketOrderCancelled(dynamic raw) {
@@ -413,10 +434,33 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     return until != null && DateTime.now().isBefore(until);
   }
 
+  // ---------------- Test alert (local only) ----------------
+
+  /// Shows the incoming-ride card with sample data and rings per the saved alert settings.
+  /// Purely local: no job exists, so nothing is claimed, rejected or recorded.
+  void startTestAlert() {
+    if (_testAlert != null || _ringingAlert != null) return;
+    _testAlert = RideAlert.test();
+    _testRing.start(force: true);
+    _testTimer?.cancel();
+    _testTimer = Timer(ringDuration, endTestAlert);
+    notifyListeners();
+  }
+
+  void endTestAlert() {
+    _testTimer?.cancel();
+    _testTimer = null;
+    _testRing.stop();
+    if (_testAlert != null) {
+      _testAlert = null;
+      notifyListeners();
+    }
+  }
+
   // ---------------- Ringing ----------------
 
   void _alertJob(RideAlert alert) {
-    if (alert.jobId.isEmpty) return;
+    if (alert.jobId.isEmpty || alert.isTest) return;
     if (_isSilenced(alert.jobId) || _activeAlerts.containsKey(alert.jobId)) return;
     if (!alertEligible) {
       // Local flag can be stale — verify via jobs list (GET /me often 504 on live).
@@ -473,6 +517,7 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _forceRingNow(RideAlert alert) {
+    if (alert.isTest) return;
     _activeAlerts[alert.jobId] = alert;
     notifyListeners();
     _startRingCycle(alert);
@@ -513,6 +558,7 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   void _startRingCycle(RideAlert alert) {
     // Covers forced rings (admin re-ring, failure offers) too: nothing pops up mid-ride.
     if (!alertEligible) return;
+    if (_testAlert != null) endTestAlert();
     _ringBurstTimer?.cancel();
     _ringGapTimer?.cancel();
     final current = _activeAlerts[alert.jobId];
@@ -528,9 +574,9 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
         FlutterForegroundTask.wakeUpScreen();
       } catch (_) {}
     }
-    _startAlertSound();
+    if (alertEligible) _ring.start();
     _ringBurstTimer = Timer(ringDuration, () {
-      _stopAlertSound();
+      _ring.stop();
       if (_activeAlerts.containsKey(alert.jobId)) {
         _ringGapTimer = Timer(_ringGap, () {
           _ringingJobId = null;
@@ -550,44 +596,14 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
       _ringingAlert = null;
       notifyListeners();
     }
-    _stopAlertSound();
-  }
-
-  Future<void> _startAlertSound() async {
-    if (!alertEligible) return;
-    if (_alertPlayer != null) return;
-    try {
-      final player = AudioPlayer(playerId: 'new_job_alert');
-      _alertPlayer = player;
-      await player.setAudioContext(
-        AudioContext(
-          android: const AudioContextAndroid(
-            usageType: AndroidUsageType.alarm,
-            contentType: AndroidContentType.sonification,
-            audioFocus: AndroidAudioFocus.gainTransientMayDuck,
-          ),
-          iOS: AudioContextIOS(category: AVAudioSessionCategory.playback),
-        ),
-      );
-      await player.setReleaseMode(ReleaseMode.loop);
-      await player.play(AssetSource('sounds/new_job_alert.wav'));
-    } catch (e) {
-      debugPrint('Could not start looping job alert: $e');
-    }
-  }
-
-  void _stopAlertSound() {
-    final p = _alertPlayer;
-    _alertPlayer = null;
-    if (p != null) {
-      p.stop().whenComplete(p.dispose);
-    }
+    _ring.stop();
   }
 
   Future<void> _startCancelSound() async {
     _stopCancelSound();
     try {
       final player = AudioPlayer(playerId: 'order_cancelled_alert');
+      player.positionUpdater = null;
       _cancelPlayer = player;
       await player.setAudioContext(
         AudioContext(
@@ -612,7 +628,7 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     final p = _cancelPlayer;
     _cancelPlayer = null;
     if (p != null) {
-      p.stop().whenComplete(p.dispose);
+      _disposePlayer(p);
     }
   }
 
@@ -635,4 +651,101 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Exposed for screens that receive a JobSummary list (badge state on the Jobs tab).
   bool isAlerting(JobSummary job) => _activeAlerts.containsKey(job.id);
+}
+
+/// One ring session: the selected tone (looping or once) plus a vibration pulse per ring,
+/// repeating every [interval] only when ring-until-respond is on. The sound switch only
+/// gates audio; vibration follows its own switch. Settings are read at start.
+class _RingFeedback {
+  _RingFeedback(this.playerId);
+
+  static const interval = Duration(milliseconds: 1400);
+  static final _pattern = [0, 300, 150, 300];
+
+  final String playerId;
+  AudioPlayer? _player;
+  Timer? _vibeTimer;
+  bool _active = false;
+
+  Future<void> start({bool force = false}) async {
+    if (_active) return;
+    _active = true;
+    final rc = RuntimeConfig.instance;
+    final repeat = rc.alertRepeat;
+    if (rc.alertVibration) {
+      _pulse();
+      if (repeat) _vibeTimer = Timer.periodic(interval, (_) => _pulse());
+    }
+    if (!rc.soundEnabled) return;
+    try {
+      final player = AudioPlayer(playerId: playerId);
+      player.positionUpdater = null;
+      _player = player;
+      await player.setAudioContext(
+        AudioContext(
+          android: const AudioContextAndroid(
+            usageType: AndroidUsageType.alarm,
+            contentType: AndroidContentType.sonification,
+            audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+          ),
+          iOS: AudioContextIOS(category: AVAudioSessionCategory.playback),
+        ),
+      );
+      await player.setReleaseMode(repeat ? ReleaseMode.loop : ReleaseMode.stop);
+      if (!_active || _player != player) return; // stopped while preparing
+      await player.play(AssetSource('sounds/${rc.alertTone.asset}'));
+    } catch (e) {
+      debugPrint('Could not start job alert sound: $e');
+    }
+  }
+
+  static Future<void> _pulse() async {
+    try {
+      if (await Vibration.hasVibrator()) await Vibration.vibrate(pattern: _pattern);
+    } catch (_) {}
+  }
+
+  void stop() {
+    if (!_active) return;
+    _active = false;
+    _vibeTimer?.cancel();
+    _vibeTimer = null;
+    Vibration.cancel().catchError((_) {});
+    final p = _player;
+    _player = null;
+    if (p != null) _disposePlayer(p);
+  }
+}
+
+AudioPlayer? _previewPlayer;
+
+/// One ring of [tone] — used when picking a tone in Settings. Plays even with the alert
+/// sound switch off, since the rider asked to hear it.
+Future<void> previewJobAlertTone(JobAlertTone tone) async {
+  final old = _previewPlayer;
+  _previewPlayer = null;
+  if (old != null) _disposePlayer(old);
+  try {
+    final player = AudioPlayer(playerId: 'job_alert_preview');
+      player.positionUpdater = null;
+    _previewPlayer = player;
+    await player.setReleaseMode(ReleaseMode.stop);
+    await player.play(AssetSource('sounds/${tone.asset}'));
+    Timer(const Duration(milliseconds: 2400), () {
+      if (_previewPlayer == player) _previewPlayer = null;
+      _disposePlayer(player);
+    });
+  } catch (e) {
+    debugPrint('Could not preview tone: $e');
+  }
+}
+
+/// Stops and releases a player; never throws (a player may already be gone).
+Future<void> _disposePlayer(AudioPlayer p) async {
+  try {
+    await p.stop();
+  } catch (_) {}
+  try {
+    await p.dispose();
+  } catch (_) {}
 }

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="launcher_background">#05C1FF</color>
+    <color name="launcher_background">#2684FC</color>
     <!-- Brand blue gradient stops shared with the Flutter startup screen. -->
-    <color name="splash_bg">#1A5CD4</color>
-    <color name="splash_bg_start">#0B3EA8</color>
-    <color name="splash_bg_end">#307EF2</color>
+    <color name="splash_bg">#1E88F0</color>
+    <color name="splash_bg_start">#2563EB</color>
+    <color name="splash_bg_end">#16B8F3</color>
 </resources>

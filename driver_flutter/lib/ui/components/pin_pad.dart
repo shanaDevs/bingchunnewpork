@@ -9,7 +9,15 @@ import '../../l10n/l10n.dart';
 
 /// Row of PIN dots that fill as digits are typed and shake when [errorTick] changes.
 class PinDots extends StatefulWidget {
-  const PinDots({super.key, required this.length, required this.filled, this.errorTick = 0, this.onDark = false});
+  const PinDots({
+    super.key,
+    required this.length,
+    required this.filled,
+    this.errorTick = 0,
+    this.onDark = false,
+    this.boxed = false,
+    this.error = false,
+  });
 
   final int length;
   final int filled;
@@ -17,6 +25,12 @@ class PinDots extends StatefulWidget {
   /// Bump to play the wrong-PIN shake.
   final int errorTick;
   final bool onDark;
+
+  /// Rounded-square boxes (QuickDrop OTP input) instead of bare circles.
+  final bool boxed;
+
+  /// Outline the boxes in the error colour.
+  final bool error;
 
   @override
   State<PinDots> createState() => _PinDotsState();
@@ -40,8 +54,8 @@ class _PinDotsState extends State<PinDots> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final on = widget.onDark ? Colors.white : c.brand;
-    final off = widget.onDark ? Colors.white.withValues(alpha: 0.35) : c.inputBorder;
+    final on = widget.onDark ? Colors.white : c.action;
+    final off = widget.onDark ? Colors.white.withValues(alpha: 0.35) : c.border;
     return AnimatedBuilder(
       animation: _shake,
       builder: (context, child) {
@@ -52,18 +66,47 @@ class _PinDotsState extends State<PinDots> with SingleTickerProviderStateMixin {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          for (var i = 0; i < widget.length; i++)
-            AnimatedContainer(
-              duration: BcMotion.fast,
-              margin: const EdgeInsets.symmetric(horizontal: 10),
-              width: 18,
-              height: 18,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: i < widget.filled ? on : Colors.transparent,
-                border: Border.all(color: i < widget.filled ? on : off, width: 2),
+          if (widget.boxed)
+            for (var i = 0; i < widget.length; i++)
+              AnimatedContainer(
+                duration: BcMotion.fast,
+                margin: const EdgeInsets.symmetric(horizontal: 6),
+                width: 56,
+                height: 64,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: c.surface,
+                  borderRadius: BorderRadius.circular(BcRadius.md),
+                  border: Border.all(
+                    color: widget.error
+                        ? c.error
+                        : i == widget.filled
+                        ? c.primary
+                        : (i < widget.filled ? on : c.border),
+                    width: i == widget.filled || widget.error ? 2 : 1.5,
+                  ),
+                ),
+                child: i < widget.filled
+                    ? Container(
+                        width: 14,
+                        height: 14,
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: c.foreground),
+                      )
+                    : null,
+              )
+          else
+            for (var i = 0; i < widget.length; i++)
+              AnimatedContainer(
+                duration: BcMotion.fast,
+                margin: const EdgeInsets.symmetric(horizontal: 10),
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: i < widget.filled ? on : Colors.transparent,
+                  border: Border.all(color: i < widget.filled ? on : off, width: 2),
+                ),
               ),
-            ),
         ],
       ),
     );
@@ -101,7 +144,10 @@ class PinKeypad extends StatelessWidget {
         HapticFeedback.selectionClick();
         onDigit(d);
       },
-      child: Text(d, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w600, color: fg)),
+      child: Text(
+        d,
+        style: TextStyle(fontFamily: BcFonts.heading, fontSize: 26, fontWeight: FontWeight.w700, color: fg),
+      ),
     );
 
     Widget row(List<Widget> keys) =>
@@ -135,7 +181,13 @@ class PinKeypad extends StatelessWidget {
 }
 
 class _Key extends StatelessWidget {
-  const _Key({required this.child, required this.onTap, required this.enabled, required this.semanticLabel, this.background});
+  const _Key({
+    required this.child,
+    required this.onTap,
+    required this.enabled,
+    required this.semanticLabel,
+    this.background,
+  });
 
   static const double size = 74;
 
@@ -155,9 +207,12 @@ class _Key extends StatelessWidget {
         height: size,
         child: Material(
           color: background ?? Colors.transparent,
-          shape: const CircleBorder(),
+          shape: CircleBorder(side: background == null ? BorderSide.none : BorderSide(color: context.bc.border)),
           clipBehavior: Clip.antiAlias,
-          child: InkWell(onTap: enabled ? onTap : null, child: Center(child: child)),
+          child: InkWell(
+            onTap: enabled ? onTap : null,
+            child: Center(child: child),
+          ),
         ),
       ),
     );

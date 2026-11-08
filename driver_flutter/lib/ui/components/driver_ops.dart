@@ -7,7 +7,7 @@ import '../../data/models/driver.dart';
 import '../theme/bc_theme.dart';
 import 'bc_dialog.dart';
 import 'run_kit.dart';
-import 'surfaces.dart';
+import 'qd_kit.dart';
 import '../../l10n/l10n.dart';
 
 /// Status-aware action content for an active run: contextual copy, "Navigate to branch",
@@ -39,7 +39,7 @@ class RunActionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final red = c.isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+    final red = c.error;
     Widget navBranch() =>
         RunOutlineButton(label: tr('Navigate to branch'), icon: Icons.navigation_rounded, onPressed: onNavigateBranch);
     final parts = <Widget>[];
@@ -205,23 +205,23 @@ class _RiderReviewsSectionState extends State<RiderReviewsSection> {
     final ratings = widget.ratings;
     final collapsible = ratings.length > widget.collapsedCount;
     final shown = collapsible && !_expanded ? ratings.take(widget.collapsedCount).toList() : ratings;
-    return BcCard(
+    return QdCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Expanded(
-                child: Text(tr('Customer reviews'), style: BcType.subtitle.copyWith(color: c.text)),
+                child: Text(tr('Customer reviews'), style: BcType.section.copyWith(color: c.foreground)),
               ),
-              if (ratings.isNotEmpty) Text('${ratings.length}', style: BcType.caption.copyWith(color: c.textMuted)),
+              if (ratings.isNotEmpty) QdBadge('${ratings.length}', tone: QdTone.primary),
             ],
           ),
           const SizedBox(height: 10),
           if (widget.loading && ratings.isEmpty)
-            Text(tr('Loading reviews…'), style: BcType.caption.copyWith(color: c.textMuted))
+            Text(tr('Loading reviews…'), style: BcType.caption.copyWith(color: c.mutedForeground))
           else if (ratings.isEmpty)
-            Text(widget.emptyLabel ?? tr('No reviews yet'), style: BcType.caption.copyWith(color: c.textMuted))
+            Text(widget.emptyLabel ?? tr('No reviews yet'), style: BcType.caption.copyWith(color: c.mutedForeground))
           else ...[
             AnimatedSize(
               duration: BcMotion.fast,
@@ -244,7 +244,7 @@ class _RiderReviewsSectionState extends State<RiderReviewsSection> {
                   onPressed: () => setState(() => _expanded = !_expanded),
                   icon: Icon(_expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 20),
                   label: Text(_expanded ? tr('Show less') : tr('Show all {n} reviews', {'n': ratings.length})),
-                  style: TextButton.styleFrom(foregroundColor: c.brand),
+                  style: TextButton.styleFrom(foregroundColor: c.primaryStrong),
                 ),
               ),
           ],
@@ -280,29 +280,29 @@ class _ReviewRow extends StatelessWidget {
                       child: Icon(
                         i < stars ? Icons.star_rounded : Icons.star_outline_rounded,
                         size: 18,
-                        color: i < stars ? const Color(0xFFF59E0B) : c.textMuted.withValues(alpha: 0.45),
+                        color: i < stars ? c.accent : c.iconMuted.withValues(alpha: 0.45),
                       ),
                     ),
                   const SizedBox(width: 4),
                   Text(
                     '$stars/5',
-                    style: BcType.caption.copyWith(color: c.text, fontWeight: FontWeight.w700),
+                    style: BcType.caption.copyWith(color: c.foreground, fontWeight: FontWeight.w700),
                   ),
                 ],
               ),
             ),
-            Text(Format.dateTime(review.createdAt), style: BcType.tiny.copyWith(color: c.textMuted)),
+            Text(Format.dateTime(review.createdAt), style: BcType.tiny.copyWith(color: c.mutedForeground)),
           ],
         ),
         if (review.comment != null && review.comment!.trim().isNotEmpty) ...[
           const SizedBox(height: 4),
-          Text(review.comment!, style: BcType.body.copyWith(color: c.text)),
+          Text(review.comment!, style: BcType.body.copyWith(color: c.foreground)),
         ],
         if (review.orderNumber != null && review.orderNumber!.trim().isNotEmpty) ...[
           const SizedBox(height: 2),
           Text(
             tr('Order #{orderNumber}', {'orderNumber': review.orderNumber}),
-            style: BcType.tiny.copyWith(color: c.textMuted),
+            style: BcType.tiny.copyWith(color: c.mutedForeground),
           ),
         ],
       ],

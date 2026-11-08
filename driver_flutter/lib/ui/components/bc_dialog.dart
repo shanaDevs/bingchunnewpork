@@ -4,21 +4,24 @@ import '../../l10n/l10n.dart';
 import '../theme/bc_theme.dart';
 
 /// Colour family for a dialog's icon badge and primary button.
-enum BcDialogTone { brand, danger, warning, success }
+/// [call] is the solid call green used by every call action.
+enum BcDialogTone { brand, danger, warning, success, call }
 
 extension on BcDialogTone {
   Color color(BcColors c) => switch (this) {
-    BcDialogTone.brand => c.brand,
-    BcDialogTone.danger => c.isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626),
+    BcDialogTone.brand => c.primary,
+    BcDialogTone.danger => c.error,
     BcDialogTone.warning => c.warning,
     BcDialogTone.success => c.success,
+    BcDialogTone.call => c.call,
   };
 
-  List<Color> gradient(BcColors c) => switch (this) {
-    BcDialogTone.brand => [c.brandLight, c.brand, c.brandDark],
-    BcDialogTone.danger => const [Color(0xFFF87171), Color(0xFFDC2626), Color(0xFFB91C1C)],
-    BcDialogTone.warning => const [Color(0xFFFBBF24), Color(0xFFF59E0B), Color(0xFFD97706)],
-    BcDialogTone.success => const [Color(0xFF34D399), Color(0xFF10B981), Color(0xFF059669)],
+  Color fill(BcColors c) => switch (this) {
+    BcDialogTone.brand => c.action,
+    BcDialogTone.danger => c.error,
+    BcDialogTone.warning => c.warning,
+    BcDialogTone.success => c.success,
+    BcDialogTone.call => c.call,
   };
 }
 
@@ -28,7 +31,7 @@ Future<T?> showBcDialog<T>(BuildContext context, {required WidgetBuilder builder
     context: context,
     barrierDismissible: barrierDismissible,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-    barrierColor: const Color(0x8C0A1530),
+    barrierColor: context.bc.scrim.withValues(alpha: 0.55),
     transitionDuration: const Duration(milliseconds: 220),
     pageBuilder: (ctx, _, _) => builder(ctx),
     transitionBuilder: (_, anim, _, child) {
@@ -60,6 +63,7 @@ class BcDialog extends StatelessWidget {
     this.onSecondary,
     this.extraActions = const [],
     this.showClose = false,
+    this.sideBySide = false,
     this.maxWidth = 400,
   });
 
@@ -79,6 +83,9 @@ class BcDialog extends StatelessWidget {
   /// Additional low-emphasis text actions shown under the buttons (e.g. "Reset").
   final List<Widget> extraActions;
   final bool showClose;
+
+  /// QuickDrop confirm layout: Cancel (outline) and the action side by side.
+  final bool sideBySide;
   final double maxWidth;
 
   @override
@@ -88,62 +95,62 @@ class BcDialog extends StatelessWidget {
     final mq = MediaQuery.of(context);
     return Center(
       child: Padding(
-        padding: EdgeInsets.fromLTRB(20, 24, 20, 24 + mq.viewInsets.bottom),
+        padding: EdgeInsets.fromLTRB(16, 20, 16, 20 + mq.viewInsets.bottom),
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: mq.size.height * 0.88),
           child: Material(
-            color: c.card,
+            color: c.elevated,
             elevation: 0,
-            borderRadius: BorderRadius.circular(28),
+            borderRadius: BorderRadius.circular(BcRadius.xxl),
             clipBehavior: Clip.antiAlias,
             child: Stack(
               children: [
-                // Soft tinted wash behind the badge.
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 96,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          accent.withValues(alpha: c.isDark ? 0.16 : 0.10),
-                          accent.withValues(alpha: 0),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
                 SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(22, 24, 22, 18),
+                  padding: EdgeInsets.all(sideBySide ? 24 : 18).copyWith(top: sideBySide ? 24 : 22, bottom: sideBySide ? 24 : 16),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       if (icon != null) ...[
                         Center(
-                          child: BcDialogBadge(icon: icon!, color: accent),
+                          child: BcDialogBadge(icon: icon!, color: accent, size: sideBySide ? 56 : 64),
                         ),
-                        const SizedBox(height: 16),
+                        SizedBox(height: sideBySide ? 12 : 16),
                       ],
                       Text(
                         title,
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: c.text, height: 1.25),
+                        style: BcType.subtitle.copyWith(color: c.foreground),
                       ),
                       if (message != null) ...[
                         const SizedBox(height: 8),
                         Text(
                           message!,
                           textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 14, color: c.textMuted, height: 1.45),
+                          style: TextStyle(fontSize: 15, color: c.mutedForeground, height: 1.45),
                         ),
                       ],
                       if (content != null) ...[const SizedBox(height: 16), content!],
-                      if (primaryLabel != null) ...[
+                      if (sideBySide && primaryLabel != null) ...[
+                        const SizedBox(height: 20),
+                        Row(
+                          children: [
+                            if (secondaryLabel != null) ...[
+                              Expanded(child: BcDialogButton(label: secondaryLabel!, onPressed: onSecondary, secondary: true)),
+                              const SizedBox(width: 12),
+                            ],
+                            Expanded(
+                              child: BcDialogButton(
+                                label: primaryLabel!,
+                                onPressed: onPrimary,
+                                tone: tone,
+                                enabled: primaryEnabled,
+                                loading: primaryLoading,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ] else if (primaryLabel != null) ...[
                         const SizedBox(height: 22),
                         BcDialogButton(
                           label: primaryLabel!,
@@ -154,7 +161,7 @@ class BcDialog extends StatelessWidget {
                           icon: primaryIcon,
                         ),
                       ],
-                      if (secondaryLabel != null) ...[
+                      if (!sideBySide && secondaryLabel != null) ...[
                         const SizedBox(height: 10),
                         BcDialogButton(label: secondaryLabel!, onPressed: onSecondary, secondary: true),
                       ],
@@ -170,8 +177,8 @@ class BcDialog extends StatelessWidget {
                     top: 12,
                     right: 12,
                     child: Material(
-                      color: c.card,
-                      shape: CircleBorder(side: BorderSide(color: c.border)),
+                      color: c.muted,
+                      shape: const CircleBorder(),
                       clipBehavior: Clip.antiAlias,
                       child: InkWell(
                         onTap: () => Navigator.of(context).maybePop(),
@@ -180,7 +187,7 @@ class BcDialog extends StatelessWidget {
                           child: SizedBox(
                             width: 36,
                             height: 36,
-                            child: Icon(Icons.close_rounded, color: c.textMuted, size: 19),
+                            child: Icon(Icons.close_rounded, color: c.mutedForeground, size: 19),
                           ),
                         ),
                       ),
@@ -195,7 +202,7 @@ class BcDialog extends StatelessWidget {
   }
 }
 
-/// Circular icon badge with a halo ring.
+/// Soft-tone circular icon tile.
 class BcDialogBadge extends StatelessWidget {
   const BcDialogBadge({super.key, required this.icon, required this.color, this.size = 64});
   final IconData icon;
@@ -205,20 +212,10 @@ class BcDialogBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: size + 16,
-      height: size + 16,
-      decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.10)),
-      alignment: Alignment.center,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: color.withValues(alpha: 0.16),
-          border: Border.all(color: color.withValues(alpha: 0.25), width: 1.5),
-        ),
-        child: Icon(icon, color: color, size: size * 0.48),
-      ),
+      width: size,
+      height: size,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.14)),
+      child: Icon(icon, color: color, size: size * 0.46),
     );
   }
 }
@@ -248,22 +245,25 @@ class BcDialogButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.bc;
     final active = enabled && !loading && onPressed != null;
-    final radius = BorderRadius.circular(BcRadius.button + 2);
-    final grad = tone.gradient(c);
-    final fg = secondary ? c.text : Colors.white;
+    final radius = BorderRadius.circular(BcRadius.full);
+    final fg = secondary
+        ? c.foreground
+        : switch (tone) {
+            BcDialogTone.brand => c.actionForeground,
+            BcDialogTone.danger => c.errorForeground,
+            BcDialogTone.warning => c.warningForeground,
+            BcDialogTone.success => c.successForeground,
+            BcDialogTone.call => c.callForeground,
+          };
     return AnimatedOpacity(
       duration: BcMotion.fast,
       opacity: active || loading ? 1 : 0.5,
       child: Container(
-        height: 50,
+        height: 52,
         decoration: BoxDecoration(
           borderRadius: radius,
-          color: secondary ? c.card : null,
-          gradient: secondary ? null : LinearGradient(colors: grad),
-          border: secondary ? Border.all(color: c.border, width: 1.2) : null,
-          boxShadow: !secondary && active
-              ? [BoxShadow(color: grad[1].withValues(alpha: 0.30), blurRadius: 14, offset: const Offset(0, 6))]
-              : null,
+          color: secondary ? Colors.transparent : tone.fill(c),
+          border: secondary ? Border.all(color: c.border, width: 1.5) : null,
         ),
         child: Material(
           type: MaterialType.transparency,
@@ -300,7 +300,7 @@ Future<bool> showBcConfirm(
   String? message,
   required String confirmLabel,
   String? cancelLabel,
-  IconData icon = Icons.help_outline_rounded,
+  IconData? icon = Icons.help_outline_rounded,
   IconData? confirmIcon,
   BcDialogTone tone = BcDialogTone.brand,
   Widget? content,
@@ -316,17 +316,17 @@ Future<bool> showBcConfirm(
       primaryLabel: confirmLabel,
       primaryIcon: confirmIcon,
       onPrimary: () => Navigator.of(ctx).pop(true),
-      // No cancel label → just a close (×) in the corner; a label adds a second button
-      // for choices worth spelling out (e.g. "Stay on duty").
-      showClose: cancelLabel == null,
-      secondaryLabel: cancelLabel,
-      onSecondary: cancelLabel == null ? null : () => Navigator.of(ctx).pop(false),
+      // QuickDrop ConfirmDialog: outline Cancel + action side by side. A plain "OK"
+      // notice has just the one button.
+      sideBySide: true,
+      secondaryLabel: confirmLabel == tr('OK') ? null : (cancelLabel ?? tr('Cancel')),
+      onSecondary: confirmLabel == tr('OK') ? null : () => Navigator.of(ctx).pop(false),
     ),
   );
   return result ?? false;
 }
 
-/// Selectable option card used inside dialogs (radio-style choice list).
+/// Selectable option card (QuickDrop choice list): bordered radius-14 card with a radio circle.
 class BcChoiceTile extends StatelessWidget {
   const BcChoiceTile({super.key, required this.label, required this.selected, required this.onTap, this.tone});
   final String label;
@@ -337,14 +337,17 @@ class BcChoiceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final accent = (tone ?? BcDialogTone.brand).color(c);
+    final danger = tone == BcDialogTone.danger;
+    final accent = danger ? c.error : c.primary;
+    final fill = danger ? c.error : c.action;
+    final onFill = danger ? c.errorForeground : c.actionForeground;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Semantics(
         selected: selected,
         button: true,
         child: Material(
-          color: selected ? accent.withValues(alpha: 0.08) : c.card,
+          color: selected ? (danger ? c.errorSoftBg : c.primarySoft) : c.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
             side: BorderSide(color: selected ? accent : c.border, width: selected ? 1.5 : 1),
@@ -353,26 +356,19 @@ class BcChoiceTile extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
               child: Row(
                 children: [
+                  BcRadioDot(selected: selected, fill: fill, onFill: onFill),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       label,
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: 15,
                         fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                        color: c.text,
+                        color: c.foreground,
                       ),
-                    ),
-                  ),
-                  AnimatedSwitcher(
-                    duration: BcMotion.fast,
-                    child: Icon(
-                      selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
-                      key: ValueKey(selected),
-                      color: selected ? accent : c.border,
-                      size: 22,
                     ),
                   ),
                 ],
@@ -381,6 +377,31 @@ class BcChoiceTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Radio circle: selected = filled with a check, otherwise an outlined ring.
+class BcRadioDot extends StatelessWidget {
+  const BcRadioDot({super.key, required this.selected, this.fill, this.onFill});
+  final bool selected;
+  final Color? fill;
+  final Color? onFill;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final f = fill ?? c.action;
+    return AnimatedContainer(
+      duration: BcMotion.fast,
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: selected ? f : Colors.transparent,
+        border: Border.all(color: selected ? f : c.border, width: 2),
+      ),
+      child: selected ? Icon(Icons.check_rounded, size: 14, color: onFill ?? c.actionForeground) : null,
     );
   }
 }

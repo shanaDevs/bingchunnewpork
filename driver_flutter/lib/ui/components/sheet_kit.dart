@@ -12,7 +12,8 @@ Future<T?> showBcSheet<T>(BuildContext context, {required WidgetBuilder builder,
     useSafeArea: true,
     isDismissible: dismissible,
     enableDrag: dismissible,
-    backgroundColor: context.bc.background,
+    backgroundColor: context.bc.elevated,
+    barrierColor: context.bc.scrim.withValues(alpha: 0.5),
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
     clipBehavior: Clip.antiAlias,
     builder: builder,
@@ -41,16 +42,16 @@ class BcSheetBody extends StatelessWidget {
           children: [
             Center(
               child: Container(
-                margin: const EdgeInsets.only(top: 10, bottom: 6),
-                width: 42,
-                height: 5,
+                margin: const EdgeInsets.only(top: 10, bottom: 4),
+                width: 40,
+                height: 4,
                 decoration: BoxDecoration(color: c.border, borderRadius: BorderRadius.circular(99)),
               ),
             ),
-            Padding(padding: const EdgeInsets.fromLTRB(20, 8, 12, 12), child: header),
+            Padding(padding: const EdgeInsets.fromLTRB(10, 8, 10, 10), child: header),
             Flexible(
               child: SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(16, 4, 16, 20 + mq.padding.bottom),
+                padding: EdgeInsets.fromLTRB(10, 4, 10, 14 + mq.padding.bottom),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
               ),
             ),
@@ -61,7 +62,9 @@ class BcSheetBody extends StatelessWidget {
   }
 }
 
-/// Icon tile + title/subtitle + round close button.
+/// QuickDrop sheet header: centred title (+ subtitle). A round close button sits at the
+/// right edge only when [onClose] is given. The icon parameters are kept for callers but
+/// no longer drawn, matching the reference's plain centred titles.
 class BcSheetHeader extends StatelessWidget {
   const BcSheetHeader({
     super.key,
@@ -85,44 +88,48 @@ class BcSheetHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    return Row(
+    final hasClose = onClose != null;
+    return Stack(
+      alignment: Alignment.center,
       children: [
-        leading ??
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(color: iconBg ?? c.brandSubtle, borderRadius: BorderRadius.circular(15)),
-              child: Icon(icon, color: iconTint ?? c.brand, size: 24),
-            ),
-        const SizedBox(width: 14),
-        Expanded(
+        Padding(
+          // Keep the centred text clear of the close button on both sides.
+          padding: const EdgeInsets.symmetric(horizontal: 44),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 title,
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: c.text, height: 1.2),
+                textAlign: TextAlign.center,
+                style: BcType.subtitle.copyWith(color: c.foreground),
               ),
               if (subtitle != null) ...[
                 const SizedBox(height: 3),
-                Text(subtitle!, style: TextStyle(fontSize: 12.5, color: c.textMuted, height: 1.35)),
+                Text(
+                  subtitle!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 14, color: c.mutedForeground, height: 1.4),
+                ),
               ],
             ],
           ),
         ),
-        const SizedBox(width: 8),
-        Material(
-          color: c.card,
-          shape: CircleBorder(side: BorderSide(color: c.border)),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onClose ?? () => Navigator.of(context).maybePop(),
-            child: Tooltip(
-              message: tr('Close'),
-              child: SizedBox(width: 38, height: 38, child: Icon(Icons.close_rounded, color: c.textMuted, size: 20)),
+        if (hasClose)
+          Positioned(
+            right: 0,
+            child: Material(
+              color: c.muted,
+              shape: const CircleBorder(),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: onClose,
+                child: Tooltip(
+                  message: tr('Close'),
+                  child: SizedBox(width: 36, height: 36, child: Icon(Icons.close_rounded, color: c.mutedForeground, size: 20)),
+                ),
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -144,7 +151,7 @@ class BcSheetLabel extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.text),
+              style: BcType.section.copyWith(color: c.foreground, fontSize: 15),
             ),
           ),
           ?trailing,
@@ -159,7 +166,7 @@ class BcSheetCard extends StatelessWidget {
   const BcSheetCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(16),
+    this.padding = const EdgeInsets.all(12),
     this.color,
     this.borderColor,
   });
@@ -174,12 +181,9 @@ class BcSheetCard extends StatelessWidget {
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: color ?? c.card,
-        borderRadius: BorderRadius.circular(BcRadius.card),
+        color: color ?? c.surface,
+        borderRadius: BorderRadius.circular(BcRadius.md + 2),
         border: Border.all(color: borderColor ?? c.border),
-        boxShadow: c.cardShadow.a == 0
-            ? null
-            : [BoxShadow(color: c.cardShadow, blurRadius: 14, offset: const Offset(0, 4))],
       ),
       child: child,
     );
@@ -206,7 +210,7 @@ class BcStatusChip extends StatelessWidget {
           const SizedBox(width: 4),
           Text(
             label,
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color),
           ),
         ],
       ),
@@ -214,7 +218,7 @@ class BcStatusChip extends StatelessWidget {
   }
 }
 
-/// Full-width gradient primary button used in sheets.
+/// Full-width solid pill primary button used in sheets (c.action fill).
 class BcGradientButton extends StatelessWidget {
   const BcGradientButton({
     super.key,
@@ -231,52 +235,160 @@ class BcGradientButton extends StatelessWidget {
   final bool loading;
   final bool enabled;
   final IconData? icon;
+
+  /// Optional override; the first colour is used as the solid fill.
   final List<Color>? colors;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
     final active = enabled && !loading && onPressed != null;
-    final grad = colors ?? [c.brandLight, c.brand, c.brandDark];
+    final bg = colors?.first ?? c.action;
+    final fg = colors == null ? c.actionForeground : c.onBrand;
     return AnimatedOpacity(
       duration: BcMotion.fast,
       opacity: active || loading ? 1 : 0.5,
-      child: Container(
-        height: 52,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(BcRadius.button + 2),
-          gradient: LinearGradient(colors: grad),
-          boxShadow: active
-              ? [BoxShadow(color: grad[1].withValues(alpha: 0.32), blurRadius: 14, offset: const Offset(0, 6))]
-              : null,
-        ),
-        child: Material(
-          type: MaterialType.transparency,
-          borderRadius: BorderRadius.circular(BcRadius.button + 2),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: active ? onPressed : null,
+      child: Material(
+        color: bg,
+        borderRadius: BorderRadius.circular(BcRadius.full),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: active ? onPressed : null,
+          child: SizedBox(
+            height: 52,
             child: Center(
               child: loading
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                    )
+                  ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: fg))
                   : Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (icon != null) ...[Icon(icon, color: Colors.white, size: 19), const SizedBox(width: 8)],
-                        Text(
-                          label,
-                          style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700, color: Colors.white),
-                        ),
+                        if (icon != null) ...[Icon(icon, color: fg, size: 19), const SizedBox(width: 8)],
+                        Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: fg)),
                       ],
                     ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// QuickDrop SlideToConfirm: pill track, draggable white knob with double chevrons, a
+/// lighter fill trailing the knob, and a label that fades as the knob slides over it.
+/// Calls [onConfirm] once the knob is dragged past ~85% of the track, then snaps back.
+/// Pass [color] / [foreground] for a coloured variant (e.g. the red pickup slide); when
+/// disabled it greys out like the QuickDrop slider.
+class BcSlideToConfirm extends StatefulWidget {
+  const BcSlideToConfirm({
+    super.key,
+    required this.label,
+    required this.onConfirm,
+    this.enabled = true,
+    this.loading = false,
+    this.color,
+    this.foreground,
+  });
+
+  final String label;
+  final VoidCallback onConfirm;
+  final bool enabled;
+  final bool loading;
+
+  /// Track colour; defaults to the primary action colour.
+  final Color? color;
+
+  /// Label colour on the track; defaults to the matching "on" colour.
+  final Color? foreground;
+
+  @override
+  State<BcSlideToConfirm> createState() => _BcSlideToConfirmState();
+}
+
+class _BcSlideToConfirmState extends State<BcSlideToConfirm> {
+  static const double _h = 64;
+  static const double _pad = 6;
+  static const double _knob = _h - _pad * 2;
+  double _x = 0;
+  bool _drag = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final greyed = !widget.enabled;
+    final track = greyed ? c.muted : (widget.color ?? c.action);
+    final fg = greyed ? c.mutedForeground : (widget.foreground ?? (widget.color == null ? c.actionForeground : c.onBrand));
+    final knobFill = greyed ? c.surface : Colors.white;
+    final knobIcon = greyed ? c.mutedForeground : (widget.color ?? c.action);
+    final on = widget.enabled && !widget.loading;
+    return LayoutBuilder(
+      builder: (context, box) {
+        final max = (box.maxWidth - _knob - _pad * 2).clamp(1.0, double.infinity);
+        final progress = (_x / max).clamp(0.0, 1.0);
+        return Container(
+          height: _h,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(color: track, borderRadius: BorderRadius.circular(BcRadius.full)),
+          child: Stack(
+            alignment: Alignment.centerLeft,
+            children: [
+              if (on)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: _x + _knob + _pad * 2,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(BcRadius.full),
+                    ),
+                  ),
+                ),
+              Center(
+                child: Opacity(
+                  opacity: (1 - progress * 1.4).clamp(0.0, 1.0),
+                  child: widget.loading
+                      ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: fg))
+                      : Padding(
+                          padding: const EdgeInsets.only(left: _knob + _pad),
+                          child: Text(
+                            widget.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: fg),
+                          ),
+                        ),
+                ),
+              ),
+              Positioned(
+                left: _pad + _x,
+                child: GestureDetector(
+                  onHorizontalDragStart: on ? (_) => setState(() => _drag = true) : null,
+                  onHorizontalDragUpdate: on ? (d) => setState(() => _x = (_x + d.delta.dx).clamp(0.0, max)) : null,
+                  onHorizontalDragEnd: on
+                      ? (_) {
+                          final done = _x >= max * 0.85;
+                          setState(() {
+                            _drag = false;
+                            _x = 0;
+                          });
+                          if (done) widget.onConfirm();
+                        }
+                      : null,
+                  child: AnimatedContainer(
+                    duration: _drag ? Duration.zero : BcMotion.standard,
+                    width: _knob,
+                    height: _knob,
+                    decoration: BoxDecoration(color: knobFill, shape: BoxShape.circle),
+                    child: Icon(Icons.keyboard_double_arrow_right_rounded, color: knobIcon, size: 26),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

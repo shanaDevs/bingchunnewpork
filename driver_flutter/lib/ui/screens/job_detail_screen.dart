@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/app_container.dart';
@@ -12,6 +13,10 @@ import '../../data/models/delivery_job.dart';
 import '../../data/models/delivery_route.dart';
 import '../../state/job_controllers.dart';
 import '../app_routes.dart';
+import '../components/app_bottom_nav.dart';
+import '../components/call_confirm.dart';
+import '../components/job_cards.dart';
+import '../components/qd_kit.dart';
 import '../components/route_map.dart';
 import '../components/run_kit.dart';
 import '../components/surfaces.dart';
@@ -65,6 +70,10 @@ class _JobDetailBodyState extends State<_JobDetailBody> with WidgetsBindingObser
     if (state == AppLifecycleState.resumed) context.read<JobDetailController>().load(widget.jobId, force: true);
   }
 
+  /// The next order to deliver, in stop order.
+  JobOrder? _nextPending(DeliveryJobDetail job) =>
+      ([...job.orders]..sort((a, b) => a.sequence.compareTo(b.sequence))).where((o) => o.isPending).firstOrNull;
+
   Future<void> _primary(JobDetailController vm, DeliveryJobDetail job) async {
     BcFeedback.tap();
     if (job.status == 'COMPLETED') {
@@ -72,18 +81,19 @@ class _JobDetailBodyState extends State<_JobDetailBody> with WidgetsBindingObser
     } else if (job.canAssign) {
       await _claim(vm, job);
     } else if (job.needsPickup) {
-      if (!await ensureLocationPermission()) return;
-      BcFeedback.success();
-      await vm.pickup(widget.jobId);
+      // The dashboard has the pickup navigation and the geofenced "Confirm pickup".
+      AppRoutes.openDashboard(context, widget.jobId, replace: true);
     } else if (job.canStart) {
       final tracker = context.read<AppContainer>().locationTracker;
       if (!await ensureLocationPermission()) return;
       if (!await tracker.isLocationEnabled()) return;
       BcFeedback.success();
+      final next = _nextPending(job);
       final ok = await vm.start(widget.jobId);
-      if (ok && mounted) AppRoutes.openDashboard(context, widget.jobId, replace: true);
+      if (ok && mounted) AppRoutes.openDashboard(context, widget.jobId, replace: true, legOrderId: next?.orderId);
     } else {
-      AppRoutes.openDashboard(context, widget.jobId, replace: true);
+      // Heading to the next order (or back to the branch once all are done).
+      AppRoutes.openDashboard(context, widget.jobId, replace: true, legOrderId: _nextPending(job)?.orderId);
     }
   }
 
@@ -113,393 +123,515 @@ class _JobDetailBodyState extends State<_JobDetailBody> with WidgetsBindingObser
     final vm = context.watch<JobDetailController>();
     final job = vm.job;
     final claimableToday = job != null && job.canAssign && Format.isToday(job.scheduledAt);
-    final primaryLabel = job == null
-        ? '…'
-        : job.status == 'COMPLETED'
-        ? tr('Back')
-        : job.canAssign && !claimableToday
-        ? tr('No longer available')
-        : job.canAssign
-        ? tr('Claim job')
-        : job.needsPickup
-        ? tr('Confirm pickup')
-        : job.canStart
-        ? tr('Start run')
-        : job.isActive
-        ? tr('Open dashboard')
-        : tr('View dashboard');
-    final primaryIcon = job == null
-        ? Icons.arrow_forward_rounded
-        : job.canAssign
-        ? Icons.check_circle_rounded
-        : job.needsPickup
-        ? Icons.storefront_rounded
-        : job.canStart
-        ? Icons.play_arrow_rounded
-        : Icons.dashboard_rounded;
     final historyView = job?.isHistorySnapshot ?? false;
 
     Widget body;
     if (vm.loading && job == null) {
-      body = Center(child: CircularProgressIndicator(color: c.brand));
+      body = Center(child: CircularProgressIndicator(color: c.primaryStrong));
     } else if (job == null) {
       body = Center(
-        child: Text(vm.error ?? tr('Job not found'), style: TextStyle(color: c.textMuted)),
+        child: Text(vm.error ?? tr('Job not found'), style: TextStyle(color: c.mutedForeground)),
       );
     } else if (historyView) {
       body = _HistoryRunBody(job: job, route: vm.route);
     } else {
-      final stops = [...job.orders]..sort((a, b) => a.sequence.compareTo(b.sequence));
-      final route = vm.route;
-      final stopCount = route?.summary.stopCount ?? job.orderCount;
-      body = ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        children: [
-          if (job.totalDeliveryFees > 0) ...[
-            _EarningsBanner(
-              label: tr('Delivery Fee'),
-              amount: job.totalDeliveryFees,
-              caption: tr('Scheduled {p1}', {'p1': Format.dateTime(job.scheduledAt)}),
-            ),
-            const SizedBox(height: 12),
-          ],
-          RunFactRow(
-            tiles: [
-              RunFactTile(icon: Icons.location_on_rounded, tint: c.brand, value: '$stopCount', label: tr('Stops')),
-              RunFactTile(
-                icon: Icons.route_rounded,
-                tint: c.success,
-                value: Format.km(route?.summary.totalDistanceKm ?? job.estimatedDistanceKm ?? 0),
-                label: tr('Distance'),
-              ),
-              RunFactTile(
-                icon: Icons.schedule_rounded,
-                tint: c.warning,
-                value: Format.minutes(route?.summary.estimatedMinutes ?? job.estimatedMinutes ?? 0),
-                label: tr('ETA'),
-              ),
-              if (job.totalCups > 0)
-                RunFactTile(icon: Icons.local_cafe_rounded, tint: _rose, value: '${job.totalCups}', label: tr('Cups')),
-            ],
-          ),
-          const SizedBox(height: 12),
-          RunCard(
-            child: RunCardHeader(
-              icon: Icons.storefront_rounded,
-              title: tr('Pickup · {pickupPlaceName}', {'pickupPlaceName': job.pickupPlaceName}),
-              subtitle: Format.deliverySummary(job.orderCount, job.totalCups),
-            ),
-          ),
-          if (route != null) ...[
-            const SizedBox(height: 12),
-            _MapCard(
-              child: MiniRouteMap(
-                route: route,
-                onTap: () => AppRoutes.openMap(context, widget.jobId),
-                activeStopSequence: route.nextStopSequence,
-                showDriverLocation: job.isActive,
-              ),
-            ),
-          ],
-          _StopsHeader(done: job.deliveredCount, total: job.orderCount),
-          for (var i = 0; i < stops.length; i++)
-            _StopTimelineRow(
-              number: i + 1,
-              order: stops[i],
-              isFirst: i == 0,
-              isLast: i == stops.length - 1,
-              highlighted: i == 0 && stops[i].isPending,
-              onOpen: () => AppRoutes.openOrder(context, widget.jobId, stops[i].orderId),
-            ),
-        ],
+      body = _LiveJobBody(
+        job: job,
+        route: vm.route,
+        error: vm.error,
+        acting: vm.acting,
+        claimableToday: claimableToday,
+        onPrimary: () => _primary(vm, job),
+        onReject: () => _reject(vm),
+        onOpenMap: () => AppRoutes.openMap(context, widget.jobId),
+        onOpenOrder: (o) => AppRoutes.openOrder(context, widget.jobId, o.orderId),
       );
     }
 
-    final locked = job != null && job.canAssign && !claimableToday;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: context.bc.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
         backgroundColor: c.background,
+        bottomNavigationBar: const AppBottomNav.overShell(),
         body: Column(
           children: [
-            _GradientTopBar(job: job, historyView: historyView),
+            QdAppBar(title: tr('Job Details'), trailing: const QdBellButton()),
             Expanded(child: body),
           ],
         ),
-        bottomNavigationBar: (job != null && !job.isHistorySnapshot)
-            ? Container(
-                decoration: BoxDecoration(
-                  color: c.card,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: c.isDark ? const Color(0x55000000) : const Color(0x1F0A2647),
-                      blurRadius: 24,
-                      offset: const Offset(0, -4),
-                    ),
-                  ],
-                ),
-                padding: EdgeInsets.fromLTRB(16, 16, 16, 12 + MediaQuery.paddingOf(context).bottom),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (vm.error != null) ...[
-                      RunNote(icon: Icons.error_outline_rounded, text: vm.error!, color: c.danger),
-                      const SizedBox(height: 10),
-                    ],
-                    RunPrimaryButton(
-                      label: primaryLabel,
-                      icon: primaryIcon,
-                      loading: vm.acting,
-                      enabled: !locked,
-                      locked: locked,
-                      onPressed: () => _primary(vm, job),
-                    ),
-                    if (job.canReject) ...[
-                      const SizedBox(height: 10),
-                      RunOutlineButton(
-                        label: tr('Reject job'),
-                        icon: Icons.do_not_disturb_on_outlined,
-                        color: c.isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626),
-                        enabled: !vm.acting,
-                        onPressed: () => _reject(vm),
-                      ),
-                    ],
-                  ],
-                ),
-              )
-            : null,
       ),
     );
   }
 }
 
-const _rose = Color(0xFFE11D48);
-const _greens = [Color(0xFF34D399), Color(0xFF10B981), Color(0xFF059669)];
+/// QuickDrop "Job Details": summary, route map, pickup, every order, then the next step.
+class _LiveJobBody extends StatelessWidget {
+  const _LiveJobBody({
+    required this.job,
+    required this.route,
+    required this.error,
+    required this.acting,
+    required this.claimableToday,
+    required this.onPrimary,
+    required this.onReject,
+    required this.onOpenMap,
+    required this.onOpenOrder,
+  });
 
-class _GradientTopBar extends StatelessWidget {
-  const _GradientTopBar({required this.job, required this.historyView});
-  final DeliveryJobDetail? job;
-  final bool historyView;
+  final DeliveryJobDetail job;
+  final DeliveryRoute? route;
+  final String? error;
+  final bool acting;
+  final bool claimableToday;
+  final VoidCallback onPrimary;
+  final VoidCallback onReject;
+  final VoidCallback onOpenMap;
+  final void Function(JobOrder order) onOpenOrder;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final j = job;
-    String? pill;
-    var dot = const Color(0xFF4ADE80);
-    if (j != null) {
-      if (historyView) {
-        final (label, color) = statusLabel(context, j.status);
-        pill = label;
-        dot = color == c.danger
-            ? const Color(0xFFF87171)
-            : color == c.warning
-            ? const Color(0xFFFBBF24)
-            : const Color(0xFF4ADE80);
-      } else {
-        pill = j.status == 'SCHEDULED'
-            ? tr('Scheduled')
-            : j.needsPickup
-            ? tr('Pickup')
-            : j.canStart
-            ? tr('Ready')
-            : tr('In Progress');
-      }
-    }
-    return BcDetailTopBar(
-      title: historyView ? tr('Delivery') : tr('Stops'),
-      subtitle: j == null ? null : Format.rideIdLabel(j.rideCode, j.id),
-      trailing: pill == null ? null : BcTopBarPill(label: pill, dotColor: dot),
-      bottom: j == null
-          ? null
-          : Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _TopTag(icon: Icons.storefront_rounded, label: Format.shortBranchName(j.store.name)),
-                _TopTag(icon: Icons.location_on_rounded, label: trn(j.orderCount, '{n} stop', '{n} stops')),
-                if (j.totalCups > 0)
-                  _TopTag(icon: Icons.local_cafe_rounded, label: trn(j.totalCups, '{n} cup', '{n} cups')),
-              ],
+    final stops = [...job.orders]..sort((a, b) => a.sequence.compareTo(b.sequence));
+    final total = job.orders.isEmpty ? job.orderCount : job.orders.length;
+    final locked = job.canAssign && !claimableToday;
+
+    // The next order to deliver, numbered by stop order.
+    final next = stops.where((o) => o.isPending).firstOrNull;
+    final nextNumber = next == null ? null : stops.indexOf(next) + 1;
+    final primaryLabel = job.canAssign
+        ? (claimableToday ? tr('Claim job') : tr('No longer available'))
+        : job.needsPickup
+        ? tr('Navigate to pickup')
+        : (job.canStart || job.status == 'IN_PROGRESS') && nextNumber != null
+        ? tr('Navigate to order {n}', {'n': nextNumber})
+        : tr('Navigate to branch');
+    final primaryIcon = job.canAssign ? Icons.check_circle_rounded : Icons.navigation_outlined;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 20),
+      children: [
+        _JobSummaryCard(job: job, route: route, orderTotal: total),
+        if (route != null) ...[
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(BcRadius.lg),
+            child: MiniRouteMap(
+              route: route!,
+              height: 220,
+              onTap: onOpenMap,
+              activeStopSequence: route!.nextStopSequence,
+              showDriverLocation: job.isActive,
             ),
-    );
-  }
-}
-
-class _TopTag extends StatelessWidget {
-  const _TopTag({required this.icon, required this.label});
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(10)),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: Colors.white, size: 14),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Green gradient earnings card (same look as the incoming-ride fee card).
-class _EarningsBanner extends StatelessWidget {
-  const _EarningsBanner({required this.label, required this.amount, this.caption, this.badge});
-  final String label;
-  final int amount;
-  final String? caption;
-  final String? badge;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(BcRadius.card),
-        gradient: LinearGradient(
-          colors: c.isDark ? [const Color(0xFF064E3B), const Color(0xFF065F46)] : _greens,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: [BoxShadow(color: _greens[1].withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6))],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          Positioned(
-            right: -24,
-            top: -30,
-            child: Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.1)),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
+        const SizedBox(height: 10),
+        _PickupCard(job: job, total: total, onCall: () => confirmAndCall(context, name: job.store.name, phone: job.store.phone)),
+        if (stops.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          QdCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 26),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        label,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.9),
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        tr('Orders ({n})', {'n': stops.length}),
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.foreground),
                       ),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          Format.money(amount),
-                          style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800),
-                        ),
+                      const SizedBox(height: 2),
+                      Text(
+                        tr('Tap an order to see its details.'),
+                        style: TextStyle(fontSize: 13, color: c.mutedForeground),
                       ),
-                      if (caption != null)
-                        Text(
-                          caption!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
-                        ),
                     ],
                   ),
                 ),
-                if (badge != null) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(99)),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.check_circle_rounded, color: _greens[2], size: 15),
-                        const SizedBox(width: 4),
-                        Text(
-                          badge!,
-                          style: TextStyle(color: _greens[2], fontSize: 11.5, fontWeight: FontWeight.w800),
-                        ),
-                      ],
-                    ),
+                for (var i = 0; i < stops.length; i++) ...[
+                  if (i > 0) Divider(height: 1, thickness: 1, indent: 14, endIndent: 14, color: c.border),
+                  _JobOrderRow(
+                    order: stops[i],
+                    number: i + 1,
+                    onTap: () => onOpenOrder(stops[i]),
+                    onCall: stops[i].customerPhone.trim().isEmpty
+                        ? null
+                        : () => confirmAndCall(context, name: stops[i].customerName, phone: stops[i].customerPhone),
                   ),
                 ],
+                Divider(height: 1, thickness: 1, color: c.border),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          tr('Total delivery fees'),
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: c.foreground),
+                        ),
+                      ),
+                      Text(
+                        Format.money(job.totalDeliveryFees),
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.successStrong),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
         ],
+        const SizedBox(height: 10),
+        if (error != null) ...[
+          RunNote(icon: Icons.error_outline_rounded, text: error!, color: c.errorStrong),
+          const SizedBox(height: 12),
+        ],
+        PillButton(
+          label: primaryLabel,
+          icon: primaryIcon,
+          height: 56,
+          loading: acting,
+          onTap: locked ? null : onPrimary,
+        ),
+        if (job.canReject) ...[
+          const SizedBox(height: 12),
+          PillButton(
+            label: tr('Reject job'),
+            icon: Icons.do_not_disturb_on_outlined,
+            kind: PillKind.danger,
+            height: 56,
+            onTap: acting ? null : onReject,
+          ),
+        ] else if (job.isActive && job.pickedUp && next != null) ...[
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline_rounded, size: 18, color: c.mutedForeground),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    tr('You can\'t reject a job after collecting orders. Use Report issue instead.'),
+                    style: TextStyle(fontSize: 13, color: c.mutedForeground, height: 1.4),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _JobSummaryCard extends StatelessWidget {
+  const _JobSummaryCard({required this.job, required this.route, required this.orderTotal});
+  final DeliveryJobDetail job;
+  final DeliveryRoute? route;
+  final int orderTotal;
+
+  static String? _time(String? iso) {
+    if (iso == null || iso.isEmpty) return null;
+    try {
+      return DateFormat('h:mm a').format(DateTime.parse(iso).toLocal());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    const onBrand = Colors.white;
+    final onBrandMuted = Colors.white.withValues(alpha: 0.75);
+    final totalStops = orderTotal + 1;
+    final done = (job.pickedUp ? 1 : 0) + job.deliveredCount;
+    final allDone = orderTotal > 0 && job.deliveredCount >= orderTotal;
+    final step = job.status == 'SCHEDULED'
+        ? tr('Scheduled')
+        : job.needsPickup
+        ? tr('Pickup')
+        : job.canStart
+        ? tr('Ready')
+        : allDone
+        ? tr('Complete')
+        : tr('Delivery');
+    final time = _time(job.assignedAt ?? job.startedAt ?? job.scheduledAt);
+    final eyebrow = '${(job.isActive ? tr('Active job') : tr('Scheduled')).toUpperCase()}${time == null ? '' : ' · $time'}';
+    final distance = route?.summary.totalDistanceKm ?? job.estimatedDistanceKm ?? 0;
+    final minutes = route?.summary.estimatedMinutes ?? job.estimatedMinutes ?? 0;
+    final ride = Format.rideIdLabel(job.rideCode, job.id).replaceFirst('·', '•');
+
+    Widget stat(String value, String label, {bool divider = false}) => Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: divider ? BoxDecoration(border: Border(left: BorderSide(color: Colors.white.withValues(alpha: 0.15)))) : null,
+        child: Column(
+          children: [
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(value, style: BcType.subtitle.copyWith(color: onBrand, fontSize: 19)),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label.toUpperCase(),
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: onBrandMuted),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return QdCard(
+      padding: EdgeInsets.zero,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(BcRadius.lg),
+        child: QdBrandHeader(
+          rounded: false,
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                eyebrow,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1, color: onBrandMuted),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                ride,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: BcType.subtitle.copyWith(color: onBrand, fontSize: 24),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (job.totalDeliveryFees > 0) ...[
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                tr('You earn').toUpperCase(),
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 1, color: onBrandMuted),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                Format.money(job.totalDeliveryFees),
+                                style: BcType.subtitle.copyWith(color: c.accent, fontSize: 24),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${job.store.name} · ${trn(orderTotal, '{n} order', '{n} orders')}',
+                      style: TextStyle(fontSize: 14, color: onBrandMuted),
+                    ),
+                    const SizedBox(height: 12),
+                    SegmentedProgress(completed: done, total: totalStops, done: allDone, onBrand: true),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            tr('{done} of {total} stops', {'done': done, 'total': totalStops}),
+                            style: TextStyle(fontSize: 14, color: onBrandMuted),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(99)),
+                          child: Text(step, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: onBrand)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.15)))),
+                child: Row(
+                  children: [
+                    stat(Format.km(distance), tr('Distance')),
+                    stat(Format.minutes(minutes), tr('Estimated time'), divider: true),
+                    stat('$orderTotal', tr('Orders'), divider: true),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
-class _MapCard extends StatelessWidget {
-  const _MapCard({required this.child});
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return RunCard(
-      padding: const EdgeInsets.all(6),
-      child: ClipRRect(borderRadius: BorderRadius.circular(BcRadius.card - 4), child: child),
-    );
-  }
-}
-
-class _StopsHeader extends StatelessWidget {
-  const _StopsHeader({required this.done, required this.total});
-  final int done;
+class _PickupCard extends StatelessWidget {
+  const _PickupCard({required this.job, required this.total, required this.onCall});
+  final DeliveryJobDetail job;
   final int total;
+  final VoidCallback onCall;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(2, 22, 2, 12),
-      child: Row(
+    final collected = job.pickedUp ? total : 0;
+    final place = job.hasPickupOverride ? job.pickupPlaceName : job.store.name;
+    final address = job.hasPickupOverride
+        ? tr('Pickup location')
+        : [job.store.addressLine, job.store.city].where((s) => s.trim().isNotEmpty).join(', ');
+    final phone = job.hasPickupOverride ? '' : job.store.phone.trim();
+    return QdCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Text(
-              tr('Delivery stops'),
-              style: TextStyle(color: c.text, fontSize: 18, fontWeight: FontWeight.w800),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  tr('Pickup'),
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.foreground),
+                ),
+              ),
+              Text(
+                tr('{done} of {total} collected', {'done': collected, 'total': total}),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: job.pickedUp ? c.successStrong : c.primary),
+              ),
+            ],
           ),
-          RunPill(
-            label: tr('{deliveredCount}/{orderCount} delivered', {'deliveredCount': done, 'orderCount': total}),
-            color: done == total && total > 0 ? c.success : c.brand,
-            icon: Icons.check_circle_outline_rounded,
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(color: c.primarySoft, borderRadius: BorderRadius.circular(BcRadius.md)),
+                child: Icon(Icons.storefront_outlined, color: c.primaryStrong, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(place, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.foreground)),
+                    if (address.isNotEmpty)
+                      Text(address, style: TextStyle(fontSize: 13, color: c.mutedForeground)),
+                    if (phone.isNotEmpty)
+                      Text(Format.lkMobileDisplay(phone), style: TextStyle(fontSize: 13, color: c.mutedForeground)),
+                  ],
+                ),
+              ),
+            ],
           ),
+          if (phone.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            PillButton(label: tr('Call branch'), icon: Icons.call_rounded, kind: PillKind.call, onTap: onCall),
+          ],
         ],
       ),
     );
   }
 }
 
-/// Finished-run receipt: earnings, facts, route, and a stop timeline. No live actions.
+class _JobOrderRow extends StatelessWidget {
+  const _JobOrderRow({required this.order, required this.number, required this.onTap, required this.onCall});
+  final JobOrder order;
+  final int number;
+  final VoidCallback onTap;
+  final VoidCallback? onCall;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final name = order.customerName.trim().isEmpty ? tr('Customer') : order.customerName;
+    return InkWell(
+      onTap: () {
+        BcFeedback.tap();
+        onTap();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: c.primarySoft),
+              child: Text('$number', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: c.primaryStrong)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.foreground),
+                  ),
+                  Text(
+                    '${order.city} · ${trn(order.itemCount, '{n} item', '{n} items')}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, color: c.mutedForeground),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              Format.money(order.deliveryFee),
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.foreground),
+            ),
+            if (onCall != null) ...[
+              const SizedBox(width: 10),
+              Material(
+                color: c.call,
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: onCall,
+                  child: Tooltip(
+                    message: tr('Call'),
+                    child: SizedBox(width: 40, height: 40, child: Icon(Icons.call_rounded, color: c.callForeground, size: 20)),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Finished-run receipt (QuickDrop "Job Details"): summary, orders, failures, read-only note.
 class _HistoryRunBody extends StatelessWidget {
   const _HistoryRunBody({required this.job, required this.route});
   final DeliveryJobDetail job;
@@ -510,230 +642,296 @@ class _HistoryRunBody extends StatelessWidget {
     final c = context.bc;
     final stops = [...job.orders]..sort((a, b) => a.sequence.compareTo(b.sequence));
     final distanceKm = job.actualDistanceKm ?? job.estimatedDistanceKm;
-    final allDone = job.orderCount > 0 && job.deliveredCount == job.orderCount;
-    // Earned = fees of the stops actually delivered, i.e. the same per-stop amounts listed
-    // below. The stored ride total can be out of sync with its orders (wrong unit / stale),
-    // which showed e.g. Rs. 2 here while the stops added up to Rs. 150.
+    // Earned = fees of the stops actually delivered (the stored ride total can be stale).
     final earned = job.orders.isEmpty
         ? job.totalDeliveryFees
         : job.orders.where((o) => o.isDelivered && !o.isFailed).fold<int>(0, (s, o) => s + o.deliveryFee);
+    final finishedIso = job.completedAt ?? job.returnStartedAt ?? job.startedAt ?? job.scheduledAt;
+    final finished = Format.toLocal(finishedIso);
+    final acceptedIso = job.assignedAt ?? job.startedAt;
+    final accepted = Format.toLocal(acceptedIso);
+    final minutes = (accepted != null && finished != null && job.completedAt != null)
+        ? finished.difference(accepted).inMinutes
+        : null;
+    final dateLabel = finished == null ? '' : DateFormat('EEE, MMM d', L10n.dateLocale).format(finished).toUpperCase();
+    final failedOrders = stops.where((o) => o.isFailed).toList();
+    final failureCount = failedOrders.length + stops.fold<int>(0, (n, o) => n + o.complaints.length);
+    final heading = TextStyle(fontFamily: BcFonts.heading, fontSize: 17, fontWeight: FontWeight.w700, color: c.foreground);
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: const EdgeInsets.fromLTRB(10, 12, 10, 24),
       children: [
-        _EarningsBanner(
-          label: tr('Earned'),
-          amount: earned,
-          caption: job.completedAt == null ? null : tr('Completed {p1}', {'p1': Format.dateTime(job.completedAt)}),
-          badge: allDone ? tr('All delivered') : null,
+        QdCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (dateLabel.isNotEmpty)
+                            Text(
+                              dateLabel,
+                              style: TextStyle(color: c.primaryStrong, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.8),
+                            ),
+                          const SizedBox(height: 4),
+                          Text(
+                            Format.displayRideId(job.rideCode, job.id),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontFamily: BcFonts.heading, fontSize: 22, fontWeight: FontWeight.w700, color: c.foreground),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(Icons.storefront_outlined, size: 16, color: c.mutedForeground),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  Format.shortBranchName(job.store.name),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: c.mutedForeground, fontSize: 14),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          tr('Earnings').toUpperCase(),
+                          style: TextStyle(color: c.mutedForeground, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.8),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          Format.money(earned),
+                          style: TextStyle(
+                            fontFamily: BcFonts.heading,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                            color: earned > 0 ? c.success : c.mutedForeground,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, thickness: 1, color: c.border),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    if (accepted != null) _HistoryKv(label: tr('Accepted at'), value: Format.dateTime(acceptedIso)),
+                    if (finished != null) _HistoryKv(label: tr('Finished'), value: Format.dateTime(finishedIso)),
+                    if (minutes != null && minutes >= 0) _HistoryKv(label: tr('Time taken'), value: Format.duration(minutes)),
+                    if (distanceKm != null) _HistoryKv(label: tr('Distance'), value: Format.km(distanceKm)),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
-        RunFactRow(
-          tiles: [
-            RunFactTile(
-              icon: Icons.task_alt_rounded,
-              tint: c.success,
-              value: '${job.deliveredCount}/${job.orderCount}',
-              label: tr('Delivered'),
-            ),
-            RunFactTile(icon: Icons.local_cafe_rounded, tint: _rose, value: '${job.totalCups}', label: tr('Cups')),
-            RunFactTile(
-              icon: Icons.route_rounded,
-              tint: c.brand,
-              value: distanceKm != null ? Format.km(distanceKm) : '—',
-              label: tr('Distance'),
-            ),
+        QdCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                child: Text(tr('Orders ({n})', {'n': stops.length}), style: heading),
+              ),
+              for (var i = 0; i < stops.length; i++) _HistoryOrderRow(number: i + 1, order: stops[i], divider: i > 0),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Text(tr('Delivery Failures'), style: heading),
+        ),
+        const SizedBox(height: 12),
+        QdCard(
+          padding: failureCount == 0 ? const EdgeInsets.all(20) : EdgeInsets.zero,
+          child: failureCount == 0
+              ? Text(
+                  tr('No delivery failures were reported for this job.'),
+                  style: TextStyle(color: c.mutedForeground, fontSize: 15),
+                )
+              : Column(
+                  children: [
+                    for (final o in failedOrders)
+                      _HistoryFailureRow(reason: tr('Delivery failed'), detail: '#${o.orderNumber} · ${o.customerName}'),
+                    for (final o in stops)
+                      for (final cp in o.complaints)
+                        _HistoryFailureRow(
+                          reason: cp.category.replaceAll('_', ' '),
+                          detail: '#${o.orderNumber} · ${o.customerName} · ${Format.dateTime(cp.createdAt)}',
+                          note: cp.description,
+                        ),
+                  ],
+                ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.lock_outline_rounded, size: 16, color: c.mutedForeground),
+            const SizedBox(width: 8),
+            Text(tr('Past jobs are read-only.'), style: TextStyle(color: c.mutedForeground, fontSize: 13)),
           ],
         ),
-        if (route != null) ...[
-          const SizedBox(height: 12),
-          _MapCard(
-            child: MiniRouteMap(route: route!, onTap: () => AppRoutes.openMap(context, job.id)),
-          ),
-        ],
-        _StopsHeader(done: job.deliveredCount, total: job.orderCount),
-        for (var i = 0; i < stops.length; i++)
-          _StopTimelineRow(
-            number: i + 1,
-            order: stops[i],
-            isFirst: i == 0,
-            isLast: i == stops.length - 1,
-            onOpen: () => AppRoutes.openOrder(context, job.id, stops[i].orderId),
-          ),
       ],
     );
   }
 }
 
-/// One stop in a vertical timeline: numbered/status badge + connector, then a tappable card.
-/// Numbers follow list position, so duplicate server sequences never show twice.
-class _StopTimelineRow extends StatelessWidget {
-  const _StopTimelineRow({
-    required this.number,
-    required this.order,
-    required this.isFirst,
-    required this.isLast,
-    required this.onOpen,
-    this.highlighted = false,
-  });
-
-  final int number;
-  final JobOrder order;
-  final bool isFirst;
-  final bool isLast;
-  final bool highlighted;
-  final VoidCallback onOpen;
+class _HistoryKv extends StatelessWidget {
+  const _HistoryKv({required this.label, required this.value});
+  final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final tint = order.isDelivered
-        ? c.success
-        : order.isFailed || order.isCancelled
-        ? c.danger
-        : c.brand;
-    final items = order.items.map((i) => '${i.quantity}× ${i.productName}').join(', ');
-    final address = order.shortAddress.trim().isNotEmpty
-        ? order.shortAddress
-        : (order.city.trim().isNotEmpty ? order.city : order.addressLine);
-    final complaints = order.complaints.length;
-    return IntrinsicHeight(
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 34,
+          Text(label, style: TextStyle(color: c.mutedForeground, fontSize: 15)),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: TextStyle(color: c.foreground, fontSize: 15, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryOrderRow extends StatelessWidget {
+  const _HistoryOrderRow({required this.number, required this.order, required this.divider});
+  final int number;
+  final JobOrder order;
+  final bool divider;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final area = order.city.trim().isNotEmpty
+        ? order.city
+        : (order.district.trim().isNotEmpty ? order.district : order.shortAddress);
+    final unpaid = order.isFailed || order.isCancelled;
+    final status = order.isFailed ? 'DELIVERY_FAILED' : order.status;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(border: divider ? Border(top: BorderSide(color: c.border)) : null),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(color: c.primarySoft, shape: BoxShape.circle),
+            alignment: Alignment.center,
+            child: Text('$number', style: TextStyle(color: c.primaryStrong, fontSize: 15, fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(width: 2, height: 16, color: isFirst ? Colors.transparent : c.border),
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: order.isDelivered ? c.success : tint.withValues(alpha: 0.12),
-                    border: Border.all(color: tint.withValues(alpha: 0.35), width: 1.2),
-                  ),
-                  alignment: Alignment.center,
-                  child: order.isDelivered
-                      ? const Icon(Icons.check_rounded, color: Colors.white, size: 18)
-                      : Text(
-                          '$number'.padLeft(2, '0'),
-                          style: TextStyle(color: tint, fontWeight: FontWeight.w800, fontSize: 11.5),
-                        ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        order.customerName.trim().isEmpty ? tr('Customer') : order.customerName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: c.foreground, fontSize: 15, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      Format.money(order.deliveryFee),
+                      style: TextStyle(
+                        color: unpaid ? c.mutedForeground : c.success,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        decoration: unpaid ? TextDecoration.lineThrough : null,
+                      ),
+                    ),
+                  ],
                 ),
-                Expanded(child: Container(width: 2, color: isLast ? Colors.transparent : c.border)),
+                const SizedBox(height: 2),
+                Text(
+                  area.trim().isEmpty ? '#${order.orderNumber}' : '#${order.orderNumber} · $area',
+                  style: TextStyle(color: c.mutedForeground, fontSize: 14),
+                ),
+                if (!order.isDelivered) ...[
+                  const SizedBox(height: 6),
+                  Align(alignment: Alignment.centerRight, child: StatusChip(status)),
+                ],
               ],
             ),
           ),
-          const SizedBox(width: 10),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryFailureRow extends StatelessWidget {
+  const _HistoryFailureRow({required this.reason, required this.detail, this.note});
+  final String reason;
+  final String detail;
+  final String? note;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(Icons.cancel_outlined, size: 16, color: c.error),
+          ),
+          const SizedBox(width: 6),
           Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(bottom: isLast ? 0 : 12),
-              child: Material(
-                color: c.card,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(BcRadius.card),
-                  side: BorderSide(color: highlighted ? c.brand : c.border, width: highlighted ? 1.5 : 1),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () {
-                    BcFeedback.tap();
-                    onOpen();
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      order.customerName.trim().isEmpty ? tr('Customer') : order.customerName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(fontWeight: FontWeight.w800, color: c.text, fontSize: 15),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  if (highlighted)
-                                    RunPill(label: tr('Next'), color: c.brand)
-                                  else
-                                    StatusChip(order.isFailed ? 'DELIVERY_FAILED' : order.status),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Icon(Icons.location_on_rounded, size: 15, color: tint),
-                                  const SizedBox(width: 4),
-                                  Expanded(
-                                    child: Text(
-                                      address,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(color: c.text, fontSize: 13, height: 1.35),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (items.trim().isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Icon(Icons.local_cafe_outlined, size: 14, color: c.textMuted),
-                                    const SizedBox(width: 5),
-                                    Expanded(
-                                      child: Text(
-                                        items,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(color: c.textMuted, fontSize: 12, height: 1.35),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  Text(
-                                    '#${order.orderNumber}',
-                                    style: TextStyle(color: c.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
-                                  ),
-                                  const Spacer(),
-                                  if (complaints > 0) ...[
-                                    RunPill(
-                                      label: complaints == 1
-                                          ? tr('1 complaint')
-                                          : tr('{n} complaints', {'n': complaints}),
-                                      color: c.warning,
-                                      icon: Icons.feedback_outlined,
-                                    ),
-                                    const SizedBox(width: 6),
-                                  ],
-                                  Text(
-                                    Format.money(order.deliveryFee),
-                                    style: TextStyle(color: c.success, fontSize: 13, fontWeight: FontWeight.w800),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(Icons.chevron_right_rounded, color: c.textMuted),
-                      ],
-                    ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(reason, style: TextStyle(color: c.error, fontSize: 14, fontWeight: FontWeight.w600)),
+                if (note != null && note!.trim().isNotEmpty)
+                  Text(
+                    '“${note!.trim()}”',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: c.mutedForeground, fontSize: 14),
                   ),
-                ),
-              ),
+                Text(detail, style: TextStyle(color: c.mutedForeground, fontSize: 14)),
+              ],
             ),
           ),
         ],
