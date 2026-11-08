@@ -488,7 +488,7 @@ export async function initiateAndApproveWithdrawal(
 
   if (inReviewDraft?.breakdown) {
     payoutRequestCents = withdrawalAmountCents(inReviewDraft);
-    breakdown = inReviewDraft.breakdown as StoredWithdrawalBreakdown;
+    breakdown = inReviewDraft.breakdown as unknown as StoredWithdrawalBreakdown;
     fromStr = toUtcDateStr(inReviewDraft.periodFrom!);
     toStr = toUtcDateStr(inReviewDraft.periodTo!);
     const walletSummary = await getWalletSummary(storeId);
