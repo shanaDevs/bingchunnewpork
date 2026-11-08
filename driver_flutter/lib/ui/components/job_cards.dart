@@ -33,7 +33,6 @@ class HomeHeader extends StatelessWidget {
     required this.driverName,
     required this.isOnline,
     required this.onToggleDuty,
-    required this.onSettingsTap,
     this.dutyLoading = false,
   });
 
@@ -41,7 +40,6 @@ class HomeHeader extends StatelessWidget {
   final bool isOnline;
   final bool dutyLoading;
   final ValueChanged<bool> onToggleDuty;
-  final VoidCallback onSettingsTap;
 
   @override
   Widget build(BuildContext context) {
@@ -56,24 +54,6 @@ class HomeHeader extends StatelessWidget {
             children: [
               const QdWordmark(inverse: true, size: QdWordmarkSize.sm),
               const Spacer(),
-              Semantics(
-                button: true,
-                label: tr('Settings'),
-                child: GestureDetector(
-                  onTap: onSettingsTap,
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withValues(alpha: 0.2),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
-                    ),
-                    child: const Icon(Icons.settings_outlined, color: Colors.white, size: 21),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
               const QdBellButton(),
             ],
           ),
@@ -110,7 +90,7 @@ class HomeHeader extends StatelessWidget {
                   'assets/images/rider_mascot.png',
                   height: 118,
                   fit: BoxFit.contain,
-                  semanticLabel: tr('QuickDrop rider'),
+                  semanticLabel: tr('Bring It rider'),
                 ),
               ),
             ],
@@ -424,7 +404,8 @@ class ActiveJobCard extends StatelessWidget {
                           icon: Icons.inventory_2_outlined,
                           label: trn(orderTotal, '{n} order', '{n} orders'),
                         ),
-                        const Spacer(),
+                        // A fixed gap (not a Spacer) so the branch chip gets all the free width.
+                        const SizedBox(width: 10),
                         Text(tr('Details'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.primary)),
                         Icon(Icons.chevron_right_rounded, size: 18, color: c.primary),
                       ],

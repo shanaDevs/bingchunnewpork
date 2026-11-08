@@ -17,10 +17,8 @@ import '../../data/models/driver.dart';
 import '../app_routes.dart';
 import '../components/headers.dart';
 import '../components/job_cards.dart';
-import '../components/sheet_kit.dart';
 import '../components/snack.dart';
 import '../components/qd_kit.dart';
-import '../components/tab_scaffold.dart';
 import '../theme/bc_theme.dart';
 import 'report_breakdown_screen.dart';
 import 'report_issue_sheet.dart';
@@ -149,47 +147,6 @@ class _JobsTabState extends State<JobsTab> {
     );
   }
 
-  /// Gear menu: keeps vehicle-issue reporting reachable from the home header.
-  Future<void> _openSettingsMenu(JobsController vm) async {
-    BcFeedback.tap();
-    final c = context.bc;
-    final choice = await showBcSheet<String>(
-      context,
-      builder: (ctx) => BcSheetBody(
-        header: BcSheetHeader(
-          icon: Icons.settings_rounded,
-          title: tr('Settings'),
-          subtitle: tr('Quick actions for your shift'),
-        ),
-        children: [
-          BcGroupCard(
-            children: [
-              BcListRow(
-                icon: Icons.build_outlined,
-                iconBg: c.errorSoftBg,
-                iconTint: c.error,
-                title: tr('Report vehicle issue'),
-                subtitle: tr('Breakdown during an active ride'),
-                onTap: () => Navigator.of(ctx).pop('report'),
-              ),
-              BcListRow(
-                icon: Icons.person_outline_rounded,
-                iconBg: c.brandSubtle,
-                iconTint: c.brand,
-                title: tr('Profile & settings'),
-                subtitle: tr('Duty, alerts, theme, sign out'),
-                onTap: () => Navigator.of(ctx).pop('profile'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-    if (!mounted) return;
-    if (choice == 'report') await _reportIssue(vm);
-    if (choice == 'profile') widget.onOpenProfile?.call();
-  }
-
   /// Errors and notices show as a toast once, then clear — the list never fills with error boxes.
   /// The full-screen error state still handles "nothing could load at all".
   void _toastMessages(JobsController vm, bool fatalError) {
@@ -247,7 +204,6 @@ class _JobsTabState extends State<JobsTab> {
           BcFeedback.tap();
           vm.setOnline(online);
         },
-        onSettingsTap: () => _openSettingsMenu(vm),
       ),
       onRefresh: () async {
         BcFeedback.refresh();

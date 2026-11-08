@@ -199,7 +199,19 @@ class _StatsBodyState extends State<_StatsBody> {
         const SizedBox(height: 16),
         ListenableBuilder(
           listenable: OfferOutcomes.instance,
-          builder: (_, _) => _AcceptanceCard(counts: OfferOutcomes.instance.counts(from: start)),
+          builder: (_, _) {
+            final local = OfferOutcomes.instance.counts(from: start);
+            final server = s.stats?.offers;
+            // The server counts accepted and declined offers; missed ones only exist on this phone.
+            final counts = server == null
+                ? local
+                : OfferOutcomeCounts(
+                    accepted: server.accepted,
+                    declined: server.declined,
+                    missed: server.missed + local.missed,
+                  );
+            return _AcceptanceCard(counts: counts);
+          },
         ),
         const SizedBox(height: 24),
         _CompletedJobsChart(period: s.period, history: vm.history),
@@ -414,44 +426,59 @@ class _AcceptanceCard extends StatelessWidget {
                 : tr('{accepted} of {total} offers accepted', {'accepted': counts.accepted, 'total': total}),
             style: TextStyle(fontSize: 14, color: c.mutedForeground),
           ),
-          if (total > 0) ...[
-            const SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(BcRadius.full),
-              child: SizedBox(
-                height: 10,
-                child: Row(
-                  children: [
-                    for (var i = 0, shown = 0; i < rows.length; i++)
-                      if (rows[i].$3 > 0) ...[
-                        if (shown++ > 0) const SizedBox(width: 2),
-                        Expanded(
-                          flex: rows[i].$3,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(color: rows[i].$4, borderRadius: BorderRadius.circular(BcRadius.full)),
+          const SizedBox(height: 16),
+          // Thin segmented bar: the outer ends are fully rounded, segments meet with a small gap.
+          // With no offers yet it is just an empty track.
+          SizedBox(
+            height: 8,
+            child: total == 0
+                ? DecoratedBox(
+                    decoration: BoxDecoration(color: c.muted, borderRadius: BorderRadius.circular(BcRadius.full)),
+                  )
+                : Row(
+                    // Stretch: an empty DecoratedBox is zero-high unless the row gives it the bar height.
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: () {
+                      final parts = rows.where((r) => r.$3 > 0).toList();
+                      return [
+                        for (var i = 0; i < parts.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 2),
+                          Expanded(
+                            flex: parts[i].$3,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: parts[i].$4,
+                                borderRadius: BorderRadius.horizontal(
+                                  left: Radius.circular(i == 0 ? 4 : 0),
+                                  right: Radius.circular(i == parts.length - 1 ? 4 : 0),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
-                  ],
-                ),
+                        ],
+                      ];
+                    }(),
+                  ),
+          ),
+          const SizedBox(height: 16),
+          // Each outcome by name, icon and count, so nothing relies on colour alone.
+          for (var i = 0; i < rows.length; i++)
+            Padding(
+              padding: EdgeInsets.only(top: i == 0 ? 0 : 8),
+              child: Row(
+                children: [
+                  Container(width: 10, height: 10, decoration: BoxDecoration(color: rows[i].$4, shape: BoxShape.circle)),
+                  const SizedBox(width: 12),
+                  Icon(rows[i].$1, size: 18, color: c.mutedForeground),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(rows[i].$2, style: TextStyle(fontSize: 16, color: c.foreground))),
+                  Text(
+                    '${rows[i].$3}',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
-            for (final r in rows)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    Container(width: 8, height: 8, decoration: BoxDecoration(color: r.$4, shape: BoxShape.circle)),
-                    const SizedBox(width: 10),
-                    Icon(r.$1, size: 18, color: c.mutedForeground),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(r.$2, style: TextStyle(fontSize: 15, color: c.foreground))),
-                    Text('${r.$3}', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.foreground)),
-                  ],
-                ),
-              ),
-          ],
         ],
       ),
     );

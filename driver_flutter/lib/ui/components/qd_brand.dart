@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/bc_theme.dart';
 
 /// App name shown in the UI (QuickDrop rider branding).
-const kAppName = 'QuickDrop';
+const kAppName = 'Bring It';
 
 /// QuickDrop app mark — the launcher artwork in a rounded tile (ports `LogoMark`).
 class QdLogoMark extends StatelessWidget {

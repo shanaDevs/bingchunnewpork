@@ -300,10 +300,10 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
             iconTint: c.primaryStrong,
             title: tr('Quick Action Bubble'),
             subtitle: !_bubbleOn
-                ? tr('Off. No floating QuickDrop bubble when you leave the app.')
+                ? tr('Off. No floating Bring It bubble when you leave the app.')
                 : _bubblePermitted
-                ? tr('On. When you leave the app, a floating QuickDrop bubble stays on screen. Tap it to return, drag it anywhere, or drop it on ✕ to hide it.')
-                : tr('Allow "Display over other apps" so the floating QuickDrop bubble can show when you leave the app.'),
+                ? tr('On. When you leave the app, a floating Bring It bubble stays on screen. Tap it to return, drag it anywhere, or drop it on ✕ to hide it.')
+                : tr('Allow "Display over other apps" so the floating Bring It bubble can show when you leave the app.'),
             done: !_bubbleOn || _bubblePermitted,
             showStatus: _bubbleOn,
             trailing: BcSwitch(
@@ -328,7 +328,7 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
           iconBg: c.primarySoft,
           iconTint: c.primaryStrong,
           title: tr('System Notification Sounds'),
-          subtitle: tr('Ensure QuickDrop notification channels are set to High Priority with sound.'),
+          subtitle: tr('Ensure Bring It notification channels are set to High Priority with sound.'),
           done: true,
           showStatus: false,
           actionLabel: tr('Open app notification settings'),
@@ -363,7 +363,7 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
                     Text(
                       Platform.isIOS
                           ? tr(
-                              '1. Allow notifications and Time Sensitive alerts.\n2. Keep Background App Refresh on for QuickDrop.\n3. Set Location to "Always" while delivering.',
+                              '1. Allow notifications and Time Sensitive alerts.\n2. Keep Background App Refresh on for Bring It.\n3. Set Location to "Always" while delivering.',
                             )
                           : tr(
                               '1. Enable \'Autostart\' in Security / App Info.\n2. Set Battery Saver to \'No restrictions\'.\n3. Lock the app in Recent Apps so the OS does not kill it.',

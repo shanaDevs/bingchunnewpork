@@ -30,7 +30,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove" />
 
     <application
-        android:label="Bing Chun Delivery"
+        android:label="Bring It"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/feedback.dart';
@@ -9,13 +10,15 @@ import '../../data/models/driver.dart';
 import '../../l10n/l10n.dart';
 import '../../state/auth_controller.dart';
 import '../../state/jobs_controller.dart';
+import '../components/call_confirm.dart';
+import '../components/job_cards.dart';
 import '../components/profile_kit.dart';
 import '../components/qd_kit.dart';
 import '../theme/bc_theme.dart';
-import 'job_sheets.dart';
+import 'branch_request_screen.dart';
 
-/// Branch management (QuickDrop branches/index.tsx): assigned branches, the request
-/// button and the request history.
+/// QuickDrop "Branches": the rider's assigned branches (read-only), the request-change
+/// button and the history of requests with support's decisions.
 class BranchesScreen extends StatefulWidget {
   const BranchesScreen({super.key});
 
@@ -25,11 +28,12 @@ class BranchesScreen extends StatefulWidget {
 
 class _BranchesScreenState extends State<BranchesScreen> with WidgetsBindingObserver {
   List<DriverBranchRequest> _requests = const [];
+  List<BranchOption> _stores = const [];
   bool _loading = true;
   // Admin review sends no socket/push event, so poll while a request is pending.
   static const _pendingPollInterval = Duration(seconds: 20);
   Timer? _pendingPoll;
-  // Guards against repeated taps while the branch list loads or the sheet is open.
+  // Guards against repeated taps while the branch list loads or the screen is open.
   bool _busy = false;
 
   static bool _isPending(DriverBranchRequest r) => r.status.toUpperCase() == 'PENDING';
@@ -39,6 +43,7 @@ class _BranchesScreenState extends State<BranchesScreen> with WidgetsBindingObse
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadRequests();
+    _loadStores();
   }
 
   @override
@@ -54,6 +59,15 @@ class _BranchesScreenState extends State<BranchesScreen> with WidgetsBindingObse
       _loadRequests();
     } else if (state == AppLifecycleState.paused) {
       _pendingPoll?.cancel();
+    }
+  }
+
+  Future<void> _loadStores() async {
+    try {
+      final list = await context.read<JobsController>().listStoresForBranchRequest();
+      if (mounted) setState(() => _stores = list);
+    } catch (_) {
+      // Cards fall back to the name and city from the profile.
     }
   }
 
@@ -83,24 +97,25 @@ class _BranchesScreenState extends State<BranchesScreen> with WidgetsBindingObse
     try {
       final messenger = ScaffoldMessenger.of(context);
       final branches = riderBranches(vm, auth);
-      List<BranchOption> stores;
-      try {
-        final fromApi = await vm.listStoresForBranchRequest();
-        final known = branches.map((b) => BranchOption(id: b.id, name: b.name, city: b.city));
-        final seen = <String>{};
-        stores = [...fromApi, ...known].where((s) => s.id.trim().isNotEmpty && seen.add(s.id)).toList();
-      } catch (e) {
-        BcFeedback.error();
-        messenger.showSnackBar(SnackBar(content: Text('$e'.isEmpty ? tr('Could not load branches') : '$e')));
-        return;
+      var stores = _stores;
+      if (stores.isEmpty) {
+        try {
+          stores = await vm.listStoresForBranchRequest();
+          if (mounted) setState(() => _stores = stores);
+        } catch (e) {
+          BcFeedback.error();
+          messenger.showSnackBar(SnackBar(content: Text('$e'.isEmpty ? tr('Could not load branches') : '$e')));
+          return;
+        }
       }
       if (!mounted) return;
-      final submitted = await showBranchRequestSheet(
+      final submitted = await BranchRequestScreen.open(
         context,
-        stores: stores,
-        accessibleStoreIds: branches.map((b) => b.id).where((id) => id.trim().isNotEmpty).toSet(),
+        assigned: branches,
+        stores: stores.where((s) => s.id.trim().isNotEmpty).toList(),
         homeStoreId: vm.profile?.storeId ?? auth.driver?.storeId,
-        onSubmit: (type, toStoreId, reason) => vm.createBranchRequest(type, toStoreId, reason),
+        onSubmit: (type, toStoreId, reason, fromStoreId) =>
+            vm.createBranchRequest(type, toStoreId, reason, fromStoreId: fromStoreId),
       );
       if (submitted) {
         BcFeedback.success();
@@ -120,9 +135,16 @@ class _BranchesScreenState extends State<BranchesScreen> with WidgetsBindingObse
     final homeId = vm.profile?.storeId ?? auth.driver?.storeId;
     final pending = _requests.any(_isPending);
 
+    BranchOption? detail(StoreRef b) {
+      for (final s in _stores) {
+        if (s.id == b.id) return s;
+      }
+      return null;
+    }
+
     return QdPage(
-      title: tr('Branch management'),
-      onRefresh: () => Future.wait([vm.load(), _loadRequests()]),
+      title: tr('Branches'),
+      onRefresh: () => Future.wait([vm.load(), _loadRequests(), _loadStores()]),
       children: [
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -139,16 +161,20 @@ class _BranchesScreenState extends State<BranchesScreen> with WidgetsBindingObse
         ),
         const SizedBox(height: 12),
         for (var i = 0; i < branches.length; i++) ...[
-          _BranchCard(branch: branches[i], primary: branches[i].id.isNotEmpty ? branches[i].id == homeId : i == 0),
-          const SizedBox(height: 12),
+          _BranchCard(
+            branch: branches[i],
+            detail: detail(branches[i]),
+            primary: branches[i].id.isNotEmpty ? branches[i].id == homeId : i == 0,
+          ),
+          const SizedBox(height: 10),
         ],
-        if (branches.isEmpty)
-          QdEmpty(icon: Icons.storefront_outlined, title: tr('No branches assigned yet')),
-        const SizedBox(height: 4),
-        QdPillButton(
+        if (branches.isEmpty) QdEmpty(icon: Icons.storefront_outlined, title: tr('No branches assigned yet')),
+        const SizedBox(height: 10),
+        PillButton(
           label: tr('Request branch change'),
           icon: Icons.swap_horiz_rounded,
-          onPressed: pending ? null : () => _requestChange(vm, auth),
+          height: 56,
+          onTap: pending ? null : () => _requestChange(vm, auth),
         ),
         if (pending)
           Padding(
@@ -167,7 +193,7 @@ class _BranchesScreenState extends State<BranchesScreen> with WidgetsBindingObse
               ],
             ),
           ),
-        QdSectionTitle(tr('Request history')),
+        QdSectionTitle(tr('Request History')),
         if (_loading)
           Padding(
             padding: const EdgeInsets.all(24),
@@ -182,38 +208,99 @@ class _BranchesScreenState extends State<BranchesScreen> with WidgetsBindingObse
   }
 }
 
+/// "Thu, Oct 15 8:54 PM".
+String _when(String? iso) {
+  if (iso == null || iso.isEmpty) return '';
+  try {
+    return DateFormat('EEE, MMM d h:mm a').format(DateTime.parse(iso).toLocal());
+  } catch (_) {
+    return Format.jobDateTime(iso);
+  }
+}
+
 class _BranchCard extends StatelessWidget {
-  const _BranchCard({required this.branch, required this.primary});
+  const _BranchCard({required this.branch, required this.detail, required this.primary});
   final StoreRef branch;
+  final BranchOption? detail;
   final bool primary;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
+    final open = detail?.isActive ?? true;
+    final city = nonBlank(detail?.city) ?? nonBlank(branch.city);
+    final street = nonBlank(detail?.addressLine);
+    final address = [?street, ?city].join(', ');
+    final phone = nonBlank(detail?.phone);
     return QdCard(
-      child: Row(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const QdIconTile(Icons.storefront_outlined),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(color: c.primarySoft, borderRadius: BorderRadius.circular(BcRadius.md)),
+                child: Icon(Icons.storefront_outlined, color: c.primaryStrong, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      branch.name,
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: c.foreground),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        if (primary) QdBadge(tr('Primary'), tone: QdTone.primary),
+                        QdBadge(open ? tr('Open') : tr('Closed'), tone: open ? QdTone.success : QdTone.neutral, dot: true),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              if (phone != null)
+                Material(
+                  color: c.primarySoft,
+                  shape: const CircleBorder(),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: () => confirmAndCall(context, name: branch.name, phone: phone),
+                    child: Tooltip(
+                      message: tr('Call branch'),
+                      child: SizedBox(width: 44, height: 44, child: Icon(Icons.call_outlined, color: c.primaryStrong, size: 22)),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (address.isNotEmpty || phone != null) const SizedBox(height: 12),
+          if (address.isNotEmpty)
+            Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  Format.shortBranchName(branch.name),
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground),
-                ),
-                if (nonBlank(branch.city) != null) ...[
-                  const SizedBox(height: 2),
-                  Text(branch.city!, style: TextStyle(fontSize: 13, color: c.mutedForeground)),
-                ],
-                if (primary) ...[
-                  const SizedBox(height: 8),
-                  QdBadge(tr('Primary'), tone: QdTone.primary),
-                ],
+                Icon(Icons.location_on_outlined, size: 18, color: c.mutedForeground),
+                const SizedBox(width: 8),
+                Expanded(child: Text(address, style: TextStyle(fontSize: 14, color: c.mutedForeground, height: 1.35))),
               ],
             ),
-          ),
+          if (address.isNotEmpty && phone != null) const SizedBox(height: 6),
+          if (phone != null)
+            Row(
+              children: [
+                Icon(Icons.call_outlined, size: 18, color: c.mutedForeground),
+                const SizedBox(width: 8),
+                Text(Format.lkMobileDisplay(phone), style: TextStyle(fontSize: 14, color: c.mutedForeground)),
+              ],
+            ),
         ],
       ),
     );
@@ -234,34 +321,62 @@ class _RequestCard extends StatelessWidget {
       'PENDING' => (tr('Pending'), QdTone.warning),
       _ => (s.isEmpty ? s : s[0] + s.substring(1).toLowerCase(), QdTone.neutral),
     };
-    final note = req.reviewNote?.trim();
-    final rejectionReason = s == 'REJECTED' && note != null && note.isNotEmpty ? note : null;
+    final to = req.toStoreName ?? req.toStoreId;
+    final from = nonBlank(req.fromStoreName);
+    final title = from == null ? to : '$from → $to';
+    final reason = nonBlank(req.reason);
+    final decided = s == 'APPROVED' || s == 'REJECTED';
+    final note = nonBlank(req.reviewNote) ?? (s == 'APPROVED' ? tr('Approved.') : tr('Rejected.'));
     return QdCard(
+      padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: Text(
-                  '${req.type} · ${req.toStoreName ?? req.toStoreId}',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.foreground),
+                  title,
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.foreground, height: 1.3),
                 ),
               ),
               const SizedBox(width: 8),
               QdBadge(label, tone: tone, dot: true),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
-            tr('Submitted {time}', {'time': Format.jobDateTime(req.createdAt)}),
+            tr('Submitted {time}', {'time': _when(req.createdAt)}),
             style: TextStyle(fontSize: 13, color: c.mutedForeground),
           ),
-          if (rejectionReason != null) ...[
+          if (reason != null) ...[
             const SizedBox(height: 8),
-            Text(
-              tr('Reason: {reason}', {'reason': rejectionReason}),
-              style: TextStyle(fontSize: 13, height: 1.35, color: c.errorStrong),
+            Text(reason, style: TextStyle(fontSize: 15, color: c.foreground, height: 1.4)),
+          ],
+          if (decided) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: s == 'APPROVED' ? c.successSoft : c.errorSoftBg,
+                borderRadius: BorderRadius.circular(BcRadius.md),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(note, style: TextStyle(fontSize: 15, color: c.foreground, height: 1.35)),
+                  if (nonBlank(req.reviewedAt) != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        tr('Decided {time}', {'time': _when(req.reviewedAt)}),
+                        style: TextStyle(fontSize: 12, color: c.mutedForeground),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ],
         ],

@@ -156,7 +156,7 @@ class _MeScreenState extends State<MeScreen> {
                 if (vehicle.isNotEmpty) QdRow(icon: Icons.two_wheeler_outlined, title: tr('Vehicle'), subtitle: vehicle),
               ],
             ),
-            QdFootnote(tr('Managed by QuickDrop. Contact support to change these details.')),
+            QdFootnote(tr('Managed by Bring It. Contact support to change these details.')),
             QdSectionTitle(
               tr('Assigned branches'),
               actionLabel: tr('Manage'),
@@ -201,7 +201,7 @@ class _MeScreenState extends State<MeScreen> {
                 QdRow(
                   icon: Icons.help_outline_rounded,
                   title: tr('Help & support'),
-                  subtitle: tr('Contact the QuickDrop support team'),
+                  subtitle: tr('Contact the Bring It support team'),
                   onTap: () => _push(const SupportScreen()),
                 ),
                 QdRow(

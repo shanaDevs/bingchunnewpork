@@ -72,7 +72,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
       _prompting = true;
       _error = null;
     });
-    final error = await lock.authenticateBiometric(tr('Unlock QuickDrop Rider'));
+    final error = await lock.authenticateBiometric(tr('Unlock Bring It Rider'));
     if (!mounted) return;
     setState(() {
       _prompting = false;
@@ -153,7 +153,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
     final combined = AppLock.combinedBiometric;
     final isPin = lock.method == AppLockMethod.pin;
 
-    final title = widget.confirmOnly ? tr('Confirm it is you') : tr('QuickDrop is locked');
+    final title = widget.confirmOnly ? tr('Confirm it is you') : tr('Bring It is locked');
     final bioHint = isFace
         ? tr('Use face unlock to open the app')
         : combined

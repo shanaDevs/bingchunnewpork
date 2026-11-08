@@ -62,6 +62,23 @@ class Intents {
     return tr('No dialer app found');
   }
 
+  /// Opens Google Maps with a multi-stop route: the first point is the start, the last the
+  /// destination, the rest are waypoints (Google allows up to 9).
+  static Future<String?> routeThrough(List<(double, double)> points) async {
+    if (points.isEmpty) return tr('No maps app found');
+    if (points.length == 1) return navigateTo(points.first.$1, points.first.$2);
+    String p((double, double) pt) => '${pt.$1},${pt.$2}';
+    final mid = points.sublist(1, points.length - 1).take(9).map(p).join('|');
+    final uri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&origin=${p(points.first)}&destination=${p(points.last)}'
+      '${mid.isEmpty ? '' : '&waypoints=${Uri.encodeComponent(mid)}'}&travelmode=driving',
+    );
+    try {
+      if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return null;
+    } catch (_) {}
+    return tr('No maps app found');
+  }
+
   /// Opens turn-by-turn navigation in Google Maps; falls back to the Google Maps web URL.
   static Future<String?> navigateTo(double lat, double lng, {String? label}) async {
     final candidates = <Uri>[

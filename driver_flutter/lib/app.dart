@@ -93,7 +93,7 @@ class _BingChunDriverAppState extends State<BingChunDriverApp> with WidgetsBindi
             _ => ThemeMode.light,
           };
           return MaterialApp(
-            title: tr('QuickDrop Rider'),
+            title: tr('Bring It Rider'),
             locale: rc.language.locale,
             supportedLocales: L10n.supportedLocales,
             localizationsDelegates: const [

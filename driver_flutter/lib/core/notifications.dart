@@ -254,7 +254,7 @@ class BcNotifications {
       styleInformation: BigTextStyleInformation(
         alert.notificationBody,
         contentTitle: alert.notificationTitle,
-        summaryText: tr('QuickDrop Rider'),
+        summaryText: tr('Bring It Rider'),
       ),
       actions: [
         AndroidNotificationAction(

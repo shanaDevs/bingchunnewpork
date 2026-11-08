@@ -206,8 +206,8 @@ class JobsController extends ChangeNotifier {
   Future<List<DriverShiftEntry>> getShiftHistory() => _c.authRepository.getShiftHistory();
 
   /// Throws on failure so the sheet can show the message.
-  Future<void> createBranchRequest(String type, String toStoreId, String? reason) async {
-    await _c.authRepository.createBranchRequest(type, toStoreId, reason: reason);
+  Future<void> createBranchRequest(String type, String toStoreId, String? reason, {String? fromStoreId}) async {
+    await _c.authRepository.createBranchRequest(type, toStoreId, reason: reason, fromStoreId: fromStoreId);
     load();
   }
 

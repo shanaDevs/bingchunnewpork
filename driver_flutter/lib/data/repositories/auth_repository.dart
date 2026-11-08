@@ -42,12 +42,13 @@ class AuthRepository {
   Future<List<BranchOption>> listStores() =>
       _api.call(() => _api.core.get<dynamic>('stores'), (d) => _list(d, BranchOption.fromJson));
 
-  Future<void> createBranchRequest(String type, String toStoreId, {String? reason}) => _api.call(
+  Future<void> createBranchRequest(String type, String toStoreId, {String? reason, String? fromStoreId}) => _api.call(
     () => _api.core.post<dynamic>(
       'delivery/me/branch-requests',
       data: compact({
         'type': type,
         'toStoreId': toStoreId,
+        'fromStoreId': fromStoreId,
         'reason': (reason != null && reason.trim().isNotEmpty) ? reason : null,
       }),
     ),

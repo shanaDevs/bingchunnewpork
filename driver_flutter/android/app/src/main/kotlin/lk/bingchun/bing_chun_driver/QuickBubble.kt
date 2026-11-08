@@ -144,7 +144,7 @@ object QuickBubble {
             elevation = dp(ctx, 6f).toFloat()
             outlineProvider = ViewOutlineProvider.BACKGROUND
             setPadding(ring, ring, ring, ring)
-            contentDescription = "Open Bing Chun Delivery"
+            contentDescription = "Open Bring It"
         }
         val logo = ImageView(ctx).apply {
             setImageResource(R.drawable.quick_bubble_logo)

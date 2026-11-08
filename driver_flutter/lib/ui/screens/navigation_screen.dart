@@ -1,9 +1,12 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/app_container.dart';
+import '../../core/feedback.dart';
 import '../../core/format.dart';
 import '../../core/intents.dart';
 import '../../data/models/delivery_route.dart';
@@ -13,7 +16,6 @@ import '../components/call_confirm.dart';
 import '../components/job_cards.dart';
 import '../components/qd_kit.dart';
 import '../components/sheet_kit.dart';
-import '../components/map_bitmaps.dart';
 import '../theme/bc_theme.dart';
 import '../../l10n/l10n.dart';
 
@@ -21,6 +23,45 @@ const _navZoom = 18.0;
 const _minRefetchDelta = 0.0002; // ~20m
 const _minHeadingDelta = 0.00004; // ~4m
 const _arrivedMetres = 40.0;
+const _followTilt = 45.0;
+
+/// Dark map palette used in dark mode, like Google Maps' night navigation view.
+const _nightStyle =
+    '[{"elementType":"geometry","stylers":[{"color":"#1d2c4d"}]},'
+    '{"elementType":"labels.text.fill","stylers":[{"color":"#8ec3b9"}]},'
+    '{"elementType":"labels.text.stroke","stylers":[{"color":"#1a3646"}]},'
+    '{"featureType":"administrative.country","elementType":"geometry.stroke","stylers":[{"color":"#4b6878"}]},'
+    '{"featureType":"landscape.man_made","elementType":"geometry.stroke","stylers":[{"color":"#334e87"}]},'
+    '{"featureType":"landscape.natural","elementType":"geometry","stylers":[{"color":"#023e58"}]},'
+    '{"featureType":"poi","elementType":"geometry","stylers":[{"color":"#283d6a"}]},'
+    '{"featureType":"poi","elementType":"labels.text.fill","stylers":[{"color":"#6f9ba5"}]},'
+    '{"featureType":"poi.park","elementType":"geometry.fill","stylers":[{"color":"#023e58"}]},'
+    '{"featureType":"road","elementType":"geometry","stylers":[{"color":"#304a7d"}]},'
+    '{"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#98a5be"}]},'
+    '{"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#2c6675"}]},'
+    '{"featureType":"transit","elementType":"geometry","stylers":[{"color":"#283d6a"}]},'
+    '{"featureType":"water","elementType":"geometry","stylers":[{"color":"#0e1626"}]}]';
+
+/// The rider marker: a blue disc with a white navigation arrow and a soft halo, drawn once.
+Future<BitmapDescriptor> _renderRiderArrow() async {
+  const size = 120.0;
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, size, size));
+  const c = Offset(size / 2, size / 2);
+  canvas.drawCircle(c, 56, Paint()..color = const Color(0xFF1A73E8).withValues(alpha: 0.28));
+  canvas.drawCircle(c, 36, Paint()..color = Colors.white);
+  canvas.drawCircle(c, 33, Paint()..color = const Color(0xFF1A5FE0));
+  final arrow = Path()
+    ..moveTo(c.dx, c.dy - 20)
+    ..lineTo(c.dx + 16, c.dy + 16)
+    ..lineTo(c.dx, c.dy + 8)
+    ..lineTo(c.dx - 16, c.dy + 16)
+    ..close();
+  canvas.drawPath(arrow, Paint()..color = Colors.white);
+  final image = await recorder.endRecording().toImage(size.toInt(), size.toInt());
+  final bytes = (await image.toByteData(format: ui.ImageByteFormat.png))!.buffer.asUint8List();
+  return BitmapDescriptor.bytes(bytes, width: 48, height: 48);
+}
 
 /// The one contextual action shown on the nav screen — port of NavPrimaryAction (Intents.kt).
 /// Rebuilt from current state on every frame via [NavigationScreen.actionBuilder].
@@ -120,7 +161,7 @@ class NavigationScreen extends StatefulWidget {
   State<NavigationScreen> createState() => _NavigationScreenState();
 }
 
-class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixin {
+class _NavigationScreenState extends State<NavigationScreen> {
   GoogleMapController? _map;
   late final LocationTracker _tracker = context.read<AppContainer>().locationTracker;
   bool _mapReady = false;
@@ -132,10 +173,20 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
   List<RoutePathPoint> _roadPath = const [];
   double? _distanceM;
   double? _durationS;
+  BitmapDescriptor? _riderIcon;
+
+  /// Camera follows the rider (heading-up). Panning the map pauses it until "Re-center".
+  bool _following = true;
+
+  /// True while a camera move was started by us (follow, zoom buttons, re-center).
+  bool _programmatic = false;
 
   @override
   void initState() {
     super.initState();
+    _renderRiderArrow().then((icon) {
+      if (mounted) setState(() => _riderIcon = icon);
+    });
     _tracker.addListener(_onFix);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onFix());
   }
@@ -164,14 +215,8 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
     _last = fix;
 
     final map = _map;
-    if (_mapReady && map != null) {
-      final center = LatLng(fix.lat, fix.lng);
-      final zoom = _zoomed ? _zoom : _navZoom;
-      _zoomed = true;
-      // Heading-up: the camera bearing follows the direction of travel.
-      map.animateCamera(
-        CameraUpdate.newCameraPosition(CameraPosition(target: center, zoom: zoom, bearing: heading ?? 0)),
-      );
+    if (_mapReady && map != null && _following) {
+      _followCamera(map, fix, heading);
     }
     setState(() {});
 
@@ -185,6 +230,31 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
     }
     _lastFetch = fix;
     _fetchRoute(fix);
+  }
+
+  /// Heading-up camera on the rider, slightly tilted like Google Maps navigation.
+  void _followCamera(GoogleMapController map, DriverFix fix, double? heading) {
+    final zoom = _zoomed ? _zoom : _navZoom;
+    _zoomed = true;
+    _programmatic = true;
+    map.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: LatLng(fix.lat, fix.lng),
+          zoom: zoom,
+          bearing: heading ?? _lastHeading ?? 0,
+          tilt: widget.target.upNext ? 0 : _followTilt,
+        ),
+      ),
+    );
+  }
+
+  void _recenter() {
+    BcFeedback.tap();
+    final fix = _tracker.lastFix;
+    final map = _map;
+    setState(() => _following = true);
+    if (fix != null && map != null) _followCamera(map, fix, _lastHeading);
   }
 
   Future<void> _fetchRoute(DriverFix fix) async {
@@ -201,6 +271,12 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
     });
   }
 
+  void _zoomBy(bool zoomIn) {
+    BcFeedback.tap();
+    _programmatic = true;
+    _map?.animateCamera(zoomIn ? CameraUpdate.zoomIn() : CameraUpdate.zoomOut());
+  }
+
   Future<void> _openGoogleMaps() async {
     final t = widget.target;
     final messenger = ScaffoldMessenger.of(context);
@@ -214,20 +290,6 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
     final t = widget.target;
     final fix = _tracker.lastFix;
     final action = widget.actionBuilder?.call(context);
-    final hasHeading = _lastHeading != null;
-    final destIcon = markerIcon(
-      'nav-dest-${c.action.toARGB32()}',
-      const Size(34, 44),
-      () => _DestinationPinPainter(c.action),
-    );
-    final driverIcon = fix == null
-        ? null
-        : markerIcon(
-            'nav-driver-${c.primaryStrong.toARGB32()}-$hasHeading',
-            const Size(72, 72),
-            () => _NavArrowPainter(0.35, c.primaryStrong, hasHeading),
-          );
-
     final top = MediaQuery.paddingOf(context).top;
     final remainingM = fix == null ? null : Geolocator.distanceBetween(fix.lat, fix.lng, t.lat, t.lng);
     final arrived =
@@ -280,41 +342,61 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
                 _onFix();
               },
               onCameraMove: (position) => _zoom = position.zoom,
+              onCameraMoveStarted: () {
+                // A move we didn't start is the rider panning: stop following.
+                if (!_programmatic && _following) setState(() => _following = false);
+              },
+              onCameraIdle: () => _programmatic = false,
+              style: c.isDark ? _nightStyle : null,
               zoomControlsEnabled: false,
+              // Plain blue dot only until the arrow marker below is ready.
+              myLocationEnabled: _riderIcon == null,
               myLocationButtonEnabled: false,
               mapToolbarEnabled: false,
               compassEnabled: false,
+              // Google-style route: a bright cyan line with a darker outline.
               polylines: {
-                if (!t.upNext && _roadPath.length >= 2)
+                if (!t.upNext && _roadPath.length >= 2) ...[
+                  Polyline(
+                    polylineId: const PolylineId('nav-route-outline'),
+                    points: _roadPath.map((p) => LatLng(p.lat, p.lng)).toList(),
+                    color: const Color(0xFF0B57D0),
+                    width: 13,
+                    jointType: JointType.round,
+                    startCap: Cap.roundCap,
+                    endCap: Cap.roundCap,
+                  ),
                   Polyline(
                     polylineId: const PolylineId('nav-route'),
                     points: _roadPath.map((p) => LatLng(p.lat, p.lng)).toList(),
-                    color: c.primaryStrong,
-                    width: 7,
+                    color: const Color(0xFF22D3EE),
+                    width: 8,
+                    zIndex: 1,
+                    jointType: JointType.round,
+                    startCap: Cap.roundCap,
+                    endCap: Cap.roundCap,
                   ),
+                ],
               },
+              // Google's standard red pin at the destination; the rider is the blue navigation arrow.
               markers: {
-                if (destIcon != null)
+                if (fix != null && _riderIcon != null)
                   Marker(
-                    markerId: const MarkerId('destination'),
-                    position: LatLng(t.lat, t.lng),
-                    icon: destIcon,
-                    anchor: const Offset(0.5, 1),
-                    consumeTapEvents: true,
-                  ),
-                if (fix != null && driverIcon != null)
-                  Marker(
-                    markerId: const MarkerId('driver'),
+                    markerId: const MarkerId('rider'),
                     position: LatLng(fix.lat, fix.lng),
-                    icon: driverIcon,
+                    icon: _riderIcon!,
                     anchor: const Offset(0.5, 0.5),
                     // Flat + heading rotation: with the camera bearing on the heading,
                     // the arrow points up on screen.
                     flat: true,
                     rotation: _lastHeading ?? 0,
                     zIndexInt: 10,
-                    consumeTapEvents: true,
                   ),
+                Marker(
+                  markerId: const MarkerId('destination'),
+                  position: LatLng(t.lat, t.lng),
+                  infoWindow: InfoWindow(title: t.label, snippet: t.address.trim().isEmpty ? null : t.address),
+                ),
               },
             ),
           ),
@@ -526,25 +608,98 @@ class _NavigationScreenState extends State<NavigationScreen> with MarkerIconMixi
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Material(
-                    color: c.inverse,
-                    shape: const CircleBorder(),
-                    elevation: 4,
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      onTap: _openGoogleMaps,
-                      child: Tooltip(
-                        message: tr('Open in Google Maps'),
-                        child: SizedBox(
-                          width: 56,
-                          height: 56,
-                          child: Icon(Icons.directions_rounded, color: c.primary, size: 28),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    // Shown after the rider pans the map away from the arrow.
+                    if (!_following)
+                      Material(
+                        color: Colors.black.withValues(alpha: 0.92),
+                        shape: const StadiumBorder(),
+                        elevation: 4,
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: _recenter,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.navigation_rounded, color: Color(0xFF4C8DFF), size: 20),
+                                const SizedBox(width: 8),
+                                Text(
+                                  tr('Re-center'),
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
+                    const Spacer(),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Zoom controls (the native ones are off so they sit with our buttons).
+                        Material(
+                          color: c.inverse,
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(BcRadius.full),
+                          clipBehavior: Clip.antiAlias,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              InkWell(
+                                onTap: () => _zoomBy(true),
+                                child: Tooltip(
+                                  message: tr('Zoom in'),
+                                  child: SizedBox(
+                                    width: 48,
+                                    height: 48,
+                                    child: Icon(Icons.add_rounded, color: c.primary, size: 26),
+                                  ),
+                                ),
+                              ),
+                              Container(width: 24, height: 1, color: c.primary.withValues(alpha: 0.3)),
+                              InkWell(
+                                onTap: () => _zoomBy(false),
+                                child: Tooltip(
+                                  message: tr('Zoom out'),
+                                  child: SizedBox(
+                                    width: 48,
+                                    height: 48,
+                                    child: Icon(Icons.remove_rounded, color: c.primary, size: 26),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Material(
+                          color: c.inverse,
+                          shape: const CircleBorder(),
+                          elevation: 4,
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: _openGoogleMaps,
+                            child: Tooltip(
+                              message: tr('Open in Google Maps'),
+                              child: SizedBox(
+                                width: 56,
+                                height: 56,
+                                child: Icon(Icons.directions_rounded, color: c.primary, size: 28),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
+                  ],
                 ),
                 if (a != null) ...[const SizedBox(height: 12), _NavActionRow(action: a)],
               ],
@@ -658,75 +813,4 @@ class _NavActionRow extends StatelessWidget {
         );
     }
   }
-}
-
-class _DestinationPinPainter extends CustomPainter {
-  _DestinationPinPainter(this.fill);
-  final Color fill;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final r = size.width / 2 - 3;
-    final cy = r + 3;
-    final paint = Paint()..color = fill;
-    canvas.drawPath(
-      Path()
-        ..moveTo(cx - r * 0.62, cy + r * 0.62)
-        ..lineTo(cx, size.height)
-        ..lineTo(cx + r * 0.62, cy + r * 0.62)
-        ..close(),
-      paint,
-    );
-    canvas.drawCircle(Offset(cx, cy), r, paint);
-    canvas.drawCircle(
-      Offset(cx, cy),
-      r,
-      Paint()
-        ..color = Colors.white
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
-    );
-    canvas.drawCircle(Offset(cx, cy), r * 0.34, Paint()..color = Colors.white);
-  }
-
-  @override
-  bool shouldRepaint(covariant _DestinationPinPainter old) => old.fill != fill;
-}
-
-/// Pulse ring plus an upward arrowhead; a plain dot until a heading is known.
-class _NavArrowPainter extends CustomPainter {
-  _NavArrowPainter(this.t, this.color, this.hasHeading);
-  final double t;
-  final Color color;
-  final bool hasHeading;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = size.center(Offset.zero);
-    canvas.drawCircle(c, 8 + 10 * t, Paint()..color = color.withValues(alpha: (1 - t) * 0.35));
-    if (hasHeading) {
-      const s = 13.0;
-      final arrow = Path()
-        ..moveTo(c.dx, c.dy - s)
-        ..lineTo(c.dx - s * 0.62, c.dy + s * 0.55)
-        ..lineTo(c.dx, c.dy + s * 0.18)
-        ..lineTo(c.dx + s * 0.62, c.dy + s * 0.55)
-        ..close();
-      canvas.drawPath(arrow, Paint()..color = color);
-      canvas.drawPath(
-        arrow,
-        Paint()
-          ..color = Colors.white
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5,
-      );
-    } else {
-      canvas.drawCircle(c, 5.5, Paint()..color = color.withValues(alpha: 0.9));
-      canvas.drawCircle(c, 2.25, Paint()..color = Colors.white);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _NavArrowPainter old) => true;
 }

@@ -15,7 +15,7 @@ class TermsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final terms = [
-      tr('You must be an approved QuickDrop rider, registered by your branch, to use this app. Your account is personal: do not share your sign-in or let anyone else ride on it.'),
+      tr('You must be an approved Bring It rider, registered by your branch, to use this app. Your account is personal: do not share your sign-in or let anyone else ride on it.'),
       tr('Keep your mobile number, name and vehicle details up to date and accurate.'),
       tr('Deliver orders carefully and on time, treat customers and branch staff with respect, and follow the road rules and safety guidance at all times.'),
       tr('Never open, tamper with or keep an order, and report any problem with an order from the app straight away.'),

@@ -2,7 +2,7 @@
 /// `{name}` placeholders must be kept as-is.
 const Map<String, String> zhStrings = {
   // App shell & navigation
-  'QuickDrop Rider': 'QuickDrop 骑手',
+  'Bring It Rider': 'Bring It 骑手',
   'Lock the app': '锁定应用',
   'Immediately': '立即',
   'After 1 minute': '1 分钟后',
@@ -76,7 +76,7 @@ const Map<String, String> zhStrings = {
   'Appearance': '外观',
   'Branch management': '分店管理',
   'Breakdown status': '故障状态',
-  'Contact the QuickDrop support team': '联系 QuickDrop 客服团队',
+  'Contact the Bring It support team': '联系 Bring It 客服团队',
   'Current shift': '当前班次',
   'Delivery streak': '连续配送',
   'Duty': '值班',
@@ -94,7 +94,7 @@ const Map<String, String> zhStrings = {
   'Log out': '退出登录',
   'Log out?': '退出登录？',
   'Manage': '管理',
-  'Managed by QuickDrop. Contact support to change these details.': '这些信息由 QuickDrop 管理，如需更改请联系客服。',
+  'Managed by Bring It. Contact support to change these details.': '这些信息由 Bring It 管理，如需更改请联系客服。',
   'Name and profile photo': '姓名和头像',
   'Needed for alerts while the app is in the background.': '应用在后台时接收提醒需要此权限。',
   'New job alerts always open full screen, even when sound is off.': '新订单提醒始终全屏显示，即使已关闭声音。',
@@ -186,7 +186,7 @@ const Map<String, String> zhStrings = {
   'Light vibration on taps and toggles': '点按和切换开关时轻微震动',
   'Job alert reliability': '提醒可靠性',
   'Background running, full-screen alerts and more': '后台运行、全屏提醒等',
-  'Needed for alerts while QuickDrop is in the background.': 'QuickDrop 在后台时接收提醒所需。',
+  'Needed for alerts while Bring It is in the background.': 'Bring It 在后台时接收提醒所需。',
   'Unlock with biometrics or your PIN': '使用生物识别或 PIN 码解锁',
   'App Preferences': '应用偏好',
   'Keep screen on during deliveries': '配送期间保持屏幕常亮',
@@ -212,7 +212,7 @@ const Map<String, String> zhStrings = {
   "YOU'LL EARN": '您将赚取',
   'DROP-OFFS': '送达地点',
   'Estimated time': '预计时间',
-  'You must be an approved QuickDrop rider, registered by your branch, to use this app. Your account is personal: do not share your sign-in or let anyone else ride on it.': '您必须是由所属门店注册的 QuickDrop 认证骑手才能使用本应用。账户仅限本人使用：请勿分享您的登录信息，也不要让他人使用您的账户。',
+  'You must be an approved Bring It rider, registered by your branch, to use this app. Your account is personal: do not share your sign-in or let anyone else ride on it.': '您必须是由所属门店注册的 Bring It 认证骑手才能使用本应用。账户仅限本人使用：请勿分享您的登录信息，也不要让他人使用您的账户。',
   'Keep your mobile number, name and vehicle details up to date and accurate.': '请保持您的手机号码、姓名和车辆信息准确并及时更新。',
   'Deliver orders carefully and on time, treat customers and branch staff with respect, and follow the road rules and safety guidance at all times.': '请谨慎、准时配送订单，尊重客户和门店员工，并始终遵守交通规则和安全指引。',
   'Never open, tamper with or keep an order, and report any problem with an order from the app straight away.': '切勿打开、篡改或私自留存订单，如订单有任何问题，请立即在应用中上报。',
@@ -429,9 +429,9 @@ const Map<String, String> zhStrings = {
   'Turn these on to keep receiving and tracking rides.': '请开启以下功能，以继续接收和追踪行程。',
   'Turn on GPS': '开启 GPS',
   'Agree & allow location': '同意并允许定位',
-  'How QuickDrop Rider uses your location': 'QuickDrop 骑手如何使用您的位置',
-  'QuickDrop Rider collects your location while you are on duty, even when the app is closed or not in use, to:':
-      '您在岗期间，即使应用已关闭或未在使用，QuickDrop 骑手也会收集您的位置，用于：',
+  'How Bring It Rider uses your location': 'Bring It 骑手如何使用您的位置',
+  'Bring It Rider collects your location while you are on duty, even when the app is closed or not in use, to:':
+      '您在岗期间，即使应用已关闭或未在使用，Bring It 骑手也会收集您的位置，用于：',
   'send you new delivery jobs from your branch': '向您推送所在门店的新配送任务',
   'show dispatch and customers your live position during a delivery': '配送期间向调度和顾客显示您的实时位置',
   'confirm pickup at the branch and drop-off at each stop': '确认在门店取货及在各站点送达',
@@ -506,7 +506,7 @@ const Map<String, String> zhStrings = {
   'Good morning,': '早上好，',
   'Good afternoon,': '下午好，',
   'Good evening,': '晚上好，',
-  'QuickDrop rider': 'QuickDrop 骑手',
+  'Bring It rider': 'Bring It 骑手',
   'Branch': '门店',
   'You are': '您当前',
   'Online': '在线',
@@ -713,7 +713,7 @@ const Map<String, String> zhStrings = {
   'Sri Lankan mobile, e.g. 077 123 4567': '斯里兰卡手机号码，例如 077 123 4567',
   'Sending code…': '正在发送验证码…',
   'Send code': '发送验证码',
-  'Only registered QuickDrop riders can sign in.': '仅限已注册的QuickDrop 骑手登录。',
+  'Only registered Bring It riders can sign in.': '仅限已注册的Bring It 骑手登录。',
   'Could not send the code. Please try again.': '验证码发送失败，请重试。',
   'Request a new code': '请重新获取验证码',
   'Incorrect or expired code': '验证码错误或已过期',
@@ -728,7 +728,7 @@ const Map<String, String> zhStrings = {
   'Resend code': '重新发送验证码',
   'Change mobile number': '更换手机号码',
   'Hmm, no match': '未找到匹配',
-  'This number is not linked to a QuickDrop rider account.': '此号码未关联QuickDrop 骑手账户。',
+  'This number is not linked to a Bring It rider account.': '此号码未关联Bring It 骑手账户。',
   'Rider Not Found': '未找到骑手',
   "We couldn't find a rider registered with this mobile number. Please check the number, or contact customer care if you think this is a mistake.":
       '未找到使用此手机号码注册的骑手。请检查号码；如您认为有误，请联系客服。',
@@ -767,7 +767,7 @@ const Map<String, String> zhStrings = {
   'Too many attempts. Try again later or sign in with your mobile number.': '尝试次数过多。请稍后重试或使用手机号码登录。',
   'Set up a fingerprint or face unlock in your phone settings first.': '请先在手机设置中设置指纹或面容解锁。',
   'Could not verify. Please try again.': '无法验证，请重试。',
-  'Unlock QuickDrop Rider': '解锁QuickDrop 骑手',
+  'Unlock Bring It Rider': '解锁Bring It 骑手',
   'Confirm it is you': '确认是您本人',
   'Welcome back!': '欢迎回来！',
   'Welcome back, {name}!': '欢迎回来，{name}！',
@@ -878,11 +878,11 @@ const Map<String, String> zhStrings = {
   'Allow background running': '允许后台运行',
   'Full-Screen Ride Alerts': '全屏行程提醒',
   'Quick Action Bubble': '快捷悬浮球',
-  'Off. No floating QuickDrop bubble when you leave the app.': '已关闭。离开应用时不显示 QuickDrop 悬浮球。',
-  'On. When you leave the app, a floating QuickDrop bubble stays on screen. Tap it to return, drag it anywhere, or drop it on ✕ to hide it.':
-      '已开启。离开应用后，屏幕上会显示 QuickDrop 悬浮球。点按返回应用，可拖动到任意位置，拖到 ✕ 即可隐藏。',
-  'Allow "Display over other apps" so the floating QuickDrop bubble can show when you leave the app.':
-      '请允许“显示在其他应用上层”，以便离开应用时显示 QuickDrop 悬浮球。',
+  'Off. No floating Bring It bubble when you leave the app.': '已关闭。离开应用时不显示 Bring It 悬浮球。',
+  'On. When you leave the app, a floating Bring It bubble stays on screen. Tap it to return, drag it anywhere, or drop it on ✕ to hide it.':
+      '已开启。离开应用后，屏幕上会显示 Bring It 悬浮球。点按返回应用，可拖动到任意位置，拖到 ✕ 即可隐藏。',
+  'Allow "Display over other apps" so the floating Bring It bubble can show when you leave the app.':
+      '请允许“显示在其他应用上层”，以便离开应用时显示 Bring It 悬浮球。',
   'Allow display over other apps': '允许显示在其他应用上层',
   'Allowed. Incoming jobs can ring over the lock screen immediately.': '已允许。新任务可立即在锁屏上响铃。',
   'Off. New rides will NOT show over the lock screen, only as a small notification. Turn on so you never miss a ride.': '已关闭。新订单不会在锁屏上全屏显示，只会显示为小通知。请开启，以免错过订单。',
@@ -890,13 +890,13 @@ const Map<String, String> zhStrings = {
   'Enabled': '已开启',
   'Allow full-screen alerts': '允许全屏提醒',
   'System Notification Sounds': '系统通知声音',
-  'Ensure QuickDrop notification channels are set to High Priority with sound.': '请确保QuickDrop通知渠道设置为高优先级并开启声音。',
+  'Ensure Bring It notification channels are set to High Priority with sound.': '请确保Bring It通知渠道设置为高优先级并开启声音。',
   'Open app notification settings': '打开应用通知设置',
   'iPhone tips': 'iPhone 提示',
   'Device tips': '设备提示',
   'Xiaomi, Redmi & Samsung Devices': '小米、红米和三星设备',
-  '1. Allow notifications and Time Sensitive alerts.\n2. Keep Background App Refresh on for QuickDrop.\n3. Set Location to "Always" while delivering.':
-      '1. 允许通知和时效性提醒。\n2. 为QuickDrop保持“后台App刷新”开启。\n3. 配送时将定位设置为“始终”。',
+  '1. Allow notifications and Time Sensitive alerts.\n2. Keep Background App Refresh on for Bring It.\n3. Set Location to "Always" while delivering.':
+      '1. 允许通知和时效性提醒。\n2. 为Bring It保持“后台App刷新”开启。\n3. 配送时将定位设置为“始终”。',
   '1. Enable \'Autostart\' in Security / App Info.\n2. Set Battery Saver to \'No restrictions\'.\n3. Lock the app in Recent Apps so the OS does not kill it.':
       '1. 在“安全 / 应用信息”中开启“自启动”。\n2. 将省电策略设为“无限制”。\n3. 在最近任务中锁定应用，防止系统将其关闭。',
   'Action needed': '需要处理',

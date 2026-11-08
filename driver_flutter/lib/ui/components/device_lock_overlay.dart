@@ -145,7 +145,7 @@ class _DeviceLockOverlayState extends State<DeviceLockOverlay> with SingleTicker
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        tr('QuickDrop Rider'),
+                        tr('Bring It Rider'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: c.foreground, fontSize: 15, fontWeight: FontWeight.w800),
@@ -327,7 +327,7 @@ class _LocationDisclosureState extends State<_LocationDisclosure> {
         const SizedBox(height: 8),
         Text(
           tr(
-            'QuickDrop Rider collects your location while you are on duty, '
+            'Bring It Rider collects your location while you are on duty, '
             'even when the app is closed or not in use, to:',
           ),
           style: body,
@@ -363,7 +363,7 @@ class _LocationDisclosureState extends State<_LocationDisclosure> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        tr('How QuickDrop Rider uses your location'),
+                        tr('How Bring It Rider uses your location'),
                         style: TextStyle(color: c.foreground, fontSize: 15, fontWeight: FontWeight.w700),
                       ),
                     ),

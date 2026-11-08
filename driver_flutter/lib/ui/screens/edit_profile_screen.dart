@@ -187,7 +187,7 @@ class _EditBodyState extends State<_EditBody> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      tr('Managed by QuickDrop. Contact support to change these details.'),
+                      tr('Managed by Bring It. Contact support to change these details.'),
                       style: TextStyle(fontSize: 13, color: c.mutedForeground, height: 1.4),
                     ),
                   ),

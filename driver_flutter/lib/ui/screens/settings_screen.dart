@@ -245,7 +245,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
             _Row(
               icon: Icons.smartphone_rounded,
               title: tr('Notification permission'),
-              subtitle: tr('Needed for alerts while QuickDrop is in the background.'),
+              subtitle: tr('Needed for alerts while Bring It is in the background.'),
               trailing: QdBadge(permLabel, tone: permTone, dot: true),
               onTap: _notif == null ? null : _requestPermission,
             ),
