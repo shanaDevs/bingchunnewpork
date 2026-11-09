@@ -26,6 +26,7 @@ import {
 } from './commission';
 
 let appSchemaReady = false;
+let appSettingsColumnsReady = false;
 
 /** Ensures optional app_settings columns exist before raw SQL writes (dev DBs may skip boot patches). */
 async function ensureAppSettingsColumnForWrite(column: string, columnDef: string): Promise<void> {
@@ -37,6 +38,54 @@ async function ensureAppSettingsColumnForWrite(column: string, columnDef: string
   await prisma.$executeRawUnsafe(
     `ALTER TABLE ${tableRef} ADD COLUMN IF NOT EXISTS ${quoted} ${pgColumnDef(columnDef)}`,
   );
+}
+
+/** Prisma findUnique on AppSetting selects every field; keep these present even when boot patches are off. */
+const APP_SETTINGS_COLUMNS: ReadonlyArray<[string, string]> = [
+  ['googleMapsApiKey', 'VARCHAR(256) NULL'],
+  ['commissionSlabsJson', 'JSON NULL'],
+  ['pickupConvenientFeeRate', 'DOUBLE PRECISION NOT NULL DEFAULT 0.06'],
+  ['gatewayFeeRate', 'DOUBLE PRECISION NOT NULL DEFAULT 0.019'],
+  ['deliveryPlatformFeeRate', 'DOUBLE PRECISION NOT NULL DEFAULT 0'],
+  ['pickupAllowAddItemsPaidOnline', 'BOOLEAN NOT NULL DEFAULT true'],
+  ['pickupAllowEditCashUnpaid', 'BOOLEAN NOT NULL DEFAULT true'],
+  ['maxCupsPerRider', 'INT NOT NULL DEFAULT 20'],
+  ['deliveryMilestone1Orders', 'INT NOT NULL DEFAULT 50'],
+  ['deliveryMilestone2Orders', 'INT NOT NULL DEFAULT 150'],
+  ['deliveryMilestone3Orders', 'INT NOT NULL DEFAULT 300'],
+  ['requireAppDownload', 'BOOLEAN NOT NULL DEFAULT true'],
+  ['androidStoreUrl', 'VARCHAR(512) NULL'],
+  ['iosStoreUrl', 'VARCHAR(512) NULL'],
+  ['androidAppIconUrl', 'VARCHAR(512) NULL'],
+  ['iosAppIconUrl', 'VARCHAR(512) NULL'],
+  ['spinDurationSeconds', 'INT NOT NULL DEFAULT 8'],
+  ['spinsPerWindow', 'INT NOT NULL DEFAULT 1'],
+  ['spinWindowHours', 'INT NOT NULL DEFAULT 24'],
+  ['spinTrackByIp', 'BOOLEAN NOT NULL DEFAULT true'],
+  ['spinEnabled', 'BOOLEAN NOT NULL DEFAULT true'],
+  ['spinFirstOrderOnly', 'BOOLEAN NOT NULL DEFAULT false'],
+  ['spinRequireLogin', 'BOOLEAN NOT NULL DEFAULT false'],
+  ['spinDaysOfWeekJson', 'JSON NULL'],
+  ['spinTimeStart', 'VARCHAR(5) NULL'],
+  ['spinTimeEnd', 'VARCHAR(5) NULL'],
+  ['spinStartsAt', 'TIMESTAMP(3) NULL'],
+  ['spinExpiresAt', 'TIMESTAMP(3) NULL'],
+  ['spinMaxPerDay', 'INT NULL'],
+  ['spinMaxPerCustomer', 'INT NULL'],
+  ['spinDisplayJson', 'JSON NULL'],
+  ['spinCriteriaJson', 'JSON NULL'],
+  ['cancelWindowMinutes', 'INT NOT NULL DEFAULT 10'],
+  ['weeklyResetDay', 'INT NULL'],
+  ['pickupMaxOrderAmount', 'INT NULL'],
+  ['branchCompletionRadiusM', 'INT NOT NULL DEFAULT 100'],
+];
+
+async function ensureAppSettingsColumnsForPrisma(): Promise<void> {
+  if (appSettingsColumnsReady) return;
+  for (const [column, columnDef] of APP_SETTINGS_COLUMNS) {
+    await ensureAppSettingsColumnForWrite(column, columnDef);
+  }
+  appSettingsColumnsReady = true;
 }
 
 async function ensureDeliveryZonesTable(): Promise<void> {
@@ -59,8 +108,9 @@ async function ensureDeliveryZonesTable(): Promise<void> {
 }
 
 export async function ensureAppSchema(): Promise<void> {
-  // Prisma selects every AppSetting field; ensure columns exist even when full runtime patches are skipped.
-  await ensureAppSettingsColumnForWrite('googleMapsApiKey', 'VARCHAR(256) NULL');
+  // Prisma selects every AppSetting field; ensure columns exist even when full runtime patches are skipped
+  // (local .env often sets RUNTIME_SCHEMA_PATCHES=false against the remote DB).
+  await ensureAppSettingsColumnsForPrisma();
 
   if (appSchemaReady) return;
   // Non-core surfaces must not run DDL on the request path (pool exhaustion / locks).

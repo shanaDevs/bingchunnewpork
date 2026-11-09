@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type Ref } from "react";
 import { Container } from "@/components/home-redesign/ui/Container";
 import { Wordmark } from "@/components/home-redesign/ui/Wordmark";
-import { mainNav } from "@/components/home-redesign/config/site";
+import { isCurrentNav, mainNav } from "@/components/home-redesign/config/site";
 import { cn } from "@/components/home-redesign/lib/cn";
 import { useHeaderState } from "@/components/home-redesign/hooks/useHeaderState";
 import { openOrderModal } from "@/components/order/SiteOrderPrompt";
@@ -40,9 +40,16 @@ const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 function readScroll() {
   const scrim = clamp01(window.scrollY / SCRIM_FADE_DISTANCE);
   const wave = document.querySelector('[data-hero="root"] [data-decor="wave"]');
-  if (!wave) return { scrim, onHero: 0 };
-  const { top, height } = wave.getBoundingClientRect();
-  return { scrim, onHero: clamp01((top + height * WAVE_CREST) / HEADER_HEIGHT) };
+  if (wave) {
+    const { top, height } = wave.getBoundingClientRect();
+    return { scrim, onHero: clamp01((top + height * WAVE_CREST) / HEADER_HEIGHT) };
+  }
+  const menuHero = document.querySelector('[data-menu-hero="root"]');
+  if (menuHero) {
+    const { bottom } = menuHero.getBoundingClientRect();
+    return { scrim, onHero: clamp01(bottom / HEADER_HEIGHT) };
+  }
+  return { scrim, onHero: 0 };
 }
 
 function subscribe(onChange: () => void) {
@@ -168,7 +175,7 @@ export function SiteHeader() {
             )}
           >
             {mainNav.map((item) => {
-              const isCurrent = item.href === pathname;
+              const isCurrent = isCurrentNav(item.href, pathname);
               return (
                 <li key={item.label}>
                   <Link
@@ -297,6 +304,7 @@ function HeaderActions({ onLight, menuOpen = false, inMenu = false, onMenuClick,
       <Link
         href="/cart"
         onClick={leaveMenu}
+        data-cart-target
         aria-label={cartCount > 0 ? `Cart, ${cartCount} ${cartCount === 1 ? "item" : "items"}` : "Cart"}
         className={cn(roundButton, "relative")}
       >

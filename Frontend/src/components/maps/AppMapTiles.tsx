@@ -160,45 +160,62 @@ async function loadGoogleMutantLayer(map: L.Map): Promise<L.Layer | null> {
   return googleMutant({ type: 'roadmap', maxZoom: 21 }).addTo(map);
 }
 
+/**
+ * Attach the Google basemap to a plain Leaflet map (or fall back to OSM).
+ * Returns a cleanup that removes the layer.
+ */
+export async function attachAppMapBasemap(
+  map: L.Map,
+  options?: { cancelled?: () => boolean },
+): Promise<() => void> {
+  let layer: L.Layer | null = null;
+  const cancelled = () => options?.cancelled?.() === true;
+
+  const useOsm = () => {
+    if (cancelled() || layer) return;
+    layer = L.tileLayer(OSM_URL, { attribution: OSM_ATTR, maxZoom: 19 }).addTo(map);
+  };
+
+  try {
+    const serverTiles = await readServerMapTiles();
+    if (cancelled()) return () => undefined;
+    if (serverTiles) {
+      layer = addGoogleTileLayer(map, serverTiles);
+    } else {
+      const mutantLayer = await loadGoogleMutantLayer(map);
+      if (cancelled()) return () => undefined;
+      if (mutantLayer) layer = mutantLayer;
+      else useOsm();
+    }
+  } catch (err) {
+    console.error('Google map basemap failed', err);
+    useOsm();
+  }
+
+  return () => {
+    if (layer) {
+      map.removeLayer(layer);
+      layer = null;
+    }
+  };
+}
+
 /** Basemap for every Leaflet map. Uses server map tiles, then Maps JS API, then OSM. */
 export default function AppMapTiles() {
   const map = useMap();
 
   useEffect(() => {
     let cancelled = false;
-    let layer: L.Layer | null = null;
+    let cleanup: (() => void) | undefined;
 
-    const useOsm = () => {
-      if (cancelled || layer) return;
-      layer = L.tileLayer(OSM_URL, { attribution: OSM_ATTR, maxZoom: 19 }).addTo(map);
-    };
-
-    void (async () => {
-      try {
-        const serverTiles = await readServerMapTiles();
-        if (cancelled) return;
-        if (serverTiles) {
-          layer = addGoogleTileLayer(map, serverTiles);
-          return;
-        }
-
-        const mutantLayer = await loadGoogleMutantLayer(map);
-        if (cancelled) return;
-        if (mutantLayer) {
-          layer = mutantLayer;
-          return;
-        }
-
-        useOsm();
-      } catch (err) {
-        console.error('Google map basemap failed', err);
-        useOsm();
-      }
-    })();
+    void attachAppMapBasemap(map, { cancelled: () => cancelled }).then((detach) => {
+      if (cancelled) detach();
+      else cleanup = detach;
+    });
 
     return () => {
       cancelled = true;
-      if (layer) map.removeLayer(layer);
+      cleanup?.();
     };
   }, [map]);
 

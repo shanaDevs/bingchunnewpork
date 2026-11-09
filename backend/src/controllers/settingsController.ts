@@ -272,8 +272,11 @@ export async function updateAdminMessagingSettings(req: Request, res: Response, 
 }
 
 export async function getAppSettings(_req: Request, res: Response, next: NextFunction) {
+  // Maps must still get a key even when other settings reads fail on a lagging schema.
+  let googleMapsApiKey = '';
   try {
     await ensureAppSchema();
+    googleMapsApiKey = await getGoogleMapsApiKey();
     const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, gatewayFeeRate, , branchCompletionRadiusM, commissionSlabs, pickupMaxOrderAmount] = await Promise.all([
       getConvenienceFeeRates(),
       prisma.appSetting.findUnique({ where: { id: 'default' } }),
@@ -322,9 +325,18 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       spinDisplay: spinSettings.display,
       cancelWindowMinutes,
       pickupMaxOrderAmount,
-      googleMapsApiKey: await getGoogleMapsApiKey(),
+      googleMapsApiKey,
     });
   } catch (err) {
+    if (googleMapsApiKey) {
+      return success(res, { googleMapsApiKey });
+    }
+    try {
+      googleMapsApiKey = await getGoogleMapsApiKey();
+      if (googleMapsApiKey) return success(res, { googleMapsApiKey });
+    } catch {
+      // fall through
+    }
     next(err);
   }
 }
