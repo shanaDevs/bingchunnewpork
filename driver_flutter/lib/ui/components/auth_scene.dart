@@ -5,9 +5,12 @@ import '../theme/bc_theme.dart';
 /// Sign-in scene (port of rider-city-scene.tsx): faint skyline with a TV tower, clouds and
 /// trees in translucent blues, a hill melting into the page colour, and the rider on top.
 class BcRiderCityScene extends StatelessWidget {
-  const BcRiderCityScene({super.key, this.height = 290});
+  const BcRiderCityScene({super.key, this.height = 290, this.onRiderTap});
 
   final double height;
+
+  /// Called when the rider mascot is tapped.
+  final VoidCallback? onRiderTap;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +37,11 @@ class BcRiderCityScene extends StatelessWidget {
                   child: Stack(
                     children: [
                       Positioned.fill(child: CustomPaint(painter: _ShadowPainter())),
-                      Image.asset('assets/images/rider_mascot.png', width: riderW, height: riderH, fit: BoxFit.contain),
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: onRiderTap,
+                        child: Image.asset('assets/images/rider_mascot.png', width: riderW, height: riderH, fit: BoxFit.contain),
+                      ),
                     ],
                   ),
                 ),

@@ -25,7 +25,13 @@ class AuthController extends ChangeNotifier {
   bool loading = false;
   bool checking = true;
   DriverSession? driver;
-  String? error;
+  String? _error;
+
+  /// Stored as the English text it was raised with and translated when read, so a message
+  /// already on screen follows a language switch (server messages without a translation
+  /// pass through unchanged).
+  String? get error => _error == null ? null : tr(_error!);
+  set error(String? value) => _error = value;
 
   bool get isAuthenticated => driver != null;
 

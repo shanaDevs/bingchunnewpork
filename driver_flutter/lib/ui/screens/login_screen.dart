@@ -28,6 +28,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _phone = TextEditingController();
   final _focus = FocusNode();
   int _logoTaps = 0;
+  int _mascotTaps = 0;
+  DateTime? _lastMascotTap;
   String? _lastError;
   String? _appSignature;
 
@@ -53,6 +55,21 @@ class _LoginScreenState extends State<LoginScreen> {
     _logoTaps++;
     if (_logoTaps >= 5) {
       _logoTaps = 0;
+      showBcDialog<void>(context, builder: (_) => const ServerUrlDialog());
+    }
+  }
+
+  /// Tap the rider mascot 3 times (within 2s of each other) to open the API-change dialog.
+  void _onMascotTap() {
+    final now = DateTime.now();
+    if (_lastMascotTap != null && now.difference(_lastMascotTap!) > const Duration(seconds: 2)) {
+      _mascotTaps = 0;
+    }
+    _lastMascotTap = now;
+    _mascotTaps++;
+    if (_mascotTaps >= 3) {
+      _mascotTaps = 0;
+      _lastMascotTap = null;
       showBcDialog<void>(context, builder: (_) => const ServerUrlDialog());
     }
   }
@@ -101,7 +118,7 @@ class _LoginScreenState extends State<LoginScreen> {
               subtitle: tr('Sign in with your mobile number to continue.'),
             ),
           ),
-          const BcRiderCityScene(),
+          BcRiderCityScene(onRiderTap: _onMascotTap),
         ],
       ),
       body: Column(
