@@ -367,6 +367,8 @@ model Store {
   deliveryOtpRequired Boolean     @default(false)
   /// Override for branch ride-completion geofence (meters). Null = use AppSetting default.
   completionRadiusM Int?
+  /// Exact Windows printer queue name for cup stickers on this branch PC (varies per store).
+  cupStickerPrinterName String?
   platformDiscountPaybackEnabled Boolean @default(false)
   /// Set when branch admin closes the branch; cleared on Open Branch. Blocks customer online orders.
   branchClosedAt   DateTime?

@@ -25,6 +25,7 @@ import { ensureMessagingSchema } from './lib/messagingSchema';
 import { ensureWhatsAppSettingsColumns } from './lib/messagingSettings';
 import { ensureSmsSettingsColumns } from './lib/smsSettings';
 import { ensureStoreOrderingHoursColumns } from './lib/storeOrderingSchema';
+import { ensureCupStickerStoreSettings } from './lib/cupStickerStoreSettings';
 import { ensureTakeawayQueueColumns, processPickupReminders, renumberTodayTokens } from './lib/takeawayQueue';
 import { logBackgroundJobDbError } from './utils/prismaErrors';
 import { ensurePaymentSettingsTables } from './lib/paymentSettings';
@@ -274,6 +275,7 @@ async function start() {
     await runPatch('whatsAppSettings', ensureWhatsAppSettingsColumns);
     await runPatch('smsSettings', ensureSmsSettingsColumns);
     await runPatch('storeOrderingHours', ensureStoreOrderingHoursColumns);
+    await runPatch('cupStickerStoreSettings', ensureCupStickerStoreSettings);
     await runPatch('jasonLedger', ensureJasonLedgerSchema);
     await runPatch('customerProfile', ensureCustomerProfileSchema);
     await runPatch('walletSecurityAudit', ensureWalletSecurityAuditLogTable);
