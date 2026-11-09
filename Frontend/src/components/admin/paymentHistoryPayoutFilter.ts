@@ -1,17 +1,19 @@
-import type { PayoutPeriodRow } from '@/components/admin/payoutPeriodTypes';
-
-export type { PayoutPeriodRow };
+/** Rows that carry a settlement billing window (payment history + period tables). */
+export type PayoutPeriodWindow = {
+  periodFrom: string;
+  periodTo: string;
+};
 
 /** True when the settlement billing window overlaps [from, to] (inclusive YMD). */
 export function payoutSettlementPeriodOverlaps(
-  row: PayoutPeriodRow,
+  row: PayoutPeriodWindow,
   from: string,
   to: string,
 ): boolean {
   return row.periodFrom <= to && row.periodTo >= from;
 }
 
-export function filterPayoutRowsForDisplay<T extends PayoutPeriodRow>(
+export function filterPayoutRowsForDisplay<T extends PayoutPeriodWindow>(
   payouts: T[],
   options: {
     periodControlled: boolean;
