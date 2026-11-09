@@ -33,6 +33,10 @@ import {
   getCupStickerJob,
   type CupStickerPayload,
 } from '../lib/cupStickerJobs';
+import {
+  getStoreCupStickerPrinterName,
+  setStoreCupStickerPrinterName,
+} from '../lib/cupStickerStoreSettings';
 
 const router = Router();
 
@@ -395,20 +399,57 @@ router.post(
   messagingAdminController.sendAdminMessagingReply,
 );
 
-router.get('/cup-sticker-agent/status', (_req, res) => {
+router.get('/cup-sticker-agent/status', async (req, res) => {
   const presence = getCupStickerAgentPresence();
+  const storeId =
+    (typeof req.query.storeId === 'string' && req.query.storeId) ||
+    (req as { user?: { storeId?: string | null } }).user?.storeId ||
+    null;
+  const printerName = storeId ? await getStoreCupStickerPrinterName(storeId) : '';
   res.json({
     success: true,
     data: {
       online: presence.online,
       lastSeenAt: presence.lastSeenAt,
+      storeId,
+      printerName,
       printerHint: 'Run tools/cup-sticker-agent/start.bat on the cashier PC',
     },
   });
 });
 
+/** Branch-wise cup-sticker printer queue name (Windows printer point). */
+router.get('/cup-sticker-settings', async (req, res) => {
+  const storeId =
+    (typeof req.query.storeId === 'string' && req.query.storeId) ||
+    (req as { user?: { storeId?: string | null } }).user?.storeId ||
+    null;
+  if (!storeId) {
+    res.status(400).json({ success: false, message: 'storeId required (branch account or ?storeId=)' });
+    return;
+  }
+  const printerName = await getStoreCupStickerPrinterName(storeId);
+  res.json({ success: true, data: { storeId, printerName } });
+});
+
+router.put('/cup-sticker-settings', async (req, res) => {
+  const storeId =
+    (typeof req.body?.storeId === 'string' && req.body.storeId.trim()) ||
+    (req as { user?: { storeId?: string | null } }).user?.storeId ||
+    null;
+  if (!storeId) {
+    res.status(400).json({ success: false, message: 'storeId required (branch account or body.storeId)' });
+    return;
+  }
+  const printerName = await setStoreCupStickerPrinterName(
+    storeId,
+    typeof req.body?.printerName === 'string' ? req.body.printerName : '',
+  );
+  res.json({ success: true, data: { storeId, printerName } });
+});
+
 /** Queue a cup-sticker print for the local Windows agent (polls /cup-sticker-agent/claim). */
-router.post('/cup-sticker-jobs', (req, res) => {
+router.post('/cup-sticker-jobs', async (req, res) => {
   const stickers = Array.isArray(req.body?.stickers) ? (req.body.stickers as CupStickerPayload[]) : [];
   if (stickers.length === 0) {
     res.status(400).json({ success: false, message: 'stickers array required' });
@@ -418,12 +459,23 @@ router.post('/cup-sticker-jobs', (req, res) => {
     (typeof req.body?.storeId === 'string' && req.body.storeId) ||
     (req as { user?: { storeId?: string | null } }).user?.storeId ||
     null;
-  const printerName =
-    (typeof req.body?.printerName === 'string' && req.body.printerName.trim()) || 'Xprinter XP-D35B';
+  const bodyPrinter =
+    typeof req.body?.printerName === 'string' ? req.body.printerName.trim() : '';
+  const storePrinter = storeId ? await getStoreCupStickerPrinterName(storeId) : '';
+  // Prefer the branch system setting; body is only a one-off override when setting is empty.
+  const printerName = storePrinter || bodyPrinter;
+  if (!printerName) {
+    res.status(400).json({
+      success: false,
+      message:
+        'No cup sticker printer name configured for this branch. Set it under Admin → Printer (exact Windows printer name).',
+    });
+    return;
+  }
   const job = enqueueCupStickerJob({ storeId, printerName, stickers });
   res.status(201).json({
     success: true,
-    data: { id: job.id, status: job.status, createdAt: job.createdAt },
+    data: { id: job.id, status: job.status, createdAt: job.createdAt, printerName },
   });
 });
 

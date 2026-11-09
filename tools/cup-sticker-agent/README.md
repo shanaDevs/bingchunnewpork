@@ -10,10 +10,10 @@ Instead:
 
 ## Setup (once per cashier PC)
 
-1. Plug in the Xprinter USB and confirm Windows shows **Xprinter XP-D35B** (or your model).
+1. Plug in the Xprinter USB and note the **exact Windows printer name** (`Get-Printer`).
 2. On **this same PC** (not the cloud server), double-click `start.bat`.
 3. Leave that window open. It should log `polling .../cup-sticker-agent/claim`.
-4. Open admin → **Settings → Printer** → status should turn green → **Test print**.
+4. Open admin → **Printer** → set **Printer name** to that exact Windows name (saved per branch) → **Test print**.
 
 ## Environment (optional)
 
@@ -31,6 +31,29 @@ start.bat
 
 ## Local endpoints (optional debug)
 
-- `GET  http://127.0.0.1:9177/health`
+- `GET  http://127.0.0.1:9177/health` — includes `printerReady` + `installedPrinters`
 - `POST http://127.0.0.1:9177/test`
 - `POST http://127.0.0.1:9177/print`
+
+## “Agent connected” but print fails
+
+Agent online only means cloud polling works. Printing still needs the **exact Windows printer name** on that cashier PC.
+
+On the cashier PC:
+
+```bat
+powershell -NoProfile -Command "Get-Printer | Format-Table Name, PrinterStatus -AutoSize"
+curl http://127.0.0.1:9177/health
+```
+
+If the name is not exactly `Xprinter XP-D35B` (extra space, different model, offline), either:
+
+1. Install/rename the driver so Windows shows `Xprinter XP-D35B`, or  
+2. Set the real name before start:
+
+```bat
+set BC_STICKER_PRINTER=Exact Name From Get-Printer
+start.bat
+```
+
+Also set the same name in admin → Settings → Printer.

@@ -126,13 +126,50 @@ if ($payload.printerName) { $PrinterName = [string]$payload.printerName }
 if ($payload.widthMm) { $WidthMm = [double]$payload.widthMm }
 if ($payload.heightMm) { $HeightMm = [double]$payload.heightMm }
 
-$probe = New-Object System.Drawing.Printing.PrintDocument
-$probe.PrinterSettings.PrinterName = $PrinterName
-if (-not $probe.PrinterSettings.IsValid) {
-  $probe.Dispose()
-  throw "Printer not found or not ready: $PrinterName"
+function Test-PrinterReady([string]$name) {
+  if ([string]::IsNullOrWhiteSpace($name)) { return $false }
+  $doc = New-Object System.Drawing.Printing.PrintDocument
+  try {
+    $doc.PrinterSettings.PrinterName = $name
+    return [bool]$doc.PrinterSettings.IsValid
+  } finally {
+    $doc.Dispose()
+  }
 }
-$probe.Dispose()
+
+function Resolve-CupStickerPrinter([string]$requested) {
+  $installed = @([System.Drawing.Printing.PrinterSettings]::InstalledPrinters)
+  if ($requested -and (Test-PrinterReady $requested)) { return $requested.Trim() }
+
+  $candidates = New-Object System.Collections.Generic.List[string]
+  if ($env:BC_STICKER_PRINTER) { [void]$candidates.Add([string]$env:BC_STICKER_PRINTER) }
+  foreach ($name in $installed) {
+    if ($name -match '(?i)xprinter|xp-d35') { [void]$candidates.Add([string]$name) }
+  }
+  # Windows printer may have been renamed (e.g. "bingchun") but still uses the Xprinter driver.
+  try {
+    $xpByDriver = @(Get-Printer | Where-Object { $_.DriverName -match '(?i)xprinter|xp-d35' } | Select-Object -ExpandProperty Name)
+    foreach ($name in $xpByDriver) { [void]$candidates.Add([string]$name) }
+  } catch {
+    # Get-Printer may be unavailable in some hosts; InstalledPrinters is enough.
+  }
+  [void]$candidates.Add('Xprinter XP-D35B')
+  [void]$candidates.Add('bingchun')
+
+  $seen = @{}
+  foreach ($name in $candidates) {
+    $key = $name.Trim()
+    if (-not $key -or $seen.ContainsKey($key)) { continue }
+    $seen[$key] = $true
+    if (Test-PrinterReady $key) { return $key }
+  }
+
+  $list = if ($installed.Count -gt 0) { ($installed | ForEach-Object { "'$_'" }) -join ', ' } else { '(none)' }
+  $wanted = if ($requested) { $requested } else { '(empty)' }
+  throw "Printer not found or not ready: '$wanted'. Installed printers: $list. Set admin Printer name / BC_STICKER_PRINTER to the exact Windows name."
+}
+
+$PrinterName = Resolve-CupStickerPrinter $PrinterName
 
 $paperW = ConvertTo-HundredthsInch $WidthMm
 $paperH = ConvertTo-HundredthsInch $HeightMm

@@ -3,29 +3,41 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Printer } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getAdminSession } from '@/lib/adminAuth';
 import {
   cupStickerAgentHealth,
-  getCupStickerPrinterName,
+  fetchCupStickerPrinterSettings,
   isCupStickerPrintingEnabled,
   printCupStickerTest,
-  setCupStickerPrinterName,
+  saveCupStickerPrinterSettings,
   setCupStickerPrintingEnabled,
 } from '@/lib/cupStickerPrint';
 
-/** Cashier control for the local Xprinter cup-sticker agent (this PC only). */
+/** Cashier control for the local Xprinter cup-sticker agent (branch system setting). */
 export default function CupStickerPrinterPanel({ compact = false }: { compact?: boolean }) {
   const [enabled, setEnabled] = useState(true);
-  const [printerName, setPrinterName] = useState('Xprinter XP-D35B');
+  const [printerName, setPrinterName] = useState('');
+  const [storeId, setStoreId] = useState<string | null>(null);
   const [agentOk, setAgentOk] = useState<boolean | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(async () => {
     setEnabled(isCupStickerPrintingEnabled());
-    setPrinterName(getCupStickerPrinterName());
+    const session = getAdminSession();
+    setStoreId(session?.storeId ?? null);
+    try {
+      const settings = await fetchCupStickerPrinterSettings(session?.storeId);
+      setPrinterName(settings.printerName);
+      setStoreId(settings.storeId);
+    } catch {
+      // Keep local field if settings API is briefly unavailable.
+    }
     const health = await cupStickerAgentHealth();
     setAgentOk(health.ok);
     setAgentError(health.ok ? null : health.error || 'Agent offline');
+    if (health.printer) setPrinterName(health.printer);
   }, []);
 
   useEffect(() => {
@@ -34,10 +46,28 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
     return () => window.clearInterval(id);
   }, [refresh]);
 
+  async function persistPrinterName(next: string) {
+    const trimmed = next.trim();
+    setSaving(true);
+    try {
+      const saved = await saveCupStickerPrinterSettings(trimmed, storeId);
+      setPrinterName(saved.printerName);
+      setStoreId(saved.storeId);
+      toast.success('Branch printer name saved');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to save printer name';
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function onTestPrint() {
     setBusy(true);
     try {
-      setCupStickerPrinterName(printerName);
+      if (printerName.trim()) {
+        await saveCupStickerPrinterSettings(printerName, storeId);
+      }
       await printCupStickerTest();
       toast.success('Test sticker sent to printer');
       setAgentOk(true);
@@ -84,13 +114,13 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
           type="text"
           value={printerName}
           onChange={(e) => setPrinterName(e.target.value)}
-          onBlur={() => setCupStickerPrinterName(printerName)}
+          onBlur={() => void persistPrinterName(printerName)}
           className="mb-2 w-full rounded-lg border border-navy-border bg-navy px-2.5 py-1.5 text-xs text-cream"
-          placeholder="Windows printer name"
+          placeholder="Windows printer name for this branch"
         />
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || saving}
           onClick={() => void onTestPrint()}
           className="btn-outline flex w-full items-center justify-center gap-2 px-3 py-2 text-xs font-semibold disabled:opacity-50"
         >
@@ -110,10 +140,10 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
             Cup sticker printer
           </h2>
           <p className="mt-1 text-xs text-muted max-w-2xl leading-relaxed">
-            On Accept, prints one sticker per cup (POS-#, OP-1001 pickup, OD-1001 delivery — last 4 of order #).
-            Run <code className="text-cream/80">tools/cup-sticker-agent/start.bat</code> on this cashier PC
-            (USB Xprinter). The online admin queues the job; the local agent pulls it and prints.
-            Keep the bat window open. Settings are stored in this browser.
+            Printer name is a branch system setting (each store can use a different Windows queue name). Run{' '}
+            <code className="text-cream/80">tools/cup-sticker-agent/start.bat</code> on this cashier PC
+            (USB sticker printer). The online admin queues the job; the local agent pulls it and prints.
+            Keep the bat window open.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-full border border-navy-border bg-navy px-3 py-1.5 text-xs">
@@ -151,26 +181,27 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
       </label>
 
       <div>
-        <label className="mb-1 block text-xs text-muted">Printer name (Windows printer point)</label>
+        <label className="mb-1 block text-xs text-muted">Printer name (Windows printer point for this branch)</label>
         <input
           type="text"
           value={printerName}
           onChange={(e) => setPrinterName(e.target.value)}
-          onBlur={() => setCupStickerPrinterName(printerName)}
+          onBlur={() => void persistPrinterName(printerName)}
           className="input-field"
-          placeholder="Xprinter XP-D35B"
+          placeholder="e.g. bingchun or Xprinter XP-D35B"
           autoComplete="off"
           spellCheck={false}
         />
         <p className="mt-2 text-[11px] text-muted">
-          Must match the exact printer name in Windows Settings → Printers (e.g. Xprinter XP-D35B on USB001).
+          Saved on this branch in system settings. Must match the exact name in Windows Settings → Printers
+          on the cashier PC. Run <code className="text-cream/80">Get-Printer</code> if unsure.
         </p>
       </div>
 
       <div className="flex flex-wrap gap-3">
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || saving}
           onClick={() => void onTestPrint()}
           className="btn-primary flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold disabled:opacity-50"
         >
@@ -179,7 +210,7 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
         </button>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || saving}
           onClick={() => void refresh()}
           className="btn-outline flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold disabled:opacity-50"
         >
