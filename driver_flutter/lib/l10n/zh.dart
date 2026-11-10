@@ -163,6 +163,8 @@ const Map<String, String> zhStrings = {
   'Accepted at': '接单时间',
   'Finished': '完成时间',
   'Ride started': '开始配送时间',
+  'No jobs in this shift': '此班次没有任务',
+  'Jobs you finish while on shift will be listed here.': '您在班次期间完成的任务将显示在这里。',
   'Returned to branch': '返回门店时间',
   'Time taken': '用时',
   'Orders ({n})': '订单（{n}）',
