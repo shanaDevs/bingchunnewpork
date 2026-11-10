@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ExternalLink, MapPin, X } from 'lucide-react';
+import AdminStopPinMap from '@/components/admin/AdminStopPinMap';
+import { toMapLatLng } from '@/lib/storeCoordinates';
 
 export type DeliveryLocationStop = {
   orderNumber: string;
@@ -20,17 +22,6 @@ function formatLocation(stop: DeliveryLocationStop): string {
 
 export function hasDeliveryMapLocation(stop: DeliveryLocationStop): boolean {
   return (stop.lat != null && stop.lng != null) || Boolean(formatLocation(stop));
-}
-
-function mapEmbedUrl(stop: DeliveryLocationStop): string | null {
-  const location = formatLocation(stop);
-  if (stop.lat != null && stop.lng != null) {
-    return `https://maps.google.com/maps?q=${stop.lat},${stop.lng}&z=16&output=embed`;
-  }
-  if (location) {
-    return `https://maps.google.com/maps?q=${encodeURIComponent(location)}&z=15&output=embed`;
-  }
-  return null;
 }
 
 function mapExternalUrl(stop: DeliveryLocationStop): string | null {
@@ -77,8 +68,9 @@ export default function AdminDeliveryLocationModal({ stop, onClose }: Props) {
   if (!portalReady) return null;
 
   const location = stop ? formatLocation(stop) : '';
-  const embedUrl = stop ? mapEmbedUrl(stop) : null;
+  const pin = stop ? toMapLatLng(stop.lat, stop.lng) : null;
   const externalUrl = stop ? mapExternalUrl(stop) : null;
+  const hasAnyLocation = Boolean(pin || location);
 
   return createPortal(
     <AnimatePresence>
@@ -120,34 +112,25 @@ export default function AdminDeliveryLocationModal({ stop, onClose }: Props) {
               </button>
             </div>
 
-            {embedUrl ? (
+            {pin ? (
               <div className="relative h-56 sm:h-64 bg-navy-light">
                 {externalUrl && (
                   <a
                     href={externalUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-lg border border-navy-border bg-white px-2.5 py-1.5 text-xs font-medium text-fg shadow-sm hover:bg-gray-50"
+                    className="absolute left-3 top-3 z-[1000] inline-flex items-center gap-1.5 rounded-lg border border-navy-border bg-white px-2.5 py-1.5 text-xs font-medium text-fg shadow-sm hover:bg-gray-50"
                   >
                     Open in Maps <ExternalLink size={12} />
                   </a>
                 )}
-                <iframe
-                  title={`Map for ${stop.orderNumber}`}
-                  src={embedUrl}
-                  width="100%"
-                  height="100%"
-                  style={{ border: 0 }}
-                  loading="lazy"
-                  allowFullScreen
-                  referrerPolicy="no-referrer-when-downgrade"
-                />
+                <AdminStopPinMap lat={pin.lat} lng={pin.lng} />
               </div>
-            ) : (
+            ) : !hasAnyLocation ? (
               <div className="flex h-40 items-center justify-center bg-navy-light px-5 text-center text-sm text-muted">
                 Map unavailable — no coordinates or address for this stop.
               </div>
-            )}
+            ) : null}
 
             <div className="space-y-3 px-5 py-4 text-sm">
               <div>

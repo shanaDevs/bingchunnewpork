@@ -602,13 +602,13 @@ export default function AdminDeliveryJobsTable({
 
   const paginationLabel = isCompleted ? 'Completed schedules pagination' : 'Active schedules pagination';
   const showCloseRideActions = hqCanCancelJobs && !isCompleted;
-  const tableColSpan = isCompleted ? 13 : showCloseRideActions ? 10 : 9;
+  const tableColSpan = isCompleted ? 13 : showCloseRideActions ? 11 : 10;
 
   return (
     <>
       {filterBar}
       <div className="overflow-x-auto rounded-xl border border-slate-200/60 shadow-sm bg-white">
-        <Table className={`w-full text-sm ${isCompleted ? 'min-w-[1650px]' : 'min-w-[1280px]'}`}>
+        <Table className={`w-full text-sm ${isCompleted ? 'min-w-[1650px]' : 'min-w-[1360px]'}`}>
           <TableHeader className="bg-[#f0f4f8]">
             <TableRow className="hover:bg-transparent border-b border-slate-200/80">
               <TableHead className="w-10 h-11" aria-hidden />
@@ -630,6 +630,7 @@ export default function AdminDeliveryJobsTable({
                 </>
               ) : (
                 <>
+                  <TableHead className="w-28 text-slate-600 font-semibold h-11">Ride ID</TableHead>
                   <TableHead className="min-w-[240px] text-slate-600 font-semibold h-11">Schedule</TableHead>
                   <TableHead className="w-32 text-slate-600 font-semibold h-11">Job status</TableHead>
                   <TableHead className="w-24 text-slate-600 font-semibold h-11">Orders</TableHead>
@@ -767,6 +768,11 @@ export default function AdminDeliveryJobsTable({
                       </>
                     ) : (
                       <>
+                        <TableCell className="py-3">
+                          <span className="font-mono text-sm text-blue-600 font-semibold whitespace-nowrap">
+                            {displayRideId(job.rideCode, job.id)}
+                          </span>
+                        </TableCell>
                         <TableCell className="py-3">
                           <p className="font-semibold text-slate-800 leading-snug">{formatDeliveryJobTitle(job.title)}</p>
                         </TableCell>
