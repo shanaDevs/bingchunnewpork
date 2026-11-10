@@ -129,15 +129,23 @@ class _DashboardBodyState extends State<_DashboardBody> with WidgetsBindingObser
   }
 
   Future<void> _complete() async {
+    final messenger = ScaffoldMessenger.of(context);
     final fix = _tracker.lastFix ?? await _tracker.getCurrentLocation();
     if (fix == null) {
-      await ensureLocationPermission();
+      if (await ensureLocationPermission()) {
+        BcFeedback.error();
+        messenger.showSnackBar(SnackBar(content: Text(tr("Couldn't get your location. Check GPS and try again."))));
+      }
       return;
     }
     final ok = await _vm.complete(widget.jobId, fix.lat, fix.lng);
-    if (ok && mounted) {
+    if (!mounted) return;
+    if (ok) {
       BcFeedback.completed();
       AppRoutes.popToHome(context);
+    } else {
+      BcFeedback.error();
+      messenger.showSnackBar(SnackBar(content: Text(_vm.error ?? tr('Failed to complete'))));
     }
   }
 

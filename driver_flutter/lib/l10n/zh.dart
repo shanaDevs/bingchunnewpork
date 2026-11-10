@@ -96,6 +96,7 @@ const Map<String, String> zhStrings = {
   'Manage': '管理',
   'Managed by Bring It. Contact support to change these details.': '这些信息由 Bring It 管理，如需更改请联系客服。',
   'Name and profile photo': '姓名和头像',
+  "Couldn't get your location. Check GPS and try again.": '无法获取您的位置，请检查 GPS 后重试。',
   'Profile photo': '头像',
   'Take photo': '拍照',
   'Choose from library': '从相册选择',
