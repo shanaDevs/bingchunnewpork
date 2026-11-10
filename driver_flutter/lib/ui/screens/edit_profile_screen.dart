@@ -15,11 +15,12 @@ import '../components/bc_dialog.dart';
 import '../components/driver_ops.dart';
 import '../components/inputs.dart';
 import '../components/profile_kit.dart';
+import '../components/profile_photo.dart';
 import '../components/qd_kit.dart';
 import '../theme/bc_theme.dart';
 
-/// Edit profile (QuickDrop profile/edit.tsx). The backend has no endpoint for name or
-/// photo, so the display name is stored on this device only. Everything else (identity,
+/// Edit profile (QuickDrop profile/edit.tsx). The display name is stored on this device
+/// only; the photo is uploaded to the rider account. Everything else (identity,
 /// vehicle, licence, ratings) is read-only here.
 class EditProfileScreen extends StatelessWidget {
   const EditProfileScreen({super.key});
@@ -146,9 +147,9 @@ class _EditBodyState extends State<_EditBody> {
         Center(
           child: Column(
             children: [
-              QdAvatar(name: _normalize(_name.text).isEmpty ? serverName : _normalize(_name.text), photoUrl: p?.profilePhotoUrl, size: 96),
+              EditableAvatar(name: _normalize(_name.text).isEmpty ? serverName : _normalize(_name.text), photoUrl: p?.profilePhotoUrl, size: 96),
               const SizedBox(height: 12),
-              QdBadge(tr('Photo and name changes stay on this phone'), tone: QdTone.neutral, icon: Icons.phone_android_rounded),
+              Text(tr('Tap the photo to change it'), style: TextStyle(fontSize: 13, color: c.mutedForeground)),
             ],
           ),
         ),
@@ -162,7 +163,7 @@ class _EditBodyState extends State<_EditBody> {
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 6),
-        QdFootnote(tr('There is no server option to change your name or photo yet. Your name is saved on this phone only.')),
+        QdFootnote(tr('Your name is saved on this phone only. Your photo is saved to your rider account.')),
         const SizedBox(height: 12),
         QdCard(
           muted: true,

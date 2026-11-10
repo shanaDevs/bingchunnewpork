@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
+
 import '../json.dart';
 import '../local/secure_store.dart';
 import '../models/driver.dart';
@@ -62,6 +64,17 @@ class AuthRepository {
 
   Future<DriverProfile> getMe() =>
       _api.call(() => _api.core.get<dynamic>('delivery/me'), (d) => DriverProfile.fromJson(asJson(d)));
+
+  /// Uploads a new profile photo; returns the stored photo URL.
+  Future<String> uploadProfilePhoto(String filePath) async {
+    final name = filePath.split(RegExp(r'[\/]')).last;
+    final form = FormData.fromMap({'profilePhoto': await MultipartFile.fromFile(filePath, filename: name)});
+    final res = await _api.call(
+      () => _api.core.patch<dynamic>('delivery/me/profile-photo', data: form),
+      (d) => asJson(d),
+    );
+    return str(res, 'profilePhotoUrl');
+  }
 
   Future<List<DriverShiftEntry>> getShiftHistory() =>
       _api.call(() => _api.core.get<dynamic>('delivery/me/shifts'), (d) => _list(d, DriverShiftEntry.fromJson));

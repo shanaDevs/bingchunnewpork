@@ -9,6 +9,7 @@ import '../../state/auth_controller.dart';
 import '../../state/jobs_controller.dart';
 import '../components/bc_dialog.dart';
 import '../components/profile_kit.dart';
+import '../components/profile_photo.dart';
 import '../components/qd_kit.dart';
 import '../components/tab_scaffold.dart';
 import '../theme/bc_theme.dart';
@@ -98,7 +99,7 @@ class _MeScreenState extends State<MeScreen> {
               padding: const EdgeInsets.all(14),
               child: Row(
                 children: [
-                  QdAvatar(name: name, photoUrl: profile?.profilePhotoUrl, size: 72),
+                  EditableAvatar(name: name, photoUrl: profile?.profilePhotoUrl, size: 72),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(

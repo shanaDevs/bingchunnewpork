@@ -72,6 +72,10 @@
 	<string>Bing Chun tracks your location during delivery runs so dispatch and customers can follow your route, and to unlock pickup and completion at the branch.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Bing Chun keeps tracking your active delivery run while the app is in the background.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Bing Chun uses the camera so you can take a profile photo.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Bing Chun lets you choose a profile photo from your library.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
