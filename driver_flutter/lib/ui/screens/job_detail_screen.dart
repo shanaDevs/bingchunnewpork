@@ -362,6 +362,9 @@ class _JobSummaryCard extends StatelessWidget {
         : tr('Delivery');
     final time = _time(job.assignedAt ?? job.startedAt ?? job.scheduledAt);
     final eyebrow = '${(job.isActive ? tr('Active job') : tr('Scheduled')).toUpperCase()}${time == null ? '' : ' · $time'}';
+    // While the route is loading, show a placeholder instead of the stored
+    // estimate (which can differ from the road route). If loading fails, fall back.
+    final routePending = route == null && context.select<JobDetailController, bool>((v) => v.routeLoading);
     final distance = route?.summary.totalDistanceKm ?? job.estimatedDistanceKm ?? 0;
     final minutes = route?.summary.estimatedMinutes ?? job.estimatedMinutes ?? 0;
     final ride = Format.rideIdLabel(job.rideCode, job.id).replaceFirst('·', '•');
@@ -475,8 +478,8 @@ class _JobSummaryCard extends StatelessWidget {
                 decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.15)))),
                 child: Row(
                   children: [
-                    stat(Format.km(distance), tr('Distance')),
-                    stat(Format.minutes(minutes), tr('Estimated time'), divider: true),
+                    stat(routePending ? '—' : Format.km(distance), tr('Distance')),
+                    stat(routePending ? '—' : Format.minutes(minutes), tr('Estimated time'), divider: true),
                     stat('$orderTotal', tr('Orders'), divider: true),
                   ],
                 ),

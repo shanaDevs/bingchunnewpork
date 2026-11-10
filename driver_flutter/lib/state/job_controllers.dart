@@ -46,11 +46,13 @@ class JobDetailController extends ChangeNotifier {
       final j = await _c.jobsRepository.getJob(jobId);
       loading = false;
       job = j;
+      final wantsRoute = j.isActive || j.canAssign || j.isHistorySnapshot;
+      // Flag the route as pending in the same frame the job appears, so the
+      // summary never flashes the stored estimate before the real route.
+      if (wantsRoute) routeLoading = true;
       _emit();
       if (j.isActive) _beginTracking(jobId);
-      if (j.isActive || j.canAssign || j.isHistorySnapshot) {
-        routeLoading = true;
-        _emit();
+      if (wantsRoute) {
         try {
           route = await _c.jobsRepository.getJobRoute(jobId, j);
         } catch (_) {}
