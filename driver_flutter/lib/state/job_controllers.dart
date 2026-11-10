@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/app_container.dart';
 import '../core/events.dart';
+import '../core/local_profile.dart';
 import '../core/offer_outcomes.dart';
 import '../data/models/delivery_job.dart';
 import '../data/models/delivery_route.dart';
@@ -198,10 +199,12 @@ class DashboardController extends ChangeNotifier {
   /// replacement. Throws a [StateError] with a message to show.
   Future<void> reportVehicleFailure(String jobId, String? note) async {
     final active = await _c.jobsRepository.getActiveJob();
-    if (active?.canReject ?? false) throw StateError(rejectJobBeforeFailureMessage);
+    final notRunning = breakdownBlockedMessage(active);
+    if (notRunning != null) throw StateError(notRunning);
     final fix = await _c.locationTracker.getCurrentLocation();
     if (fix == null) throw StateError(tr('Could not get your location. Enable GPS and try again.'));
     await _c.jobsRepository.reportVehicleFailure(fix.lat, fix.lng, note: note);
+    await LocalProfile.instance.recordBreakdown(note: note, jobId: jobId);
     await _c.alertService.stopTracking();
     JobRefreshBus.refresh(jobId);
     JobRefreshBus.dropRide(jobId);

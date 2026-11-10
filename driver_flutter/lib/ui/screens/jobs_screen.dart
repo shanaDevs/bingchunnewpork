@@ -9,6 +9,7 @@ import '../../core/alert_service.dart';
 import '../../core/app_container.dart';
 import '../../core/feedback.dart';
 import '../../core/format.dart';
+import '../../core/local_profile.dart';
 import '../../data/network/api_client.dart';
 import '../../data/models/delivery_job.dart';
 import '../../state/auth_controller.dart';
@@ -20,6 +21,7 @@ import '../components/job_cards.dart';
 import '../components/snack.dart';
 import '../components/qd_kit.dart';
 import '../theme/bc_theme.dart';
+import 'breakdown_screen.dart';
 import 'report_breakdown_screen.dart';
 import 'report_issue_sheet.dart';
 import 'job_sheets.dart';
@@ -224,6 +226,7 @@ class _JobsTabState extends State<JobsTab> {
                 )
               : const SizedBox(width: double.infinity),
         ),
+        const BreakdownBanner(),
         if (firstLoad)
           const BcJobsSkeleton()
         else if (fatalError)
@@ -235,12 +238,17 @@ class _JobsTabState extends State<JobsTab> {
           for (final job in active)
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
-              child: ActiveJobCard(
-                job: job,
-                detail: vm.activeJobDetail?.id == job.id ? vm.activeJobDetail : null,
-                onOpen: () => widget.onOpenJob(job),
-                onViewDetails: () => AppRoutes.openJobDetail(context, job.id),
-                onReportIssue: () => _openReportSheet(vm),
+              // Rebuilds when the rider cancels the breakdown so the button flips back.
+              child: ListenableBuilder(
+                listenable: LocalProfile.instance,
+                builder: (context, _) => ActiveJobCard(
+                  job: job,
+                  detail: vm.activeJobDetail?.id == job.id ? vm.activeJobDetail : null,
+                  onOpen: () => widget.onOpenJob(job),
+                  onViewDetails: () => AppRoutes.openJobDetail(context, job.id),
+                  onReportIssue: () => _openReportSheet(vm),
+                  onViewBreakdown: isBreakdownOpen(vm) ? () => openBreakdownStatus(context) : null,
+                ),
               ),
             ),
           if (active.isEmpty && scheduled.isEmpty) NoOtherJobsCard(isOnline: vm.isOnline),

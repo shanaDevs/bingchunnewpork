@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/app_container.dart';
 import '../core/events.dart';
+import '../core/local_profile.dart';
 import '../core/offer_outcomes.dart';
 import '../data/json.dart';
 import '../data/models/delivery_job.dart';
@@ -23,6 +24,26 @@ class ActiveJobCache {
 }
 
 const rejectJobBeforeFailureMessage = 'reject job if you want to remove the accepted job';
+
+/// Why a breakdown can't be reported yet, or null when the ride is running (server only
+/// accepts IN_PROGRESS / RETURNING rides). [active] is the rider's active job, if any.
+String? breakdownBlockedMessage(DeliveryJobDetail? active) {
+  if (active == null) return null; // let the server decide (job may be held elsewhere)
+  if (active.status == 'IN_PROGRESS' || active.status == 'RETURNING') {
+    // The server needs at least one stop still to deliver; with none left there is nothing
+    // to hand over (the rider only has to return to the branch).
+    if (active.orders.isNotEmpty && active.orders.every((o) => !o.isPending)) {
+      return tr('All stops on this ride are already finished, so there is nothing left to hand over. Return to the branch to complete it.');
+    }
+    return null;
+  }
+  if (active.canReject) {
+    return tr(
+      "You haven't picked up this ride's orders yet, so there is nothing to hand over. Reject the job instead if you can't do it.",
+    );
+  }
+  return tr('Start the delivery run first. A breakdown can only be reported once the ride is in progress.');
+}
 
 const _heldStatuses = {'IN_PROGRESS', 'ASSIGNED', 'RETURNING', 'QUEUED'};
 const _blockingStatuses = {'IN_PROGRESS', 'ASSIGNED', 'QUEUED'};
@@ -214,7 +235,8 @@ class JobsController extends ChangeNotifier {
   /// Driver's vehicle broke down mid-ride — flag it (with location) so admin can send a replacement.
   Future<void> reportVehicleFailure(String? note) async {
     final active = await _c.jobsRepository.getActiveJob();
-    if (active?.canReject ?? false) throw StateError(rejectJobBeforeFailureMessage);
+    final notRunning = breakdownBlockedMessage(active);
+    if (notRunning != null) throw StateError(notRunning);
     final fix = await _c.locationTracker.getCurrentLocation();
     if (fix == null) throw StateError(tr('Could not get your location. Enable GPS and try again.'));
     final activeJobId =
@@ -224,6 +246,7 @@ class JobsController extends ChangeNotifier {
             .firstOrNull
             ?.id;
     await _c.jobsRepository.reportVehicleFailure(fix.lat, fix.lng, note: note);
+    await LocalProfile.instance.recordBreakdown(note: note, jobId: activeJobId);
     if (activeJobId != null) {
       jobs = jobs.where((j) => j.id != activeJobId).toList();
       _emit();

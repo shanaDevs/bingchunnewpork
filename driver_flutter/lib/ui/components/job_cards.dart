@@ -293,10 +293,14 @@ class ActiveJobCard extends StatelessWidget {
     required this.onOpen,
     this.onViewDetails,
     this.onReportIssue,
+    this.onViewBreakdown,
   });
 
   final JobSummary job;
   final DeliveryJobDetail? detail;
+
+  /// Set while a breakdown is open: the primary action becomes "View breakdown status".
+  final VoidCallback? onViewBreakdown;
 
   /// Opens the live run (dashboard) — "Continue" and the next-stop panel.
   final VoidCallback onOpen;
@@ -504,12 +508,19 @@ class ActiveJobCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  PillButton(
-                    label: beforePickup ? tr('Navigate to pickup') : tr('Navigate'),
-                    icon: Icons.navigation_outlined,
-                    // Opens the in-app active run (map + route); its directions icon hands off to Google Maps.
-                    onTap: onOpen,
-                  ),
+                  if (onViewBreakdown != null)
+                    PillButton(
+                      label: tr('View breakdown status'),
+                      trailingIcon: Icons.arrow_forward_rounded,
+                      onTap: onViewBreakdown,
+                    )
+                  else
+                    PillButton(
+                      label: beforePickup ? tr('Navigate to pickup') : tr('Navigate'),
+                      icon: Icons.navigation_outlined,
+                      // Opens the in-app active run (map + route); its directions icon hands off to Google Maps.
+                      onTap: onOpen,
+                    ),
                   if (onReportIssue != null) ...[
                     const SizedBox(height: 12),
                     PillButton(

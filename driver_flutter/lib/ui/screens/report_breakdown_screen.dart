@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/app_container.dart';
 import '../../core/feedback.dart';
+import '../../data/network/api_exception.dart';
 import '../../l10n/l10n.dart';
 import '../../tracking/location_tracker.dart';
 import '../components/bc_dialog.dart';
@@ -81,7 +82,21 @@ class _ReportBreakdownScreenState extends State<ReportBreakdownScreen> {
 
   bool get _descriptionValid => _description.text.trim().length >= _minDescription;
 
+  /// Turns server/controller refusals into something a rider can act on.
+  String _friendlyError(Object e) {
+    final msg = errorMessage(e, tr('Could not report the breakdown. Try again.'));
+    final lower = msg.toLowerCase();
+    if (lower.contains('reject job')) {
+      return tr("You haven't picked up this ride's orders yet. Reject the job instead if you can't do it.");
+    }
+    if (lower.contains('no active delivery')) {
+      return tr('No delivery is in progress. Start your delivery run first, then report the breakdown.');
+    }
+    return msg;
+  }
+
   Future<void> _submit() async {
+    FocusScope.of(context).unfocus();
     setState(() => _attempted = true);
     if (_type == null || !_descriptionValid) {
       BcFeedback.error();
@@ -89,11 +104,17 @@ class _ReportBreakdownScreenState extends State<ReportBreakdownScreen> {
     }
     final confirmed = await showBcConfirm(
       context,
-      title: tr('Report breakdown?'),
+      title: tr('Report a Breakdown?'),
       message: widget.rideLabel != null
-          ? tr('Your active job {ride} will be reassigned to another rider.', {'ride': widget.rideLabel!})
-          : tr('Support will be told your location and send another rider.'),
+          ? tr(
+              "Support will assign another rider to take over {ride}. You won't receive new jobs until you're back on the road.",
+              {'ride': widget.rideLabel!},
+            )
+          : tr(
+              "Support will be told your location and send another rider. You won't receive new jobs until you're back on the road.",
+            ),
       confirmLabel: tr('Report breakdown'),
+      cancelLabel: tr('Cancel'),
       icon: Icons.warning_amber_rounded,
       tone: BcDialogTone.danger,
     );
@@ -111,7 +132,7 @@ class _ReportBreakdownScreenState extends State<ReportBreakdownScreen> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = e is StateError ? e.message : e.toString();
+        _error = _friendlyError(e);
       });
     }
   }
@@ -279,10 +300,6 @@ class _ReportBreakdownScreenState extends State<ReportBreakdownScreen> {
                       ],
                     ),
                   ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 12),
-                    RunNote(icon: Icons.error_outline_rounded, text: _error!, color: c.errorStrong),
-                  ],
                 ],
               ),
             ),
@@ -294,13 +311,24 @@ class _ReportBreakdownScreenState extends State<ReportBreakdownScreen> {
             border: Border(top: BorderSide(color: c.border)),
           ),
           padding: EdgeInsets.fromLTRB(10, 10, 10, 10 + MediaQuery.paddingOf(context).bottom),
-          child: PillButton(
-            label: tr('Report breakdown'),
-            icon: Icons.warning_amber_rounded,
-            kind: PillKind.error,
-            height: 56,
-            loading: _submitting,
-            onTap: _submit,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Shown next to the button so it is visible even with the keyboard open.
+              if (_error != null) ...[
+                RunNote(icon: Icons.error_outline_rounded, text: _error!, color: c.errorStrong),
+                const SizedBox(height: 10),
+              ],
+              PillButton(
+                label: tr('Report breakdown'),
+                icon: Icons.warning_amber_rounded,
+                kind: PillKind.error,
+                height: 56,
+                loading: _submitting,
+                onTap: _submit,
+              ),
+            ],
           ),
         ),
       ),

@@ -1050,4 +1050,34 @@ const Map<String, String> zhStrings = {
   'AVERAGE': '一般',
   'WARNING': '警告',
   'CRITICAL': '严重',
+
+  // Breakdown & Handover
+  'orders': '个订单',
+  'Breakdown & Handover': '故障与交接',
+  'Finding rider': '寻找骑手',
+  'Handover': '交接',
+  'Near': '靠近',
+  'Breakdown reported to support.': '故障已上报客服。',
+  "You won't receive new jobs until you're back on the road.": '在您恢复上路之前，将不会收到新的订单。',
+  "You're back on the road.": '您已恢复上路。',
+  'Cancel breakdown?': '取消故障上报？',
+  'Cancel breakdown': '取消故障上报',
+  'Keep report': '保留上报',
+  "You'll be marked as back on the road and can receive new jobs again.": '您将被标记为已恢复上路，并可重新接收新订单。',
+  'Report a Breakdown?': '上报车辆故障？',
+  "Support will assign another rider to take over {ride}. You won't receive new jobs until you're back on the road.":
+      '客服将安排另一位骑手接手 {ride}。在您恢复上路之前，将不会收到新的订单。',
+  "Support will be told your location and send another rider. You won't receive new jobs until you're back on the road.":
+      '客服将收到您的位置并派出另一位骑手。在您恢复上路之前，将不会收到新的订单。',
+  'Could not report the breakdown. Try again.': '无法上报故障，请重试。',
+  "You haven't picked up this ride's orders yet. Reject the job instead if you can't do it.":
+      '您尚未取走此行程的订单。如果无法完成，请改为拒绝该任务。',
+  "You haven't picked up this ride's orders yet, so there is nothing to hand over. Reject the job instead if you can't do it.":
+      '您尚未取走此行程的订单，因此没有可交接的内容。如果无法完成，请改为拒绝该任务。',
+  'No delivery is in progress. Start your delivery run first, then report the breakdown.':
+      '当前没有进行中的配送。请先开始配送，再上报故障。',
+  'Start the delivery run first. A breakdown can only be reported once the ride is in progress.':
+      '请先开始配送。只有行程进行中才能上报故障。',
+  'All stops on this ride are already finished, so there is nothing left to hand over. Return to the branch to complete it.':
+      '此行程的所有站点均已完成，没有需要交接的内容。请返回门店完成行程。',
 };
