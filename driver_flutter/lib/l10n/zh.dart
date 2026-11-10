@@ -315,6 +315,8 @@ const Map<String, String> zhStrings = {
   'There are no other branches to join right now.': '目前没有其他可加入的门店。',
   'Temporarily closed': '暂时关闭',
   'Choose a branch to join.': '请选择要加入的门店。',
+  'Search branches': '搜索门店',
+  'Required · at least {n} characters': '必填 · 至少 {n} 个字符',
   'Add a short reason (at least {n} characters).': '请添加简短原因（至少 {n} 个字符）。',
   'Navigate to order {n}': '导航至订单 {n}',
   'Slide to confirm delivery': '滑动确认送达',

@@ -33,7 +33,13 @@ class BranchRequestScreen extends StatefulWidget {
   final String? homeStoreId;
 
   /// Sends the request; throws on failure with a message to show.
-  final Future<void> Function(String type, String toStoreId, String? reason, String? fromStoreId) onSubmit;
+  final Future<void> Function(
+    String type,
+    String toStoreId,
+    String? reason,
+    String? fromStoreId,
+  )
+  onSubmit;
 
   /// Opens the screen; true once a request was sent.
   static Future<bool> open(
@@ -41,7 +47,13 @@ class BranchRequestScreen extends StatefulWidget {
     required List<StoreRef> assigned,
     required List<BranchOption> stores,
     required String? homeStoreId,
-    required Future<void> Function(String type, String toStoreId, String? reason, String? fromStoreId) onSubmit,
+    required Future<void> Function(
+      String type,
+      String toStoreId,
+      String? reason,
+      String? fromStoreId,
+    )
+    onSubmit,
   }) async {
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
@@ -62,32 +74,43 @@ class BranchRequestScreen extends StatefulWidget {
 
 class _BranchRequestScreenState extends State<BranchRequestScreen> {
   final _reason = TextEditingController();
+  final _search = TextEditingController();
+  String _query = '';
   String? _from;
   String? _to;
   bool _attempted = false;
   bool _submitting = false;
   String? _error;
 
-  late final Set<String> _assignedIds = widget.assigned.map((b) => b.id).where((id) => id.isNotEmpty).toSet();
+  late final Set<String> _assignedIds = widget.assigned
+      .map((b) => b.id)
+      .where((id) => id.isNotEmpty)
+      .toSet();
 
   /// Branches the rider isn't on yet; closed ones are listed but can't be chosen.
-  late final List<BranchOption> _others = widget.stores.where((s) => !_assignedIds.contains(s.id)).toList();
+  late final List<BranchOption> _others = widget.stores
+      .where((s) => !_assignedIds.contains(s.id))
+      .toList();
 
   @override
   void initState() {
     super.initState();
     final assigned = widget.assigned.where((b) => b.id.isNotEmpty).toList();
-    _from = assigned.any((b) => b.id == widget.homeStoreId) ? widget.homeStoreId : assigned.firstOrNull?.id;
+    _from = assigned.any((b) => b.id == widget.homeStoreId)
+        ? widget.homeStoreId
+        : assigned.firstOrNull?.id;
   }
 
   @override
   void dispose() {
     _reason.dispose();
+    _search.dispose();
     super.dispose();
   }
 
   bool get _reasonValid => _reason.text.trim().length >= _minReason;
-  bool get _chooseFrom => widget.assigned.where((b) => b.id.isNotEmpty).length > 1;
+  bool get _chooseFrom =>
+      widget.assigned.where((b) => b.id.isNotEmpty).length > 1;
 
   String _name(String? id) {
     for (final b in widget.assigned) {
@@ -111,17 +134,25 @@ class _BranchRequestScreenState extends State<BranchRequestScreen> {
     final confirmed = await showBcConfirm(
       context,
       title: tr('Request branch change?'),
-      message: tr('{from} → {to}. Your branches change only after support approves the request.', {
-        'from': _chooseFrom ? _name(_from) : tr('Your branches'),
-        'to': _name(_to),
-      }),
+      message: tr(
+        '{from} → {to}. Your branches change only after support approves the request.',
+        {
+          'from': _chooseFrom ? _name(_from) : tr('Your branches'),
+          'to': _name(_to),
+        },
+      ),
       confirmLabel: tr('Send request'),
       icon: Icons.swap_horiz_rounded,
     );
     if (!confirmed || !mounted) return;
     setState(() => _submitting = true);
     try {
-      await widget.onSubmit('ADD_BRANCH', _to!, _reason.text.trim(), _chooseFrom ? _from : null);
+      await widget.onSubmit(
+        'ADD_BRANCH',
+        _to!,
+        _reason.text.trim(),
+        _chooseFrom ? _from : null,
+      );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       BcFeedback.error();
@@ -136,9 +167,16 @@ class _BranchRequestScreenState extends State<BranchRequestScreen> {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final open = _others.where((b) => b.isActive).toList();
-    final closed = _others.where((b) => !b.isActive).toList();
-    String label(String name, String? city) => [name, if (nonBlank(city) != null) city!].join(' · ');
+    final q = _query.trim().toLowerCase();
+    bool matches(BranchOption b) =>
+        q.isEmpty ||
+        b.name.toLowerCase().contains(q) ||
+        (nonBlank(b.city) ?? '').toLowerCase().contains(q);
+    final allOpen = _others.where((b) => b.isActive).toList();
+    final open = allOpen.where(matches).toList();
+    final closed = _others.where((b) => !b.isActive).where(matches).toList();
+    String label(String name, String? city) =>
+        [name, if (nonBlank(city) != null) city!].join(' · ');
 
     return PopScope(
       canPop: !_submitting,
@@ -149,28 +187,49 @@ class _BranchRequestScreenState extends State<BranchRequestScreen> {
           icon: Icons.send_outlined,
           height: 56,
           loading: _submitting,
-          onTap: open.isEmpty ? null : _send,
+          onTap: allOpen.isEmpty ? null : _send,
         ),
         children: [
           if (_chooseFrom) ...[
             _Label(tr('Branch to leave')),
             _ChoiceGroup(
-              items: [for (final b in widget.assigned.where((b) => b.id.isNotEmpty)) (b.id, label(b.name, b.city))],
+              items: [
+                for (final b in widget.assigned.where((b) => b.id.isNotEmpty))
+                  (b.id, label(b.name, b.city)),
+              ],
               value: _from,
               onChanged: (v) => setState(() => _from = v),
             ),
             const SizedBox(height: 16),
           ],
-          _Label(tr('Requested branch')),
-          if (open.isEmpty)
-            Text(tr('There are no other branches to join right now.'), style: TextStyle(fontSize: 14, color: c.mutedForeground))
+          _Label(tr('Requested branch'), required: true),
+          if (allOpen.isEmpty)
+            Text(
+              tr('There are no other branches to join right now.'),
+              style: TextStyle(fontSize: 14, color: c.mutedForeground),
+            )
           else ...[
-            _ChoiceGroup(
-              items: [for (final b in open) (b.id, label(b.name, b.city))],
-              value: _to,
-              invalid: _attempted && _to == null,
-              onChanged: (v) => setState(() => _to = v),
+            _BranchSearchField(
+              controller: _search,
+              onChanged: (v) => setState(() => _query = v),
             ),
+            const SizedBox(height: 10),
+            if (open.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+                child: Text(
+                  tr('No branches match that search.'),
+                  style: TextStyle(fontSize: 14, color: c.mutedForeground),
+                ),
+              )
+            else
+              _ChoiceGroup(
+                items: [for (final b in open) (b.id, label(b.name, b.city))],
+                value: _to,
+                invalid: _attempted && _to == null,
+                maxHeight: 280,
+                onChanged: (v) => setState(() => _to = v),
+              ),
             for (final b in closed)
               Padding(
                 padding: const EdgeInsets.only(top: 8, left: 2),
@@ -180,21 +239,26 @@ class _BranchRequestScreenState extends State<BranchRequestScreen> {
                 ),
               ),
           ],
-          if (_attempted && _to == null && open.isNotEmpty)
+          if (_attempted && _to == null && allOpen.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6, left: 2),
-              child: Text(tr('Choose a branch to join.'), style: TextStyle(fontSize: 13, color: c.errorStrong)),
+              child: Text(
+                tr('Choose a branch to join.'),
+                style: TextStyle(fontSize: 13, color: c.errorStrong),
+              ),
             ),
           const SizedBox(height: 16),
+          _Label(tr('Reason'), required: true),
           BcTextField(
             controller: _reason,
-            label: tr('Reason'),
             placeholder: tr('Why would you like to change branch?'),
             maxLines: 4,
             isError: _attempted && !_reasonValid,
             supportingText: _attempted && !_reasonValid
-                ? tr('Add a short reason (at least {n} characters).', {'n': _minReason})
-                : null,
+                ? tr('Add a short reason (at least {n} characters).', {
+                    'n': _minReason,
+                  })
+                : tr('Required · at least {n} characters', {'n': _minReason}),
             inputFormatters: [LengthLimitingTextInputFormatter(_maxReason)],
             onChanged: (_) => setState(() {}),
           ),
@@ -206,8 +270,14 @@ class _BranchRequestScreenState extends State<BranchRequestScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  tr('Your branches change only after support approves the request.'),
-                  style: TextStyle(fontSize: 14, color: c.mutedForeground, height: 1.4),
+                  tr(
+                    'Your branches change only after support approves the request.',
+                  ),
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: c.mutedForeground,
+                    height: 1.4,
+                  ),
                 ),
               ),
             ],
@@ -223,22 +293,105 @@ class _BranchRequestScreenState extends State<BranchRequestScreen> {
 }
 
 class _Label extends StatelessWidget {
-  const _Label(this.text);
+  const _Label(this.text, {this.required = false});
   final String text;
+  final bool required;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(left: 2, bottom: 8),
-    child: Text(
-      text,
-      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: context.bc.foreground),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, bottom: 8),
+      child: Text.rich(
+        TextSpan(
+          text: text,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: c.foreground,
+          ),
+          children: [
+            if (required)
+              TextSpan(
+                text: ' *',
+                style: TextStyle(color: c.errorStrong),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Search box above the branch list; filters by branch name or city.
+class _BranchSearchField extends StatelessWidget {
+  const _BranchSearchField({required this.controller, required this.onChanged});
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    OutlineInputBorder border(Color color, [double width = 1]) =>
+        OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: color, width: width),
+        );
+    return SizedBox(
+      height: 52,
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        textInputAction: TextInputAction.search,
+        autocorrect: false,
+        cursorColor: c.primary,
+        style: TextStyle(fontSize: 15, color: c.foreground),
+        decoration: InputDecoration(
+          hintText: tr('Search branches'),
+          hintStyle: TextStyle(fontSize: 15, color: c.mutedForeground),
+          filled: true,
+          fillColor: c.surface,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+          prefixIcon: Icon(
+            Icons.search_rounded,
+            size: 20,
+            color: c.mutedForeground,
+          ),
+          suffixIcon: controller.text.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: tr('Clear search'),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 20,
+                    color: c.mutedForeground,
+                  ),
+                  onPressed: () {
+                    controller.clear();
+                    onChanged('');
+                  },
+                ),
+          border: border(c.border),
+          enabledBorder: border(c.border),
+          focusedBorder: border(c.primary, 2),
+        ),
+      ),
+    );
+  }
 }
 
 /// Bordered radio list: store icon, label, radio dot; the chosen row is highlighted.
 class _ChoiceGroup extends StatelessWidget {
-  const _ChoiceGroup({required this.items, required this.value, required this.onChanged, this.invalid = false});
+  const _ChoiceGroup({
+    required this.items,
+    required this.value,
+    required this.onChanged,
+    this.invalid = false,
+    this.maxHeight,
+  });
+
+  /// When set, the list scrolls inside this height so the fields below stay in view.
+  final double? maxHeight;
   final List<(String, String)> items;
   final String? value;
   final ValueChanged<String> onChanged;
@@ -252,41 +405,62 @@ class _ChoiceGroup extends StatelessWidget {
       decoration: BoxDecoration(
         color: c.surface,
         borderRadius: BorderRadius.circular(BcRadius.lg),
-        border: Border.all(color: invalid ? c.error : c.border, width: invalid ? 2 : 1),
+        border: Border.all(
+          color: invalid ? c.error : c.border,
+          width: invalid ? 2 : 1,
+        ),
       ),
-      child: Column(
-        children: [
-          for (var i = 0; i < items.length; i++) ...[
-            if (i > 0) Divider(height: 1, thickness: 1, color: c.border),
-            InkWell(
-              onTap: () {
-                BcFeedback.tap();
-                onChanged(items[i].$1);
-              },
-              child: Container(
-                color: value == items[i].$1 ? c.primarySoft : null,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                child: Row(
-                  children: [
-                    Icon(Icons.storefront_outlined, size: 22, color: c.primary),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        items[i].$2,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: value == items[i].$1 ? FontWeight.w700 : FontWeight.w400,
-                          color: c.foreground,
-                        ),
-                      ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight ?? double.infinity),
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              for (var i = 0; i < items.length; i++) ...[
+                if (i > 0) Divider(height: 1, thickness: 1, color: c.border),
+                InkWell(
+                  onTap: () {
+                    BcFeedback.tap();
+                    onChanged(items[i].$1);
+                  },
+                  child: Container(
+                    color: value == items[i].$1 ? c.primarySoft : null,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 14,
                     ),
-                    BcRadioDot(selected: value == items[i].$1, fill: c.primary, onFill: c.primaryForeground),
-                  ],
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.storefront_outlined,
+                          size: 22,
+                          color: c.primary,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            items[i].$2,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: value == items[i].$1
+                                  ? FontWeight.w700
+                                  : FontWeight.w400,
+                              color: c.foreground,
+                            ),
+                          ),
+                        ),
+                        BcRadioDot(
+                          selected: value == items[i].$1,
+                          fill: c.primary,
+                          onFill: c.primaryForeground,
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ],
-        ],
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
