@@ -11,6 +11,8 @@ export const CUP_STICKER_AGENT_URL = LOCAL_CUP_STICKER_AGENT_URL;
 
 export const CUP_STICKER_ENABLED_KEY = 'bc_cup_sticker_enabled';
 export const CUP_STICKER_PRINTER_KEY = 'bc_cup_sticker_printer';
+/** Placeholder only — real value comes from branch system settings. */
+export const DEFAULT_CUP_STICKER_PRINTER = '';
 
 /** Printed as two centered rows (split on the period) for readability on small labels. */
 export const CUP_STICKER_ADVISORY_EN =
@@ -46,13 +48,49 @@ export function setCupStickerPrintingEnabled(enabled: boolean) {
 }
 
 export function getCupStickerPrinterName(): string {
-  if (!isBrowser()) return 'Xprinter XP-D35B';
-  return localStorage.getItem(CUP_STICKER_PRINTER_KEY)?.trim() || 'Xprinter XP-D35B';
+  if (!isBrowser()) return '';
+  return localStorage.getItem(CUP_STICKER_PRINTER_KEY)?.trim() || '';
 }
 
 export function setCupStickerPrinterName(name: string) {
   if (!isBrowser()) return;
   localStorage.setItem(CUP_STICKER_PRINTER_KEY, name.trim());
+}
+
+/** Load branch system-setting printer name (per store). */
+export async function fetchCupStickerPrinterSettings(storeId?: string | null): Promise<{
+  storeId: string;
+  printerName: string;
+}> {
+  const session = getAdminSession();
+  const sid = storeId || session?.storeId || '';
+  const qs = sid ? `?storeId=${encodeURIComponent(sid)}` : '';
+  const data = await adminApiFetch<{ storeId: string; printerName: string }>(
+    `/admin/cup-sticker-settings${qs}`,
+  );
+  setCupStickerPrinterName(data.printerName || '');
+  return { storeId: data.storeId, printerName: data.printerName || '' };
+}
+
+/** Save branch system-setting printer name (per store). */
+export async function saveCupStickerPrinterSettings(
+  printerName: string,
+  storeId?: string | null,
+): Promise<{ storeId: string; printerName: string }> {
+  const session = getAdminSession();
+  const sid = storeId || session?.storeId || '';
+  const data = await adminApiFetch<{ storeId: string; printerName: string }>(
+    '/admin/cup-sticker-settings',
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        storeId: sid || null,
+        printerName: printerName.trim(),
+      }),
+    },
+  );
+  setCupStickerPrinterName(data.printerName || '');
+  return { storeId: data.storeId, printerName: data.printerName || '' };
 }
 
 /**
@@ -167,15 +205,21 @@ export async function cupStickerAgentHealth(): Promise<{
   error?: string;
 }> {
   try {
+    const session = getAdminSession();
+    const qs = session?.storeId ? `?storeId=${encodeURIComponent(session.storeId)}` : '';
     const status = await adminApiFetch<{
       online: boolean;
       lastSeenAt: number | null;
+      printerName?: string;
       printerHint?: string;
-    }>('/admin/cup-sticker-agent/status');
-    if (!status.online) {
-      return { ok: false, error: AGENT_OFFLINE_MSG };
+    }>(`/admin/cup-sticker-agent/status${qs}`);
+    if (status.printerName != null) {
+      setCupStickerPrinterName(status.printerName);
     }
-    return { ok: true, printer: getCupStickerPrinterName() };
+    if (!status.online) {
+      return { ok: false, error: AGENT_OFFLINE_MSG, printer: status.printerName || getCupStickerPrinterName() };
+    }
+    return { ok: true, printer: status.printerName || getCupStickerPrinterName() };
   } catch (e) {
     return {
       ok: false,
@@ -190,10 +234,10 @@ export async function printCupStickers(stickers: CupSticker[]): Promise<{ printe
   if (!health.ok) throw new Error(health.error || AGENT_OFFLINE_MSG);
 
   const session = getAdminSession();
+  // Server uses the branch system setting as the printer name source of truth.
   const job = await adminApiFetch<{ id: string }>('/admin/cup-sticker-jobs', {
     method: 'POST',
     body: JSON.stringify({
-      printerName: getCupStickerPrinterName(),
       storeId: session?.storeId ?? null,
       stickers,
     }),

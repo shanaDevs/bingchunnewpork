@@ -154,6 +154,7 @@ export async function ensureDeliveryJobsTables(): Promise<void> {
   await addColumnIfMissing('delivery_jobs', 'pickupLng', 'DOUBLE PRECISION NULL');
   await addColumnIfMissing('delivery_jobs', 'pickupLabel', 'TEXT NULL');
   await addColumnIfMissing('stores', 'completionRadiusM', 'INT NULL');
+  await addColumnIfMissing('stores', 'cupStickerPrinterName', 'VARCHAR(256) NULL');
 
   await createUniqueIndexIfMissing('delivery_jobs', 'delivery_jobs_rideCode_key', 'rideCode');
 

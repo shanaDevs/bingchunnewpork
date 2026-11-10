@@ -144,9 +144,26 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === 'GET' && url.pathname === '/health') {
+      let installedPrinters = [];
+      let printerReady = null;
+      try {
+        const raw = execSync(
+          `powershell.exe -NoProfile -Command "Add-Type -AssemblyName System.Drawing; [System.Drawing.Printing.PrinterSettings]::InstalledPrinters | ForEach-Object { $_ }"`,
+          { encoding: 'utf8', windowsHide: true, timeout: 8000 },
+        );
+        installedPrinters = raw
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        printerReady = installedPrinters.some((name) => name === PRINTER);
+      } catch {
+        printerReady = null;
+      }
       sendJson(res, 200, {
         ok: true,
         printer: PRINTER,
+        printerReady,
+        installedPrinters,
         widthMm: WIDTH_MM,
         heightMm: HEIGHT_MM,
         advisoryEn: ADVISORY_EN,

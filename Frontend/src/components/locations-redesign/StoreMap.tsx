@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import type * as Leaflet from "leaflet";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/components/home-redesign/lib/cn";
+import { attachAppMapBasemap } from "@/components/maps/AppMapTiles";
 import { sortByDistance, type FinderStore, type LatLng } from "./stores";
 
 /** Sri Lanka with a margin: the map can't be panned or zoomed out far past it. */
@@ -42,11 +43,6 @@ const USER_PIN_HTML = `<span class="relative block size-full">
 </span>`;
 const USER_PIN_SIZE: [number, number] = [36, 50];
 
-// OpenStreetMap's own tiles: free with attribution and no API key, but only for light use (see
-// operations.osmfoundation.org/policies/tiles). Move to a tile provider plan for heavy traffic.
-const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-// The licence requires a visible credit linking to the copyright page, kept small and quiet (ATTRIBUTION_CLASS).
-const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 // Leaflet's own stylesheet isn't in a cascade layer, so `!` is needed to restyle its credit box.
 const ATTRIBUTION_CLASS =
   "[&_.leaflet-control-attribution]:rounded-tl-md! [&_.leaflet-control-attribution]:bg-white/60! [&_.leaflet-control-attribution]:px-1.5! [&_.leaflet-control-attribution]:text-[0.5625rem]! [&_.leaflet-control-attribution]:leading-4! [&_.leaflet-control-attribution]:text-slate-500! [&_.leaflet-control-attribution_a]:text-slate-500!";
@@ -108,7 +104,7 @@ type StoreMapProps = {
 };
 
 /**
- * Store map on OpenStreetMap tiles (Leaflet), with a mascot pin at each store's position. It follows the list:
+ * Store map on Google tiles (Leaflet), with a mascot pin at each store's position. It follows the list:
  * it fits the stores in the current search and moves to the selected one. With the customer's position it shows
  * a "you are here" pin and fits them together with their nearest stores. It mirrors the store list (the
  * accessible control), so it is hidden from assistive tech and kept out of the tab order; its pins are pointer-only.
@@ -154,7 +150,9 @@ export function StoreMap({ stores, selectableIds, selectedId, highlightedId, use
     const markers = markersRef.current;
     const applied = appliedRef.current;
 
-    import("leaflet").then((L) => {
+    let detachTiles: (() => void) | undefined;
+
+    import("leaflet").then(async (L) => {
       if (cancelled) return;
       leafletRef.current = L;
       map = L.map(container, {
@@ -166,8 +164,12 @@ export function StoreMap({ stores, selectableIds, selectedId, highlightedId, use
         minZoom: 7,
         zoomSnap: 0.5,
       }).fitBounds(ISLAND_BOUNDS);
-      // Toned down, so the brand pins stand out from the busy street map.
-      L.tileLayer(TILE_URL, { attribution: TILE_ATTRIBUTION, maxZoom: 19, className: "saturate-50" }).addTo(map);
+      detachTiles = await attachAppMapBasemap(map, { cancelled: () => cancelled });
+      if (cancelled) {
+        detachTiles();
+        map.remove();
+        return;
+      }
       map.attributionControl.setPrefix(false);
       map.on("zoomend", (event: Leaflet.LeafletEvent) => {
         setZoomedOut((event.target as Leaflet.Map).getZoom() < COMPACT_BELOW_ZOOM);
@@ -181,7 +183,7 @@ export function StoreMap({ stores, selectableIds, selectedId, highlightedId, use
           .on("click", () => latest.current.selectableIds.has(store.id) && latest.current.onSelect(store.id))
           .on("mouseover", () => latest.current.selectableIds.has(store.id) && latest.current.onHover(store.id))
           .on("mouseout", () => latest.current.onHover(null))
-          .addTo(map);
+          .addTo(map!);
         markers.set(store.id, marker);
       }
 
@@ -193,6 +195,7 @@ export function StoreMap({ stores, selectableIds, selectedId, highlightedId, use
 
     return () => {
       cancelled = true;
+      detachTiles?.();
       if (map) {
         // A zoom animation ends on a timer that remove() doesn't cancel, and it then throws on the
         // removed map. Leaflet skips that step when it isn't animating, so clear the flag first.

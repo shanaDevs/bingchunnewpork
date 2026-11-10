@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, Marker, Popup, Polyline, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import AppMapTiles from '@/components/maps/AppMapTiles';
 import { toMapLatLng } from '@/lib/storeCoordinates';
 import { fetchRoadPath, pointAlongPath, prefixAlongPath } from '@/lib/roadRouting';
 
@@ -392,11 +393,7 @@ export default function DeliveryMap({
         className="h-full w-full"
         style={{ minHeight: bleed || redesign ? '100%' : 220, height: '100%', background: redesign ? '#eef5ff' : '#0d1124' }}
       >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          className={redesign ? 'saturate-50' : undefined}
-        />
+        <AppMapTiles />
         <MapResizeObserver />
         <MapViewport points={viewportPoints} />
         {showAnimatedRoute && (
