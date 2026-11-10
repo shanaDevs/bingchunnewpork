@@ -72,7 +72,11 @@ class BranchRequestScreen extends StatefulWidget {
   State<BranchRequestScreen> createState() => _BranchRequestScreenState();
 }
 
+enum _Mode { add, change, remove }
+
 class _BranchRequestScreenState extends State<BranchRequestScreen> {
+  _Mode _mode = _Mode.change;
+  String? _removeId;
   final _reason = TextEditingController();
   final _search = TextEditingController();
   String _query = '';
@@ -112,6 +116,21 @@ class _BranchRequestScreenState extends State<BranchRequestScreen> {
   bool get _chooseFrom =>
       widget.assigned.where((b) => b.id.isNotEmpty).length > 1;
 
+  /// Assigned branches that can be removed (the home branch can't be).
+  List<StoreRef> get _removable => widget.assigned
+      .where((b) => b.id.isNotEmpty && b.id != widget.homeStoreId)
+      .toList();
+
+  void _setMode(_Mode m) {
+    if (m == _mode) return;
+    BcFeedback.tap();
+    setState(() {
+      _mode = m;
+      _attempted = false;
+      _error = null;
+    });
+  }
+
   String _name(String? id) {
     for (final b in widget.assigned) {
       if (b.id == id) return b.name;
@@ -127,31 +146,47 @@ class _BranchRequestScreenState extends State<BranchRequestScreen> {
       _attempted = true;
       _error = null;
     });
-    if (_to == null || !_reasonValid || (_chooseFrom && _from == null)) {
+    final isRemove = _mode == _Mode.remove;
+    final isChange = _mode == _Mode.change;
+    final target = isRemove ? _removeId : _to;
+    if (target == null ||
+        !_reasonValid ||
+        (isChange && _chooseFrom && _from == null)) {
       BcFeedback.error();
       return;
     }
     final confirmed = await showBcConfirm(
       context,
-      title: tr('Request branch change?'),
-      message: tr(
-        '{from} → {to}. Your branches change only after support approves the request.',
-        {
-          'from': _chooseFrom ? _name(_from) : tr('Your branches'),
-          'to': _name(_to),
-        },
-      ),
+      title: isRemove
+          ? tr('Request branch removal?')
+          : isChange
+          ? tr('Request branch change?')
+          : tr('Request new branch?'),
+      message: isRemove
+          ? tr(
+              'Remove {branch}. Your branches change only after support approves the request.',
+              {'branch': _name(_removeId)},
+            )
+          : tr(
+              '{from} → {to}. Your branches change only after support approves the request.',
+              {
+                'from': isChange && _chooseFrom
+                    ? _name(_from)
+                    : tr('Your branches'),
+                'to': _name(_to),
+              },
+            ),
       confirmLabel: tr('Send request'),
-      icon: Icons.swap_horiz_rounded,
+      icon: isRemove ? Icons.remove_circle_outline : Icons.swap_horiz_rounded,
     );
     if (!confirmed || !mounted) return;
     setState(() => _submitting = true);
     try {
       await widget.onSubmit(
-        'ADD_BRANCH',
-        _to!,
+        isRemove ? 'REMOVE_BRANCH' : 'ADD_BRANCH',
+        target,
         _reason.text.trim(),
-        _chooseFrom ? _from : null,
+        isChange && _chooseFrom ? _from : null,
       );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -187,10 +222,50 @@ class _BranchRequestScreenState extends State<BranchRequestScreen> {
           icon: Icons.send_outlined,
           height: 56,
           loading: _submitting,
-          onTap: allOpen.isEmpty ? null : _send,
+          onTap: (_mode == _Mode.remove ? _removable.isEmpty : allOpen.isEmpty)
+              ? null
+              : _send,
         ),
         children: [
-          if (_chooseFrom) ...[
+          _ModeSwitch(
+            mode: _mode,
+            onChanged: _setMode,
+            labels: {
+              _Mode.add: tr('Add'),
+              _Mode.change: tr('Change'),
+              _Mode.remove: tr('Remove'),
+            },
+          ),
+          const SizedBox(height: 20),
+          if (_mode == _Mode.remove) ...[
+            _Label(tr('Branch to remove'), required: true),
+            if (_removable.isEmpty)
+              Text(
+                tr(
+                  'Your home branch cannot be removed. Request a branch change first.',
+                ),
+                style: TextStyle(fontSize: 14, color: c.mutedForeground),
+              )
+            else ...[
+              _ChoiceGroup(
+                items: [
+                  for (final b in _removable) (b.id, label(b.name, b.city)),
+                ],
+                value: _removeId,
+                invalid: _attempted && _removeId == null,
+                onChanged: (v) => setState(() => _removeId = v),
+              ),
+              if (_attempted && _removeId == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6, left: 2),
+                  child: Text(
+                    tr('Choose a branch to remove.'),
+                    style: TextStyle(fontSize: 13, color: c.errorStrong),
+                  ),
+                ),
+            ],
+          ],
+          if (_mode == _Mode.change && _chooseFrom) ...[
             _Label(tr('Branch to leave')),
             _ChoiceGroup(
               items: [
@@ -202,51 +277,56 @@ class _BranchRequestScreenState extends State<BranchRequestScreen> {
             ),
             const SizedBox(height: 16),
           ],
-          _Label(tr('Requested branch'), required: true),
-          if (allOpen.isEmpty)
-            Text(
-              tr('There are no other branches to join right now.'),
-              style: TextStyle(fontSize: 14, color: c.mutedForeground),
-            )
-          else ...[
-            _BranchSearchField(
-              controller: _search,
-              onChanged: (v) => setState(() => _query = v),
-            ),
-            const SizedBox(height: 10),
-            if (open.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
-                child: Text(
-                  tr('No branches match that search.'),
-                  style: TextStyle(fontSize: 14, color: c.mutedForeground),
-                ),
+          if (_mode != _Mode.remove) ...[
+            _Label(tr('Requested branch'), required: true),
+            if (allOpen.isEmpty)
+              Text(
+                tr('There are no other branches to join right now.'),
+                style: TextStyle(fontSize: 14, color: c.mutedForeground),
               )
-            else
-              _ChoiceGroup(
-                items: [for (final b in open) (b.id, label(b.name, b.city))],
-                value: _to,
-                invalid: _attempted && _to == null,
-                maxHeight: 280,
-                onChanged: (v) => setState(() => _to = v),
+            else ...[
+              _BranchSearchField(
+                controller: _search,
+                onChanged: (v) => setState(() => _query = v),
               ),
-            for (final b in closed)
+              const SizedBox(height: 10),
+              if (open.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 8,
+                    horizontal: 2,
+                  ),
+                  child: Text(
+                    tr('No branches match that search.'),
+                    style: TextStyle(fontSize: 14, color: c.mutedForeground),
+                  ),
+                )
+              else
+                _ChoiceGroup(
+                  items: [for (final b in open) (b.id, label(b.name, b.city))],
+                  value: _to,
+                  invalid: _attempted && _to == null,
+                  maxHeight: 280,
+                  onChanged: (v) => setState(() => _to = v),
+                ),
+              for (final b in closed)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, left: 2),
+                  child: Text(
+                    '${b.name} · ${tr('Temporarily closed')}',
+                    style: TextStyle(fontSize: 13, color: c.mutedForeground),
+                  ),
+                ),
+            ],
+            if (_attempted && _to == null && allOpen.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 8, left: 2),
+                padding: const EdgeInsets.only(top: 6, left: 2),
                 child: Text(
-                  '${b.name} · ${tr('Temporarily closed')}',
-                  style: TextStyle(fontSize: 13, color: c.mutedForeground),
+                  tr('Choose a branch to join.'),
+                  style: TextStyle(fontSize: 13, color: c.errorStrong),
                 ),
               ),
           ],
-          if (_attempted && _to == null && allOpen.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 6, left: 2),
-              child: Text(
-                tr('Choose a branch to join.'),
-                style: TextStyle(fontSize: 13, color: c.errorStrong),
-              ),
-            ),
           const SizedBox(height: 16),
           _Label(tr('Reason'), required: true),
           BcTextField(
@@ -318,6 +398,81 @@ class _Label extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Pill-shaped slider: Add / Change / Remove, with the selected segment filled.
+class _ModeSwitch extends StatelessWidget {
+  const _ModeSwitch({
+    required this.mode,
+    required this.onChanged,
+    required this.labels,
+  });
+  final _Mode mode;
+  final ValueChanged<_Mode> onChanged;
+  final Map<_Mode, String> labels;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    const modes = _Mode.values;
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: c.border),
+      ),
+      child: Stack(
+        children: [
+          AnimatedAlign(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment(-1 + mode.index * 2 / (modes.length - 1), 0),
+            child: FractionallySizedBox(
+              widthFactor: 1 / modes.length,
+              heightFactor: 1,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: c.primary,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              for (final m in modes)
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    selected: m == mode,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(24),
+                      onTap: () => onChanged(m),
+                      child: Center(
+                        child: Text(
+                          labels[m]!,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: m == mode
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            color: m == mode
+                                ? c.primaryForeground
+                                : c.mutedForeground,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
