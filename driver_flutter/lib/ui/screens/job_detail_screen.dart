@@ -734,6 +734,10 @@ class _HistoryRunBody extends StatelessWidget {
                 child: Column(
                   children: [
                     if (accepted != null) _HistoryKv(label: tr('Accepted at'), value: Format.dateTime(acceptedIso)),
+                    if (job.startedAt != null)
+                      _HistoryKv(label: tr('Ride started'), value: Format.dateTime(job.startedAt)),
+                    if (job.returnStartedAt != null)
+                      _HistoryKv(label: tr('Returned to branch'), value: Format.dateTime(job.returnStartedAt)),
                     if (finished != null) _HistoryKv(label: tr('Finished'), value: Format.dateTime(finishedIso)),
                     if (minutes != null && minutes >= 0) _HistoryKv(label: tr('Time taken'), value: Format.duration(minutes)),
                     if (distanceKm != null) _HistoryKv(label: tr('Distance'), value: Format.km(distanceKm)),

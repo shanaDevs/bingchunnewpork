@@ -162,6 +162,8 @@ const Map<String, String> zhStrings = {
   'Accepted': '已接受',
   'Accepted at': '接单时间',
   'Finished': '完成时间',
+  'Ride started': '开始配送时间',
+  'Returned to branch': '返回门店时间',
   'Time taken': '用时',
   'Orders ({n})': '订单（{n}）',
   'Delivery Failures': '配送失败',
