@@ -25,6 +25,12 @@ function authorizeAgent(req: { header(name: string): string | undefined }, res: 
 
 router.use(authorizeAgent);
 
+/** Lightweight presence ping (agent should hit this or /claim every few seconds). */
+router.get('/heartbeat', (_req, res) => {
+  touchCupStickerAgent();
+  res.json({ success: true, data: { ok: true, serverTime: Date.now() } });
+});
+
 /** Local agent polls this to pull the next print job. */
 router.get('/claim', (req, res) => {
   touchCupStickerAgent();

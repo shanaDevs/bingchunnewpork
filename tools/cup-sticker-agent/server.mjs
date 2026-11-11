@@ -14,13 +14,137 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execSync } from 'node:child_process';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/** Folder next to server.mjs, or next to the packaged .exe when running under pkg. */
+function resolveAgentDir() {
+  if (typeof process.pkg !== 'undefined') {
+    return path.dirname(process.execPath);
+  }
+  if (process.env.BC_STICKER_AGENT_DIR) {
+    return path.resolve(process.env.BC_STICKER_AGENT_DIR);
+  }
+  try {
+    return path.dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return process.cwd();
+  }
+}
+const AGENT_DIR = resolveAgentDir();
+
+/** Load key=value pairs from local.env when the process env is unset. */
+function loadLocalEnvFile() {
+  const envPath = path.join(AGENT_DIR, 'local.env');
+  if (!fs.existsSync(envPath)) return;
+  try {
+    const text = fs.readFileSync(envPath, 'utf8');
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq <= 0) continue;
+      const key = line.slice(0, eq).trim();
+      const value = line.slice(eq + 1).trim();
+      if (!key) continue;
+      if (process.env[key] == null || process.env[key] === '') {
+        process.env[key] = value;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function detectPrinterName() {
+  const exe = path.join(AGENT_DIR, 'detect-printer.exe');
+  try {
+    if (fs.existsSync(exe)) {
+      const out = execSync(`"${exe}"`, { encoding: 'utf8', windowsHide: true, timeout: 12000 })
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .find(Boolean);
+      if (out) return out;
+    }
+  } catch {
+    /* fall through */
+  }
+  // Windows 7-friendly: WMIC (no PowerShell)
+  try {
+    const raw = execSync('wmic printer get Name,DriverName /format:csv', {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 15000,
+    });
+    const lines = raw
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter((s) => s && !/^Node,DriverName,Name$/i.test(s));
+    const rows = lines.map((line) => {
+      const parts = line.split(',');
+      const name = (parts[parts.length - 1] || '').trim();
+      const driver = (parts[parts.length - 2] || '').trim();
+      return { name, driver };
+    });
+    const hit =
+      rows.find((r) => /xprinter|xp-d35/i.test(r.driver) || /xprinter|xp-d35/i.test(r.name)) ||
+      rows.find((r) => /^bingchun$/i.test(r.name));
+    return hit?.name || '';
+  } catch {
+    return '';
+  }
+}
+
+function listPrinterDetails() {
+  try {
+    const raw = execSync('wmic printer get Name,DriverName,PortName,PrinterStatus /format:csv', {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 20000,
+    });
+    const lines = raw
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter((s) => s && !/^Node,/i.test(s));
+    const printers = [];
+    for (const line of lines) {
+      const parts = line.split(',');
+      if (parts.length < 4) continue;
+      const status = (parts[parts.length - 1] || '').trim();
+      const portName = (parts[parts.length - 2] || '').trim();
+      const name = (parts[parts.length - 3] || '').trim();
+      const driverName = (parts[parts.length - 4] || '').trim();
+      if (!name) continue;
+      const stickerLikely = /xprinter|xp-d35|bingchun/i.test(`${driverName} ${name}`);
+      printers.push({
+        name,
+        driverName,
+        portName,
+        hostAddress: '',
+        tcpPort: null,
+        portKind: /^USB\d+/i.test(portName) ? 'usb' : /^COM\d+/i.test(portName) ? 'com' : 'other',
+        status,
+        ready: true,
+        stickerLikely,
+      });
+    }
+    const suggested =
+      printers.find((p) => p.stickerLikely)?.name || printers[0]?.name || '';
+    return { printers, ports: [], suggested };
+  } catch {
+    return null;
+  }
+}
+
+loadLocalEnvFile();
+
 const HOST = process.env.BC_STICKER_HOST || '127.0.0.1';
 const PORT = Number(process.env.BC_STICKER_PORT || 9177);
-const PRINTER = process.env.BC_STICKER_PRINTER || 'Xprinter XP-D35B';
 const WIDTH_MM = Number(process.env.BC_STICKER_WIDTH_MM || 40);
 const HEIGHT_MM = Number(process.env.BC_STICKER_HEIGHT_MM || 30);
-const PRINT_PS1 = path.join(__dirname, 'print-stickers.ps1');
+const PRINTER =
+  (process.env.BC_STICKER_PRINTER || '').trim() || detectPrinterName() || 'Xprinter XP-D35B';
+// Keep process env in sync so child print script inherits the resolved name.
+process.env.BC_STICKER_PRINTER = PRINTER;
+const PRINT_EXE = path.join(AGENT_DIR, 'print-stickers.exe');
+const PRINT_PS1 = path.join(AGENT_DIR, 'print-stickers.ps1');
 /** Admin API base (browser cannot reach localhost from HTTPS — agent pulls jobs). */
 const API_BASE = (process.env.BC_STICKER_API_URL || 'https://admin.bingchunsrilanka.com/api').replace(
   /\/$/,
@@ -83,11 +207,17 @@ function runPrint(payload) {
     // UTF-8 BOM so Windows PowerShell 5.1 Get-Content -Encoding UTF8 keeps Sinhala intact.
     const json = JSON.stringify(payload);
     fs.writeFileSync(tmp, `\uFEFF${json}`, 'utf8');
-    const ps = spawn(
-      'powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PRINT_PS1, '-JsonPath', tmp],
-      { windowsHide: true },
-    );
+    const useExe = fs.existsSync(PRINT_EXE);
+    const ps = useExe
+      ? spawn(PRINT_EXE, ['-JsonPath', tmp], {
+          windowsHide: true,
+          env: { ...process.env, BC_STICKER_PRINTER: process.env.BC_STICKER_PRINTER || PRINTER },
+        })
+      : spawn(
+          'powershell.exe',
+          ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PRINT_PS1, '-JsonPath', tmp],
+          { windowsHide: true },
+        );
     let stdout = '';
     let stderr = '';
     ps.stdout.on('data', (d) => {
@@ -146,16 +276,37 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/health') {
       let installedPrinters = [];
       let printerReady = null;
+      let printerPort = process.env.BC_STICKER_PRINTER_PORT || '';
+      let printerHost = process.env.BC_STICKER_PRINTER_HOST || '';
+      let printerTcpPort = process.env.BC_STICKER_PRINTER_TCP_PORT || '';
+      let printersDetailed = null;
       try {
-        const raw = execSync(
-          `powershell.exe -NoProfile -Command "Add-Type -AssemblyName System.Drawing; [System.Drawing.Printing.PrinterSettings]::InstalledPrinters | ForEach-Object { $_ }"`,
-          { encoding: 'utf8', windowsHide: true, timeout: 8000 },
-        );
-        installedPrinters = raw
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-        printerReady = installedPrinters.some((name) => name === PRINTER);
+        const details = listPrinterDetails();
+        if (details?.printers) {
+          printersDetailed = details.printers;
+          installedPrinters = details.printers.map((p) => p.name).filter(Boolean);
+          const match = details.printers.find((p) => p.name === PRINTER);
+          if (match) {
+            printerReady = Boolean(match.ready);
+            printerPort = match.portName || printerPort;
+            printerHost = match.hostAddress || printerHost;
+            if (match.tcpPort != null && match.tcpPort !== '') {
+              printerTcpPort = String(match.tcpPort);
+            }
+          } else {
+            printerReady = installedPrinters.includes(PRINTER);
+          }
+        } else {
+          const raw = execSync(
+            `powershell.exe -NoProfile -Command "Add-Type -AssemblyName System.Drawing; [System.Drawing.Printing.PrinterSettings]::InstalledPrinters | ForEach-Object { $_ }"`,
+            { encoding: 'utf8', windowsHide: true, timeout: 8000 },
+          );
+          installedPrinters = raw
+            .split(/\r?\n/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+          printerReady = installedPrinters.some((name) => name === PRINTER);
+        }
       } catch {
         printerReady = null;
       }
@@ -163,7 +314,11 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         printer: PRINTER,
         printerReady,
+        printerPort,
+        printerHost,
+        printerTcpPort,
         installedPrinters,
+        printers: printersDetailed,
         widthMm: WIDTH_MM,
         heightMm: HEIGHT_MM,
         advisoryEn: ADVISORY_EN,

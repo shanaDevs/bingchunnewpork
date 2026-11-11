@@ -1,0 +1,13 @@
+local.env
+node_modules/
+service/*.exe
+service/*.out.log
+service/*.err.log
+service/*.wrapper.log
+service/*.config
+*.log
+dist/
+# Portable Node is large (~30MB). Keep locally for USB copy; do not commit.
+# Run download-node16.cmd to refresh runtime\node (Node 16 for Win7).
+runtime/node/
+BingChunCupStickerAgentRuntime.exe

@@ -22,17 +22,28 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
   const [agentError, setAgentError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+  const isDesktopApp =
+    typeof window !== 'undefined' && Boolean(window.bingchunCashier?.isDesktop);
 
   const refresh = useCallback(async () => {
     setEnabled(isCupStickerPrintingEnabled());
     const session = getAdminSession();
     setStoreId(session?.storeId ?? null);
-    try {
-      const settings = await fetchCupStickerPrinterSettings(session?.storeId);
-      setPrinterName(settings.printerName);
-      setStoreId(settings.storeId);
-    } catch {
-      // Keep local field if settings API is briefly unavailable.
+    if (typeof window !== 'undefined' && window.bingchunCashier?.isDesktop) {
+      try {
+        const cfg = await window.bingchunCashier.getConfig();
+        if (cfg.printerName) setPrinterName(cfg.printerName);
+      } catch {
+        // ignore
+      }
+    } else {
+      try {
+        const settings = await fetchCupStickerPrinterSettings(session?.storeId);
+        setPrinterName(settings.printerName);
+        setStoreId(settings.storeId);
+      } catch {
+        // Keep local field if settings API is briefly unavailable.
+      }
     }
     const health = await cupStickerAgentHealth();
     setAgentOk(health.ok);
@@ -50,10 +61,16 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
     const trimmed = next.trim();
     setSaving(true);
     try {
-      const saved = await saveCupStickerPrinterSettings(trimmed, storeId);
-      setPrinterName(saved.printerName);
-      setStoreId(saved.storeId);
-      toast.success('Branch printer name saved');
+      if (window.bingchunCashier?.isDesktop) {
+        await window.bingchunCashier.setConfig({ printerName: trimmed });
+        setPrinterName(trimmed);
+        toast.success('Desktop printer saved');
+      } else {
+        const saved = await saveCupStickerPrinterSettings(trimmed, storeId);
+        setPrinterName(saved.printerName);
+        setStoreId(saved.storeId);
+        toast.success('Branch printer name saved');
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to save printer name';
       toast.error(msg);
@@ -65,11 +82,18 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
   async function onTestPrint() {
     setBusy(true);
     try {
-      if (printerName.trim()) {
-        await saveCupStickerPrinterSettings(printerName, storeId);
+      const trimmed = printerName.trim();
+      if (trimmed) {
+        if (window.bingchunCashier?.isDesktop) {
+          await window.bingchunCashier.setConfig({ printerName: trimmed });
+        } else {
+          await saveCupStickerPrinterSettings(trimmed, storeId);
+        }
       }
       await printCupStickerTest();
-      toast.success('Test sticker sent to printer');
+      toast.success(
+        isDesktopApp ? 'Test sticker sent via Electron printer' : 'Test sticker sent to printer',
+      );
       setAgentOk(true);
       setAgentError(null);
     } catch (e: unknown) {
@@ -96,8 +120,17 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
           />
         </div>
         <p className="mb-3 text-[11px] leading-relaxed text-muted">
-          On Accept, prints one sticker per cup. Run{' '}
-          <code className="text-cream/80">tools/cup-sticker-agent/start.bat</code> on this PC.
+          On Accept, prints one sticker per cup.{' '}
+          {isDesktopApp ? (
+            <>
+              Uses the printer from <strong>Cashier → Printer &amp; Settings</strong> (direct Electron
+              print).
+            </>
+          ) : (
+            <>
+              Run <code className="text-cream/80">tools/cup-sticker-agent/start.bat</code> on this PC.
+            </>
+          )}
         </p>
         <label className="mb-2 flex items-center gap-2 text-xs text-cream">
           <input
@@ -140,10 +173,20 @@ export default function CupStickerPrinterPanel({ compact = false }: { compact?: 
             Cup sticker printer
           </h2>
           <p className="mt-1 text-xs text-muted max-w-2xl leading-relaxed">
-            Printer name is a branch system setting (each store can use a different Windows queue name). Run{' '}
-            <code className="text-cream/80">tools/cup-sticker-agent/start.bat</code> on this cashier PC
-            (USB sticker printer). The online admin queues the job; the local agent pulls it and prints.
-            Keep the bat window open.
+            {isDesktopApp ? (
+              <>
+                You are in the Bing Chun Cashier desktop app. Stickers print directly to the printer
+                chosen under <strong>Cashier → Printer &amp; Settings</strong> — no agent redirect.
+                Use <strong>Test print</strong> here or the menu <strong>Test sticker print</strong>.
+              </>
+            ) : (
+              <>
+                Printer name is a branch system setting (each store can use a different Windows queue
+                name). Run <code className="text-cream/80">tools/cup-sticker-agent/start.bat</code> on
+                this cashier PC (USB sticker printer). The online admin queues the job; the local agent
+                pulls it and prints. Keep the bat window open.
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-full border border-navy-border bg-navy px-3 py-1.5 text-xs">

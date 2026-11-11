@@ -2,12 +2,14 @@
 import { adminApiFetch as adminFetch } from '@/lib/adminApi';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Minus, Plus, Trash2, ShoppingCart, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import CounterPaymentForm, { counterPaymentValid } from '@/components/admin/CounterPaymentForm';
 import { formatMoney } from '@/lib/receipt';
 import { getAdminSession, isSuperAdmin, type AdminSession } from '@/lib/adminAuth';
+import { dispatchAdminNewOrder } from '@/lib/adminOrderSync';
 import type { Category, Product } from '@/types';
 
 interface PosCartItem {
@@ -136,6 +138,7 @@ interface PlaceOrderResult {
 }
 
 export default function AdminPosPage() {
+  const router = useRouter();
   const [admin, setAdmin] = useState<AdminSession | null>(null);
   const [storeId, setStoreId] = useState('');
   const [posCart, setPosCart] = useState<PosCartItem[]>([]);
@@ -276,15 +279,36 @@ export default function AdminPosPage() {
         }),
       });
 
+      const cartSnapshot = posCart.map((item) => ({
+        productName: item.name,
+        quantity: item.quantity,
+      }));
+
       setSuccessOrder({
         orderNumber: result.order.orderNumber,
         total: result.order.total,
       });
       clearCart();
 
+      dispatchAdminNewOrder({
+        orderId: result.order.id,
+        orderNumber: result.order.orderNumber,
+        orderMode: 'TAKEAWAY',
+        total: result.order.total,
+        status: 'RECEIVED',
+        paymentMethod: paymentMethod === 'CASH' ? 'CASH_AT_COUNTER' : 'CARD',
+        paymentStatus: paymentMethod === 'CASH' ? 'PAID' : 'PENDING',
+        storeName: admin?.storeName || undefined,
+        createdAt: new Date().toISOString(),
+        items: cartSnapshot,
+      });
+
       if (result.paymentUrl) {
         toast.success('Order created — redirecting to card payment');
         window.open(result.paymentUrl, '_blank');
+      } else {
+        toast.success('Order placed — opening Orders');
+        router.push('/admin/orders');
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to place order');

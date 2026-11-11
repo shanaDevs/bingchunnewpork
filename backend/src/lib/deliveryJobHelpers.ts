@@ -12,12 +12,17 @@ import {
   DEFAULT_BRANCH_COMPLETION_RADIUS_M,
   getBranchCompletionRadiusM,
 } from './appSchema';
-import { broadcastDeliveryJobUpdated } from './socket';
+import { broadcastDeliveryJobUpdated, broadcastNewJob } from './socket';
 import { invalidateJobRoute } from './routeCache';
 import { ensureDeliveryJobAdminCancellationsSchema, ensureDeliveryJobsTables } from './deliverySchema';
 import { getDeliveryJobsSqlRef } from './deliveryPg';
 import { lkrToDecimal } from './moneyDecimal';
-import { todayDateRange } from './datetime';
+import { dateStringInColombo, todayDateRange, todayDateString } from './datetime';
+import {
+  buildNewJobBroadcastPayload,
+  buildNewJobPushFromBroadcast,
+} from './newJobBroadcast';
+import { sendPushToBranchDrivers } from './driverPush';
 
 export const ACTIVE_JOB_STATUSES = [
   'SCHEDULED',
@@ -435,10 +440,67 @@ export function isAdminDeliveryJobCancellable(
   return false;
 }
 
+/** HQ Close ride on today's ASSIGNED/QUEUED run before pickup — same gate as driver reject. */
+export function isAdminCloseReofferEligible(
+  job: { status: string; driverId: string | null; scheduledAt: Date },
+  domainStates: string[],
+  todayFrom: Date = todayDateRange().from,
+): boolean {
+  if (!job.driverId) return false;
+  if (job.status !== 'ASSIGNED' && job.status !== 'QUEUED') return false;
+  if (job.scheduledAt < todayFrom) return false;
+  return isRejectAllowed(domainStates);
+}
+
+/** Notify branch drivers about an unclaimed same-day job (after reject, admin re-offer, or re-ring). */
+export async function reofferDeliveryJobToBranchPool(
+  jobId: string,
+  opts: { forceRing?: boolean } = {},
+): Promise<void> {
+  const job = await prisma.deliveryJob.findUnique({
+    where: { id: jobId },
+    include: {
+      store: { select: { id: true, name: true, city: true, lat: true, lng: true } },
+      jobOrders: jobOrdersWithDetails,
+    },
+  });
+  if (!job || job.status !== 'SCHEDULED' || job.driverId) return;
+
+  const jobIsToday = dateStringInColombo(job.scheduledAt) === todayDateString();
+  if (!jobIsToday) return;
+
+  const forceRing = opts.forceRing ?? false;
+  const broadcastedAt = new Date();
+  const offer = buildNewJobBroadcastPayload(
+    {
+      id: job.id,
+      title: job.title,
+      status: 'SCHEDULED',
+      scheduledAt: job.scheduledAt,
+      storeId: job.storeId,
+      rideCode: job.rideCode,
+      totalCups: job.totalCups,
+      estimatedDistanceKm: job.estimatedDistanceKm,
+      estimatedMinutes: job.estimatedMinutes,
+      totalDistanceKm: job.totalDistanceKm,
+      totalDeliveryFees: job.totalDeliveryFees,
+      store: job.store,
+      jobOrders: job.jobOrders.map((jo) => ({ sequence: jo.sequence, order: jo.order })),
+    },
+    { broadcastedAt, ...(forceRing ? { forceRing: true } : {}) },
+  );
+  broadcastNewJob(job.storeId, offer);
+  sendPushToBranchDrivers(
+    job.storeId,
+    buildNewJobPushFromBroadcast(offer, forceRing ? { forceRing: true } : {}),
+  ).catch(() => {});
+}
+
 export type AdminCancelDeliveryJobResult = {
   jobId: string;
-  status: 'CANCELLED';
+  status: 'CANCELLED' | 'SCHEDULED';
   releasedDriverId: string | null;
+  reoffered: boolean;
 };
 
 /** Close a stuck delivery job as CANCELLED; orders keep their current status. */
@@ -487,6 +549,55 @@ export async function executeAdminCancelDeliveryJob(opts: {
   const previousStatus = job.status;
   const driverId = job.driverId;
 
+  const events = await prisma.deliveryEvent.findMany({
+    where: { jobId: opts.jobId },
+    select: { state: true },
+  });
+  const domainStates = events.map((e) => e.state as string);
+
+  if (isAdminCloseReofferEligible(job, domainStates, todayFrom) && driverId) {
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.deliveryJob.updateMany({
+        where: {
+          id: opts.jobId,
+          driverId,
+          status: { in: ['ASSIGNED', 'QUEUED'] },
+        },
+        data: {
+          driverId: null,
+          status: 'SCHEDULED',
+          assignedAt: null,
+          broadcastedAt: new Date(),
+        },
+      });
+      if (updated.count === 0) throw new AppError('Job could not be re-offered', 409);
+
+      const auditNote = `Admin closed ride (re-offered): ${opts.reason}`;
+      await tx.deliveryEvent.createMany({
+        data: job.jobOrders.map((jo) => ({
+          orderId: jo.orderId,
+          jobId: opts.jobId,
+          driverId,
+          state: 'PENDING_ASSIGNMENT' as const,
+          note: auditNote,
+        })),
+      });
+    }, { maxWait: 10_000, timeout: 30_000 });
+
+    await releaseDriverWhenIdle(driverId);
+    await promoteNextQueuedJob(driverId);
+    invalidateJobRoute(opts.jobId);
+    broadcastDeliveryJobUpdated(opts.storeId, { jobId: opts.jobId, status: 'SCHEDULED' });
+    await reofferDeliveryJobToBranchPool(opts.jobId, { forceRing: true });
+
+    return {
+      jobId: opts.jobId,
+      status: 'SCHEDULED',
+      releasedDriverId: driverId,
+      reoffered: true,
+    };
+  }
+
   await prisma.$transaction(async (tx) => {
     const updated = await tx.deliveryJob.updateMany({
       where: {
@@ -534,7 +645,7 @@ export async function executeAdminCancelDeliveryJob(opts: {
   invalidateJobRoute(opts.jobId);
   broadcastDeliveryJobUpdated(opts.storeId, { jobId: opts.jobId, status: 'CANCELLED' });
 
-  return { jobId: opts.jobId, status: 'CANCELLED', releasedDriverId: driverId };
+  return { jobId: opts.jobId, status: 'CANCELLED', releasedDriverId: driverId, reoffered: false };
 }
 
 /** Flip the driver back to ONLINE once they hold no assigned/queued/in-progress/returning run. */
@@ -1040,6 +1151,7 @@ export {
   fetchLatestDriverLocation,
   parseActualRouteJson,
   simplifyGpsPath,
+  snapGpsPathForDisplay,
   isCreditedDelivery,
   groupFailedOrderIdsByJob,
   creditedDeliveredTotals,
