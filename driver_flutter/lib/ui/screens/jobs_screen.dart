@@ -247,7 +247,6 @@ class _JobsTabState extends State<JobsTab> {
                   onOpen: () => widget.onOpenJob(job),
                   onViewDetails: () => AppRoutes.openJobDetail(context, job.id),
                   onReportIssue: () => _openReportSheet(vm),
-                  onViewBreakdown: isBreakdownOpen(vm) ? () => openBreakdownStatus(context) : null,
                 ),
               ),
             ),

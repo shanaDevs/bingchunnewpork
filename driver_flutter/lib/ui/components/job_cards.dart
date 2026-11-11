@@ -293,14 +293,10 @@ class ActiveJobCard extends StatelessWidget {
     required this.onOpen,
     this.onViewDetails,
     this.onReportIssue,
-    this.onViewBreakdown,
   });
 
   final JobSummary job;
   final DeliveryJobDetail? detail;
-
-  /// Set while a breakdown is open: the primary action becomes "View breakdown status".
-  final VoidCallback? onViewBreakdown;
 
   /// Opens the live run (dashboard) — "Continue" and the next-stop panel.
   final VoidCallback onOpen;
@@ -337,6 +333,7 @@ class ActiveJobCard extends StatelessWidget {
     final allDone = detail != null && orders.isNotEmpty && orders.every((o) => !o.isPending);
     final stepLabel = !pickedUp ? tr('Pickup') : (allDone ? tr('Complete') : tr('Delivery'));
     final beforePickup = !pickedUp;
+    final nextOrderIndex = orders.indexWhere((o) => o.isPending);
     final earn = detail?.totalDeliveryFees ?? job.totalDeliveryFees;
 
     final viewDetails = onViewDetails ?? onOpen;
@@ -508,17 +505,22 @@ class ActiveJobCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (onViewBreakdown != null)
+                  // Opens the in-app active run (map + route); its directions icon hands off to Google Maps.
+                  // One primary action that follows the job's current step.
+                  if (allDone)
                     PillButton(
-                      label: tr('View breakdown status'),
+                      label: tr('Complete job'),
                       trailingIcon: Icons.arrow_forward_rounded,
-                      onTap: onViewBreakdown,
+                      onTap: onOpen,
                     )
                   else
                     PillButton(
-                      label: beforePickup ? tr('Navigate to pickup') : tr('Navigate'),
+                      label: beforePickup
+                          ? tr('Navigate to pickup')
+                          : (nextOrderIndex >= 0
+                              ? tr('Navigate to order {n}', {'n': nextOrderIndex + 1})
+                              : tr('Navigate')),
                       icon: Icons.navigation_outlined,
-                      // Opens the in-app active run (map + route); its directions icon hands off to Google Maps.
                       onTap: onOpen,
                     ),
                   if (onReportIssue != null) ...[
