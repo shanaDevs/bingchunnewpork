@@ -270,7 +270,9 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
             _Row(
               icon: Icons.shield_outlined,
               title: tr('App lock'),
-              subtitle: tr('Unlock with biometrics or your PIN'),
+              subtitle: lock.enabled
+                  ? tr('On · {method}', {'method': appLockLabel(lock.method)})
+                  : tr('Unlock with biometrics or your PIN'),
               trailing: IgnorePointer(child: BcSwitch(value: lock.enabled, onChanged: (_) {})),
               onTap: () => showAppLockSheet(context),
             ),

@@ -47,7 +47,7 @@ class AppLock extends ChangeNotifier {
   bool _unlocked = false;
 
   /// Re-lock delay after the app goes to the background (see [timeoutOptions]).
-  int lockTimeout = timeoutNever;
+  int lockTimeout = 0;
   DateTime? _backgroundedAt;
   bool _systemPromptOpen = false;
 
