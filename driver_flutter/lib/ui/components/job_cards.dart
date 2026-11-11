@@ -43,8 +43,10 @@ class HomeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.bc;
     final name = driverName.trim().isEmpty ? tr('Driver') : driverName.trim();
+    final parts = name.split(RegExp(r'\s+'));
+    final firstName = parts.first;
+    final restName = parts.skip(1).join(' ');
     return QdBrandHeader(
       tall: true,
       child: Column(
@@ -69,18 +71,28 @@ class HomeHeader extends StatelessWidget {
                       _greeting(),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: BcType.subtitle.copyWith(color: c.heroSubtitle, fontWeight: FontWeight.w600),
+                      style: BcType.subtitle.copyWith(color: Colors.white.withValues(alpha: 0.9), fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 2),
+                    // First name large; remaining names on a smaller line so long names never shrink the title.
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        name,
+                        firstName,
                         maxLines: 1,
-                        style: BcType.displayHero.copyWith(color: c.heroTitle),
+                        style: BcType.displayHero.copyWith(color: Colors.white),
                       ),
                     ),
+                    if (restName.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        restName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: BcType.subtitle.copyWith(color: Colors.white.withValues(alpha: 0.9), fontWeight: FontWeight.w600),
+                      ),
+                    ],
                   ],
                 ),
               ),
