@@ -36,6 +36,7 @@ import {
   orderStopImageMeta,
   parseActualRouteJson,
   simplifyGpsPath,
+  snapGpsPathForDisplay,
   visibleJobOrderLinksForDeliveryJob,
   jobPickedUpForList,
   mapListJobOrderStops,
@@ -588,7 +589,7 @@ export async function getAdminDeliveryJobActualRoute(req: Request, res: Response
       const completedAt = job.completedAt ?? new Date();
       const locations = await fetchJobGpsLocations(jobId, startedAt, completedAt, job.driverId);
       if (locations.length >= 2) {
-        path = simplifyGpsPath(locations);
+        path = await snapGpsPathForDisplay(locations);
         source = 'gps_fallback';
       }
     }
@@ -1434,11 +1435,7 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
           ...(storeId
             ? [
                 {
-                  OR: [
-                    { storeId },
-                    { accessibleStores: { some: { id: storeId } } },
-                    activeJobOnBranch,
-                  ],
+                  OR: [{ storeId }, activeJobOnBranch],
                 },
               ]
             : []),
@@ -1457,12 +1454,23 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
           select: { lat: true, lng: true, recordedAt: true, jobId: true, heading: true },
         },
         deliveryJobs: {
-          where: { status: { in: ['ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING'] } },
+          where: {
+            status: { in: ['ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING'] },
+            ...(storeId ? { storeId } : {}),
+          },
           select: { id: true, status: true, title: true },
           take: 5,
         },
       },
     });
+
+    const scopedStore =
+      storeId != null
+        ? await prisma.store.findUnique({
+            where: { id: storeId },
+            select: { id: true, name: true },
+          })
+        : null;
 
     return success(
       res,
@@ -1474,19 +1482,22 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
           recordedAt: point.recordedAt,
           heading: point.heading ?? null,
         }));
+        const activeJobs = d.deliveryJobs;
+        const displayStoreId = scopedStore?.id ?? d.storeId;
+        const displayStoreName = scopedStore?.name ?? d.store?.name ?? null;
         return {
           driverId: d.id,
           name: d.name,
           dutyStatus: d.dutyStatus,
           vehicleNumber: d.vehicleNumber,
-          storeId: d.storeId,
-          storeName: d.store?.name ?? null,
+          storeId: displayStoreId,
+          storeName: displayStoreName,
           lat: loc?.lat ?? null,
           lng: loc?.lng ?? null,
           heading: loc?.heading ?? null,
           updatedAt: loc?.recordedAt ?? null,
-          jobId: loc?.jobId ?? d.deliveryJobs.find((j) => j.status === 'IN_PROGRESS')?.id ?? null,
-          activeJobs: d.deliveryJobs,
+          jobId: loc?.jobId ?? activeJobs.find((j) => j.status === 'IN_PROGRESS')?.id ?? null,
+          activeJobs,
           recentPath,
         };
       }),

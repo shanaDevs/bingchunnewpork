@@ -37,6 +37,7 @@ import {
   orderStopImageMeta,
   promoteNextQueuedJob,
   releaseDriverWhenIdle,
+  reofferDeliveryJobToBranchPool,
   resolveCompletionRadiusM,
   resolveJobRouteOrigin,
 } from '../lib/deliveryJobHelpers';
@@ -619,34 +620,8 @@ export async function rejectJob(req: Request, res: Response, next: NextFunction)
     // Restore ONLINE before FCM so the rejector is included in the branch push audience.
     await releaseDriverWhenIdle(driverId).catch(() => {});
 
-    const broadcastedAt = new Date();
     broadcastDeliveryJobUpdated(job.storeId, { jobId, status: 'SCHEDULED' });
-
-    // Only ring drivers if the job is still claimable today — otherwise it just
-    // sits SCHEDULED/unassigned and surfaces as "Missed" in the admin Incomplete tab.
-    const jobIsToday = dateStringInColombo(job.scheduledAt) === todayDateString();
-    if (jobIsToday) {
-      const offer = buildNewJobBroadcastPayload(
-        {
-          id: job.id,
-          title: job.title,
-          status: 'SCHEDULED',
-          scheduledAt: job.scheduledAt,
-          storeId: job.storeId,
-          rideCode: job.rideCode,
-          totalCups: job.totalCups,
-          estimatedDistanceKm: job.estimatedDistanceKm,
-          estimatedMinutes: job.estimatedMinutes,
-          totalDistanceKm: job.totalDistanceKm,
-          totalDeliveryFees: job.totalDeliveryFees,
-          store: job.store,
-          jobOrders: job.jobOrders.map((jo) => ({ sequence: jo.sequence, order: jo.order })),
-        },
-        { broadcastedAt },
-      );
-      broadcastNewJob(job.storeId, offer);
-      sendPushToBranchDrivers(job.storeId, buildNewJobPushFromBroadcast(offer)).catch(() => {});
-    }
+    await reofferDeliveryJobToBranchPool(jobId);
 
     return success(res, { rejected: true, jobId });
   } catch (err) {
