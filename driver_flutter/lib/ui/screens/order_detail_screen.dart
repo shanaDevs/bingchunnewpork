@@ -431,6 +431,14 @@ class _OrderDetailBodyState extends State<_OrderDetailBody> {
               ],
             ),
           ),
+          if (order.isFailed && (order.failureReason?.isNotEmpty ?? false)) ...[
+            const SizedBox(height: 10),
+            RunNote(
+              icon: Icons.error_outline_rounded,
+              text: '${tr('Failure reason')}: ${order.failureReason!}',
+              color: c.errorStrong,
+            ),
+          ],
           if (order.complaints.isNotEmpty) ...[
             const SizedBox(height: 10),
             _ComplaintsSection(complaints: order.complaints),

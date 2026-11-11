@@ -266,6 +266,9 @@ class JobOrder {
   final List<JobOrderItem> items;
   final bool deliveryFailed;
 
+  /// Reason the rider gave when marking this order as failed.
+  final String? failureReason;
+
   /// Store/global rule: driver must enter the customer code to mark delivered.
   final bool deliveryOtpRequired;
   final List<DriverComplaint> complaints;
@@ -290,6 +293,7 @@ class JobOrder {
     this.lng,
     this.items = const [],
     this.deliveryFailed = false,
+    this.failureReason,
     this.deliveryOtpRequired = false,
     this.complaints = const [],
   });
@@ -314,6 +318,7 @@ class JobOrder {
     lng: dblOrNull(j, 'lng'),
     items: listOf(j, 'items', JobOrderItem.fromJson),
     deliveryFailed: boolOf(j, 'deliveryFailed'),
+    failureReason: strOrNull(j, 'failureReason'),
     deliveryOtpRequired: boolOf(j, 'deliveryOtpRequired'),
     complaints: listOf(j, 'complaints', DriverComplaint.fromJson),
   );

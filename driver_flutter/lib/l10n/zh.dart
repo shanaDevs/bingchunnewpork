@@ -1028,6 +1028,7 @@ const Map<String, String> zhStrings = {
   'You can mark this stop delivered.': '您可以将此站点标记为已送达。',
   'Not ready yet': '尚未就绪',
   'Your complaint': '您的投诉',
+  'Failure reason': '失败原因',
   'Your complaints': '您的投诉',
   'Describe the issue. Your branch admin will review it.': '请描述问题，门店管理员将进行审核。',
   'What happened?': '发生了什么？',
