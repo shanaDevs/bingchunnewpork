@@ -1,29 +1,54 @@
 @echo off
+REM Windows 7 safe: prefer native .NET agent — NO Node.js (avoids ADVAPI32 EventSetInformation).
 title Bing Chun Cup Sticker Agent
 cd /d "%~dp0"
+set "BC_STICKER_AGENT_DIR=%~dp0"
 
-REM Cloud admin API — agent pulls print jobs (Chrome cannot call localhost from HTTPS).
+set "AUTOSTART=0"
+if /I "%~1"=="--autostart" set "AUTOSTART=1"
+if /I "%~1"=="/autostart" set "AUTOSTART=1"
+
+if exist "%~dp0local.env" (
+  for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%~dp0local.env") do (
+    if not "%%A"=="" set "%%A=%%B"
+  )
+)
+
 if not defined BC_STICKER_API_URL set BC_STICKER_API_URL=https://admin.bingchunsrilanka.com/api
-REM Must match server CUP_STICKER_AGENT_SECRET / INTERNAL_SERVICE_SECRET (default works out of the box).
 if not defined BC_STICKER_SECRET set BC_STICKER_SECRET=bingchun-cup-sticker-local
+if not defined BC_STICKER_PRINTER set BC_STICKER_PRINTER=
+if "%BC_STICKER_PRINTER%"=="" if exist "%~dp0detect-printer.exe" (
+  for /f "usebackq delims=" %%P in (`"%~dp0detect-printer.exe"`) do set "BC_STICKER_PRINTER=%%P"
+)
+if "%BC_STICKER_PRINTER%"=="" set BC_STICKER_PRINTER=bingchun
 
-echo Starting cup sticker agent
-echo   Local health:  http://127.0.0.1:9177/health
-echo   Cloud queue:    %BC_STICKER_API_URL%/cup-sticker-agent/claim
-echo   Printer:       Xprinter XP-D35B  (override with BC_STICKER_PRINTER)
-echo Run this on the cashier PC with the USB printer — keep this window open.
-echo.
+if not exist "%~dp0print-stickers.exe" if exist "%~dp0build-helpers.bat" call "%~dp0build-helpers.bat"
+if not exist "%~dp0BingChunCupStickerAgent.exe" if exist "%~dp0build-helpers.bat" call "%~dp0build-helpers.bat"
 
-REM Free port 9177 if a previous agent is still running
+if not exist "%~dp0BingChunCupStickerAgent.exe" (
+  echo ERROR: BingChunCupStickerAgent.exe missing.
+  echo Copy the full cup-sticker-agent folder, or run build-helpers.bat on a PC with .NET 4.
+  if "%AUTOSTART%"=="0" pause
+  exit /b 1
+)
+
+if not "%AUTOSTART%"=="1" if not "%BC_STICKER_SILENT%"=="1" (
+  echo Starting cup sticker agent ^(native .NET — no Node.js^)
+  echo   Health:   http://127.0.0.1:9177/health
+  echo   Printer:  %BC_STICKER_PRINTER%
+  echo.
+)
+
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr /R /C:":9177 .*LISTENING"') do (
-  echo Port 9177 already in use — stopping old process %%p ...
   taskkill /F /PID %%p >nul 2>&1
 )
-timeout /t 1 /nobreak >nul
+ping -n 2 127.0.0.1 >nul
 
-node "%~dp0server.mjs"
-if errorlevel 1 (
-  echo.
-  echo Agent stopped with an error.
+"%~dp0BingChunCupStickerAgent.exe"
+set ERR=%ERRORLEVEL%
+if not "%ERR%"=="0" (
+  echo Agent stopped ^(exit %ERR%^).
+  if "%AUTOSTART%"=="0" if not "%BC_STICKER_SILENT%"=="1" pause
+  exit /b %ERR%
 )
-pause
+if "%AUTOSTART%"=="0" if not "%BC_STICKER_SILENT%"=="1" pause

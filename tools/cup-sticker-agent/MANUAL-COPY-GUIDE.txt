@@ -1,0 +1,136 @@
+Bing Chun Cup Sticker Agent — Manual copy guide
+================================================
+
+A) WINDOWS 7 CASHIER PC (recommended — NO Node.js)
+--------------------------------------------------
+1. On this build PC, open folder:
+   tools\cup-sticker-agent
+
+2. Copy the WHOLE folder to a USB stick, then to the Windows 7 PC.
+   Important files that must be copied:
+     - BingChunCupStickerSetup.exe
+     - BingChunCupStickerAgent.exe
+     - print-stickers.exe
+     - detect-printer.exe
+     - start.bat
+     - start-autostart.bat
+     - install.bat
+     - ensure-dotnet.cmd
+     - local.env          (created after setup; optional to copy)
+     - MANUAL-COPY-GUIDE.txt
+
+3. On Windows 7 PC:
+   - Double-click BingChunCupStickerSetup.exe
+   - Select the sticker printer
+   - Click "Save && Install agent"
+
+4. Needs .NET Framework 4 only (setup can install it).
+   Does NOT need Node.js.
+   Avoids ADVAPI32 / EventSetInformation errors.
+
+
+B) MANUAL NODE 16 COPY (optional / backup)
+------------------------------------------
+Use this only if you still want portable Node in the folder.
+Windows 7 must use Node 16 (NOT Node 18 or 20 — those crash with ADVAPI32).
+
+Option 1 — copy from this project folder (if present)
+  Source:
+    tools\cup-sticker-agent\runtime\node\
+
+  Copy the entire "node" folder to the Win7 PC at:
+    cup-sticker-agent\runtime\node\
+
+  After copy you must have:
+    cup-sticker-agent\runtime\node\node.exe
+
+Option 2 — download on another PC, then copy
+  64-bit Windows 7:
+    https://nodejs.org/dist/v16.20.2/node-v16.20.2-win-x64.zip
+
+  32-bit Windows 7:
+    https://nodejs.org/dist/v16.20.2/node-v16.20.2-win-x86.zip
+
+  Steps:
+  1. Download the ZIP on a PC with internet.
+  2. Unzip it.
+  3. Inside you will see a folder like:
+       node-v16.20.2-win-x64
+     Rename that folder to:  node
+  4. Put it here on the cashier PC:
+       cup-sticker-agent\runtime\node\node.exe
+     (so node.exe is directly under runtime\node\)
+
+Do NOT copy Node 18 / 19 / 20 / 22 to Windows 7.
+
+
+C) FOLDER LAYOUT AFTER COPY
+---------------------------
+cup-sticker-agent\
+  BingChunCupStickerSetup.exe
+  BingChunCupStickerAgent.exe
+  print-stickers.exe
+  detect-printer.exe
+  start.bat
+  install.bat
+  local.env                 (after first setup)
+  runtime\
+    node\                   (optional Node 16 backup)
+      node.exe
+      ...
+
+
+D) START / STOP  (Windows 7: prefer EXE, not .bat)
+-------------------------------------------------
+Best:    BingChunCupStickerSetup.exe  (Save && Install starts the EXE)
+Or:      double-click BingChunCupStickerAgent.exe
+Or:      double-click start-agent.vbs
+Avoid relying on .bat if Windows asks for a bat / bat does not run.
+
+Health:  http://127.0.0.1:9177/health
+Normal agent uses BingChunCupStickerAgent.exe (native .NET), not Node.
+Startup shortcut also points to BingChunCupStickerAgent.exe.
+
+
+E) CHANGE PRINTER LATER
+-----------------------
+Run BingChunCupStickerSetup.exe again → select printer → Save.
+Or edit local.env:
+  BC_STICKER_PRINTER=YourPrinterName
+
+
+F) PRINTER NOT DETECTING / NOT PRINTING
+---------------------------------------
+1. Open BingChunCupStickerSetup.exe → Refresh
+   - You must see a line with [STICKER] (Xprinter driver or name bingchun)
+2. Select that exact name → click Test print
+3. If Test print fails:
+   - Printer power ON, USB plugged in
+   - In Windows: Devices and Printers → open the queue → unpause / set Online
+   - Only ONE printer should use the USB port (USB001). Remove/share conflict
+     (e.g. "3D Systems Cube 3" on same USB001 as bingchun causes Error status)
+4. Save && Install again so local.env matches the printer name
+5. In Admin → Printer settings, set Printer name to the SAME Windows name
+   (example: bingchun — not a different spelling)
+6. Check agent health in a browser on that PC:
+     http://127.0.0.1:9177/health
+   Should show "ok": true and "printer": "bingchun" (or your name)
+7. If health does not open: run BingChunCupStickerAgent.exe again
+
+
+G) ADMIN SHOWS "AGENT OFFLINE" BUT AGENT IS RUNNING
+---------------------------------------------------
+Admin online status is NOT from local port 9177.
+The agent must reach the cloud every few seconds:
+  BC_STICKER_API_URL/cup-sticker-agent/heartbeat  (and /claim)
+
+1. On cashier PC open: http://127.0.0.1:9177/health
+   - Look for "cloudOk": true
+   - If "cloudOk": false, read "cloudError"
+2. Confirm local.env has:
+     BC_STICKER_API_URL=https://admin.bingchunsrilanka.com/api
+     BC_STICKER_SECRET=bingchun-cup-sticker-local
+   (secret must match server CUP_STICKER_AGENT_SECRET)
+3. PC must have internet (firewall must allow outbound HTTPS)
+4. Restart BingChunCupStickerAgent.exe after fixing local.env
+5. Wait ~5 seconds, refresh Admin Printer page — should show Agent online
