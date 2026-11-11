@@ -84,12 +84,14 @@ export function computeAllTimeAvailableBalanceCents(
   );
 }
 
-function netAmountCentsFromBreakdown(breakdown: unknown): number {
+function readRoundedCentsField(breakdown: unknown, key: string): number {
   if (!breakdown || typeof breakdown !== 'object') return 0;
-  const netAmount = (breakdown as Record<string, unknown>).netAmount;
-  return typeof netAmount === 'number' && Number.isFinite(netAmount)
-    ? Math.round(netAmount)
-    : 0;
+  const value = (breakdown as Record<string, unknown>)[key];
+  return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : 0;
+}
+
+function netAmountCentsFromBreakdown(breakdown: unknown): number {
+  return readRoundedCentsField(breakdown, 'netAmount');
 }
 
 function branchReceivableExcludingJasonFromRow(params: {
@@ -123,12 +125,13 @@ function lkrToExpenseCents(lkr: number): number {
   return Math.round(lkr * 100);
 }
 
+function readPreviewLkr(data: Record<string, unknown>, key: string): number | null {
+  const value = data[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 function gatewayFeeCentsFromBreakdown(breakdown: unknown): number {
-  if (!breakdown || typeof breakdown !== 'object') return 0;
-  const gatewayFee = (breakdown as Record<string, unknown>).gatewayFee;
-  return typeof gatewayFee === 'number' && Number.isFinite(gatewayFee)
-    ? Math.round(gatewayFee)
-    : 0;
+  return readRoundedCentsField(breakdown, 'gatewayFee');
 }
 
 /**
@@ -322,11 +325,6 @@ export function resolvePayoutPeriodRowDisplayAmounts(params: {
         : params.amountCents,
     netPreviewData: params.netPreviewData,
   });
-
-  function readPreviewLkr(data: Record<string, unknown>, key: string): number | null {
-    const value = data[key];
-    return typeof value === 'number' && Number.isFinite(value) ? value : null;
-  }
 
   if (!parsed) {
     return {

@@ -12,9 +12,9 @@ import {
 } from '@/components/admin/payoutPeriodRowAmounts';
 import { fetchPayoutPeriods, payoutPeriodsQueryKey } from '@/components/admin/payoutPeriodsApi';
 import {
-  isCompletedPayout,
   previewPeriodTo,
   resolveRowBaseDisplayAmounts,
+  rowMatchesPayoutListTab,
   sortPayoutPeriodRows,
 } from '@/components/admin/payoutPeriodRowModel';
 import type { PayoutListTab, PayoutPeriodSort } from '@/components/admin/payoutPeriodTypes';
@@ -98,10 +98,7 @@ export function useBranchPayoutPeriodsData({
   );
 
   const tabRows = useMemo(
-    () =>
-      displayRows.filter((row) =>
-        listTab === 'completed' ? isCompletedPayout(row.status) : !isCompletedPayout(row.status),
-      ),
+    () => displayRows.filter((row) => rowMatchesPayoutListTab(row, listTab)),
     [displayRows, listTab],
   );
 

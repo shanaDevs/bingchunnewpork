@@ -185,7 +185,11 @@ export default function PlatformProviderReceivable({
     );
   }
   const displayGatewayRatePct = breakdown.gatewayRatePct ?? gatewayRatePct;
-  const sppcNotDeducted = !resolvedPaybackEnabled && breakdown.sharedPromoPlatformLkr > 0.001;
+  const sharedPlatformLkr = breakdown.sharedPromoPlatformLkr;
+  const sharedDeductedLkr = resolvedPaybackEnabled ? sharedPlatformLkr : 0;
+  const platformDiscountPaybackLkr = breakdown.platformPaybackLkr + sharedDeductedLkr;
+  const sharedRowLkr = resolvedPaybackEnabled ? 0 : sharedPlatformLkr;
+  const sppcNotDeducted = !resolvedPaybackEnabled && sharedPlatformLkr > 0.001;
 
   return (
     <div className={`platform-provider-receivable space-y-4 ${className}`}>
@@ -204,7 +208,7 @@ export default function PlatformProviderReceivable({
           <BreakdownRow label="Branch commission" value={finalLkr(breakdown.commissionFeeLkr)} />
           <BreakdownRow
             label="Platform discount payback"
-            value={finalLkr(breakdown.platformPaybackLkr)}
+            value={finalLkr(platformDiscountPaybackLkr)}
             valueTone="red"
             operator="−"
           />
@@ -216,7 +220,7 @@ export default function PlatformProviderReceivable({
           />
           <BreakdownRow
             label="Shared promo platform contribution"
-            value={finalLkr(breakdown.sharedPromoPlatformLkr)}
+            value={finalLkr(sharedRowLkr)}
             valueTone={sppcNotDeducted ? 'default' : 'red'}
             operator={sppcNotDeducted ? undefined : '−'}
             hint={

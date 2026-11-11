@@ -46,6 +46,7 @@
     "seed:nuge-sept1-15-delivery": "ts-node --transpile-only src/scripts/seed-nugegoda-sept1-15-delivery-promos.ts",
     "seed:nuge-sept5-15-delivery": "ts-node --transpile-only src/scripts/seed-nugegoda-sept5-15-delivery-promos.ts",
     "seed:nuge-sept16-30-delivery": "ts-node --transpile-only src/scripts/seed-nugegoda-sept16-30-delivery-orders.ts",
+    "seed:nuge-nov1-30-delivery": "ts-node --transpile-only src/scripts/seed-nugegoda-nov1-30-delivery-promos.ts",
     "seed:moratuwa-delivery": "node -r ./scripts/prisma-use-direct-url.cjs ./node_modules/ts-node/dist/bin.js --transpile-only scripts/seed-moratuwa-delivery-orders.ts",
     "seed:nugegoda-delivery": "node -r ./scripts/prisma-use-direct-url.cjs ./node_modules/ts-node/dist/bin.js --transpile-only scripts/seed-nugegoda-delivery-orders.ts",
     "seed:bambalapitiya-delivery": "node -r ./scripts/prisma-use-direct-url.cjs ./node_modules/ts-node/dist/bin.js --transpile-only scripts/seed-bambalapitiya-delivery-orders.ts",

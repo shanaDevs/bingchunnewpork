@@ -16,6 +16,7 @@ import {
   mergeWalletSecurityAuditRows,
 } from '../lib/walletSecurityAuditLegacy';
 import {
+  enrichWalletSecurityAuditRowsWithStoreNames,
   listWalletSecurityAuditLogs,
   parseWalletSecurityAuditListQuery,
 } from '../lib/walletSecurityAuditSchema';
@@ -641,7 +642,11 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
         buffer,
       } as Express.Multer.File;
     }
-    const proofFile = assertSettlementProofFile(uploadedProof);
+    const proofFile = uploadedProof
+      ? assertSettlementProofFile(uploadedProof)
+      : data.paymentMethod === 'CASH'
+        ? undefined
+        : assertSettlementProofFile(uploadedProof);
 
     let draftWithdrawalId: string | undefined = data.withdrawalId;
     let inReviewDraft: Awaited<ReturnType<typeof findInReviewWithdrawalForPeriod>> = null;
@@ -700,6 +705,7 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
       storeId,
       amountCents,
       withdrawalId: updated.id,
+      reference: store?.name ? `Branch: ${store.name}` : null,
     });
 
     invalidateBranchPayablesBalanceCaches(storeId);
@@ -711,23 +717,25 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
 
     void (async () => {
       let proofUrl: string | null = null;
-      try {
-        proofUrl = await uploadSettlementProof(
-          proofFile.buffer,
-          proofFile.originalname,
-          proofFile.mimetype,
-          storeId,
-        );
-        await prisma.storeWithdrawal.update({
-          where: { id: updated.id },
-          data: { proofUrl },
-        });
-      } catch (err) {
-        console.error('[initiate-payout] background proof upload failed', {
-          storeId,
-          withdrawalId: updated.id,
-          err,
-        });
+      if (proofFile) {
+        try {
+          proofUrl = await uploadSettlementProof(
+            proofFile.buffer,
+            proofFile.originalname,
+            proofFile.mimetype,
+            storeId,
+          );
+          await prisma.storeWithdrawal.update({
+            where: { id: updated.id },
+            data: { proofUrl },
+          });
+        } catch (err) {
+          console.error('[initiate-payout] background proof upload failed', {
+            storeId,
+            withdrawalId: updated.id,
+            err,
+          });
+        }
       }
 
       try {
@@ -1536,9 +1544,11 @@ export async function listWalletSecurityAuditLogsHandler(req: Request, res: Resp
       total = merged.total;
     }
 
+    const rowsWithStoreNames = await enrichWalletSecurityAuditRowsWithStoreNames(rows);
+
     res.json({
       success: true,
-      data: { rows, total, page, limit },
+      data: { rows: rowsWithStoreNames, total, page, limit },
     });
   } catch (err) {
     next(err);

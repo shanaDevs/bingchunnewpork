@@ -115,6 +115,30 @@ describe('resolvePayoutPeriodRowDisplayAmounts', () => {
     expect(totals.jasonInvestmentCents).toBe(0);
   });
 
+  it('does not add Payout 1 platform discounts into expenses net platform amount', () => {
+    const totals = aggregatePaidPayoutPeriodExpensesCents([
+      {
+        status: 'PAID',
+        amountCents: 304_600,
+        periodFrom: '2026-09-04',
+        periodTo: '2026-09-18',
+        breakdown: {
+          cycleStage: 'FIRST',
+          grossAmount: 432_000,
+          commissionFee: 0,
+          gatewayFee: 5_900,
+          netAmount: 304_600,
+          platformPaybackTotal: 19_500,
+          platformOwnedPromoDiscountTotal: 0,
+          netPlatformEarning: 0,
+        },
+      },
+    ]);
+
+    expect(totals.netPlatformAmountCents).toBe(0);
+    expect(totals.gatewayFeeCents).toBe(5_900);
+  });
+
   it('separates Jason investment from paid branch receivable', () => {
     const totals = aggregatePaidPayoutPeriodExpensesCents([
       {

@@ -22,7 +22,6 @@ import {
   ReportTotalRow,
 } from '@/components/admin/payoutFinancialReportUi';
 import {
-  PAYOUT_FIRST_CYCLE_DEFERRED_SECTION,
   PAYOUT_FIRST_CYCLE_HEADLINE,
   PAYOUT_FIRST_ONLINE_COLLECTIONS_SECTION_HINT,
   PAYOUT_FIRST_ONLINE_COLLECTIONS_TITLE,
@@ -98,11 +97,11 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
       />
 
       {isFirstCyclePayout ? (
-        <ReportSection title="Discounts & platform share" amount="—">
-          <p className="text-[12px] font-medium leading-relaxed text-[#64748b] dark:text-slate-400">
-            {PAYOUT_FIRST_CYCLE_DEFERRED_SECTION}
-          </p>
-        </ReportSection>
+        <ReportSection
+          title="Discounts & platform share"
+          amount="—"
+          info={<DiscountDetailsInfoPopover values={values} />}
+        />
       ) : (
         <ReportSection
           title="Discounts"
@@ -169,14 +168,10 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
 
       <ReportSection
         title="Net Platform Amount"
+        amount={isFirstCyclePayout ? '—' : undefined}
         info={<NetPlatformAmountInfoPopover values={values} />}
       >
-        {isFirstCyclePayout ? (
-          <p className="text-[12px] font-medium leading-relaxed text-[#64748b] dark:text-slate-400">
-            {PAYOUT_FIRST_CYCLE_DEFERRED_SECTION} Commission, platform discounts, and loyalty for
-            the full cycle are reconciled in Payout 2.
-          </p>
-        ) : (
+        {isFirstCyclePayout ? null : (
           <>
             {hasNetPlatformBreakdown && (
               <>

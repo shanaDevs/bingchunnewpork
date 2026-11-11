@@ -4,7 +4,6 @@ import {
   type ChannelSettlementRow,
   type CommissionChannel,
 } from './commission';
-import { resolveNetPayoutFinalPayCentsFromWithdrawalBreakdown } from './payoutWithdrawalAmounts';
 import {
   addDaysToUtcDateStr,
   dayAfterUtcDateStr,
@@ -110,10 +109,27 @@ export function readFirstPayoutOnlineSubtotalCentsFromBreakdown(breakdown: unkno
   return readOnlineWalletCentsFromBreakdown(breakdown);
 }
 
-/** Payout 2 prior deduction — net payout (final pay amount) from the paired Payout 1 withdrawal. */
+/**
+ * Payout 2 prior deduction — Payout 1 pickup + delivery online wallet after discounts,
+ * before the payment gateway fee. Not the net payout after the gateway deduction.
+ */
 export function readFirstPayoutPriorDeductionCentsFromBreakdown(breakdown: unknown): number {
-  const fallbackCents = readFirstPayoutOnlineSubtotalCentsFromBreakdown(breakdown);
-  return resolveNetPayoutFinalPayCentsFromWithdrawalBreakdown(breakdown, fallbackCents);
+  return readFirstPayoutOnlineSubtotalCentsFromBreakdown(breakdown);
+}
+
+/** Paired Payout 1 online wallet before gateway, for an existing Payout 2 withdrawal. */
+export async function secondPayoutPriorBeforeGatewayFeeCents(
+  storeId: string,
+  cyclePairId: string | null | undefined,
+): Promise<number | null> {
+  if (!cyclePairId) return null;
+  const first = await prisma.storeWithdrawal.findFirst({
+    where: { id: cyclePairId, storeId },
+    select: { breakdown: true },
+  });
+  if (!first) return null;
+  const cents = readFirstPayoutPriorDeductionCentsFromBreakdown(first.breakdown);
+  return cents > 0 ? cents : null;
 }
 
 /**

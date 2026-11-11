@@ -51,7 +51,8 @@ export const walletReportQuerySchema = z.object({
 
 export const walletAnalysisQuerySchema = z.object({
   month: monthQuerySchema,
-  storeId: z.string().uuid().optional(),
+  /** Branch ids include legacy slugs such as `store-bing-chun---moratuwa`, not only UUIDs. */
+  storeId: z.string().min(1).optional(),
 });
 
 export const payhereNotifyBodySchema = z.object({

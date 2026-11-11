@@ -339,6 +339,26 @@ const ONLINE_PAYABLES_CHANNELS: ReadonlySet<keyof CommissionChannelRevenueCents>
   'deliveryOnlineIn',
 ]);
 
+const ONLINE_PAYABLES_CARD_METHODS = ['CARD', 'PAYHERE', 'LOYALTY_POINTS'] as const;
+
+/**
+ * Paid orders that feed branch online payables (same basis as Online Available Balance).
+ * PAYHERE pickup + card/PayHere/loyalty delivery — excludes counter cash and in-store card pickup.
+ */
+export function onlinePayablesPaidOrderWhere(
+  extra: Omit<Prisma.OrderWhereInput, 'OR' | 'paymentStatus' | 'status'> = {},
+): Prisma.OrderWhereInput {
+  return {
+    ...extra,
+    paymentStatus: 'PAID',
+    status: { not: 'CANCELLED' },
+    OR: [
+      { orderMode: 'TAKEAWAY', paymentMethod: 'PAYHERE' },
+      { orderMode: 'DELIVERY', paymentMethod: { in: [...ONLINE_PAYABLES_CARD_METHODS] } },
+    ],
+  };
+}
+
 /**
  * Branch-wallet payables credit for one paid order (same basis as Revenue Summary):
  * subtotal − promo discount. Online cents feed All-Time Available Balance.

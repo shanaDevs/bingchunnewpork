@@ -73,8 +73,14 @@ export function isOldestUnpaidBranchPayoutRow(row: PayoutDueRow, allRows: Payout
   return oldest.periodFrom === row.periodFrom && oldest.periodTo === row.periodTo;
 }
 
-function emptyPayoutsDuePage(page: number, limit: number): BranchPayoutsDuePage {
-  return { items: [], total: 0, allTotal: 0, page, limit, pages: 1 };
+async function readPayoutsDueApiError(res: Response, fallback: string): Promise<string> {
+  try {
+    const json = (await res.json()) as { message?: string };
+    const detail = json.message ? `${res.status}: ${json.message}` : String(res.status);
+    return `${fallback} (${detail})`;
+  } catch {
+    return `${fallback} (${res.status})`;
+  }
 }
 
 export async function fetchBranchPayoutsDue(
@@ -96,7 +102,7 @@ export async function fetchBranchPayoutsDue(
     credentials: 'include',
     signal,
   });
-  if (!res.ok) return emptyPayoutsDuePage(page, limit);
+  if (!res.ok) throw new Error(await readPayoutsDueApiError(res, 'Failed to load payouts due'));
   const json = await res.json();
   const data = (json.data ?? {}) as Partial<BranchPayoutsDuePage>;
   const items = Array.isArray(data.items) ? data.items : [];

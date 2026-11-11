@@ -391,12 +391,15 @@ export default function PayoutsDuePanel({
 
   const searchActive = debouncedSearch.length > 0;
   const pageBusy = pageFetching && dueQuery.isPlaceholderData;
+  const showEmptyDue = dueQuery.isSuccess && count === 0 && !searchActive;
+  const showFullSkeleton =
+    !searchActive && count === 0 && !showEmptyDue && !dueQuery.isPlaceholderData;
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
-      {loading && count === 0 && !searchActive && <PayoutsDueTableSkeleton />}
+      {showFullSkeleton && <PayoutsDueTableSkeleton />}
 
-      {!loading && count === 0 && !searchActive && (
+      {showEmptyDue && (
         <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-400">
             <CheckCircle size={28} />

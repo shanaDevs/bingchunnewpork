@@ -63,7 +63,8 @@ import {
 import { getWalletSummary, getOrCreateWallet } from '../lib/walletService';
 import { getCommissionSlabs, getConvenienceFeeRates } from '../lib/appSchema';
 import { generateCommissionSettlementInvoice } from '../lib/withdrawalInvoice';
-import { dateStringInColombo, todayDateString } from '../lib/datetime';
+import { todayDateString } from '../lib/datetime';
+import { payoutReviewDisplayRange } from '../lib/payoutReviewNames';
 import {
   calendarMonthFromPeriodFrom,
   combinePlatformProviderReceivableLkr,
@@ -80,7 +81,10 @@ import {
   mapApprovedWithdrawalToBranchPayoutRow,
   mapApprovedWithdrawalToPlatformPayoutRow,
   mergeBranchPayoutHistoryRows,
+  paginatePayoutHistoryRows,
+  PAYMENT_HISTORY_PAYOUT_DEFAULT_LIMIT,
 } from '../lib/paymentHistoryBranchPayouts';
+import { paginationQuerySchema } from '../lib/httpSchemas';
 import { platformProviderSettlementInvoiceApiPath } from '../lib/invoice/refs';
 import {
   computeNetCommissionSettlementDebitCents,
@@ -94,7 +98,7 @@ const PROMOTION_PAYBACK_SELECT = {
   platformPaybackReversedAt: true,
 } as const;
 
-const querySchema = z.object({
+const querySchema = paginationQuerySchema.extend({
   storeId: z.string().min(1).optional(),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -206,6 +210,7 @@ const SETTLEMENT_PAYOUT_SELECT = {
   periodTo: true,
   storeWithdrawalId: true,
   store: { select: { name: true } },
+  storeWithdrawal: { select: { breakdown: true } },
 } as const;
 
 const SETTLEMENT_PLATFORM_PAYOUT_SELECT = {
@@ -804,7 +809,24 @@ type SettlementPayoutRow = {
   periodTo: Date;
   storeWithdrawalId?: string | null;
   store: { name: string };
+  storeWithdrawal?: { breakdown: unknown } | null;
 };
+
+function displayedSettlementPeriod(settlement: SettlementPayoutRow): { from: string; to: string } {
+  const from = toDateStr(settlement.periodFrom);
+  const to = toDateStr(settlement.periodTo);
+  const breakdown = settlement.storeWithdrawal?.breakdown;
+  const cycle =
+    breakdown && typeof breakdown === 'object'
+      ? (breakdown as { cycleStage?: string | null; cycleFrom?: string | null })
+      : null;
+  return payoutReviewDisplayRange({
+    from,
+    to,
+    cycleStage: cycle?.cycleStage,
+    cycleFrom: cycle?.cycleFrom,
+  });
+}
 
 function mapSettlementToPayout(
   settlement: SettlementPayoutRow,
@@ -819,6 +841,7 @@ function mapSettlementToPayout(
   const grossCommissionLkr = decimalFieldToCentsNumber(settlement.totalCommission) / 100;
   const netAmountLkr = grossCommissionLkr - paybackLkr;
   const receipt = serializeSettlementReceiptFields(settlement.receiptUrl, settlement.storeId);
+  const period = displayedSettlementPeriod(settlement);
 
   return {
     id: settlement.id,
@@ -836,8 +859,8 @@ function mapSettlementToPayout(
     invoiceRef: settlement.invoiceRef ?? undefined,
     invoiceUrl: settlement.invoiceUrl ?? undefined,
     status: settlement.status,
-    periodFrom: dateStringInColombo(settlement.periodFrom),
-    periodTo: dateStringInColombo(settlement.periodTo),
+    periodFrom: period.from,
+    periodTo: period.to,
     storeWithdrawalId,
     isAdvance,
     storeName: settlement.store.name,
@@ -919,7 +942,12 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
   try {
     await ensureCommissionSettlementTable();
 
-    const { from: queryFrom, to: queryTo } = querySchema.parse(req.query);
+    const {
+      from: queryFrom,
+      to: queryTo,
+      page: payoutHistoryPage,
+      limit: payoutHistoryLimit,
+    } = querySchema.parse(req.query);
     const { from, to } = parsePeriodQuery(queryFrom, queryTo);
     const viewingCurrentMonth = isCurrentMonthPeriod(from, to);
 
@@ -946,6 +974,18 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
           period: { from, to, isCurrentMonth: viewingCurrentMonth },
           payouts: [],
           platformPayouts: [],
+          payoutsPagination: {
+            page: payoutHistoryPage,
+            limit: payoutHistoryLimit,
+            total: 0,
+            pages: 1,
+          },
+          platformPayoutsPagination: {
+            page: payoutHistoryPage,
+            limit: payoutHistoryLimit,
+            total: 0,
+            pages: 1,
+          },
         },
       });
     }
@@ -1056,13 +1096,13 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
         .filter((id): id is string => !!id),
     );
     const withdrawalBranchPayouts = approvedWithdrawals.map(mapApprovedWithdrawalToBranchPayoutRow);
-    const payouts = mergeBranchPayoutHistoryRows(
+    const mergedBranchPayouts = mergeBranchPayoutHistoryRows(
       settlementPayouts,
       withdrawalBranchPayouts,
       linkedSettlementWithdrawalIds,
     );
 
-    const platformPayouts = includePlatformPayoutHistory
+    const mergedPlatformPayouts = includePlatformPayoutHistory
       ? mergeBranchPayoutHistoryRows(
           (
             await Promise.all(
@@ -1078,6 +1118,15 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
         )
       : [];
 
+    const historyLimit = payoutHistoryLimit || PAYMENT_HISTORY_PAYOUT_DEFAULT_LIMIT;
+    const { items: payouts, pagination: payoutsPagination } = paginatePayoutHistoryRows(
+      mergedBranchPayouts,
+      payoutHistoryPage,
+      historyLimit,
+    );
+    const { items: platformPayouts, pagination: platformPayoutsPagination } =
+      paginatePayoutHistoryRows(mergedPlatformPayouts, payoutHistoryPage, historyLimit);
+
     res.json({
       success: true,
       data: {
@@ -1092,6 +1141,8 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
         period: { from, to, isCurrentMonth: viewingCurrentMonth },
         payouts,
         platformPayouts,
+        payoutsPagination,
+        platformPayoutsPagination,
       },
     });
   } catch (err) {
@@ -1674,7 +1725,18 @@ export async function getSettlementReceiptUrl(req: Request, res: Response, next:
       select: { id: true, storeId: true, receiptUrl: true },
     });
 
-    if (!settlement) throw new AppError('Settlement not found', 404);
+    if (!settlement) {
+      const storeScope =
+        storeIds.length === 1 ? { storeId: storeIds[0] } : { storeId: { in: storeIds } };
+      const withdrawal = await prisma.storeWithdrawal.findFirst({
+        where: { id, ...storeScope },
+        select: { proofUrl: true },
+      });
+      if (!withdrawal) throw new AppError('Settlement not found', 404);
+      const access = await buildProofAccessResponse(withdrawal.proofUrl);
+      res.json({ success: true, data: access });
+      return;
+    }
 
     const resolved = resolveSettlementReceiptUrl(settlement.receiptUrl, settlement.storeId);
     const access = await buildProofAccessResponse(resolved);

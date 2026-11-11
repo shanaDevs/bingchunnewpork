@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  fetchBranchPayoutsDue,
   isOldestUnpaidBranchPayoutRow,
   sortBranchPayoutDueRows,
 } from '@/lib/branchPayoutsDue';
@@ -21,6 +22,27 @@ function row(
     orderCount: 1,
   };
 }
+
+describe('fetchBranchPayoutsDue', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('throws instead of returning an empty page when the API fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({ message: 'unavailable' }),
+      }),
+    );
+
+    await expect(fetchBranchPayoutsDue('http://api.test', { page: 1 })).rejects.toThrow(
+      /Failed to load payouts due/,
+    );
+  });
+});
 
 describe('sortBranchPayoutDueRows', () => {
   it('orders by period start, then end, then branch name', () => {

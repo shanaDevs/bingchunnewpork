@@ -37,13 +37,14 @@ import {
   type WithdrawalBreakdown,
   withdrawalBreakdownToLkr,
 } from '@/components/admin/settlementTypes';
+import { resolvePayoutCycleDisplayRange } from '@/components/admin/payoutSecondCycleDisplayRange';
 import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
 import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
 import { centsToLkr, paybackEnabledFromBreakdown, toDateInputValue } from '@/lib/walletUtils';
 import {
-  addDaysToDateStr,
   formatBiweeklyPeriodLabel,
   isValidPayoutRange,
+  resolvePayoutPeriodIncompleteState,
   rollingPeriodLabel,
   todayDateStr,
   type RollingPeriodOption,
@@ -690,9 +691,20 @@ export default function WalletWithdrawalModal({
   const showAdvance = advanceAmountLkr > 0;
   const isAdvance = showAdvance;
   const rangeReady = isValidRange(dateFrom, dateTo);
-  const displayDateFrom = viewPeriodDisplay?.from ?? dateFrom;
-  const displayDateTo = viewPeriodDisplay?.to ?? dateTo;
-  const displayPeriodDays = viewPeriodDisplay?.days ?? periodDays;
+  const viewCycleBreakdown =
+    breakdown ?? parseWithdrawalBreakdown(activeViewWithdrawal?.breakdown);
+  const viewCycleRange =
+    isViewMode && !viewPeriodDisplay && dateFrom && dateTo
+      ? resolvePayoutCycleDisplayRange({
+          cycleStage: viewCycleBreakdown?.cycleStage ?? activeViewWithdrawal?.cycleStage ?? null,
+          cycleFrom: viewCycleBreakdown?.cycleFrom ?? null,
+          periodFrom: dateFrom,
+          periodTo: dateTo,
+        })
+      : null;
+  const displayDateFrom = viewPeriodDisplay?.from ?? viewCycleRange?.displayFrom ?? dateFrom;
+  const displayDateTo = viewPeriodDisplay?.to ?? viewCycleRange?.displayTo ?? dateTo;
+  const displayPeriodDays = viewPeriodDisplay?.days ?? viewCycleRange?.displayDays ?? periodDays;
   const displayRangeReady = isValidRange(displayDateFrom, displayDateTo);
   const breakdownPanelRangeReady = isViewMode ? displayRangeReady : rangeReady;
   let periodPillLabel: string | null = null;
@@ -706,13 +718,13 @@ export default function WalletWithdrawalModal({
     periodPillLabel = periodDays != null ? `${range} · ${periodDays} days` : range;
   }
   const periodInFuture = !!dateTo && dateTo > todayDateStr();
-  const selectedPeriodOption =
-    periodDays != null ? periodOptions.find((opt) => opt.days === periodDays) ?? null : null;
-  const periodIncomplete = selectedPeriodOption?.capped ?? false;
-  const periodCompleteEndDate =
-    selectedPeriodOption && periodIncomplete
-      ? addDaysToDateStr(selectedPeriodOption.from, selectedPeriodOption.days - 1)
-      : null;
+  const periodIncompleteState = resolvePayoutPeriodIncompleteState({
+    periodFrom: displayDateFrom,
+    periodTo: displayDateTo,
+    days: displayPeriodDays ?? periodDays,
+  });
+  const periodIncomplete = periodIncompleteState.incomplete;
+  const periodCompleteEndDate = periodIncompleteState.completeEndDate;
   const slabRatePct = resolveSlabRatePctFromPreview(channelPreview);
   const periodLabel =
     displayDateFrom && displayDateTo ? `${displayDateFrom} → ${displayDateTo}` : null;

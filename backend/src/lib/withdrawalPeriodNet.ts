@@ -19,6 +19,7 @@ import {
   pairedFirstWindowForSecondFrom,
   readFirstPayoutPriorDeductionCentsFromBreakdown,
   resolvePayoutCycleContext,
+  secondPayoutPriorBeforeGatewayFeeCents,
   type PayoutCycleContext,
   type PayoutBreakdownOptions,
   type PayoutCycleStage,
@@ -28,7 +29,6 @@ import {
   dayAfterUtcDateStr,
   toUtcDateStr,
 } from './utcDateString';
-import { getGatewayFeeRate } from './appSchema';
 import { sumBreakdownConvenienceFee, sumOnlinePaymentsCollectedFromBreakdown } from './commission';
 import { buildPeriodChannelPreview } from './periodChannelPreview';
 
@@ -122,13 +122,12 @@ async function findWithdrawalForWindow(
   return null;
 }
 
-/** Fees shown on payout period tables for a single 15-day window. */
-export async function resolvePayoutWindowTableAllocationCents(
+async function tableAllocationCentsForPeriod(
   storeId: string,
-  windowFrom: string,
-  windowTo: string,
+  from: string,
+  to: string,
 ): Promise<{ convenienceFee: number; deliveryFee: number }> {
-  const preview = await buildPeriodChannelPreview(storeId, windowFrom, windowTo);
+  const preview = await buildPeriodChannelPreview(storeId, from, to);
   const convenienceFeeLkr = sumBreakdownConvenienceFee(preview.breakdown);
   const deliveryFeeLkr = Object.values(preview.breakdown).reduce(
     (sum, row) => sum + row.deliveryFeeTotal,
@@ -140,6 +139,15 @@ export async function resolvePayoutWindowTableAllocationCents(
   };
 }
 
+/** Fees shown on payout period tables for a single 15-day window. */
+export async function resolvePayoutWindowTableAllocationCents(
+  storeId: string,
+  windowFrom: string,
+  windowTo: string,
+): Promise<{ convenienceFee: number; deliveryFee: number }> {
+  return tableAllocationCentsForPeriod(storeId, windowFrom, windowTo);
+}
+
 /**
  * Payout 2 list/table columns: full-cycle convenience & delivery (entire payout cycle, e.g. Sep 1–30).
  */
@@ -148,16 +156,7 @@ export async function resolveSecondPayoutTableAllocationCents(
   cycleFrom: string,
   cycleTo: string,
 ): Promise<{ convenienceFee: number; deliveryFee: number }> {
-  const cyclePreview = await buildPeriodChannelPreview(storeId, cycleFrom, cycleTo);
-  const convenienceFeeLkr = sumBreakdownConvenienceFee(cyclePreview.breakdown);
-  const deliveryFeeLkr = Object.values(cyclePreview.breakdown).reduce(
-    (sum, row) => sum + row.deliveryFeeTotal,
-    0,
-  );
-  return {
-    convenienceFee: Math.round(convenienceFeeLkr * 100),
-    deliveryFee: Math.round(deliveryFeeLkr * 100),
-  };
+  return tableAllocationCentsForPeriod(storeId, cycleFrom, cycleTo);
 }
 
 async function liveFirstPayoutPriorDeductionCents(
@@ -165,15 +164,11 @@ async function liveFirstPayoutPriorDeductionCents(
   from: string,
   to: string,
 ): Promise<number> {
-  const [preview, gatewayFeeRate] = await Promise.all([
-    buildPeriodChannelPreview(storeId, from, to),
-    getGatewayFeeRate(),
-  ]);
+  const preview = await buildPeriodChannelPreview(storeId, from, to);
   const baseCents = Math.round(
     sumOnlinePaymentsCollectedFromBreakdown(preview.breakdown) * 100,
   );
-  const gatewayCents = Math.round(baseCents * gatewayFeeRate);
-  return Math.max(0, baseCents - gatewayCents);
+  return Math.max(0, baseCents);
 }
 
 async function findPairedFirstWithdrawalRow(
@@ -343,7 +338,11 @@ export async function resolveCycleContextForWindow(
     (stored?.cycleStage === 'FIRST' || stored?.cycleStage === 'SECOND') &&
     (gridStage == null || stored.cycleStage === gridStage)
   ) {
-    return cycleContextFromWithdrawal(stored);
+    const ctx = cycleContextFromWithdrawal(stored);
+    if (ctx.cycleStage !== 'SECOND') return ctx;
+    const prior = await secondPayoutPriorBeforeGatewayFeeCents(storeId, stored.cyclePairId);
+    if (prior == null) return ctx;
+    return { ...ctx, priorOnlineWalletAmountCents: prior };
   }
 
   if (!origin || gridStage === 'FIRST') {

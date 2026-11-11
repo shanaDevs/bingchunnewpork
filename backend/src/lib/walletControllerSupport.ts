@@ -21,11 +21,15 @@ import {
   payoutWindowKey,
   type PayoutWindowBounds,
 } from './withdrawalPeriodNet';
-import type { PayoutCycleContext } from './payoutCycle';
+import {
+  secondPayoutPriorBeforeGatewayFeeCents,
+  type PayoutCycleContext,
+} from './payoutCycle';
 import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import { invalidateWalletAnalysisCache } from './walletAnalysis';
 import {
   computeBreakdownForPeriod,
+  refreshSecondPayoutGatewayAndNet,
   computeBranchPayablesBreakdown,
   computeNetTransferableEarnings,
   enrichWalletRow,
@@ -243,6 +247,8 @@ export const PAYOUT_PERIOD_LIST_SELECT = {
   createdAt: true,
   isAdvance: true,
   breakdown: true,
+  cycleStage: true,
+  cyclePairId: true,
 } as const;
 
 /** Table-row summary: merged period net/orderCount without channel snapshot extras. */
@@ -293,6 +299,19 @@ export async function loadPayoutPeriodItems(storeId: string) {
     if (!periodFrom || !periodTo) continue;
     covered.add(periodKey(periodFrom, periodTo));
     const isInReview = withdrawal.status === 'IN_REVIEW';
+    let breakdown: unknown = withdrawal.breakdown ?? null;
+    if (withdrawal.cycleStage === 'SECOND' && breakdown && typeof breakdown === 'object') {
+      const prior = await secondPayoutPriorBeforeGatewayFeeCents(storeId, withdrawal.cyclePairId);
+      if (prior != null) {
+        breakdown = refreshSecondPayoutGatewayAndNet({
+          ...(breakdown as PeriodBreakdown),
+          cycleStage: 'SECOND',
+          priorOnlineWalletAmountCents: prior,
+        });
+      }
+    }
+    const withdrawalForRow =
+      breakdown === withdrawal.breakdown ? withdrawal : { ...withdrawal, breakdown };
     items.push({
       key: `wd-${withdrawal.id}`,
       periodFrom,
@@ -304,9 +323,9 @@ export async function loadPayoutPeriodItems(storeId: string) {
             ? 'PAYMENT_PENDING'
             : 'PENDING',
       amountCents: withdrawalAmountCents(withdrawal),
-      orderCount: breakdownOrderCount(withdrawal.breakdown),
-      breakdown: withdrawal.breakdown ?? null,
-      withdrawal,
+      orderCount: breakdownOrderCount(breakdown),
+      breakdown,
+      withdrawal: withdrawalForRow,
       draftInvoiceUrl: isInReview
         ? withdrawal.invoiceUrl ?? payoutDraftInvoiceApiPath(withdrawal.id)
         : undefined,
@@ -1454,7 +1473,7 @@ export async function finalizeWithdrawalWithInvoice(input: WithdrawalInvoiceFina
     netTransferableEarnings - totalWithdrawnBefore - withdrawnCents,
   );
 
-  const invoice = await generateWithdrawalInvoice({
+  const invoicePayload = await generateWithdrawalInvoice({
     storeId,
     withdrawalId: updated.id,
     storeName,
@@ -1483,14 +1502,17 @@ export async function finalizeWithdrawalWithInvoice(input: WithdrawalInvoiceFina
       storePaybackEnabled,
     ),
   });
+  const invoiceDataJson = JSON.parse(
+    JSON.stringify(invoicePayload.invoiceData),
+  ) as object;
 
   try {
     const finalized = await prisma.storeWithdrawal.update({
       where: { id: updated.id },
       data: {
-        invoiceRef: invoice.invoiceRef,
-        invoiceUrl: invoice.invoiceUrl,
-        invoiceData: invoice.invoiceData as object,
+        invoiceRef: invoicePayload.invoiceRef,
+        invoiceUrl: invoicePayload.invoiceUrl,
+        invoiceData: invoiceDataJson,
       },
     });
     invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));

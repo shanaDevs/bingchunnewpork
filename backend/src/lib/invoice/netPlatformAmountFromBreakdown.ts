@@ -1,7 +1,11 @@
+import { readPayoutCycleStageFromBreakdown } from '../paidPayoutAllTimeDeduction';
+import { paybackEnabledFromBreakdown } from '../breakdownPayback';
+
 /**
  * Net platform amount (cents) — matches Payout Request Details "Net Platform Amount"
  * (commission − platform promo deduction − shared platform when payback − loyalty).
  * Does not use stored netPlatformEarning snapshot.
+ * Payout 1 defers commission / platform discounts / loyalty to Payout 2.
  */
 
 function num(o: Record<string, unknown>, key: string): number {
@@ -9,15 +13,9 @@ function num(o: Record<string, unknown>, key: string): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : 0;
 }
 
-function paybackEnabledFromBreakdown(o: Record<string, unknown>): boolean {
-  if (typeof o.platformDiscountPaybackEnabled === 'boolean') {
-    return o.platformDiscountPaybackEnabled;
-  }
-  return num(o, 'platformPaybackTotal') > 0;
-}
-
 export function resolveNetPlatformAmountCentsFromWithdrawalBreakdown(breakdown: unknown): number {
   if (!breakdown || typeof breakdown !== 'object') return 0;
+  if (readPayoutCycleStageFromBreakdown(breakdown) === 'FIRST') return 0;
   const o = breakdown as Record<string, unknown>;
 
   const commissionCents = num(o, 'commissionFee');

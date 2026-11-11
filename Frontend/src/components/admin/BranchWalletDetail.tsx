@@ -1,6 +1,7 @@
 'use client';
 
 import { adminAuthHeaders } from '@/lib/adminSession';
+import { formatStoredPayoutPeriodLabel } from '@/components/admin/payoutSecondCycleDisplayRange';
 import { getApiBaseUrl } from '@/lib/apiBase';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
@@ -111,10 +112,7 @@ function withdrawalStatusLabel(status: WithdrawalRow['status']) {
 }
 
 function withdrawalPeriodLabel(row: WithdrawalRow) {
-  if (!row.periodFrom || !row.periodTo) return '—';
-  const fmt = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' });
-  return `${fmt(row.periodFrom)} – ${fmt(row.periodTo)}`;
+  return formatStoredPayoutPeriodLabel(row);
 }
 
 function exportPeriodLabel(

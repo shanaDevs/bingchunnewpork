@@ -248,7 +248,7 @@ export default function WalletTankCard({
                 {formatMoney(deliveryFee)}
               </p>
               <p className="mt-0.5 mb-0 text-[10px] leading-tight" style={{ color: SECONDARY }}>
-                All-time · excluded from balance
+                Online · excluded from Online Available Balance
               </p>
             </div>
             <div className="min-w-0 border-l border-white/15 pl-3">
@@ -262,7 +262,7 @@ export default function WalletTankCard({
                 {formatMoney(convenienceFee)}
               </p>
               <p className="mt-0.5 mb-0 text-[10px] leading-tight" style={{ color: SECONDARY }}>
-                All-time · excluded from balance
+                Online · excluded from Online Available Balance
               </p>
             </div>
           </>

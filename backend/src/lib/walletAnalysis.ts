@@ -1,6 +1,6 @@
 import { prisma } from './prisma';
 import { isOnlinePaymentMethod } from './orderPayment';
-import { orderCreatedAtFilter } from './walletRevenue';
+import { onlinePayablesPaidOrderWhere, orderCreatedAtFilter } from './walletRevenue';
 import {
   chartBucketKey,
   resolveChartBucketDateRange,
@@ -58,9 +58,9 @@ export type WalletAnalysisHealthSlice = {
 };
 
 export type WalletAnalysisExcludedFees = {
-  /** All-time customer delivery fees (excluded from available balance). */
+  /** Online payables delivery fees (excluded from Online Available Balance). */
   deliveryFee: number;
-  /** All-time customer convenience fees (excluded from available balance). */
+  /** Online payables convenience fees (excluded from Online Available Balance). */
   convenienceFee: number;
 };
 
@@ -636,13 +636,7 @@ async function computeWalletAnalysis(params: {
   });
   const storeIds = wallets.map((w) => w.storeId);
 
-  const paidOrdersFeeWhere = {
-    storeId: { in: storeIds },
-    paymentStatus: 'PAID' as const,
-    status: { not: 'CANCELLED' as const },
-  };
-
-  const [payablesBreakdowns, allTimeFeeAgg] = await Promise.all([
+  const [payablesBreakdowns, onlinePayablesFeeAgg] = await Promise.all([
     storeIds.length > 0
       ? promiseAllLimited(
           getPrismaFanOutLimit(),
@@ -651,15 +645,15 @@ async function computeWalletAnalysis(params: {
       : Promise.resolve([]),
     storeIds.length > 0
       ? prisma.order.aggregate({
-          where: paidOrdersFeeWhere,
+          where: onlinePayablesPaidOrderWhere({ storeId: { in: storeIds } }),
           _sum: { deliveryFee: true, convenientFee: true },
         })
       : Promise.resolve({ _sum: { deliveryFee: null, convenientFee: null } }),
   ]);
 
   const excludedFees: WalletAnalysisExcludedFees = {
-    deliveryFee: roundLkr(allTimeFeeAgg._sum.deliveryFee ?? 0),
-    convenienceFee: roundLkr(allTimeFeeAgg._sum.convenientFee ?? 0),
+    deliveryFee: roundLkr(onlinePayablesFeeAgg._sum.deliveryFee ?? 0),
+    convenienceFee: roundLkr(onlinePayablesFeeAgg._sum.convenientFee ?? 0),
   };
 
   const balanceCents = payablesBreakdowns.reduce(
