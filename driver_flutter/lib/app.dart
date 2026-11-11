@@ -11,6 +11,7 @@ import 'core/duty_service.dart';
 import 'core/feedback.dart';
 import 'core/notifications.dart';
 import 'core/offer_outcomes.dart';
+import 'core/request_updates.dart';
 import 'core/ride_alert.dart';
 import 'core/runtime_config.dart';
 import 'core/system_settings.dart';
@@ -176,14 +177,29 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int _tab = 0;
   StreamSubscription<NotificationTap>? _tapSub;
   StreamSubscription<int>? _tabSub;
+  Timer? _updatesTimer;
+
+  /// Admin replies to complaints / branch requests → Notifications inbox.
+  void _checkRequestUpdates() {
+    if (!mounted) return;
+    RequestUpdates.check(context.read<AppContainer>(), riderId: context.read<AuthController>().driver?.id);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkRequestUpdates();
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkRequestUpdates());
+    _updatesTimer = Timer.periodic(const Duration(minutes: 3), (_) => _checkRequestUpdates());
     // Ask once after login so new-job alerts can be posted (Android 13+ / iOS).
     BcNotifications.requestPermission();
     _tapSub = BcNotifications.taps.listen(_onNotificationTap);
@@ -199,6 +215,8 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _updatesTimer?.cancel();
     _tapSub?.cancel();
     _tabSub?.cancel();
     super.dispose();

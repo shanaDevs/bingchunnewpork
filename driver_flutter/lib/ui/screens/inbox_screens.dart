@@ -8,11 +8,13 @@ import '../../core/endpoints.dart';
 import '../../core/feedback.dart';
 import '../../core/format.dart';
 import '../../core/inbox.dart';
+import '../../core/request_updates.dart';
 import '../../data/models/delivery_job.dart';
 import '../../l10n/l10n.dart';
 import '../components/headers.dart';
 import '../components/profile_kit.dart';
 import '../components/qd_kit.dart';
+import 'branches_screen.dart';
 import 'issue_status_screen.dart';
 import 'new_complaint_screen.dart';
 import '../theme/bc_theme.dart';
@@ -40,6 +42,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   void initState() {
     super.initState();
     NotificationInbox.instance.load();
+  }
+
+  /// Marks the notification read and opens what it is about (complaints / branch requests).
+  void _open(InboxItem item) {
+    NotificationInbox.instance.markRead(item);
+    final Widget? page = switch (item.type) {
+      kComplaintUpdateType => const ComplaintsScreen(),
+      kBranchRequestUpdateType => const BranchesScreen(),
+      _ => null,
+    };
+    if (page != null) Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
   }
 
   static DateTime _day(DateTime t) => DateTime(t.year, t.month, t.day);
@@ -151,7 +164,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               children: [
                                 for (var i = 0; i < g.$2.length; i++) ...[
                                   if (i > 0) Divider(height: 1, thickness: 1, color: c.border),
-                                  _NotificationRow(item: g.$2[i], when: _when(g.$2[i].at), onTap: () => inbox.markRead(g.$2[i])),
+                                  _NotificationRow(item: g.$2[i], when: _when(g.$2[i].at), onTap: () => _open(g.$2[i])),
                                 ],
                               ],
                             ),

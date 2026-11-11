@@ -31,6 +31,14 @@ Future<void> firebaseBackgroundHandler(RemoteMessage message) async {
       if (orderId.isEmpty) return;
       await BcNotifications.notifyOrderCancelled(orderId, (data['orderNumber'] ?? '').toString());
       await BcNotifications.vibrateCancel();
+    case 'COMPLAINT_UPDATE' || 'BRANCH_REQUEST_UPDATE':
+      // Admin replies: the system shows the notification itself, so just keep it in the inbox.
+      final n = message.notification;
+      await NotificationInbox.instance.add(
+        title: n?.title ?? (data['title'] ?? '').toString(),
+        body: n?.body ?? (data['body'] ?? '').toString(),
+        type: data['type'].toString(),
+      );
   }
 }
 
