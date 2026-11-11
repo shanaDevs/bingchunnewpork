@@ -65,6 +65,30 @@ Future<void> ensureNoUnfinishedRide(AppContainer c, {String? claimingJobId}) asy
   }
 }
 
+/// Thrown when the rider tries to pick up / start a ride while an earlier ride is still
+/// RETURNING (all orders handled, but "Complete Ride" never tapped).
+class PreviousRideIncompleteException implements Exception {
+  const PreviousRideIncompleteException(this.job);
+  final JobSummary job;
+
+  @override
+  String toString() => tr('Complete your previous ride first');
+}
+
+/// Reminder gate for pickup / start of [nextJobId]: throws [PreviousRideIncompleteException]
+/// while another of the rider's rides is still RETURNING. A failed lookup never blocks the
+/// rider — the server stays the final judge.
+Future<void> ensurePreviousRideCompleted(AppContainer c, String nextJobId) async {
+  List<JobSummary> held;
+  try {
+    held = await c.jobsRepository.listJobs();
+  } catch (_) {
+    return;
+  }
+  final previous = held.where((j) => j.id != nextJobId && j.status == 'RETURNING').firstOrNull;
+  if (previous != null) throw PreviousRideIncompleteException(previous);
+}
+
 /// New-job rings stay muted while any job is ASSIGNED/IN_PROGRESS/QUEUED.
 Future<void> refreshAlertEligibility(AppContainer c) async {
   bool blocked;

@@ -17,6 +17,7 @@ import '../../state/job_controllers.dart';
 import '../../state/jobs_controller.dart';
 import '../../tracking/location_tracker.dart';
 import '../app_routes.dart';
+import '../components/previous_ride_reminder.dart';
 import '../components/qd_kit.dart';
 import '../theme/bc_theme.dart';
 import 'navigation_screen.dart';
@@ -120,12 +121,22 @@ class _DashboardBodyState extends State<_DashboardBody> with WidgetsBindingObser
     if (!await ensureLocationPermission()) return;
     BcFeedback.success();
     await _vm.pickup(widget.jobId);
+    await _remindPreviousRide();
+  }
+
+  /// Shows the "complete your previous ride" popup when the last action was refused for it.
+  Future<void> _remindPreviousRide() async {
+    final previous = _vm.previousRide;
+    if (previous == null || !mounted) return;
+    _vm.previousRide = null;
+    await showPreviousRideReminder(context, previous);
   }
 
   Future<void> _start() async {
     if (!await ensureLocationPermission()) return;
     BcFeedback.success();
     await _vm.start(widget.jobId);
+    await _remindPreviousRide();
   }
 
   Future<void> _complete() async {

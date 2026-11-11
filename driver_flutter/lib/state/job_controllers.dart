@@ -32,6 +32,9 @@ class JobDetailController extends ChangeNotifier {
   DeliveryRoute? route;
   String? error;
 
+  /// Set when an action was refused because an earlier ride was never completed.
+  JobSummary? previousRide;
+
   void _emit() {
     if (!_disposed) notifyListeners();
   }
@@ -73,8 +76,12 @@ class JobDetailController extends ChangeNotifier {
     OfferOutcomes.instance.record(jobId, OfferOutcome.accepted);
     return j;
   });
-  Future<bool> start(String jobId) => _act(() => _c.jobsRepository.startJob(jobId));
+  Future<bool> start(String jobId) => _act(() async {
+    await ensurePreviousRideCompleted(_c, jobId);
+    return _c.jobsRepository.startJob(jobId);
+  });
   Future<bool> pickup(String jobId) => _act(() async {
+    await ensurePreviousRideCompleted(_c, jobId);
     final fix = await requireFix(_c);
     return _c.jobsRepository.pickupJob(jobId, fix.lat, fix.lng);
   });
@@ -115,6 +122,7 @@ class JobDetailController extends ChangeNotifier {
     if (acting) return false;
     acting = true;
     error = null;
+    previousRide = null;
     _emit();
     try {
       final j = await block();
@@ -129,6 +137,12 @@ class JobDetailController extends ChangeNotifier {
       _emit();
       JobRefreshBus.refresh(j.id);
       return true;
+    } on PreviousRideIncompleteException catch (e) {
+      // The screen shows the reminder popup; no inline error needed.
+      acting = false;
+      previousRide = e.job;
+      _emit();
+      return false;
     } catch (e) {
       acting = false;
       error = errorMessage(e, tr('Action failed'));
@@ -166,6 +180,9 @@ class DashboardController extends ChangeNotifier {
   DeliveryJobDetail? job;
   DeliveryRoute? route;
   String? error;
+
+  /// Set when start / pickup was refused because an earlier ride was never completed.
+  JobSummary? previousRide;
 
   void _emit() {
     if (!_disposed) notifyListeners();
@@ -226,8 +243,10 @@ class DashboardController extends ChangeNotifier {
     }
     acting = true;
     error = null;
+    previousRide = null;
     _emit();
     try {
+      await ensurePreviousRideCompleted(_c, jobId);
       final j = await _c.jobsRepository.startJob(jobId);
       DeliveryRoute? r;
       try {
@@ -244,6 +263,10 @@ class DashboardController extends ChangeNotifier {
       error = gpsOk ? null : tr('Run started, but GPS tracking didn\'t start. Check location settings.');
       _emit();
       JobRefreshBus.refresh(jobId);
+    } on PreviousRideIncompleteException catch (e) {
+      acting = false;
+      previousRide = e.job;
+      _emit();
     } catch (e) {
       acting = false;
       error = errorMessage(e, tr('Failed to start'));
@@ -255,8 +278,10 @@ class DashboardController extends ChangeNotifier {
     if (acting) return;
     acting = true;
     error = null;
+    previousRide = null;
     _emit();
     try {
+      await ensurePreviousRideCompleted(_c, jobId);
       final fix = await requireFix(_c);
       final j = await _c.jobsRepository.pickupJob(jobId, fix.lat, fix.lng);
       DeliveryRoute? r;
@@ -271,6 +296,10 @@ class DashboardController extends ChangeNotifier {
       route = r;
       _emit();
       JobRefreshBus.refresh(jobId);
+    } on PreviousRideIncompleteException catch (e) {
+      acting = false;
+      previousRide = e.job;
+      _emit();
     } catch (e) {
       acting = false;
       error = errorMessage(e, tr('Failed to confirm pickup'));

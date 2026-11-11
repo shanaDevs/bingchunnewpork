@@ -17,6 +17,7 @@ import '../../state/jobs_controller.dart';
 import '../app_routes.dart';
 import '../components/app_bottom_nav.dart';
 import '../components/job_cards.dart';
+import '../components/previous_ride_reminder.dart';
 import '../components/qd_kit.dart';
 import '../components/route_map.dart';
 import '../theme/bc_theme.dart';
@@ -86,6 +87,12 @@ class _RouteMapBodyState extends State<_RouteMapBody> {
       if (!await ensureLocationPermission()) return;
       BcFeedback.success();
       await vm.start(widget.jobId);
+      final previous = vm.previousRide;
+      if (previous != null) {
+        vm.previousRide = null;
+        if (mounted) await showPreviousRideReminder(context, previous);
+        return;
+      }
       // A failed start leaves its message in the controller; stay here so it can show.
       if (!mounted || vm.error != null) return;
     }

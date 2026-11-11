@@ -16,6 +16,7 @@ import '../app_routes.dart';
 import '../components/app_bottom_nav.dart';
 import '../components/call_confirm.dart';
 import '../components/job_cards.dart';
+import '../components/previous_ride_reminder.dart';
 import '../components/qd_kit.dart';
 import '../components/route_map.dart';
 import '../components/run_kit.dart';
@@ -90,6 +91,12 @@ class _JobDetailBodyState extends State<_JobDetailBody> with WidgetsBindingObser
       BcFeedback.success();
       final next = _nextPending(job);
       final ok = await vm.start(widget.jobId);
+      final previous = vm.previousRide;
+      if (!ok && previous != null) {
+        vm.previousRide = null;
+        if (mounted) await showPreviousRideReminder(context, previous);
+        return;
+      }
       if (ok && mounted) AppRoutes.openDashboard(context, widget.jobId, replace: true, legOrderId: next?.orderId);
     } else {
       // Heading to the next order (or back to the branch once all are done).
