@@ -15,6 +15,8 @@ import '../components/profile_kit.dart';
 import '../components/qd_kit.dart';
 import '../components/tab_scaffold.dart';
 import '../theme/bc_theme.dart';
+import '../../core/feedback.dart';
+import 'delivered_orders_screen.dart';
 import 'shifts_screen.dart';
 
 /// Activity tab (QuickDrop `activity.tsx`): period control, live shift banner, stat tiles,
@@ -132,7 +134,17 @@ class _StatsBodyState extends State<_StatsBody> {
 
     final tiles = <Widget>[
       _StatTile(icon: Icons.route_rounded, label: tr('Completed jobs'), value: '$totalRuns'),
-      _StatTile(icon: Icons.inventory_2_outlined, label: tr('Delivered orders'), value: '$totalDelivered'),
+      _StatTile(
+        icon: Icons.inventory_2_outlined,
+        label: tr('Delivered orders'),
+        value: '$totalDelivered',
+        onTap: () {
+          BcFeedback.tap();
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => DeliveredOrdersScreen(jobs: inRange)),
+          );
+        },
+      ),
       _StatTile(
         icon: Icons.schedule_rounded,
         label: tr('Online time'),
@@ -346,17 +358,19 @@ class _ShiftBanner extends StatelessWidget {
 
 /// One headline number with its label (QuickDrop StatTile).
 class _StatTile extends StatelessWidget {
-  const _StatTile({required this.icon, required this.label, required this.value, this.valueColor});
+  const _StatTile({required this.icon, required this.label, required this.value, this.valueColor, this.onTap});
 
   final IconData icon;
   final String label;
   final String value;
   final Color? valueColor;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
     return QdCard(
+      onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
