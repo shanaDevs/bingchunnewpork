@@ -7,7 +7,6 @@ import '../../core/local_profile.dart';
 import '../../data/models/delivery_job.dart';
 import '../../l10n/l10n.dart';
 import '../../state/jobs_controller.dart';
-import '../components/bc_dialog.dart';
 import '../components/profile_kit.dart';
 import '../components/qd_kit.dart';
 import '../theme/bc_theme.dart';
@@ -60,7 +59,7 @@ String? _noteFor(JobHistoryItem r) {
   return null;
 }
 
-/// Splits a note ("<type>: <description>") into its reason and description.
+/// Splits a note (`type: description`) into its reason and description.
 ({String? type, String? description}) _splitNote(String? note) {
   if (note == null) return (type: null, description: null);
   final i = note.indexOf(': ');
@@ -83,9 +82,9 @@ class _BreakdownScreenState extends State<BreakdownScreen> {
     ok ? BcFeedback.success() : BcFeedback.error();
   }
 
-  void _open(JobHistoryItem r) {
+  void _open(JobHistoryItem r, bool open) {
     BcFeedback.tap();
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => BreakdownDetailScreen(report: r)));
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => BreakdownDetailScreen(report: r, open: open)));
   }
 
   @override
@@ -116,7 +115,11 @@ class _BreakdownScreenState extends State<BreakdownScreen> {
             for (final r in rides)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: _BreakdownRow(report: r, onTap: () => _open(r)),
+                child: _BreakdownRow(
+                  report: r,
+                  open: isBreakdownReportOpen(vm, r),
+                  onTap: () => _open(r, isBreakdownReportOpen(vm, r)),
+                ),
               ),
           if (!vm.isOnline) QdFootnote(tr('Go on duty to report a vehicle failure.')),
         ],
@@ -127,9 +130,10 @@ class _BreakdownScreenState extends State<BreakdownScreen> {
 
 /// One reported breakdown in the list: reason, ride, orders, time and state.
 class _BreakdownRow extends StatelessWidget {
-  const _BreakdownRow({required this.report, required this.onTap});
+  const _BreakdownRow({required this.report, required this.open, required this.onTap});
 
   final JobHistoryItem report;
+  final bool open;
   final VoidCallback onTap;
 
   @override
@@ -138,7 +142,7 @@ class _BreakdownRow extends StatelessWidget {
     final title = _splitNote(_noteFor(report)).type ?? tr('Vehicle breakdown');
     final code = report.rideCode;
     final ride = code != null && code.isNotEmpty ? code : report.title;
-    final active = LocalProfile.instance.isBreakdownActive(_reportedAt(report));
+    final active = open;
     return QdCard(
       onTap: onTap,
       padding: const EdgeInsets.all(14),
@@ -185,28 +189,12 @@ class _BreakdownRow extends StatelessWidget {
 /// expose the support-side progress (rider found / handover), so the tracker stays on
 /// "Reported".
 class BreakdownDetailScreen extends StatelessWidget {
-  const BreakdownDetailScreen({super.key, required this.report});
+  const BreakdownDetailScreen({super.key, required this.report, required this.open});
 
   final JobHistoryItem report;
 
-  /// Confirms, then marks the rider as back on the road (hides the Home notice). On this
-  /// phone only — the server has no breakdown cancel/close endpoint.
-  Future<void> _cancelBreakdown(BuildContext context) async {
-    BcFeedback.tap();
-    final confirmed = await showBcConfirm(
-      context,
-      title: tr('Cancel breakdown?'),
-      message: tr("You'll be marked as back on the road and can receive new jobs again."),
-      confirmLabel: tr('Cancel breakdown'),
-      cancelLabel: tr('Keep report'),
-      icon: Icons.warning_amber_rounded,
-      tone: BcDialogTone.danger,
-    );
-    if (!confirmed || !context.mounted) return;
-    BcFeedback.success();
-    await LocalProfile.instance.clearBreakdown();
-    if (context.mounted) Navigator.of(context).maybePop();
-  }
+  /// Whether this is the rider's current, still-open breakdown (see [isBreakdownOpen]).
+  final bool open;
 
   @override
   Widget build(BuildContext context) {
@@ -218,21 +206,13 @@ class BreakdownDetailScreen extends StatelessWidget {
         final code = report.rideCode;
         final rideText = code != null && code.isNotEmpty ? code : report.title;
         final when = Format.jobDateTime(report.completedAt ?? report.scheduledAt);
-        final active = LocalProfile.instance.isBreakdownActive(_reportedAt(report));
         return QdPage(
           title: tr('Breakdown & Handover'),
-          footer: active
-              ? QdPillButton(
-                  label: tr('Cancel breakdown'),
-                  icon: Icons.close_rounded,
-                  onPressed: () => _cancelBreakdown(context),
-                )
-              : null,
           children: [
             _StatusCard(
               title: parts.type ?? tr('Vehicle breakdown'),
               subtitle: '${tr('Reported')} $when · $rideText',
-              message: active
+              message: open
                   ? tr("You won't receive new jobs until you're back on the road.")
                   : tr("You're back on the road."),
             ),
@@ -274,9 +254,19 @@ class BreakdownDetailScreen extends StatelessWidget {
   }
 }
 
-/// True while a reported breakdown has not been cancelled / closed by the rider.
-bool isBreakdownOpen(JobsController vm) =>
-    LocalProfile.instance.isBreakdownActive(_reportedAt(latestBreakdownRide(vm)));
+/// The server has no "breakdown closed" signal, so a breakdown counts as over once the rider
+/// is running a delivery again (a run IN_PROGRESS / RETURNING).
+bool _riderBackOnRoad(JobsController vm) => vm.jobs.any((j) => j.status == 'IN_PROGRESS' || j.status == 'RETURNING');
+
+/// True when [r] is the rider's newest breakdown and they are not yet back on a run.
+bool isBreakdownReportOpen(JobsController vm, JobHistoryItem r) =>
+    latestBreakdownRide(vm)?.id == r.id && !_riderBackOnRoad(vm);
+
+/// True while the rider's latest reported breakdown is still open.
+bool isBreakdownOpen(JobsController vm) {
+  final latest = latestBreakdownRide(vm);
+  return latest != null && isBreakdownReportOpen(vm, latest);
+}
 
 /// Opens the Breakdown status list from Home (banner and active-job card).
 void openBreakdownStatus(BuildContext context) {
@@ -313,11 +303,9 @@ class _BreakdownBannerState extends State<BreakdownBanner> {
   Widget build(BuildContext context) {
     final c = context.bc;
     final vm = context.watch<JobsController>();
-    final serverAt = _reportedAt(latestBreakdownRide(vm));
-    return ListenableBuilder(
-      listenable: LocalProfile.instance,
-      builder: (context, _) {
-        if (!LocalProfile.instance.isBreakdownActive(serverAt)) return const SizedBox.shrink();
+    return Builder(
+      builder: (context) {
+        if (!isBreakdownOpen(vm)) return const SizedBox.shrink();
         return Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Container(

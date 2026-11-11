@@ -1083,10 +1083,6 @@ const Map<String, String> zhStrings = {
   'Breakdown reported to support.': '故障已上报客服。',
   "You won't receive new jobs until you're back on the road.": '在您恢复上路之前，将不会收到新的订单。',
   "You're back on the road.": '您已恢复上路。',
-  'Cancel breakdown?': '取消故障上报？',
-  'Cancel breakdown': '取消故障上报',
-  'Keep report': '保留上报',
-  "You'll be marked as back on the road and can receive new jobs again.": '您将被标记为已恢复上路，并可重新接收新订单。',
   'Report a Breakdown?': '上报车辆故障？',
   "Support will assign another rider to take over {ride}. You won't receive new jobs until you're back on the road.":
       '客服将安排另一位骑手接手 {ride}。在您恢复上路之前，将不会收到新的订单。',

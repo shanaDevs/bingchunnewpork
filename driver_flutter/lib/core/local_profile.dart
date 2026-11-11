@@ -5,8 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Device-local profile overrides. The backend has no endpoint for changing the display
 /// name, so edits are kept on this phone only and shown on the Profile tab. Also keeps the
-/// last vehicle-breakdown report (time + note) and when the rider confirmed they were back
-/// on the road (there is no breakdown status API).
+/// last vehicle-breakdown report (time + note) and the reason/description per ride, since
+/// the server does not return them to drivers.
 class LocalProfile extends ChangeNotifier {
   LocalProfile._();
   static final LocalProfile instance = LocalProfile._();
@@ -15,7 +15,6 @@ class LocalProfile extends ChangeNotifier {
   static const _kBreakdownAt = 'local_last_breakdown_at';
   static const _kBreakdownNote = 'local_last_breakdown_note';
   static const _kBreakdownNotes = 'local_breakdown_notes';
-  static const _kBreakdownClearedAt = 'local_breakdown_cleared_at';
 
   String? displayName;
   DateTime? lastBreakdownAt;
@@ -24,8 +23,6 @@ class LocalProfile extends ChangeNotifier {
   /// Reason + description per ride (jobId → "Type: description"), saved when each report is sent.
   Map<String, String> breakdownNotes = {};
 
-  /// When the rider last tapped "Back on the road".
-  DateTime? breakdownClearedAt;
   bool _loaded = false;
 
   Future<void> load() async {
@@ -39,8 +36,6 @@ class LocalProfile extends ChangeNotifier {
       final raw = p.getString(_kBreakdownNotes);
       if (raw != null) breakdownNotes = (jsonDecode(raw) as Map).map((k, v) => MapEntry('$k', '$v'));
     } catch (_) {}
-    final cleared = p.getString(_kBreakdownClearedAt);
-    breakdownClearedAt = cleared == null ? null : DateTime.tryParse(cleared);
     _loaded = true;
     notifyListeners();
   }
@@ -50,27 +45,6 @@ class LocalProfile extends ChangeNotifier {
     displayName = v;
     final p = await SharedPreferences.getInstance();
     v == null ? await p.remove(_kName) : await p.setString(_kName, v);
-    notifyListeners();
-  }
-
-  /// A breakdown is open when the newest report (this phone's, or the server history's
-  /// [serverReportedAt]) is later than the last "Back on the road" confirmation.
-  bool isBreakdownActive([DateTime? serverReportedAt]) {
-    final reported = [lastBreakdownAt, serverReportedAt].whereType<DateTime>().fold<DateTime?>(
-      null,
-      (a, b) => a == null || b.isAfter(a) ? b : a,
-    );
-    if (reported == null) return false;
-    final cleared = breakdownClearedAt;
-    return cleared == null || reported.isAfter(cleared);
-  }
-
-  /// Rider confirms they are back on the road — hides the home-screen breakdown notice.
-  Future<void> clearBreakdown() async {
-    await load();
-    breakdownClearedAt = DateTime.now();
-    final p = await SharedPreferences.getInstance();
-    await p.setString(_kBreakdownClearedAt, breakdownClearedAt!.toIso8601String());
     notifyListeners();
   }
 
