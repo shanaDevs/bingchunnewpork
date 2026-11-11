@@ -120,10 +120,28 @@ export default function AdminActualRouteMap({ route, className = '' }: Props) {
         <MapResizeTrigger />
         <FitBounds points={boundsPoints} />
         {pathPoints.length >= 2 && (
-          <Polyline
-            positions={pathPoints}
-            pathOptions={{ color: '#16a34a', weight: 5, opacity: 0.9 }}
-          />
+          <>
+            <Polyline
+              positions={pathPoints}
+              pathOptions={{
+                color: '#166534',
+                weight: 9,
+                opacity: 0.28,
+                lineJoin: 'round',
+                lineCap: 'round',
+              }}
+            />
+            <Polyline
+              positions={pathPoints}
+              pathOptions={{
+                color: '#16a34a',
+                weight: 6,
+                opacity: 0.95,
+                lineJoin: 'round',
+                lineCap: 'round',
+              }}
+            />
+          </>
         )}
         {showStoreMarker ? (
           <Marker position={[route.store.lat, route.store.lng]} icon={storeIcon()} />

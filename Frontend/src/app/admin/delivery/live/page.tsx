@@ -191,6 +191,12 @@ export default function AdminLiveDeliveryPage() {
     enabled: admin !== null,
   });
 
+  const scopedStore = useMemo(
+    () => (branchStoreId ? stores.find((s) => s.id === branchStoreId) ?? null : null),
+    [branchStoreId, stores],
+  );
+  const displayBranchName = scopedStore?.name ?? admin?.storeName ?? null;
+
   useEffect(() => {
     if (liveDrivers.length === 0) return;
 
@@ -332,17 +338,29 @@ export default function AdminLiveDeliveryPage() {
   );
 
   const storeMarkers: LiveStoreMarker[] = useMemo(() => {
+    if (scopedStore) {
+      return [
+        {
+          id: scopedStore.id,
+          name: scopedStore.name,
+          lat: scopedStore.lat,
+          lng: scopedStore.lng,
+          addressLine: scopedStore.addressLine,
+        },
+      ];
+    }
     const storeIds = new Set(
       liveDrivers.map((d) => d.storeId).filter((id): id is string => Boolean(id)),
     );
     return stores
       .filter((s) => storeIds.has(s.id))
       .map((s) => ({ id: s.id, name: s.name, lat: s.lat, lng: s.lng, addressLine: s.addressLine }));
-  }, [stores, liveDrivers]);
+  }, [stores, liveDrivers, scopedStore]);
 
   const driverMarkers: LiveDriverMarker[] = useMemo(() => {
     const markers: LiveDriverMarker[] = [];
     const branchSlot = new Map<string, number>();
+    const fallbackStoreId = branchStoreId ?? null;
     for (const driver of liveDrivers) {
       const socketPos =
         driverPositions[driver.driverId] ??
@@ -351,10 +369,11 @@ export default function AdminLiveDeliveryPage() {
       let lng = socketPos?.lng ?? driver.lng ?? null;
       let locationApproximate = false;
       if (lat == null || lng == null) {
-        const storeKey = driver.storeId ?? '';
+        const anchorStoreId = fallbackStoreId ?? driver.storeId ?? '';
+        const storeKey = anchorStoreId || '';
         const slot = branchSlot.get(storeKey) ?? 0;
         branchSlot.set(storeKey, slot + 1);
-        const fallback = branchFallbackPosition(driver.storeId, stores, slot);
+        const fallback = branchFallbackPosition(anchorStoreId || null, stores, slot);
         if (!fallback) continue;
         [lat, lng] = fallback;
         locationApproximate = true;
@@ -365,7 +384,7 @@ export default function AdminLiveDeliveryPage() {
         jobId: driver.jobId ?? driver.driverId,
         driverId: driver.driverId,
         driverName: driver.name,
-        storeName: driver.storeName ?? undefined,
+        storeName: displayBranchName ?? driver.storeName ?? undefined,
         lat,
         lng,
         heading: socketPos?.heading ?? driver.heading ?? lastTrail?.heading ?? null,
@@ -375,7 +394,7 @@ export default function AdminLiveDeliveryPage() {
       });
     }
     return markers;
-  }, [liveDrivers, driverPositions, driverTrails, stores]);
+  }, [liveDrivers, driverPositions, driverTrails, stores, branchStoreId, displayBranchName]);
 
   const selectedMarker = useMemo(
     () => driverMarkers.find((marker) => (marker.driverId ?? marker.jobId) === selectedDriverId) ?? null,
@@ -502,7 +521,9 @@ export default function AdminLiveDeliveryPage() {
                         <span className={adminBadgeClass(dutyStatusBadge(driver.dutyStatus))}>
                           {DUTY_STATUS_LABEL[driver.dutyStatus] ?? driver.dutyStatus.replace(/_/g, ' ')}
                         </span>
-                        <span className="text-xs text-muted truncate">{driver.storeName ?? 'Unknown branch'}</span>
+                        <span className="text-xs text-muted truncate">
+                          {displayBranchName ?? driver.storeName ?? 'Unknown branch'}
+                        </span>
                       </div>
                       <div className="flex items-center justify-between mt-1.5 text-xs">
                         <span className="text-muted truncate">

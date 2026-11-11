@@ -1,6 +1,7 @@
 import { prisma } from '@bingchun/db';
 import { haversineKm } from './geo';
 import { lkrWholeToJobFeeDecimal } from './jobFees';
+import { mapMatchGpsPath } from './roadRouting';
 
 export type LatLngPoint = { lat: number; lng: number };
 
@@ -8,6 +9,8 @@ export type JobGpsLocation = LatLngPoint & { recordedAt: Date };
 
 const GPS_PATH_SIMPLIFY_THRESHOLD = 500;
 const GPS_PATH_SIMPLIFY_EPSILON_KM = 0.01;
+/** Drop consecutive duplicates / GPS jitter (~1 m), keep large mock-location jumps. */
+const GPS_DEDUPE_KM = 0.001;
 
 /** Fetch GPS points recorded for a delivery job within a time window.
  *  Falls back to the driver's points in the same window (any jobId) when none are tagged. */
@@ -70,6 +73,27 @@ export function parseActualRouteJson(actualRoute: string | null | undefined): La
   } catch {
     return [];
   }
+}
+
+/** Drop non-finite coords and near-duplicate consecutive pings. */
+export function filterGpsNoise(locations: LatLngPoint[]): LatLngPoint[] {
+  const out: LatLngPoint[] = [];
+  for (const loc of locations) {
+    if (!Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) continue;
+    if (Math.abs(loc.lat) > 90 || Math.abs(loc.lng) > 180) continue;
+    const prev = out[out.length - 1];
+    if (prev && haversineKm(prev.lat, prev.lng, loc.lat, loc.lng) < GPS_DEDUPE_KM) continue;
+    out.push({ lat: loc.lat, lng: loc.lng });
+  }
+  return out;
+}
+
+/** Filter GPS, snap onto roads, then simplify for map payloads. */
+export async function snapGpsPathForDisplay(locations: LatLngPoint[]): Promise<LatLngPoint[]> {
+  const filtered = filterGpsNoise(locations);
+  if (filtered.length < 2) return filtered;
+  const matched = await mapMatchGpsPath(filtered);
+  return simplifyGpsPath(matched);
 }
 
 /** Simplify a GPS trace for map payloads; full resolution below threshold. */
@@ -278,7 +302,7 @@ async function computeActualRouteForJob(
       }
       actualDistanceKm = sum;
     }
-    actualRoute = simplifyGpsPath(locations);
+    actualRoute = await snapGpsPathForDisplay(locations);
   } else {
     let prevLat = job.store.lat;
     let prevLng = job.store.lng;
