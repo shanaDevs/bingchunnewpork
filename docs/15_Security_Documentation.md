@@ -4,7 +4,7 @@
 
 | Control | Status |
 |---------|--------|
-| JWT access + refresh with separate secrets | Implemented (admin access ~15m; customer access **non-expiring**; customer refresh default `3650d`) |
+| JWT access + refresh with separate secrets | Implemented (admin access ~15m; customer access ~1d renewed via refresh; customer refresh default `3650d`) |
 | bcrypt password hashing (cost 12) | Implemented |
 | Auth / OTP rate limiting | Implemented |
 | Soft-delete customers | Implemented |

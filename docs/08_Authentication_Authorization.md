@@ -55,9 +55,9 @@
 | Access secret | `JWT_SECRET` |
 | Refresh secret | `JWT_REFRESH_SECRET` |
 | Admin access TTL | `15m` (`JWT_EXPIRES_IN` / `config.jwtExpiresIn`) |
-| Customer access TTL | **No expiry** — `signToken` for `type=user` omits `expiresIn` (shoppers stay signed in). `JWT_USER_EXPIRES_IN` / `config.jwtUserExpiresIn` (default `3650d`) exists in config but is **not applied** by current signing |
-| Admin refresh TTL | `7d` (`JWT_REFRESH_EXPIRES_IN`) |
-| Customer refresh TTL | `3650d` (`JWT_USER_REFRESH_EXPIRES_IN`) |
+| Customer access TTL | `1d` (`JWT_USER_EXPIRES_IN`) — short-lived; `CustomerAuthSync` + `POST /auth/refresh` renew it so shoppers stay signed in |
+| Admin/cashier refresh TTL | `3650d` (`JWT_REFRESH_EXPIRES_IN`) — staff stay signed in via refresh keep-alive |
+| Customer refresh TTL | `3650d` (`JWT_USER_REFRESH_EXPIRES_IN`) — ~10y so customer sessions effectively never idle-expire (Facebook-style) |
 | Driver access | `7d` via `signDeliveryToken` |
 
 **Payload shape (conceptual):** `{ sub, type: 'user' \| 'admin', role?, storeId? }`
@@ -67,7 +67,7 @@ Refresh endpoints:
 - Customer: `POST /api/auth/refresh`
 - Admin: `POST /api/auth/admin/refresh`
 
-Frontend admin refreshes when token nears expiry (`useAdminSessionGuard`); idle auto-logout is disabled — sessions continue via refresh tokens until refresh expiry.
+Frontend admin/cashier refreshes when token nears expiry (`useAdminSessionGuard`); idle auto-logout is disabled — sessions continue via refresh tokens (~10y) until explicit sign-out or revocation.
 
 ---
 
