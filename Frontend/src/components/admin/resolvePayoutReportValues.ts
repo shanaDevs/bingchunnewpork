@@ -1,28 +1,22 @@
 import {
-  commissionRateToDisplayPct,
-  getEffectiveRate,
-  resolveCommissionSlabs,
-} from '@/components/admin/commissionUtils';
-import { formatMoneyAmount } from '@/lib/receipt';
+  resolveApplicableSlabCommissionRateDisplay,
+  resolveDiscountReport,
+  resolveGatewayFigures,
+  resolveOnlineWalletChannelNets,
+  resolveRefundReport,
+  resolveSalesFigures,
+} from '@/components/admin/resolvePayoutReportValuesHelpers';
+import { inferPayoutCycleStage } from '@/components/admin/settlement/inferPayoutCycleStage';
 import {
   computeBranchWalletBeforeGatewayLkr,
   computePeriodGatewayLkr,
   computePayoutNetLkr,
-  hasSharedPromoAmounts,
   resolveCommissionPaybackLkr,
   resolveExtraPlatformOwnedDeductionLkr,
   resolveNetPlatformCommissionWithRefundFeesLkr,
   resolvePlatformDiscountsReportLkr,
-  resolveTotalDiscountsLkr,
   resolveTotalPlatformCommissionDisplayLkr,
   roundLkr,
-  sumAllDiscounts,
-  sumAllRevenueSubtotal,
-  sumAllSubtotalBeforeDiscount,
-  resolveOnlinePaymentsCollectedComponents,
-  resolveFirstPayoutOnlineSubtotalComponents,
-  sumOnlineRevenueSubtotals,
-  sumOnlineSubtotalBeforeDiscount,
   type PayoutFormulaBreakdownLkr,
   type SettlementBreakdown,
   type SettlementPreview,
@@ -173,385 +167,6 @@ export function buildPayoutBreakdownDisplayInput(
   };
 }
 
-function firstNumber(
-  ...values: Array<number | null | undefined>
-): number {
-  for (const value of values) {
-    if (value != null) return value;
-  }
-  return 0;
-}
-
-function resolveFirstPayoutOnlineCollectionsLkr(params: {
-  preview: SettlementPreview | null;
-  channelBreakdown: SettlementBreakdown | null | undefined;
-  periodBreakdownLkr: PayoutFormulaBreakdownLkr;
-  snapshotActive: boolean;
-  onlinePaymentsOverride: number | null;
-  fallbackOnlineWalletLkr: number;
-}): number {
-  const breakdown =
-    params.preview?.breakdown ?? params.channelBreakdown ?? null;
-  if (breakdown) {
-    return sumOnlineRevenueSubtotals(breakdown);
-  }
-  if (params.onlinePaymentsOverride != null) {
-    return params.onlinePaymentsOverride;
-  }
-  if (params.snapshotActive) {
-    return (
-      params.periodBreakdownLkr.gatewayBase ??
-      params.periodBreakdownLkr.onlineWalletGross ??
-      params.fallbackOnlineWalletLkr
-    );
-  }
-  return (
-    params.periodBreakdownLkr.gatewayBase ??
-    params.fallbackOnlineWalletLkr
-  );
-}
-
-function resolveSalesFigures(params: {
-  preview: SettlementPreview | null;
-  channelBreakdown?: SettlementBreakdown | null;
-  periodBreakdownLkr: PayoutFormulaBreakdownLkr;
-  snapshotActive: boolean;
-  fallbackGrossLkr: number;
-  totalSalesOverride: number | null;
-  totalDiscountOverride: number | null;
-  subtotalBeforeDiscountOverride: number | null;
-  onlinePaymentsOverride: number | null;
-  cycleStage?: 'FIRST' | 'SECOND';
-}) {
-  const {
-    preview,
-    channelBreakdown,
-    periodBreakdownLkr,
-    snapshotActive,
-    fallbackGrossLkr,
-    totalSalesOverride,
-    totalDiscountOverride,
-    subtotalBeforeDiscountOverride,
-    onlinePaymentsOverride,
-    cycleStage,
-  } = params;
-
-  const allChannelsSubtotalLkr =
-    totalSalesOverride ??
-    (snapshotActive
-      ? periodBreakdownLkr.grossAmount
-      : preview != null
-        ? sumAllRevenueSubtotal(preview)
-        : fallbackGrossLkr);
-  const previewDiscountLkr = preview && !snapshotActive ? sumAllDiscounts(preview.breakdown) : 0;
-  const totalDiscountLkr =
-    totalDiscountOverride ??
-    resolveTotalDiscountsLkr({
-      periodDiscountsTotal: periodBreakdownLkr.periodDiscountsTotal,
-      previewDiscountTotal: previewDiscountLkr,
-    });
-  const subtotalBeforeDiscountLkr =
-    subtotalBeforeDiscountOverride ??
-    (snapshotActive
-      ? (periodBreakdownLkr.periodDiscountsTotal ?? 0) > 0.001
-        ? periodBreakdownLkr.grossAmount + (periodBreakdownLkr.periodDiscountsTotal ?? 0)
-        : periodBreakdownLkr.grossAmount
-      : preview
-        ? sumAllSubtotalBeforeDiscount(preview.breakdown)
-        : totalDiscountLkr > 0.001 && periodBreakdownLkr.grossAmount != null
-          ? periodBreakdownLkr.grossAmount + totalDiscountLkr
-          : 0);
-
-  const grossLkr = allChannelsSubtotalLkr ?? periodBreakdownLkr.grossAmount ?? 0;
-  const onlineWalletLkr =
-    periodBreakdownLkr.onlineWalletGross ?? periodBreakdownLkr.gatewayBase ?? 0;
-  const onlinePaymentsCollectedLkr =
-    cycleStage === 'FIRST'
-      ? resolveFirstPayoutOnlineCollectionsLkr({
-          preview,
-          channelBreakdown,
-          periodBreakdownLkr,
-          snapshotActive,
-          onlinePaymentsOverride,
-          fallbackOnlineWalletLkr: onlineWalletLkr,
-        })
-      : snapshotActive
-        ? (periodBreakdownLkr.onlineWalletGross ?? periodBreakdownLkr.gatewayBase ?? 0)
-        : onlinePaymentsOverride ??
-          (preview ? sumOnlineRevenueSubtotals(preview.breakdown) : onlineWalletLkr);
-  const commissionLkr = snapshotActive
-    ? periodBreakdownLkr.commissionFee
-    : preview != null
-      ? preview.totalCommission
-      : (periodBreakdownLkr.commissionFee ?? 0);
-
-  return {
-    grossLkr,
-    totalDiscountLkr,
-    subtotalBeforeDiscountLkr,
-    onlinePaymentsCollectedLkr,
-    commissionLkr,
-  };
-}
-
-function resolveDiscountReport(params: {
-  periodBreakdownLkr: PayoutFormulaBreakdownLkr;
-  totalDiscountLkr: number;
-  sharedPromo: SharedPromoBreakdownLkr | null;
-  loyaltyDiscountLkr: number;
-  paybackEnabled: boolean;
-}) {
-  const { periodBreakdownLkr, totalDiscountLkr, sharedPromo, loyaltyDiscountLkr, paybackEnabled } =
-    params;
-  const sharedPromoPlatformLkr = sharedPromo?.platformContributionLkr ?? 0;
-  const sharedPromoJasonLkr = sharedPromo?.jasonContributionLkr ?? 0;
-  const sharedPromoBranchLkr = sharedPromo?.branchContributionLkr ?? 0;
-  const sharedPromoTotalLkr = sharedPromo?.totalDiscountLkr ?? 0;
-  const totalProvidedDiscountsLkr = periodBreakdownLkr.periodDiscountsTotal ?? totalDiscountLkr;
-  const branchOwnedPromoDiscountsLkr = periodBreakdownLkr.branchOwnedPromoDiscountTotal ?? 0;
-  const platformOwnedPromoDiscountsLkr = periodBreakdownLkr.platformOwnedPromoDiscountTotal ?? 0;
-  const totalPromotionDiscountsLkr =
-    branchOwnedPromoDiscountsLkr + platformOwnedPromoDiscountsLkr + sharedPromoTotalLkr;
-  const untrackedDiscountsLkr = Math.max(
-    0,
-    roundLkr(totalProvidedDiscountsLkr - totalPromotionDiscountsLkr - loyaltyDiscountLkr),
-  );
-  const costPartnerBranchDiscountsLkr = branchOwnedPromoDiscountsLkr + sharedPromoBranchLkr;
-  const sharedPromoPlatformForCostPartner = paybackEnabled ? sharedPromoPlatformLkr : 0;
-  const costPartnerPlatformDiscountsLkr =
-    platformOwnedPromoDiscountsLkr + sharedPromoPlatformForCostPartner + loyaltyDiscountLkr;
-  const costPartnerJasonDiscountsLkr = sharedPromoJasonLkr;
-  const costPartnerDiscountsTotalLkr =
-    costPartnerBranchDiscountsLkr +
-    costPartnerPlatformDiscountsLkr +
-    costPartnerJasonDiscountsLkr;
-
-  return {
-    sharedPromoPlatformLkr,
-    sharedPromoJasonLkr,
-    sharedPromoTotalLkr,
-    totalProvidedDiscountsLkr,
-    branchOwnedPromoDiscountsLkr,
-    platformOwnedPromoDiscountsLkr,
-    totalSharedPromoDiscountsLkr: sharedPromoTotalLkr,
-    totalPromotionDiscountsLkr,
-    untrackedDiscountsLkr,
-    branchDiscountsLkr: sharedPromoBranchLkr,
-    platformDiscountsLkr: sharedPromoPlatformLkr,
-    jasonDiscountsLkr: sharedPromoJasonLkr,
-    costPartnerBranchDiscountsLkr,
-    costPartnerPlatformDiscountsLkr,
-    costPartnerJasonDiscountsLkr,
-    costPartnerDiscountsTotalLkr,
-    showSharedPromo: sharedPromo != null && hasSharedPromoAmounts(sharedPromo),
-  };
-}
-
-function resolveRefundReport(
-  periodBreakdownLkr: PayoutFormulaBreakdownLkr,
-  snapshots: Pick<
-    ResolvePayoutReportValuesInput,
-    | 'snapshotCancelledByBranchGatewayFeeLkr'
-    | 'snapshotCancelledByBranchOrderCount'
-    | 'snapshotCustomerLateCancelSubtotalLkr'
-    | 'snapshotCustomerLateCancelGatewayDeductionLkr'
-    | 'snapshotCustomerLateCancelNetAmountLkr'
-    | 'snapshotRejectedRefundSubtotalLkr'
-    | 'snapshotRejectedRefundGatewayDeductionLkr'
-    | 'snapshotRejectedRefundNetAmountLkr'
-  >,
-) {
-  const cancelledByBranchGatewayFeeLkr = firstNumber(
-    snapshots.snapshotCancelledByBranchGatewayFeeLkr,
-    periodBreakdownLkr.cancelledByBranchGatewayFee,
-  );
-  const cancelledByBranchOrderCount = firstNumber(
-    snapshots.snapshotCancelledByBranchOrderCount,
-    periodBreakdownLkr.cancelledByBranchOrderCount,
-  );
-  const customerLateCancelSubtotalLkr = firstNumber(
-    snapshots.snapshotCustomerLateCancelSubtotalLkr,
-    periodBreakdownLkr.customerLateCancelSubtotal,
-  );
-  const customerLateCancelGatewayDeductionLkr = firstNumber(
-    snapshots.snapshotCustomerLateCancelGatewayDeductionLkr,
-    periodBreakdownLkr.customerLateCancelGatewayDeduction,
-  );
-  const customerLateCancelNetAmountLkr = firstNumber(
-    snapshots.snapshotCustomerLateCancelNetAmountLkr,
-    periodBreakdownLkr.customerLateCancelNetAmount,
-  );
-  const rejectedRefundSubtotalLkr = firstNumber(
-    snapshots.snapshotRejectedRefundSubtotalLkr,
-    periodBreakdownLkr.rejectedRefundSubtotal,
-  );
-  const rejectedRefundGatewayDeductionLkr = firstNumber(
-    snapshots.snapshotRejectedRefundGatewayDeductionLkr,
-    periodBreakdownLkr.rejectedRefundGatewayDeduction,
-  );
-  const rejectedRefundNetAmountLkr = firstNumber(
-    snapshots.snapshotRejectedRefundNetAmountLkr,
-    periodBreakdownLkr.rejectedRefundNetAmount,
-  );
-  const refundConvenienceFeeLkr = periodBreakdownLkr.refundConvenienceFee ?? 0;
-  const rejectedRefundConvenienceFeeLkr = periodBreakdownLkr.rejectedRefundConvenienceFee ?? 0;
-  const refundDeliveryFeeLkr = periodBreakdownLkr.refundDeliveryFee ?? 0;
-  const rejectedRefundDeliveryFeeLkr = periodBreakdownLkr.rejectedRefundDeliveryFee ?? 0;
-  const platformRefundsLkr = refundConvenienceFeeLkr + rejectedRefundConvenienceFeeLkr;
-  const deliveryRefundsLkr = refundDeliveryFeeLkr + rejectedRefundDeliveryFeeLkr;
-  const nonReturningRefundsBranchLkr =
-    customerLateCancelNetAmountLkr + rejectedRefundNetAmountLkr;
-  const nonReturningRefundsBranchGrossLkr =
-    customerLateCancelSubtotalLkr + rejectedRefundSubtotalLkr;
-  const showBranchRefunds = cancelledByBranchGatewayFeeLkr > 0.001;
-  const showCustomerRefunds =
-    customerLateCancelSubtotalLkr > 0.001 ||
-    customerLateCancelGatewayDeductionLkr > 0.001 ||
-    customerLateCancelNetAmountLkr > 0.001;
-  const showRejectedRefunds =
-    rejectedRefundSubtotalLkr > 0.001 ||
-    rejectedRefundGatewayDeductionLkr > 0.001 ||
-    rejectedRefundNetAmountLkr > 0.001;
-
-  return {
-    cancelledByBranchGatewayFeeLkr,
-    cancelledByBranchOrderCount,
-    customerLateCancelSubtotalLkr,
-    customerLateCancelGatewayDeductionLkr,
-    customerLateCancelNetAmountLkr,
-    rejectedRefundSubtotalLkr,
-    rejectedRefundGatewayDeductionLkr,
-    rejectedRefundNetAmountLkr,
-    refundConvenienceFeeLkr,
-    rejectedRefundConvenienceFeeLkr,
-    refundDeliveryFeeLkr,
-    rejectedRefundDeliveryFeeLkr,
-    platformRefundsLkr,
-    deliveryRefundsLkr,
-    nonReturningRefundsBranchLkr,
-    nonReturningRefundsBranchGrossLkr,
-    totalRefundAmountLkr: nonReturningRefundsBranchLkr,
-    totalRefundAmountGrossLkr:
-      nonReturningRefundsBranchGrossLkr + platformRefundsLkr + deliveryRefundsLkr,
-    showBranchRefunds,
-    showCustomerRefunds,
-    showRejectedRefunds,
-    showRefundSection: showBranchRefunds || showCustomerRefunds || showRejectedRefunds,
-  };
-}
-
-function resolveGatewayFigures(params: {
-  periodBreakdownLkr: PayoutFormulaBreakdownLkr;
-  snapshotActive: boolean;
-  useStoredSnapshot: boolean;
-  onlinePaymentsCollectedLkr: number;
-  gatewayRatePctProp: number;
-  snapshotGatewayFeeLkr: number | null;
-  snapshotGatewayRatePct: number | null;
-  snapshotOnlineWalletGrossLkr: number | null;
-  isFirstCyclePayout?: boolean;
-  secondCycleBranchWalletBeforeGatewayLkr?: number | null;
-}) {
-  const {
-    periodBreakdownLkr,
-    snapshotActive,
-    useStoredSnapshot,
-    onlinePaymentsCollectedLkr,
-    gatewayRatePctProp,
-    snapshotGatewayFeeLkr,
-    snapshotGatewayRatePct,
-    snapshotOnlineWalletGrossLkr,
-    isFirstCyclePayout = false,
-    secondCycleBranchWalletBeforeGatewayLkr = null,
-  } = params;
-  const gatewayBaseLkr = isFirstCyclePayout
-    ? (snapshotOnlineWalletGrossLkr ?? onlinePaymentsCollectedLkr)
-    : secondCycleBranchWalletBeforeGatewayLkr != null && secondCycleBranchWalletBeforeGatewayLkr >= 0
-      ? secondCycleBranchWalletBeforeGatewayLkr
-      : snapshotOnlineWalletGrossLkr ??
-        (periodBreakdownLkr.gatewayBase != null && periodBreakdownLkr.gatewayBase > 0
-          ? periodBreakdownLkr.gatewayBase
-          : periodBreakdownLkr.remainingOnlineWalletLkr != null &&
-              periodBreakdownLkr.remainingOnlineWalletLkr >= 0
-            ? periodBreakdownLkr.remainingOnlineWalletLkr
-            : onlinePaymentsCollectedLkr);
-  const gatewayRatePct =
-    snapshotGatewayRatePct ??
-    (snapshotActive
-      ? (periodBreakdownLkr.gatewayRatePct ?? gatewayRatePctProp)
-      : gatewayRatePctProp);
-  const gatewayLkr = isFirstCyclePayout
-    ? roundLkr(gatewayBaseLkr * (gatewayRatePct / 100))
-    : snapshotGatewayFeeLkr ??
-      (useStoredSnapshot || snapshotActive
-        ? (periodBreakdownLkr.gatewayFee ?? 0)
-        : roundLkr(gatewayBaseLkr * (gatewayRatePct / 100)));
-  const gatewayHint =
-    gatewayBaseLkr > 0.001
-      ? `Online payments collected (branch revenue) ${formatMoneyAmount(gatewayBaseLkr)} x ${gatewayRatePct}%`
-      : `Online payments collected (branch revenue) x ${gatewayRatePct}%`;
-
-  return { gatewayBaseLkr, gatewayRatePct, gatewayLkr, gatewayHint };
-}
-
-function resolveApplicableSlabCommissionRateDisplay(params: {
-  preview: SettlementPreview | null;
-  slabRatePct: number | null;
-  periodBreakdownLkr: PayoutFormulaBreakdownLkr;
-}): { applicableSlabCommissionRatePct: number | null; slabMonthlyBaseLkr: number | null } {
-  const monthlyBase = params.preview?.slabInfo.monthlyBase;
-  const payoutSlabs = resolveCommissionSlabs(params.preview?.slabInfo.slabs);
-  if (monthlyBase != null && monthlyBase >= 0) {
-    return {
-      applicableSlabCommissionRatePct: commissionRateToDisplayPct(
-        getEffectiveRate(monthlyBase, payoutSlabs),
-      ),
-      slabMonthlyBaseLkr: monthlyBase,
-    };
-  }
-  const previewRate = params.preview?.slabInfo.effectiveRate;
-  if (previewRate != null && previewRate > 0) {
-    return {
-      applicableSlabCommissionRatePct: commissionRateToDisplayPct(previewRate),
-      slabMonthlyBaseLkr: params.preview?.slabInfo.monthlyBase ?? null,
-    };
-  }
-  if (params.slabRatePct != null) {
-    return { applicableSlabCommissionRatePct: params.slabRatePct, slabMonthlyBaseLkr: null };
-  }
-  const storedRate = params.periodBreakdownLkr.commissionRate;
-  if (storedRate != null && storedRate > 0) {
-    return {
-      applicableSlabCommissionRatePct: commissionRateToDisplayPct(storedRate),
-      slabMonthlyBaseLkr: null,
-    };
-  }
-  return { applicableSlabCommissionRatePct: null, slabMonthlyBaseLkr: null };
-}
-
-function resolveOnlineWalletChannelNets(params: {
-  preview: SettlementPreview | null;
-  channelBreakdown: SettlementBreakdown | null | undefined;
-  cycleStage?: 'FIRST' | 'SECOND';
-}): { onlinePickupNetLkr: number; onlineDeliveryNetLkr: number } {
-  const breakdown = params.preview?.breakdown ?? params.channelBreakdown ?? null;
-  if (!breakdown) {
-    return { onlinePickupNetLkr: 0, onlineDeliveryNetLkr: 0 };
-  }
-  if (params.cycleStage === 'FIRST') {
-    const parts = resolveFirstPayoutOnlineSubtotalComponents(breakdown);
-    return {
-      onlinePickupNetLkr: parts.pickupSubtotalLkr,
-      onlineDeliveryNetLkr: parts.deliverySubtotalLkr,
-    };
-  }
-  const components = resolveOnlinePaymentsCollectedComponents(breakdown);
-  return {
-    onlinePickupNetLkr: components.pickupRevenueLkr,
-    onlineDeliveryNetLkr: components.deliveryRevenueLkr,
-  };
-}
-
 export function resolvePayoutBreakdownBundle(
   input: PayoutBreakdownDisplayInput,
 ): PayoutBreakdownBundle | null {
@@ -589,13 +204,8 @@ export function resolvePayoutReportValues(
 
   const snapshotActive = useStoredSnapshot || snapshotGatewayFeeLkr != null;
   const fallbackGrossLkr = onlineOrderSubtotalLkr ?? periodBreakdownLkr.grossAmount;
-  const cycleStageEarly =
-    periodBreakdownLkr.cycleStage ??
-    (periodBreakdownLkr.commissionFee <= 0.001 &&
-    (periodBreakdownLkr.netPlatformEarning ?? 0) <= 0.001 &&
-    (periodBreakdownLkr.priorOnlineWalletAmountLkr ?? 0) <= 0.001
-      ? ('FIRST' as const)
-      : undefined);
+  const cycleStage = inferPayoutCycleStage(periodBreakdownLkr);
+  const isFirstCyclePayout = cycleStage === 'FIRST';
   const sales = resolveSalesFigures({
     preview,
     channelBreakdown,
@@ -606,7 +216,7 @@ export function resolvePayoutReportValues(
     totalDiscountOverride,
     subtotalBeforeDiscountOverride,
     onlinePaymentsOverride,
-    cycleStage: cycleStageEarly,
+    cycleStage,
   });
   const showPaybackDetails = paybackEnabled;
   const platformPaybackLkr = periodBreakdownLkr.platformPaybackTotal ?? 0;
@@ -624,7 +234,6 @@ export function resolvePayoutReportValues(
     paybackEnabled: showPaybackDetails,
   });
   const refunds = resolveRefundReport(periodBreakdownLkr, input);
-  const isFirstCyclePayoutEarly = cycleStageEarly === 'FIRST';
   const netPlatformCommissionForPayoutLkr = resolveTotalPlatformCommissionDisplayLkr({
     commissionLkr: sales.commissionLkr,
     platformPaybackTotal: platformPaybackLkr,
@@ -662,7 +271,7 @@ export function resolvePayoutReportValues(
   // Customer convenience is platform-retained and must not reduce branch earnings here.
   const netPlatformAmountLkr = netPlatformCommissionForPayoutLkr;
   const secondCycleBranchWalletBeforeGatewayLkr =
-    isFirstCyclePayoutEarly
+    isFirstCyclePayout
       ? null
       : Math.max(
           0,
@@ -672,6 +281,7 @@ export function resolvePayoutReportValues(
             priorOnlineWalletAmountLkr: periodBreakdownLkr.priorOnlineWalletAmountLkr ?? 0,
             nonReturningRefundsBranchGrossLkr: refunds.nonReturningRefundsBranchGrossLkr,
             netPlatformAmountLkr,
+            bankPenaltyLkr: refunds.cancelledByBranchGatewayFeeLkr,
           }),
         );
   const gateway = resolveGatewayFigures({
@@ -683,13 +293,12 @@ export function resolvePayoutReportValues(
     snapshotGatewayFeeLkr,
     snapshotGatewayRatePct,
     snapshotOnlineWalletGrossLkr,
-    isFirstCyclePayout: isFirstCyclePayoutEarly,
+    isFirstCyclePayout,
     secondCycleBranchWalletBeforeGatewayLkr,
   });
-  const gatewayResolved = gateway;
   const priorOnlineWalletForNetLkr = periodBreakdownLkr.priorOnlineWalletAmountLkr ?? 0;
   const onlineWalletBaseForBranchNetLkr =
-    cycleStageEarly === 'SECOND'
+    cycleStage === 'SECOND'
       ? Math.max(
           0,
           periodBreakdownLkr.remainingOnlineWalletLkr ??
@@ -699,13 +308,13 @@ export function resolvePayoutReportValues(
   const recalculatedNetLkr = computePayoutNetLkr({
     onlinePaymentsCollectedLkr: onlineWalletBaseForBranchNetLkr,
     netPlatformCommissionLkr: netPlatformCommissionForPayoutLkr,
-    gatewayLkr: gatewayResolved.gatewayLkr,
+    gatewayLkr: gateway.gatewayLkr,
     cancelledByBranchGatewayFeeLkr: refunds.cancelledByBranchGatewayFeeLkr,
     customerLateCancelNetAmountLkr: refunds.customerLateCancelNetAmountLkr,
     rejectedRefundNetAmountLkr: refunds.rejectedRefundNetAmountLkr,
   });
   const liveSecondCycleNetAmountLkr =
-    cycleStageEarly === 'SECOND' &&
+    cycleStage === 'SECOND' &&
     snapshotNetAmountLkr == null &&
     !snapshotActive &&
     periodBreakdownLkr.netAmount != null &&
@@ -722,13 +331,13 @@ export function resolvePayoutReportValues(
         ? periodBreakdownLkr.netAmount
         : liveSecondCycleNetAmountLkr != null
           ? liveSecondCycleNetAmountLkr
-          : gatewayResolved.gatewayBaseLkr > 0.001
+          : gateway.gatewayBaseLkr > 0.001
             ? recalculatedNetLkr
             : (periodBreakdownLkr.netAmount ?? recalculatedNetLkr);
   const onlineWalletChannelNets = resolveOnlineWalletChannelNets({
     preview,
     channelBreakdown,
-    cycleStage: cycleStageEarly,
+    cycleStage,
   });
   const applicableSlabCommission = resolveApplicableSlabCommissionRateDisplay({
     preview,
@@ -736,20 +345,12 @@ export function resolvePayoutReportValues(
     periodBreakdownLkr,
   });
 
-  const cycleStage =
-    periodBreakdownLkr.cycleStage ??
-    (periodBreakdownLkr.commissionFee <= 0.001 &&
-    (periodBreakdownLkr.netPlatformEarning ?? 0) <= 0.001 &&
-    (periodBreakdownLkr.priorOnlineWalletAmountLkr ?? 0) <= 0.001
-      ? ('FIRST' as const)
-      : undefined);
-  const isFirstCyclePayout = cycleStage === 'FIRST';
   const priorOnlineWalletAmountLkr = isFirstCyclePayout
     ? 0
     : (periodBreakdownLkr.priorOnlineWalletAmountLkr ?? 0);
 
   const finalBranchNetPayoutLkr = isFirstCyclePayout
-    ? roundLkr(sales.onlinePaymentsCollectedLkr - gatewayResolved.gatewayLkr)
+    ? roundLkr(sales.onlinePaymentsCollectedLkr - gateway.gatewayLkr)
     : branchNetPayoutLkr;
 
   const displayCommissionLkr = isFirstCyclePayout ? 0 : sales.commissionLkr;
@@ -780,7 +381,7 @@ export function resolvePayoutReportValues(
     ...discounts,
     ...(displayDiscountTotals ?? {}),
     ...refunds,
-    ...gatewayResolved,
+    ...gateway,
     platformPaybackLkr: isFirstCyclePayout ? 0 : platformPaybackLkr,
     commissionPaybackLkr: isFirstCyclePayout ? 0 : commissionPaybackLkr,
     platformDiscountsReportLkr: isFirstCyclePayout
@@ -845,11 +446,10 @@ type SecondCycleBranchWalletWalkthrough = Pick<
   | 'cancelledByBranchGatewayFeeLkr'
 >;
 
-/** Payout 2 Net Branch Payout — sum of wallet lines before gateway (matches report display). */
-export function resolveBranchWalletBeforeGatewayLkr(
+function computeSecondCycleBranchWalletBeforeGatewayLkr(
   values: SecondCycleBranchWalletWalkthrough,
-): number | null {
-  if (values.cycleStage !== 'SECOND') return null;
+  includeBankPenalty: boolean,
+): number {
   return Math.max(
     0,
     computeBranchWalletBeforeGatewayLkr({
@@ -858,32 +458,46 @@ export function resolveBranchWalletBeforeGatewayLkr(
       priorOnlineWalletAmountLkr: values.priorOnlineWalletAmountLkr,
       nonReturningRefundsBranchGrossLkr: values.nonReturningRefundsBranchGrossLkr,
       netPlatformAmountLkr: values.netPlatformAmountLkr,
+      bankPenaltyLkr: includeBankPenalty ? values.cancelledByBranchGatewayFeeLkr : 0,
     }),
   );
 }
 
-/** Payout 2 gateway fee — 1.9% of branch wallet before gateway (matches report lines). */
+/** Payout 2 gateway-fee base — branch wallet before gateway (after bank penalty, PayHere 1.9%). */
+export function resolveBranchWalletBeforeGatewayLkr(
+  values: SecondCycleBranchWalletWalkthrough,
+): number | null {
+  if (values.cycleStage !== 'SECOND') return null;
+  return computeSecondCycleBranchWalletBeforeGatewayLkr(values, true);
+}
+
+/** Payout 2 report subtotal — same walkthrough after bank penalty, before gateway fee. */
+export function resolveDisplayedBranchWalletBeforeGatewayLkr(
+  values: SecondCycleBranchWalletWalkthrough,
+): number | null {
+  return resolveBranchWalletBeforeGatewayLkr(values);
+}
+
+/** Payout 2 gateway fee — 1.9% of branch wallet before gateway (after bank penalty). */
 export function resolveSecondCycleGatewayLkr(
   values: SecondCycleBranchWalletWalkthrough & { gatewayRatePct: number },
 ): number | null {
-  const beforeGateway = resolveBranchWalletBeforeGatewayLkr(values);
-  if (beforeGateway == null) return null;
+  const gatewayBase = resolveBranchWalletBeforeGatewayLkr(values);
+  if (gatewayBase == null) return null;
   return computePeriodGatewayLkr({
-    onlinePaymentsCollectedLkr: beforeGateway,
+    onlinePaymentsCollectedLkr: gatewayBase,
     gatewayRatePct: values.gatewayRatePct,
   });
 }
 
-/** Payout 2 report footer — branch wallet before gateway minus gateway and bank penalty. */
+/** Payout 2 report footer — displayed before-gateway subtotal minus gateway fee. */
 export function resolveSecondCycleDisplayFinalPayLkr(
   values: SecondCycleBranchWalletWalkthrough & { gatewayRatePct: number },
 ): number | null {
-  const beforeGateway = resolveBranchWalletBeforeGatewayLkr(values);
+  const displayedBeforeGateway = resolveDisplayedBranchWalletBeforeGatewayLkr(values);
   const gatewayLkr = resolveSecondCycleGatewayLkr(values);
-  if (beforeGateway == null || gatewayLkr == null) return null;
-  return roundLkr(
-    Math.max(0, beforeGateway - gatewayLkr - values.cancelledByBranchGatewayFeeLkr),
-  );
+  if (displayedBeforeGateway == null || gatewayLkr == null) return null;
+  return roundLkr(Math.max(0, displayedBeforeGateway - gatewayLkr));
 }
 
 /** Report “Net payout (final pay amount)” — Payout 2 uses the visible walkthrough total. */

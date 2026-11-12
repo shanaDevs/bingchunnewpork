@@ -169,7 +169,7 @@ describe('buildNetBranchPayoutRows', () => {
       true,
     );
     const rows = buildNetBranchPayoutRows(statement);
-    expect(rows[1]).toMatchObject({
+    expect(rows.find((row) => row.label === INVOICE_PRIOR_PAYOUT_ONLINE_WALLET_ROW_LABEL)).toMatchObject({
       label: INVOICE_PRIOR_PAYOUT_ONLINE_WALLET_ROW_LABEL,
       amount: '21,490.00',
     });
@@ -303,6 +303,26 @@ describe('buildPayoutStatementFromBreakdown', () => {
     expect(statement.platformDiscountsReportCents).toBe(8_000);
     expect(statement.netPlatformAmountCents).toBe(2_000);
   });
+
+  it('defers net platform amount and platform discounts on FIRST payout invoices', () => {
+    const statement = buildPayoutStatementFromBreakdown(
+      {
+        cycleStage: 'FIRST',
+        grossAmount: 432_000,
+        onlinePaymentsCollected: 310_500,
+        commissionFee: 0,
+        platformPaybackTotal: 19_500,
+        platformOwnedPromoDiscountTotal: 0,
+        gatewayFee: 5_900,
+        netPlatformEarning: 0,
+      },
+      304_600,
+      true,
+    );
+    expect(statement.commissionCents).toBe(0);
+    expect(statement.platformDiscountsReportCents).toBe(0);
+    expect(statement.netPlatformAmountCents).toBe(0);
+  });
 });
 
 describe('buildPage2PayoutSections', () => {
@@ -373,6 +393,57 @@ describe('buildPage2PayoutSections', () => {
       loyaltyDiscountCents: 0,
     }).find((s) => s.title === 'Net branch payout');
     expect(withJason?.rows.some((row) => row.label === '+ Jason Discounts')).toBe(true);
+  });
+
+  it('keeps net platform amount on FIRST payout invoices as LKR 0.00', () => {
+    const firstBreakdown = {
+      cycleStage: 'FIRST' as const,
+      grossAmount: 432_000,
+      onlinePaymentsCollected: 310_500,
+      commissionFee: 0,
+      platformPaybackTotal: 19_500,
+      platformOwnedPromoDiscountTotal: 0,
+      gatewayFee: 5_900,
+      netPlatformEarning: 0,
+    };
+    const firstStatement = buildPayoutStatementFromBreakdown(firstBreakdown, 304_600, true);
+    const summary = buildInvoiceSummaryRows(
+      {
+        requestedCents: 304_600,
+        payoutStatement: {
+          ...firstStatement,
+          platformDiscountsReportCents: 19_500,
+          netPlatformAmountCents: -19_500,
+        },
+      } as GenerateWithdrawalInvoiceInput,
+      { withdrawalBreakdown: firstBreakdown, cycleStage: 'FIRST' },
+    );
+    const summaryNpa = summary.find((row) => row.label === '– Net Platform Amount');
+    expect(summaryNpa?.amount).toBe('—');
+
+    const sections = buildPage2PayoutSections(firstStatement, { cycleStage: 'FIRST' });
+    const npa = sections.find((section) => section.title === 'Net platform amount');
+    expect(npa).toBeDefined();
+    expect(npa?.rows.find((row) => row.label === 'Commission')?.amount).toBe('—');
+    expect(npa?.rows.find((row) => row.label === '– Platform Discounts')?.amount).toBe('—');
+    expect(npa?.rows.find((row) => row.label === 'Net Platform Amount')).toMatchObject({
+      amount: 'LKR 0.00',
+      bold: true,
+      highlight: true,
+    });
+    const discounts = sections.find((section) => section.title === 'Discounts');
+    expect(discounts?.rows.find((row) => row.label === 'Platform-owned discount')?.amount).toBe('—');
+    expect(discounts?.rows.find((row) => row.label === 'Total by Cost Partner')?.amount).toBe(
+      'considered on next payout',
+    );
+    const refunds = sections.find((section) => section.title === 'Refunds');
+    expect(refunds?.rows.find((row) => row.label === 'Non-returning refunds (Branch)')?.amount).toBe(
+      '—',
+    );
+    expect(refunds?.rows.find((row) => row.label === 'Total Refund Amount')?.amount).toBe(
+      'considered on next payout',
+    );
+    expect(sections.some((section) => section.title === 'Net branch payout')).toBe(true);
   });
 });
 

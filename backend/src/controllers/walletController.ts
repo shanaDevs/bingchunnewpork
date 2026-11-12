@@ -16,6 +16,7 @@ import {
   mergeWalletSecurityAuditRows,
 } from '../lib/walletSecurityAuditLegacy';
 import {
+  enrichWalletSecurityAuditRowsWithStoreNames,
   listWalletSecurityAuditLogs,
   parseWalletSecurityAuditListQuery,
 } from '../lib/walletSecurityAuditSchema';
@@ -177,9 +178,11 @@ export async function getPayoutPeriodInfoHandler(req: Request, res: Response, ne
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /admin/wallet/payouts-due
-// Super Admin queue: all elapsed unpaid branch payout periods (oldest first).
-// Optional query `from`/`to` are ignored (wallet month filter does not scope this list).
-// `page` / `limit` (default 10) paginate due periods. Optional `search` filters by branch name.
+// Super Admin queue: elapsed unpaid branch payout periods (oldest first).
+// Optional `from`/`to` keep periods that overlap a custom range (legacy; wallet UI omits these).
+// Optional `storeId` scopes to one branch. `page` / `limit` (default 10) paginate due periods.
+// Optional `search` filters by branch name.
+// `isOldestUnpaid` is still computed on the full unpaid chain, not the filtered page.
 // ──────────────────────────────────────────────────────────────────────────────
 function invalidateWalletPayoutsDueCache(): void {
   invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-payouts-due']));
@@ -195,7 +198,8 @@ export async function getPayoutsDueHandler(req: Request, res: Response, next: Ne
   try {
     if (req.user?.role !== 'SYSTEM_ADMIN') throw new AppError('Forbidden', 403);
 
-    const { page, limit, search, from, to } = walletPayoutsDueQuerySchema.parse(req.query);
+    const { page, limit, search, storeId, from, to } =
+      walletPayoutsDueQuerySchema.parse(req.query);
 
     await ensureWithdrawalInReviewEnumReady();
 
@@ -206,6 +210,7 @@ export async function getPayoutsDueHandler(req: Request, res: Response, next: Ne
           page,
           limit,
           ...(search ? { search } : {}),
+          ...(storeId ? { storeId } : {}),
           ...(from ? { from } : {}),
           ...(to ? { to } : {}),
         }),
@@ -641,7 +646,11 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
         buffer,
       } as Express.Multer.File;
     }
-    const proofFile = assertSettlementProofFile(uploadedProof);
+    const proofFile = uploadedProof
+      ? assertSettlementProofFile(uploadedProof)
+      : data.paymentMethod === 'CASH'
+        ? undefined
+        : assertSettlementProofFile(uploadedProof);
 
     let draftWithdrawalId: string | undefined = data.withdrawalId;
     let inReviewDraft: Awaited<ReturnType<typeof findInReviewWithdrawalForPeriod>> = null;
@@ -700,6 +709,7 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
       storeId,
       amountCents,
       withdrawalId: updated.id,
+      reference: store?.name ? `Branch: ${store.name}` : null,
     });
 
     invalidateBranchPayablesBalanceCaches(storeId);
@@ -711,23 +721,25 @@ export async function initiatePayoutHandler(req: Request, res: Response, next: N
 
     void (async () => {
       let proofUrl: string | null = null;
-      try {
-        proofUrl = await uploadSettlementProof(
-          proofFile.buffer,
-          proofFile.originalname,
-          proofFile.mimetype,
-          storeId,
-        );
-        await prisma.storeWithdrawal.update({
-          where: { id: updated.id },
-          data: { proofUrl },
-        });
-      } catch (err) {
-        console.error('[initiate-payout] background proof upload failed', {
-          storeId,
-          withdrawalId: updated.id,
-          err,
-        });
+      if (proofFile) {
+        try {
+          proofUrl = await uploadSettlementProof(
+            proofFile.buffer,
+            proofFile.originalname,
+            proofFile.mimetype,
+            storeId,
+          );
+          await prisma.storeWithdrawal.update({
+            where: { id: updated.id },
+            data: { proofUrl },
+          });
+        } catch (err) {
+          console.error('[initiate-payout] background proof upload failed', {
+            storeId,
+            withdrawalId: updated.id,
+            err,
+          });
+        }
       }
 
       try {
@@ -1536,9 +1548,11 @@ export async function listWalletSecurityAuditLogsHandler(req: Request, res: Resp
       total = merged.total;
     }
 
+    const rowsWithStoreNames = await enrichWalletSecurityAuditRowsWithStoreNames(rows);
+
     res.json({
       success: true,
-      data: { rows, total, page, limit },
+      data: { rows: rowsWithStoreNames, total, page, limit },
     });
   } catch (err) {
     next(err);

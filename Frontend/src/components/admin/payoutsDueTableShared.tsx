@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -30,12 +31,47 @@ const TABLE_HEAD_ROW_CLASS =
 const TH_BASE = 'px-3 py-2.5 font-semibold whitespace-nowrap';
 const TH_RIGHT = `${TH_BASE} text-right`;
 
-export function PayoutsDueTableHead() {
+export type PayoutsDueTableHeadProps = {
+  selectAllChecked?: boolean;
+  selectAllIndeterminate?: boolean;
+  onSelectAllChange?: (checked: boolean) => void;
+  selectAllDisabled?: boolean;
+};
+
+export function PayoutsDueTableHead({
+  selectAllChecked = false,
+  selectAllIndeterminate = false,
+  onSelectAllChange,
+  selectAllDisabled = false,
+}: PayoutsDueTableHeadProps = {}) {
+  const selectAllRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = selectAllIndeterminate;
+    }
+  }, [selectAllIndeterminate, selectAllChecked]);
+
   return (
     <thead>
       <tr className={TABLE_HEAD_ROW_CLASS}>
         <th scope="col" className={TH_BASE}>
-          Draft
+          {onSelectAllChange ? (
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={selectAllChecked}
+                disabled={selectAllDisabled}
+                aria-label="Save all payouts on this page as draft"
+                onChange={(event) => onSelectAllChange(event.target.checked)}
+                className="h-4 w-4 accent-[var(--color-brand)] disabled:cursor-not-allowed"
+              />
+              <span>Draft</span>
+            </label>
+          ) : (
+            'Draft'
+          )}
         </th>
         <th scope="col" className={TH_BASE}>
           Branch

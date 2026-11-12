@@ -13,12 +13,12 @@ import { deliveryWalletFetch, unlockDeliveryWallet } from '@/lib/deliveryWalletA
 import type { DeliveryPayoutDueRow } from '@/lib/deliveryPayoutTypes';
 
 type Props = {
-  branchRows: PayoutDueRow[];
-  branchLoading?: boolean;
-  branchLoadingMore?: boolean;
+  branchListEnabled?: boolean;
+  dueStoreId?: string | null;
   onViewBranchDue: (row: PayoutDueRow) => void;
   onReviewBranchDue: (row: PayoutDueRow) => void;
   onDeliveryDueCountChange?: (count: number) => void;
+  onBranchDueCountChange?: (count: number) => void;
 };
 
 async function fetchDeliveryPayoutsDue(unlockToken: string): Promise<DeliveryPayoutDueRow[]> {
@@ -26,12 +26,12 @@ async function fetchDeliveryPayoutsDue(unlockToken: string): Promise<DeliveryPay
 }
 
 export default function PayoutsDueSubTabs({
-  branchRows,
-  branchLoading,
-  branchLoadingMore,
+  branchListEnabled = true,
+  dueStoreId = null,
   onViewBranchDue,
   onReviewBranchDue,
   onDeliveryDueCountChange,
+  onBranchDueCountChange,
 }: Props) {
   const queryClient = useQueryClient();
   const [deliverySubTab, setDeliverySubTab] = useState<'branch' | 'delivery'>('branch');
@@ -76,8 +76,13 @@ export default function PayoutsDueSubTabs({
     ]);
   }
 
-  const branchCount = branchRows.length;
+  const [branchCount, setBranchCount] = useState(0);
   const deliveryCount = unlockToken ? deliveryDue.length : 0;
+
+  function handleBranchDueCountChange(count: number) {
+    setBranchCount(count);
+    onBranchDueCountChange?.(count);
+  }
 
   useEffect(() => {
     onDeliveryDueCountChange?.(unlockToken ? deliveryDue.length : 0);
@@ -121,11 +126,11 @@ export default function PayoutsDueSubTabs({
 
         <TabsContent value="branch" className="mt-0 outline-none">
           <PayoutsDuePanel
-            rows={branchRows}
-            loading={branchLoading}
-            loadingMore={branchLoadingMore}
+            enabled={branchListEnabled}
+            storeId={dueStoreId}
             onView={onViewBranchDue}
             onReviewAndPay={onReviewBranchDue}
+            onTotalChange={handleBranchDueCountChange}
           />
         </TabsContent>
 

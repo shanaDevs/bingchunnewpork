@@ -11,6 +11,7 @@ import {
   walletSecurityAuditLabel,
   walletSecurityAuditScope,
 } from '@/lib/walletSecurityAuditLabels';
+import { branchDisplayName } from '@/components/admin/reports/reportUtils';
 
 type AuditRow = {
   id: string;
@@ -19,6 +20,7 @@ type AuditRow = {
   actorId: string | null;
   actorRole: string | null;
   storeId: string | null;
+  storeName: string | null;
   amountCents: number | null;
   withdrawalId: string | null;
   payoutId: string | null;
@@ -31,9 +33,14 @@ type AuditRow = {
 
 const PAGE_SIZE = 50;
 
+function formatBranch(row: AuditRow): string {
+  if (row.storeName) return branchDisplayName(row.storeName);
+  if (row.storeId) return row.storeId;
+  return '—';
+}
+
 function formatReference(row: AuditRow): string {
   const parts: string[] = [];
-  if (row.storeId) parts.push(`store ${row.storeId.slice(0, 8)}`);
   if (row.withdrawalId) parts.push(`withdrawal ${row.withdrawalId.slice(0, 8)}`);
   if (row.payoutId) parts.push(`payout ${row.payoutId.slice(0, 8)}`);
   if (row.orderNumber) parts.push(`order ${row.orderNumber}`);
@@ -108,6 +115,7 @@ export default function WalletSecurityAuditPage() {
                 <tr>
                   <th className="p-2 whitespace-nowrap">Time</th>
                   <th className="p-2 whitespace-nowrap">Scope</th>
+                  <th className="p-2 whitespace-nowrap">Branch</th>
                   <th className="p-2 whitespace-nowrap">Operation</th>
                   <th className="p-2">Outcome</th>
                   <th className="p-2">Actor</th>
@@ -119,7 +127,7 @@ export default function WalletSecurityAuditPage() {
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-4 text-muted text-center">
+                    <td colSpan={9} className="p-4 text-muted text-center">
                       No events yet.
                     </td>
                   </tr>
@@ -131,6 +139,12 @@ export default function WalletSecurityAuditPage() {
                       </td>
                       <td className="p-2 whitespace-nowrap text-xs">
                         {walletSecurityAuditScope(row.event)}
+                      </td>
+                      <td
+                        className="p-2 max-w-[12rem] truncate text-xs"
+                        title={formatBranch(row)}
+                      >
+                        {formatBranch(row)}
                       </td>
                       <td className="p-2 text-xs">{walletSecurityAuditLabel(row.event)}</td>
                       <td className="p-2">{row.outcome}</td>

@@ -16,9 +16,23 @@ import {
   PAYOUT_FIRST_ONLINE_COLLECTIONS_TOTAL_LABEL,
   PAYOUT_FIRST_ONLINE_DELIVERY_SUBTOTAL_LABEL,
   PAYOUT_FIRST_ONLINE_PICKUP_SUBTOTAL_LABEL,
+  PAYOUT_FIRST_CYCLE_COMMISSION_INFO_DESCRIPTION,
+  PAYOUT_FIRST_CYCLE_DEFERRED_SECTION,
+  PAYOUT_FIRST_CYCLE_NET_PLATFORM_INFO_DESCRIPTION,
 } from '@/components/admin/payoutFirstCycleCopy';
 
 export function DiscountDetailsInfoPopover({ values }: { values: PayoutReportValues }) {
+  if (values.cycleStage === 'FIRST') {
+    return (
+      <SectionInfoPopover ariaLabel="Discounts & platform share — Payout 1">
+        <InfoPopoverHeader
+          title="Discounts & platform share"
+          description={PAYOUT_FIRST_CYCLE_DEFERRED_SECTION}
+        />
+      </SectionInfoPopover>
+    );
+  }
+
   return (
     <SectionInfoPopover ariaLabel="Discount calculation details">
       <InfoPopoverHeader
@@ -196,7 +210,18 @@ export function OnlineWalletInfoPopover({ values }: { values: PayoutReportValues
 }
 
 export function CommissionInfoPopover({ values }: { values: PayoutReportValues }) {
-  const walletLkr = values.onlinePaymentsCollectedLkr;
+  if (values.cycleStage === 'FIRST') {
+    return (
+      <SectionInfoPopover ariaLabel="Commission — Payout 1">
+        <InfoPopoverHeader
+          title="Commission"
+          description={PAYOUT_FIRST_CYCLE_COMMISSION_INFO_DESCRIPTION}
+        />
+      </SectionInfoPopover>
+    );
+  }
+
+  const totalSaleLkr = values.grossLkr;
   const ratePct = values.applicableSlabCommissionRatePct;
   const monthlyBaseHint =
     values.slabMonthlyBaseLkr != null && values.slabMonthlyBaseLkr >= 0
@@ -210,11 +235,11 @@ export function CommissionInfoPopover({ values }: { values: PayoutReportValues }
         description="Slab commission for the period. Platform-owned promo payback and discount offsets are applied in Net Platform Amount, not here."
       />
       <InfoFormulaLine>
-        Commission = Online Wallet Amount × Commission Rate ={' '}
-        {plainAmount(walletLkr)} × {ratePct != null ? `${ratePct}%` : '—'}
+        Commission = Total Sale × Commission Rate = {plainAmount(totalSaleLkr)} ×{' '}
+        {ratePct != null ? `${ratePct}%` : '—'}
       </InfoFormulaLine>
       <div className="space-y-2 border-t border-[#e2e8f0] pt-2.5 dark:border-slate-700">
-        <ReportRow label="Online Wallet Amount" value={plainAmount(walletLkr)} />
+        <ReportRow label="Total Sale" value={plainAmount(totalSaleLkr)} />
         <ReportRow
           label="Commission rate"
           value={ratePct != null ? `${ratePct}%` : '—'}
@@ -268,7 +293,10 @@ export function NetPlatformAmountInfoPopover({ values }: { values: PayoutReportV
   if (values.cycleStage === 'FIRST') {
     return (
       <SectionInfoPopover ariaLabel="Net Platform Amount — Payout 1">
-        <InfoPopoverHeader title="Net Platform Amount" />
+        <InfoPopoverHeader
+          title="Net Platform Amount"
+          description={PAYOUT_FIRST_CYCLE_NET_PLATFORM_INFO_DESCRIPTION}
+        />
       </SectionInfoPopover>
     );
   }

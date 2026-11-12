@@ -7,6 +7,7 @@ import {
   Loader2,
   Wallet,
 } from 'lucide-react';
+import { formatStoredPayoutPeriodLabel } from '@/components/admin/payoutSecondCycleDisplayRange';
 import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
 import {
   parseWithdrawalBreakdown,
@@ -60,14 +61,7 @@ function SummaryAmount({
 }
 
 function formatPeriod(row: WithdrawalRow) {
-  if (!row.periodFrom || !row.periodTo) return '—';
-  const fmt = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-LK', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-  return `${fmt(row.periodFrom)} – ${fmt(row.periodTo)}`;
+  return formatStoredPayoutPeriodLabel(row);
 }
 
 function branchLabel(row: WithdrawalRow, storeNames: Record<string, string>) {

@@ -10,13 +10,28 @@ import {
 import { readPayoutCycleStage } from '@/components/admin/payoutPeriodRowCycleDisplay';
 import { syntheticPeriodViewWithdrawal } from '@/components/admin/payoutPeriodView';
 import type {
+  PayoutListTab,
   PayoutPeriodRow,
   PayoutPeriodSort,
   PayoutPeriodStatus,
 } from '@/components/admin/payoutPeriodTypes';
+import { coerceToIsoString } from '@/lib/datetime';
 
 export function isCompletedPayout(status: PayoutPeriodStatus) {
   return status === 'PAID';
+}
+
+/** Branch payout draft submitted for platform review (maps from withdrawal IN_REVIEW). */
+export function isInReviewPayoutPeriod(row: PayoutPeriodRow) {
+  if (row.status === 'PAYMENT_PENDING') return true;
+  return String(row.withdrawal?.status ?? '') === 'IN_REVIEW';
+}
+
+export function rowMatchesPayoutListTab(row: PayoutPeriodRow, listTab: PayoutListTab) {
+  if (listTab === 'completed') {
+    return isCompletedPayout(row.status) && !isInReviewPayoutPeriod(row);
+  }
+  return !isCompletedPayout(row.status);
 }
 
 export function statusLabel(status: PayoutPeriodStatus) {
@@ -42,22 +57,15 @@ export function rowBreakdownForStage(row: PayoutPeriodRow): unknown {
   return row.breakdown ?? row.withdrawal?.breakdown;
 }
 
-function asIsoDate(value: unknown): string | null {
-  if (!value) return null;
-  if (typeof value === 'string') return value;
-  if (value instanceof Date) return value.toISOString();
-  return null;
-}
-
 function toWithdrawalRow(raw: WithdrawalRow, fallbackStoreId?: string): WithdrawalRow {
   return {
     ...raw,
     storeId: raw.storeId ?? fallbackStoreId,
-    periodFrom: asIsoDate(raw.periodFrom) ?? raw.periodFrom,
-    periodTo: asIsoDate(raw.periodTo) ?? raw.periodTo,
-    createdAt: asIsoDate(raw.createdAt) ?? raw.createdAt,
-    reviewedAt: asIsoDate(raw.reviewedAt) ?? raw.reviewedAt,
-    checkDate: asIsoDate(raw.checkDate) ?? raw.checkDate,
+    periodFrom: coerceToIsoString(raw.periodFrom) ?? raw.periodFrom,
+    periodTo: coerceToIsoString(raw.periodTo) ?? raw.periodTo,
+    createdAt: coerceToIsoString(raw.createdAt) ?? raw.createdAt,
+    reviewedAt: coerceToIsoString(raw.reviewedAt) ?? raw.reviewedAt,
+    checkDate: coerceToIsoString(raw.checkDate) ?? raw.checkDate,
   };
 }
 

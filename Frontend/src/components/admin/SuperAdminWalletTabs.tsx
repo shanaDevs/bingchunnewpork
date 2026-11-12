@@ -35,6 +35,7 @@ export type SuperAdminWalletTabsProps = SuperAdminSystemWalletTabProps & {
   periodLabel?: string | null;
   tabActions?: ReactNode;
   dueListEnabled?: boolean;
+  dueStoreId?: string | null;
   onViewDuePayout?: (row: PayoutDueRow) => void;
   onReviewDuePayout?: (row: PayoutDueRow) => void;
   onDueTabOpen?: () => void;
@@ -46,6 +47,7 @@ export default function SuperAdminWalletTabs({
   periodLabel = null,
   tabActions,
   dueListEnabled = true,
+  dueStoreId = null,
   onViewDuePayout,
   onReviewDuePayout,
   onDueTabOpen,
@@ -112,6 +114,7 @@ export default function SuperAdminWalletTabs({
       <TabsContent value="due" className="mt-0 outline-none">
         <PayoutsDueSubTabs
           branchListEnabled={dueListEnabled && activeTab === 'due'}
+          dueStoreId={dueStoreId}
           onViewBranchDue={onViewDuePayout ?? (() => {})}
           onReviewBranchDue={onReviewDuePayout ?? (() => {})}
           onDeliveryDueCountChange={setDeliveryDueCount}

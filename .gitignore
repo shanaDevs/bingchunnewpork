@@ -41,7 +41,8 @@ playwright-report/
 test-results/
 
 # Backend test files
-backend/tests/
+backend/tests/lib/
+backend/test
 
 # Frontend-v2 unit tests (local only — do not publish)
 Frontend-v2/**/*.test.ts

@@ -14,6 +14,7 @@ import type { DeliveryPayoutDueRow } from '@/lib/deliveryPayoutTypes';
 
 type Props = {
   branchListEnabled?: boolean;
+  dueStoreId?: string | null;
   onViewBranchDue: (row: PayoutDueRow) => void;
   onReviewBranchDue: (row: PayoutDueRow) => void;
   onDeliveryDueCountChange?: (count: number) => void;
@@ -26,6 +27,7 @@ async function fetchDeliveryPayoutsDue(unlockToken: string): Promise<DeliveryPay
 
 export default function PayoutsDueSubTabs({
   branchListEnabled = true,
+  dueStoreId = null,
   onViewBranchDue,
   onReviewBranchDue,
   onDeliveryDueCountChange,
@@ -125,6 +127,7 @@ export default function PayoutsDueSubTabs({
         <TabsContent value="branch" className="mt-0 outline-none">
           <PayoutsDuePanel
             enabled={branchListEnabled}
+            storeId={dueStoreId}
             onView={onViewBranchDue}
             onReviewAndPay={onReviewBranchDue}
             onTotalChange={handleBranchDueCountChange}
