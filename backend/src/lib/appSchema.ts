@@ -3,6 +3,7 @@ import { prisma } from './prisma';
 import {
   addColumnIfMissing,
   createIndexIfMissing,
+  ensureEnumTypeIfMissing,
   pgColumnDef,
   runtimeSchemaPatchesAllowed,
   tableExists,
@@ -284,22 +285,13 @@ export async function ensureAppSchema(): Promise<void> {
     /* table exists */
   }
 
-  for (const col of ['sugarLevel', 'iceLevel']) {
-    if (await tableHasColumn('cart_items', col)) {
-      try {
-        await prisma.$executeRawUnsafe(`ALTER TABLE "cart_items" DROP COLUMN "${col}"`);
-      } catch {
-        /* ignore */
-      }
-    }
-    if (await tableHasColumn('order_items', col)) {
-      try {
-        await prisma.$executeRawUnsafe(`ALTER TABLE "order_items" DROP COLUMN "${col}"`);
-      } catch {
-        /* ignore */
-      }
-    }
-  }
+  await ensureEnumTypeIfMissing('SugarLevel', ['FIFTY', 'HUNDRED']);
+  await ensureEnumTypeIfMissing('IceLevel', ['LESS_ICE', 'NORMAL_ICE']);
+  await addColumnIfMissing('stores', 'cupStickerPrinterName', 'VARCHAR(256) NULL');
+  await addColumnIfMissing('cart_items', 'sugarLevel', '"SugarLevel"');
+  await addColumnIfMissing('cart_items', 'iceLevel', '"IceLevel"');
+  await addColumnIfMissing('order_items', 'sugarLevel', '"SugarLevel"');
+  await addColumnIfMissing('order_items', 'iceLevel', '"IceLevel"');
 
   await primeDeliverySqlRefs();
   const zonesTable = getDeliveryZonesSqlRef();

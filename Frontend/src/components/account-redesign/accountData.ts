@@ -51,7 +51,7 @@ export function useLoyaltySummary() {
   });
 }
 
-/** The customer's latest orders (GET /orders/my), newest first; checked again every 30 seconds while one is under way. */
+/** Latest orders; socket invalidates on status changes — HTTP backup while an order is active. */
 export function useMyOrders() {
   const signedIn = useSignedIn();
   const userId = useAuthStore((s) => s.user?.id);
@@ -62,8 +62,8 @@ export function useMyOrders() {
       return Array.isArray(result) ? result : [];
     },
     enabled: signedIn,
-    staleTime: 30_000,
-    refetchInterval: (query) => (query.state.data?.some((order) => ACTIVE_STATUSES.includes(order.status)) ? 30_000 : false),
+    staleTime: 60_000,
+    refetchInterval: (query) => (query.state.data?.some((order) => ACTIVE_STATUSES.includes(order.status)) ? 60_000 : false),
   });
 }
 

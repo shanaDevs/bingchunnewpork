@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>Printer & Settings</title>
+  <style>
+    :root {
+      --bg: #f1f5f9; --card: #fff; --ink: #0f172a; --muted: #64748b;
+      --accent: #c41e3a; --ok: #15803d; --bad: #b91c1c; --line: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg); color: var(--ink); padding: 20px 22px 28px;
+    }
+    h1 { margin: 0 0 4px; font-size: 1.25rem; font-weight: 650; }
+    .sub { margin: 0 0 18px; color: var(--muted); font-size: 0.85rem; }
+    label {
+      display: block; font-size: 0.78rem; font-weight: 600;
+      letter-spacing: 0.02em; text-transform: uppercase; color: var(--muted);
+      margin: 14px 0 6px;
+    }
+    input[type="url"], select {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--line);
+      border-radius: 8px; font-size: 0.95rem; background: var(--card);
+    }
+    .row { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+    .hint { margin-top: 8px; font-size: 0.82rem; color: var(--muted); line-height: 1.4; }
+    button {
+      border: 0; border-radius: 8px; padding: 10px 14px;
+      font-weight: 600; cursor: pointer; font-size: 0.9rem;
+    }
+    .primary { background: var(--accent); color: #fff; }
+    .ghost { background: #e2e8f0; color: var(--ink); }
+    .actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+    .msg { margin-top: 12px; font-size: 0.85rem; color: var(--ok); min-height: 1.2em; }
+    .msg.err { color: var(--bad); }
+  </style>
+</head>
+<body>
+  <h1>Printer &amp; settings</h1>
+  <p class="sub">Direct Electron print · no start.bat / agent · v<span id="ver">…</span></p>
+
+  <label for="printer">Sticker printer</label>
+  <select id="printer">
+    <option value="">Loading printers…</option>
+  </select>
+  <div class="row">
+    <button type="button" class="ghost" id="refreshPrinters">Refresh printers</button>
+  </div>
+  <p class="hint">Pick your USB sticker printer, or leave “Windows default”. Accept / Test print go straight to this printer.</p>
+
+  <label for="posUrl">POS URL</label>
+  <input id="posUrl" type="url" spellcheck="false" />
+
+  <div class="actions">
+    <button type="button" class="ghost" id="cancel">Close</button>
+    <button type="button" class="primary" id="save">Save</button>
+  </div>
+  <div id="msg" class="msg"></div>
+  <script src="./settings.js"></script>
+</body>
+</html>

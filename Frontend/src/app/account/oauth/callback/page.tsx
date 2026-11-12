@@ -25,7 +25,12 @@ export default function OAuthCallbackPage() {
       return;
     }
 
-    const returnTo = params.get('returnTo') || '/';
+    const rawReturnTo = params.get('returnTo');
+    // Mirror backend safeReturnTo: only same-origin paths (block //evil.com open redirects).
+    const returnTo =
+      typeof rawReturnTo === 'string' && rawReturnTo.startsWith('/') && !rawReturnTo.startsWith('//')
+        ? rawReturnTo
+        : '/';
 
     void (async () => {
       try {
@@ -36,7 +41,7 @@ export default function OAuthCallbackPage() {
         } catch {
           // access expiry is optional; cookie session still valid
         }
-        router.replace(returnTo.startsWith('/') ? returnTo : '/');
+        router.replace(returnTo);
       } catch (err: unknown) {
         toast.error(err instanceof Error ? err.message : 'Sign-in failed');
         router.replace('/account/login');

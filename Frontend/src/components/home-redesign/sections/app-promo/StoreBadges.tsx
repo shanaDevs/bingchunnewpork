@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { APP_DOWNLOAD_SETTINGS_QUERY_KEY, fetchAppDownloadSettings } from "@/lib/appDownload";
+import { APP_DOWNLOAD_SETTINGS_QUERY_KEY, fetchAppDownloadSettings, isPublishedStoreUrl } from "@/lib/appDownload";
 
 const ANDROID_FALLBACK = "https://play.google.com/store/apps/details?id=com.bingchun.customer";
 const IOS_FALLBACK = "https://apps.apple.com/app/bing-chun/id0000000000";
@@ -51,6 +51,23 @@ function StoreBadge({ href, icon, kicker, store }: StoreBadgeProps) {
   );
 }
 
+function StoreBadgeSoon({ icon, kicker, store }: Omit<StoreBadgeProps, "href">) {
+  return (
+    <span
+      aria-disabled="true"
+      title="Coming soon"
+      className="flex h-14 cursor-not-allowed items-center gap-3 rounded-xl bg-neutral-800 px-4 pr-5 text-snow/75 ring-1 ring-[#a6a6a6]/60 ring-inset max-sm:h-12 max-sm:justify-center max-sm:gap-2 max-sm:px-2"
+    >
+      {icon}
+      <span className="flex flex-col text-left leading-none">
+        <span className="text-[0.6875rem] font-medium max-sm:text-[0.5625rem]">{kicker}</span>
+        <span className="mt-0.5 text-xl font-semibold tracking-[-0.01em] whitespace-nowrap max-sm:text-[0.9375rem]">Coming soon</span>
+        <span className="sr-only">{store}</span>
+      </span>
+    </span>
+  );
+}
+
 /**
  * App Store and Google Play buttons. URLs come from the app download settings (admin-managed, with
  * built-in fallbacks while they load).
@@ -63,15 +80,23 @@ export function StoreBadges() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const iosUrl = settings?.iosStoreUrl ?? IOS_FALLBACK;
+  const androidUrl = settings?.androidStoreUrl ?? ANDROID_FALLBACK;
+  const iosLive = isPublishedStoreUrl(iosUrl);
+  const androidLive = isPublishedStoreUrl(androidUrl);
+
   return (
     <div className="flex flex-wrap gap-3 max-sm:grid max-sm:gap-2.5 max-[359px]:grid-cols-1 min-[360px]:max-sm:grid-cols-2">
-      <StoreBadge href={settings?.iosStoreUrl ?? IOS_FALLBACK} icon={<AppleLogo />} kicker="Download on the" store="App Store" />
-      <StoreBadge
-        href={settings?.androidStoreUrl ?? ANDROID_FALLBACK}
-        icon={<GooglePlayLogo />}
-        kicker="GET IT ON"
-        store="Google Play"
-      />
+      {iosLive ? (
+        <StoreBadge href={iosUrl} icon={<AppleLogo />} kicker="Download on the" store="App Store" />
+      ) : (
+        <StoreBadgeSoon icon={<AppleLogo />} kicker="Download on the" store="App Store" />
+      )}
+      {androidLive ? (
+        <StoreBadge href={androidUrl} icon={<GooglePlayLogo />} kicker="GET IT ON" store="Google Play" />
+      ) : (
+        <StoreBadgeSoon icon={<GooglePlayLogo />} kicker="GET IT ON" store="Google Play" />
+      )}
     </div>
   );
 }

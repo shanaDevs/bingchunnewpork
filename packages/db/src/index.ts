@@ -1,7 +1,7 @@
 import { parse as parseEnv } from 'dotenv';
 import fs from 'fs';
 import path from 'path';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 /** Ensure DATABASE_URL is loaded before PrismaClient reads process.env (monorepo / ts-node-dev safe). */
 function bootstrapDatabaseEnv(): void {
@@ -182,7 +182,7 @@ function createPrismaClient() {
   // Idle sockets get dropped by PgBouncer / firewalls / DB restarts ("Socket not connected",
   // errno 107). Reads are idempotent, so retry them once on a fresh connection instead of
   // surfacing a 503. Writes and anything inside a transaction are never retried.
-  client.$use(async (params, next) => {
+  client.$use(async (params: Prisma.MiddlewareParams, next: (params: Prisma.MiddlewareParams) => Promise<unknown>) => {
     if (params.runInTransaction || !params.model || !RETRYABLE_READ_ACTIONS.has(params.action)) {
       return next(params);
     }

@@ -1,59 +1,37 @@
-# Cup sticker agent (cashier PC)
+# Cup sticker agent (Windows 7 / 10 / 11)
 
-Prints one Bing Chun cup sticker per cup on the local **Xprinter** when the cashier accepts an order.
+**No Node.js.** Uses a native **.NET 4** agent (`BingChunCupStickerAgent.exe`) so Windows 7 does not hit `EventSetInformation` / `ADVAPI32.dll` errors from Node 16/18/20.
 
-Because the admin site is HTTPS, the browser cannot call `http://127.0.0.1` directly (Chrome blocks it).  
-Instead:
+## Cashier PC (including Windows 7)
 
-1. Admin queues a print job on the server  
-2. This agent (running on the cashier PC) **polls** the server and prints locally  
+**Full manual steps:** see **`MANUAL-COPY-GUIDE.txt`** in this folder.
 
-## Setup (once per cashier PC)
+1. Copy the whole `cup-sticker-agent` folder (EXE files + optional `runtime\node`)  
+2. Run **`BingChunCupStickerSetup.exe`**  
+3. Select the sticker printer  
+4. Click **Save && Install agent**  
 
-1. Plug in the Xprinter USB and note the **exact Windows printer name** (`Get-Printer`).
-2. On **this same PC** (not the cloud server), double-click `start.bat`.
-3. Leave that window open. It should log `polling .../cup-sticker-agent/claim`.
-4. Open admin → **Printer** → set **Printer name** to that exact Windows name (saved per branch) → **Test print**.
+Needs **.NET Framework 4** (setup can download/install it).  
+Normal run uses **native agent** (no Node). `runtime\node` is Node **16** backup only.
 
-## Environment (optional)
+## Files that must be on the Win7 PC
 
-```bat
-set BC_STICKER_API_URL=https://admin.bingchunsrilanka.com/api
-set BC_STICKER_SECRET=bingchun-cup-sticker-local
-set BC_STICKER_PRINTER=Xprinter XP-D35B
-set BC_STICKER_WIDTH_MM=40
-set BC_STICKER_HEIGHT_MM=30
-set BC_STICKER_STORE_ID=
-start.bat
-```
+- `BingChunCupStickerSetup.exe` — printer picker GUI  
+- `BingChunCupStickerAgent.exe` — agent (poll + health HTTP)  
+- `print-stickers.exe` — prints labels  
+- `detect-printer.exe`  
+- `start.bat` / `install.bat` / `local.env` (created by setup)  
+- `MANUAL-COPY-GUIDE.txt` — copy instructions  
+- `runtime\node\` — optional portable **Node 16** (for backup / manual copy)  
 
-`BC_STICKER_SECRET` must match the server `CUP_STICKER_AGENT_SECRET` (or the built-in default above).
+Do **not** put Node 18/20 on Windows 7 (ADVAPI32 / EventSetInformation error).
 
-## Local endpoints (optional debug)
-
-- `GET  http://127.0.0.1:9177/health` — includes `printerReady` + `installedPrinters`
-- `POST http://127.0.0.1:9177/test`
-- `POST http://127.0.0.1:9177/print`
-
-## “Agent connected” but print fails
-
-Agent online only means cloud polling works. Printing still needs the **exact Windows printer name** on that cashier PC.
-
-On the cashier PC:
+## Build on a modern PC
 
 ```bat
-powershell -NoProfile -Command "Get-Printer | Format-Table Name, PrinterStatus -AutoSize"
-curl http://127.0.0.1:9177/health
+build-helpers.bat
 ```
 
-If the name is not exactly `Xprinter XP-D35B` (extra space, different model, offline), either:
+## Health
 
-1. Install/rename the driver so Windows shows `Xprinter XP-D35B`, or  
-2. Set the real name before start:
-
-```bat
-set BC_STICKER_PRINTER=Exact Name From Get-Printer
-start.bat
-```
-
-Also set the same name in admin → Settings → Printer.
+`http://127.0.0.1:9177/health` — includes `"native":true`

@@ -74,12 +74,13 @@ export function RewardsView() {
  * level, Order to earn (and Use at checkout once the points can be used); the Happy Points coin at the right end.
  */
 function MemberHero() {
-  const { summary, balance, spend, tiers, current, currentIndex, next } = useHappyPoints();
+  const { summary, isLoading, balance, spend, tiers, current, currentIndex, next } = useHappyPoints();
   const settings = normalizeLoyaltySettings(summary?.settings);
   const lkrPerPoint = Math.max(1, Math.round(1 / settings.pointsPerLkr));
   const CurrentIcon = current ? tierLook(currentIndex, tiers.length).icon : Sparkles;
-  const progressText = next ? `LKR ${lkr(next.minSpendLkr - spend)} to ${next.name}` : current ? `You've reached ${current.name}, our top level` : "";
-  const percent = next ? percentOf(spend, next.minSpendLkr) : 100;
+  const spendValue = spend ?? 0;
+  const progressText = next ? `LKR ${lkr(next.minSpendLkr - spendValue)} to ${next.name}` : current ? `You've reached ${current.name}, our top level` : "";
+  const percent = next && spend != null ? percentOf(spendValue, next.minSpendLkr) : spend == null && isLoading ? null : 100;
 
   // Points come off an order at checkout (1 point = redeemValue rupees), once the admin allows it and the customer has
   // earned the minimum in all.
@@ -87,13 +88,13 @@ function MemberHero() {
   const minToRedeem = settings.minPointsToRedeem ?? 0;
   const lifetime = summary?.lifetimePointsEarned ?? 0;
   const unlocked = summary?.checkoutRedeemUnlocked ?? isCheckoutRedeemUnlocked({ lifetimePointsEarned: lifetime, minPointsToRedeem: minToRedeem });
-  const canUse = redeemOn && unlocked && balance > 0;
+  const canUse = redeemOn && unlocked && (balance ?? 0) > 0;
   const redeemText = !redeemOn
     ? "Using points at checkout is paused for now"
     : !unlocked
       ? `Earn ${lkr(minToRedeem)} points in all to use them at checkout (${lkr(Math.min(lifetime, minToRedeem))} so far)`
-      : balance > 0
-        ? `Worth LKR ${lkr(balance * settings.redeemValue)} off at checkout`
+      : (balance ?? 0) > 0
+        ? `Worth LKR ${lkr((balance ?? 0) * settings.redeemValue)} off at checkout`
         : null;
 
   return (
@@ -117,7 +118,13 @@ function MemberHero() {
             Available balance
           </h3>
           <p className="mt-2.5 flex items-end gap-2 text-brand-950">
-            <CountUp value={balance} className="font-numeric text-5xl leading-[0.95] font-extrabold tracking-tight sm:text-6xl" />
+            {balance != null ? (
+              <CountUp value={balance} className="font-numeric text-5xl leading-[0.95] font-extrabold tracking-tight sm:text-6xl" />
+            ) : (
+              <span className="font-numeric text-5xl leading-[0.95] font-extrabold tracking-tight text-brand-300 sm:text-6xl" aria-hidden="true">
+                …
+              </span>
+            )}
             <span className="pb-1 text-base font-bold text-brand-600">pts</span>
           </p>
           <p className="mt-1 text-xs font-medium text-slate-600">1 point per LKR {lkr(lkrPerPoint)} spent</p>
@@ -125,7 +132,7 @@ function MemberHero() {
         </div>
 
         <div className="min-w-0 basis-full max-md:order-2 md:basis-auto md:flex-1 md:border-l md:border-brand-200/80 md:pl-7">
-          {progressText && (
+          {progressText && percent != null && (
             <>
               <div className="flex items-baseline justify-between gap-3 text-sm">
                 <span className="font-semibold text-brand-950">{progressText}</span>
@@ -315,8 +322,9 @@ function JourneyCard({ journey }: { journey: CustomerLoyaltyJourney }) {
  */
 function MembershipCard() {
   const { spend, tiers, current } = useHappyPoints();
+  const spendValue = spend ?? 0;
   // Where the spend sits on the track: 0 at the first level, 100 at the last, in even steps between levels.
-  const passed = tiers.reduce((count, tier) => (spend >= tier.minSpendLkr ? count + 1 : count), 0);
+  const passed = tiers.reduce((count, tier) => (spendValue >= tier.minSpendLkr ? count + 1 : count), 0);
   const percent =
     tiers.length < 2
       ? passed > 0
@@ -326,7 +334,7 @@ function MembershipCard() {
         ? 0
         : passed >= tiers.length
           ? 100
-          : ((passed - 1 + (spend - tiers[passed - 1].minSpendLkr) / Math.max(1, tiers[passed].minSpendLkr - tiers[passed - 1].minSpendLkr)) / (tiers.length - 1)) * 100;
+          : ((passed - 1 + (spendValue - tiers[passed - 1].minSpendLkr) / Math.max(1, tiers[passed].minSpendLkr - tiers[passed - 1].minSpendLkr)) / (tiers.length - 1)) * 100;
 
   return (
     <section aria-labelledby="membership-heading" className={cn(panel, "relative isolate overflow-hidden")}>
@@ -334,12 +342,12 @@ function MembershipCard() {
       <h3 id="membership-heading" className={panelHeading}>
         Membership
       </h3>
-      <p className="mt-1 text-sm text-slate-600">LKR {lkr(spend)} spent so far</p>
+      <p className="mt-1 text-sm text-slate-600">{spend != null ? `LKR ${lkr(spend)} spent so far` : "Loading spend…"}</p>
 
       <Track count={tiers.length} percent={percent} className="mt-6">
         {tiers.map((tier, index) => {
           const look = tierLook(index, tiers.length);
-          const reached = spend >= tier.minSpendLkr;
+          const reached = spend != null && spendValue >= tier.minSpendLkr;
           return (
             <TrackStop
               key={tier.id}

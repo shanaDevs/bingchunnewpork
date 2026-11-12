@@ -44,16 +44,44 @@ const DEMO_ACCOUNTS = [
 
 const LOGO_TAPS_REQUIRED = 5;
 const LOGO_TAP_WINDOW_MS = 2500;
+const REMEMBER_LOGIN_KEY = 'bc_admin_remember_login';
 
 type AdminAuthResult = {
   admin: AdminSession;
   accessExpiresAt?: number;
 };
 
+type RememberedLogin = {
+  email: string;
+  password: string;
+};
+
+function readRememberedLogin(): RememberedLogin | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(REMEMBER_LOGIN_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as RememberedLogin;
+    if (!parsed?.email) return null;
+    return { email: parsed.email, password: parsed.password || '' };
+  } catch {
+    return null;
+  }
+}
+
+function writeRememberedLogin(email: string, password: string) {
+  localStorage.setItem(REMEMBER_LOGIN_KEY, JSON.stringify({ email, password }));
+}
+
+function clearRememberedLogin() {
+  localStorage.removeItem(REMEMBER_LOGIN_KEY);
+}
+
 export default function AdminLoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const [loggedIn, setLoggedIn] = useState<AdminSession | null>(null);
@@ -65,6 +93,30 @@ export default function AdminLoginPage() {
   useEffect(() => {
     setHasApiOverride(Boolean(getApiBaseOverride()));
   }, [showApiDialog]);
+
+  useEffect(() => {
+    async function loadSavedCredentials() {
+      const local = readRememberedLogin();
+      if (local) {
+        setEmail(local.email);
+        setPassword(local.password);
+        setRememberMe(true);
+      }
+      if (window.bingchunCashier?.getSavedLogin) {
+        try {
+          const saved = await window.bingchunCashier.getSavedLogin();
+          if (saved?.remember && saved.email) {
+            setEmail(saved.email);
+            setPassword(saved.password || '');
+            setRememberMe(true);
+          }
+        } catch {
+          // ignore desktop bridge errors
+        }
+      }
+    }
+    void loadSavedCredentials();
+  }, []);
 
   useEffect(() => {
     async function checkSession() {
@@ -105,6 +157,17 @@ export default function AdminLoginPage() {
     }
     const { admin, accessExpiresAt } = result;
     saveAdminAuth(admin, accessExpiresAt);
+    if (rememberMe) {
+      writeRememberedLogin(email.trim(), password);
+      void window.bingchunCashier?.saveLogin?.({
+        remember: true,
+        email: email.trim(),
+        password,
+      });
+    } else {
+      clearRememberedLogin();
+      void window.bingchunCashier?.saveLogin?.({ remember: false, email: '', password: '' });
+    }
     const label = adminRoleLabel(admin.role);
     toast.success(`Welcome, ${label}! 🧋`);
     openAdminHome(admin);
@@ -250,7 +313,17 @@ export default function AdminLoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
+            autoComplete="current-password"
           />
+          <label className="flex items-center gap-2 text-sm text-muted cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="h-4 w-4 accent-brand"
+            />
+            Remember email &amp; password on this PC
+          </label>
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}

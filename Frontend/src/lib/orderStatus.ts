@@ -133,6 +133,7 @@ export function isNewCompletionStatus(
 export function getStatusLabel(status: OrderStatus, orderMode?: 'DELIVERY' | 'TAKEAWAY'): string {
   if (status === 'READY' && orderMode === 'TAKEAWAY') return 'Ready for Pickup';
   if (status === 'READY' && orderMode === 'DELIVERY') return 'Order Ready';
+  if (status === 'DELIVERED' && orderMode === 'TAKEAWAY') return 'Collected';
   return STATUS_LABELS[status];
 }
 

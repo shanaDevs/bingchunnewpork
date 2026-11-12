@@ -29,7 +29,7 @@ import adminDeliveryRoutes from './adminDelivery';
 import { verifyAdminPinHandler } from '../lib/verifyAdminPin';
 import {
   enqueueCupStickerJob,
-  getCupStickerAgentPresence,
+  getCupStickerAgentPresenceAsync,
   getCupStickerJob,
   type CupStickerPayload,
 } from '../lib/cupStickerJobs';
@@ -400,7 +400,7 @@ router.post(
 );
 
 router.get('/cup-sticker-agent/status', async (req, res) => {
-  const presence = getCupStickerAgentPresence();
+  const presence = await getCupStickerAgentPresenceAsync();
   const storeId =
     (typeof req.query.storeId === 'string' && req.query.storeId) ||
     (req as { user?: { storeId?: string | null } }).user?.storeId ||
@@ -413,7 +413,8 @@ router.get('/cup-sticker-agent/status', async (req, res) => {
       lastSeenAt: presence.lastSeenAt,
       storeId,
       printerName,
-      printerHint: 'Run tools/cup-sticker-agent/start.bat on the cashier PC',
+      printerHint:
+        'On the cashier PC run BingChunCupStickerAgent.exe (or Setup → Save && Install). Local health: http://127.0.0.1:9177/health',
     },
   });
 });

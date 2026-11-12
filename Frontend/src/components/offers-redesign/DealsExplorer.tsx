@@ -94,7 +94,7 @@ function FilterBar({ filter, onChange }: { filter: PromotionFilter; onChange: (f
 function DealsSkeleton() {
   const shapes = [LOOK_SPANS.poster, "", LOOK_SPANS.wide, "", LOOK_SPANS.poster, LOOK_SPANS.wide];
   return (
-    <div aria-hidden="true" className="mt-6 grid gap-3 sm:grid-flow-dense sm:grid-cols-2 sm:gap-5 lg:mt-8 lg:grid-cols-4">
+    <div aria-hidden="true" className="mt-5 grid gap-2.5 sm:grid-flow-dense sm:grid-cols-2 sm:gap-3.5 lg:mt-6 lg:grid-cols-4 lg:gap-4">
       {shapes.map((span, i) => (
         <div key={i} className={cn("min-h-32 animate-pulse rounded-2xl bg-brand-50 sm:min-h-72 sm:rounded-[1.75rem]", span)} />
       ))}
@@ -212,11 +212,11 @@ export function DealsExplorer({
   );
 
   return (
-    <section id="deals" aria-labelledby="deals-heading" className="scroll-mt-20 bg-white pt-6 pb-20 sm:pt-10 sm:pb-24 lg:pb-28">
+    <section id="deals" aria-labelledby="deals-heading" className="scroll-mt-20 bg-white pt-5 pb-16 sm:pt-8 sm:pb-20 lg:pb-[5.25rem]">
       <Container>
         <SectionHeading id="deals-heading" eyebrow="All the good stuff" heading={(highlight) => <>Discover Your {highlight("Deals")}</>} />
 
-        <div data-reveal className="mt-8 sm:mt-10">
+        <div data-reveal className="mt-6 sm:mt-8 lg:mt-7">
           <FilterBar filter={filter} onChange={choose} />
           {/* How many match, for screen readers only (announced as the filter changes). */}
           <p aria-live="polite" className="sr-only">
@@ -226,17 +226,18 @@ export function DealsExplorer({
 
         {status === "pending" && <DealsSkeleton />}
 
-        <div ref={gridRef} className="mt-6 grid gap-3 sm:grid-flow-dense sm:grid-cols-2 sm:gap-5 lg:mt-8 lg:grid-cols-4">
+        <div ref={gridRef} className="mt-5 grid gap-2.5 sm:grid-flow-dense sm:grid-cols-2 sm:gap-3.5 lg:mt-6 lg:grid-cols-4 lg:gap-4">
           {promotions.map((promotion, i) => (
             // The box is what the filter hides, moves and animates (`data-promo-card`); the card (or, on phones, the
             // compact coupon) fills it.
             <div
               key={promotion.id}
+              id={`promo-${promotion.id}`}
               data-promo-card
               data-id={promotion.id}
               data-index={i}
               hidden={!matchesFilter(promotion, filter)}
-              className={cn("flex", LOOK_SPANS[promotion.look])}
+              className={cn("flex scroll-mt-24", LOOK_SPANS[promotion.look])}
             >
               {promotion.look === "banner" ? (
                 <PromoCard promotion={promotion} className="w-full" />

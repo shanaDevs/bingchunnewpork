@@ -133,7 +133,6 @@ function ProductCard({ product, onOrder }: { product: Product; onOrder: (product
               src={src}
               alt={product.name}
               fill
-              unoptimized
               loading="lazy"
               sizes="(min-width: 1024px) 160px, 140px"
               className={`object-contain object-bottom ${imageShadow}`}

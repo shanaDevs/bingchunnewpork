@@ -1,4 +1,5 @@
 'use client';
+import '../admin.css';
 import { adminApiFetch } from '@/lib/adminApi';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import Link from 'next/link';
