@@ -20,6 +20,7 @@ import {
   nextPeriodStartFromPeriodTo,
   resolveDeliveryPayoutPeriodWindow,
   resolveLiveDeliveryWalletRange,
+  resolveOpenDeliveryPayoutWindow,
   toBusinessDateStr,
   todayUtcDateStr,
   toUtcDateStr,
@@ -70,7 +71,14 @@ export type DeliveryPayoutDueItem = {
   payable: boolean;
 };
 
-type DeliveryPayoutDbRow = {
+export type DeliveryCurrentPayoutCycle = {
+  from: string;
+  cycleTo: string;
+  through: string;
+  days: DeliveryPayoutPeriodDays;
+};
+
+export type DeliveryPayoutDbRow = {
   id: string;
   amount: number | bigint | string;
   status: string;
@@ -239,6 +247,24 @@ async function resolveDeliveryPayoutPeriodStart(): Promise<string | null> {
   return getEarliestDeliveryFeeDate();
 }
 
+export async function getCurrentDeliveryPayoutCycle(): Promise<DeliveryCurrentPayoutCycle | null> {
+  const periodStart = await resolveDeliveryPayoutPeriodStart();
+  if (!periodStart) return null;
+  const today = todayUtcDateStr();
+  const open = resolveOpenDeliveryPayoutWindow({
+    periodStart,
+    days: DELIVERY_PAYOUT_ELAPSED_DAYS,
+    today,
+  });
+  if (!open) return null;
+  return {
+    from: open.from,
+    cycleTo: open.cycleTo,
+    through: open.through,
+    days: open.days,
+  };
+}
+
 export async function resolveDeliveryPayoutPeriod(
   days: DeliveryPayoutPeriodDays,
 ): Promise<ResolvedDeliveryPayoutPeriod | null> {
@@ -386,9 +412,10 @@ export async function listDeliveryPayouts(opts?: {
 export async function getDeliveryPayoutPreview(from?: string, to?: string, periodDays?: number) {
   await ensureDeliveryPayoutSchema();
   const today = todayUtcDateStr();
-  const [nextPeriodStart, liveRange] = await Promise.all([
+  const [nextPeriodStart, liveRange, currentPayoutCycle] = await Promise.all([
     getNextDeliveryPayoutStartDateForOpenRequests(),
     getLiveDeliveryWalletRange(),
+    getCurrentDeliveryPayoutCycle(),
   ]);
   const liveFrom = liveRange?.from ?? null;
   const liveTo = liveRange?.to ?? null;
@@ -416,6 +443,7 @@ export async function getDeliveryPayoutPreview(from?: string, to?: string, perio
         liveFrom,
         liveTo,
         liveAfterApproved,
+        currentPayoutCycle,
         options,
         periodDays,
         from: null,
@@ -459,6 +487,7 @@ export async function getDeliveryPayoutPreview(from?: string, to?: string, perio
     liveFrom,
     liveTo,
     liveAfterApproved,
+    currentPayoutCycle,
     options,
     periodDays: selectedPeriod?.days ?? null,
     from: resolvedFrom ?? null,

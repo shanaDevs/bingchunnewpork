@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node init && cross-env TZ=Asia/Colombo NODE_OPTIONS=--max-old-space-size=4096 next dev --webpack",
-    "dev:turbo": "node init && cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbopack",
+    "dev": "cross-env TZ=Asia/Colombo NODE_OPTIONS=--max-old-space-size=4096 next dev --webpack",
+    "dev:turbo": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbopack",
     "clean": "rimraf .next",
-    "build": "node init && cross-env NODE_OPTIONS=--max-old-space-size=4096 next build --webpack",
-    "start": "node init && next start",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next build --webpack",
+    "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest"

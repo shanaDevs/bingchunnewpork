@@ -3,7 +3,7 @@ import { DeliveryJobStatus, type Order, type OrderItem, type User, type Address,
 import { AppError } from '../middleware/errorHandler';
 import { normalizeProductImageUrl } from './productImages';
 import { prisma } from './prisma';
-import { creditedDeliveredTotals } from '@bingchun/delivery-domain';
+import { creditedDeliveredTotals, groupLatestFailedAttemptsByJob } from '@bingchun/delivery-domain';
 import type { RouteStop } from './routeOptimizer';
 import { optimizeDeliveryStops, totalRouteDistanceKm, totalRouteEtaMinutes } from './routeOptimizer';
 import { haversineKm } from '../utils/geo';
@@ -398,7 +398,11 @@ export async function recordVehicleFailureAndReleaseJob(opts: {
     where: { jobId: opts.jobId },
     select: { orderId: true, order: { select: { status: true, deliveryFee: true, cancelledAtStatus: true } } },
   });
-  const { deliveredTotal } = creditedDeliveredTotals(allLinks, new Set(orderIds));
+  const failedByOrder = await fetchLatestFailedAttemptsForJob(
+    opts.jobId,
+    allLinks.map((l) => l.orderId),
+  );
+  const { deliveredTotal } = creditedDeliveredTotals(allLinks, failedByOrder);
 
   await prisma.deliveryJob.update({
     where: { id: opts.jobId },
@@ -540,11 +544,26 @@ export async function executeAdminCancelDeliveryJob(opts: {
 
   const failedAttempts = await prisma.deliveryAttempt.findMany({
     where: { jobId: opts.jobId, outcome: { not: 'DELIVERED' } },
-    select: { orderId: true },
-    distinct: ['orderId'],
+    select: {
+      jobId: true,
+      orderId: true,
+      outcome: true,
+      note: true,
+      attemptNo: true,
+      createdAt: true,
+    },
+    orderBy: [{ attemptNo: 'desc' }, { createdAt: 'desc' }],
   });
-  const failedOrderIds = new Set(failedAttempts.map((a) => a.orderId));
-  const { deliveredTotal } = creditedDeliveredTotals(job.jobOrders, failedOrderIds);
+  const failedByOrder = groupLatestFailedAttemptsByJob(failedAttempts).get(opts.jobId) ?? new Map();
+  const creditedLinks = job.jobOrders.map((jo) => ({
+    orderId: jo.orderId,
+    order: {
+      status: jo.order.status,
+      deliveryFee: jo.order.deliveryFee,
+      cancelledAtStatus: jo.order.cancelledAtStatus ?? null,
+    },
+  }));
+  const { deliveredTotal } = creditedDeliveredTotals(creditedLinks, failedByOrder);
 
   const previousStatus = job.status;
   const driverId = job.driverId;
@@ -1154,6 +1173,8 @@ export {
   snapGpsPathForDisplay,
   isCreditedDelivery,
   groupFailedOrderIdsByJob,
+  groupLatestFailedAttemptsByJob,
+  buildJobHistoryOrderRows,
   creditedDeliveredTotals,
   deliveredOrderDeliveryFees,
   finalizeDeliveryJob,
@@ -1221,6 +1242,35 @@ export async function fetchOrderComplaintsByOrderIds(
     else byOrder.set(row.orderId, [summary]);
   }
   return byOrder;
+}
+
+export type FailedAttemptSummary = {
+  outcome: string;
+  note: string | null;
+};
+
+/** Latest non-delivered attempt per order on a job (for driver history / order detail). */
+export async function fetchLatestFailedAttemptsForJob(
+  jobId: string,
+  orderIds: string[],
+): Promise<Map<string, FailedAttemptSummary>> {
+  if (orderIds.length === 0) return new Map();
+  const rows = await prisma.deliveryAttempt.findMany({
+    where: {
+      orderId: { in: orderIds },
+      jobId,
+      outcome: { not: 'DELIVERED' },
+    },
+    select: { orderId: true, outcome: true, note: true, attemptNo: true, createdAt: true },
+    orderBy: [{ attemptNo: 'desc' }, { createdAt: 'desc' }],
+  });
+  const map = new Map<string, FailedAttemptSummary>();
+  for (const row of rows) {
+    if (!map.has(row.orderId)) {
+      map.set(row.orderId, { outcome: row.outcome, note: row.note });
+    }
+  }
+  return map;
 }
 
 /** Complaints this driver filed, grouped by order — for job/order detail payloads. */

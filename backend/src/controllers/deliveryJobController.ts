@@ -20,13 +20,15 @@ import {
   canDriverClaimMore,
   classifyIncompleteJob,
   countComplaintsForOrderIds,
+  buildJobHistoryOrderRows,
   creditedDeliveredTotals,
   distanceMeters,
   fetchDriverComplaintsByOrderIds,
+  fetchLatestFailedAttemptsForJob,
   finalizeDeliveryJob,
   persistJobActualRouteFromGps,
   formatJobOrder,
-  groupFailedOrderIdsByJob,
+  groupLatestFailedAttemptsByJob,
   isRejectAllowed,
   jobOrdersWithDetails,
   maybeEnterReturningPhase,
@@ -148,28 +150,24 @@ async function formatJob(
     !!opts.viewerDriverId && !!job.driverId && job.driverId === opts.viewerDriverId;
   const redactCustomer = !isAssignedToViewer;
   const orderIds = job.jobOrders.map((jo) => jo.orderId);
-  const failedAttempts = orderIds.length
-    ? await prisma.deliveryAttempt.findMany({
-        where: {
-          orderId: { in: orderIds },
-          jobId: job.id,
-          outcome: { not: 'DELIVERED' },
-        },
-        select: { orderId: true },
-        distinct: ['orderId'],
-      })
-    : [];
-  const failedOrderIds = new Set(failedAttempts.map((a) => a.orderId));
+  const failedByOrder = await fetchLatestFailedAttemptsForJob(job.id, orderIds);
+  const failedOrderIds = new Set(failedByOrder.keys());
   const complaintsByOrder =
     opts.viewerDriverId && orderIds.length
       ? await fetchDriverComplaintsByOrderIds(opts.viewerDriverId, orderIds)
       : new Map();
 
-  const orders = job.jobOrders.map((jo) => ({
-    ...formatJobOrder(jo.order, jo.sequence, { redactCustomer, redactPricing: true }),
-    deliveryFailed: failedOrderIds.has(jo.orderId),
-    complaints: complaintsByOrder.get(jo.orderId) ?? [],
-  }));
+  const orders = job.jobOrders.map((jo) => {
+    const failed = failedByOrder.get(jo.orderId);
+    const deliveryFailed = failedOrderIds.has(jo.orderId);
+    return {
+      ...formatJobOrder(jo.order, jo.sequence, { redactCustomer, redactPricing: true }),
+      deliveryFailed,
+      failureOutcome: deliveryFailed ? (failed?.outcome ?? null) : null,
+      failureNote: deliveryFailed ? (failed?.note ?? null) : null,
+      complaints: complaintsByOrder.get(jo.orderId) ?? [],
+    };
+  });
 
   // Count failed attempts as resolved so the driver app canComplete gate works.
   const deliveredCount = orders.filter(
@@ -192,7 +190,7 @@ async function formatJob(
         (jo.order as { cancelledAtStatus?: string | null }).cancelledAtStatus ?? null,
     },
   }));
-  const { deliveredTotal } = creditedDeliveredTotals(creditedLinks, failedOrderIds);
+  const { deliveredTotal } = creditedDeliveredTotals(creditedLinks, failedByOrder);
 
   const terminalFeeSnapshot =
     job.status === 'COMPLETED' || job.status === 'VEHICLE_FAILURE' || job.status === 'CANCELLED';
@@ -843,10 +841,9 @@ export async function getOrder(req: Request, res: Response, next: NextFunction) 
     if (!link) throw new AppError('Order not found', 404);
 
     const isMine = link.job.driverId === driverId;
-    const failed = await prisma.deliveryAttempt.findFirst({
-      where: { orderId, jobId: link.jobId, outcome: { not: 'DELIVERED' } },
-      select: { id: true },
-    });
+    const failedByOrder = await fetchLatestFailedAttemptsForJob(link.jobId, [orderId]);
+    const failed = failedByOrder.get(orderId);
+    const deliveryFailed = !!failed;
     const complaints = isMine
       ? ((await fetchDriverComplaintsByOrderIds(driverId, [orderId])).get(orderId) ?? [])
       : [];
@@ -858,7 +855,9 @@ export async function getOrder(req: Request, res: Response, next: NextFunction) 
       }),
       jobId: link.jobId,
       jobStatus: link.job.status,
-      deliveryFailed: !!failed,
+      deliveryFailed,
+      failureOutcome: deliveryFailed ? (failed?.outcome ?? null) : null,
+      failureNote: deliveryFailed ? (failed?.note ?? null) : null,
       complaints,
     });
   } catch (err) {
@@ -881,10 +880,16 @@ export async function getMyJobHistory(req: Request, res: Response, next: NextFun
           // Own past-due held jobs (never finished) surface here as Incomplete
           // instead of lingering in the active pick list indefinitely.
           { status: { in: [...DRIVER_HELD_JOB_STATUSES] }, scheduledAt: { lt: todayDateRange().from } },
+          { status: 'CANCELLED', adminCancellations: { some: {} } },
         ],
       },
       include: {
         store: { select: { name: true, city: true } },
+        adminCancellations: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { reason: true, createdAt: true },
+        },
         jobOrders: {
           select: {
             orderId: true,
@@ -906,40 +911,66 @@ export async function getMyJobHistory(req: Request, res: Response, next: NextFun
               jobId: { in: jobs.map((j) => j.id) },
               outcome: { not: 'DELIVERED' },
             },
-            select: { jobId: true, orderId: true },
-            distinct: ['jobId', 'orderId'],
+            select: {
+              jobId: true,
+              orderId: true,
+              outcome: true,
+              note: true,
+              attemptNo: true,
+              createdAt: true,
+            },
+            orderBy: [{ attemptNo: 'desc' }, { createdAt: 'desc' }],
           }),
     ]);
-    const failedByJob = groupFailedOrderIdsByJob(failedAttempts);
+    const latestFailedByJob = groupLatestFailedAttemptsByJob(failedAttempts);
 
     return success(
       res,
       jobs.map((j) => {
         const { deliveredCount, deliveredTotal } = creditedDeliveredTotals(
-          j.jobOrders,
-          failedByJob.get(j.id) ?? new Set(),
+          j.jobOrders.map((jo) => ({
+            orderId: jo.orderId,
+            order: {
+              status: jo.order.status,
+              deliveryFee: jo.order.deliveryFee,
+              cancelledAtStatus: jo.order.cancelledAtStatus ?? null,
+            },
+          })),
+          latestFailedByJob.get(j.id) ?? new Map(),
         );
         const jobOrderIds = j.jobOrders.map((jo) => jo.orderId);
+        const { orders, failedCount } = buildJobHistoryOrderRows(
+          j.jobOrders,
+          latestFailedByJob.get(j.id),
+        );
+        const adminClose =
+          j.status === 'CANCELLED' && j.adminCancellations.length > 0
+            ? j.adminCancellations[0]
+            : null;
         return {
           id: j.id,
           title: j.title,
           status: j.status,
-          displayStatus:
-            j.status === 'COMPLETED'
+          displayStatus: adminClose
+            ? 'ADMIN_CLOSED'
+            : j.status === 'COMPLETED'
               ? 'COMPLETED'
               : j.status === 'VEHICLE_FAILURE'
                 ? 'VEHICLE_FAILURE'
                 : classifyIncompleteJob(j, deliveredCount),
           scheduledAt: j.scheduledAt,
-          completedAt: j.completedAt,
+          completedAt: j.completedAt ?? adminClose?.createdAt ?? null,
           storeName: j.store.name,
           storeCity: j.store.city,
           orderCount: j.jobOrders.length,
           deliveredCount,
           deliveredTotal,
+          failedCount,
+          orders,
           totalDeliveryFees: formatTotalDeliveryFeesForApi(j.totalDeliveryFees, deliveredTotal),
           complaintCount: countComplaintsForOrderIds(complaintsByOrder, jobOrderIds),
           rideCode: j.rideCode ?? null,
+          ...(adminClose ? { cancelReason: adminClose.reason } : {}),
         };
       }),
     );
