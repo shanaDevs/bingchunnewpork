@@ -6,6 +6,7 @@ import '../../core/feedback.dart';
 import '../../core/format.dart';
 import '../../data/models/delivery_job.dart';
 import '../../state/jobs_controller.dart';
+import '../components/bc_dialog.dart';
 import '../components/headers.dart';
 import '../components/qd_kit.dart';
 import '../components/tab_scaffold.dart';
@@ -204,8 +205,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
             children.add(
               _HistoryItemCard(
                 run: run,
-                // A cancelled run has gone back to the branch pool: there is no ride left to open.
-                onTap: _isCancelled(run)
+                // A run closed by an admin can't be opened as a live ride: show its closure details.
+                // Other cancelled runs went back to the branch pool, so there is nothing to open.
+                onTap: run.isAdminClosed
+                    ? () {
+                        BcFeedback.tap();
+                        _showClosedRideDetails(context, run);
+                      }
+                    : _isCancelled(run)
                     ? null
                     : () {
                         BcFeedback.tap();
@@ -460,6 +467,19 @@ class _HistoryItemCard extends StatelessWidget {
                       _Meta(Icons.inventory_2_outlined, trn(run.orderCount, '{n} order', '{n} orders')),
                     ],
                   ),
+                  if (run.isAdminClosed) ...[
+                    const SizedBox(height: 8),
+                    QdBadge(tr('Closed by admin'), tone: QdTone.error, dot: true),
+                    if (_reasonOf(run) != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        '${tr('Reason')}: ${_reasonOf(run)!}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 14, color: c.mutedForeground),
+                      ),
+                    ],
+                  ],
                 ],
               ),
             ),
@@ -470,6 +490,46 @@ class _HistoryItemCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _reasonOf(JobHistoryItem r) {
+  final t = r.cancelReason?.trim();
+  return t == null || t.isEmpty ? null : t;
+}
+
+/// Read-only summary of a ride an admin closed: ride ID, status, reason and when it was closed.
+Future<void> _showClosedRideDetails(BuildContext context, JobHistoryItem run) {
+  final c = context.bc;
+  final closed = run.completedAt ?? run.scheduledAt;
+  Widget row(String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(fontSize: 13, color: c.mutedForeground)),
+        const SizedBox(height: 2),
+        Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: c.foreground)),
+      ],
+    ),
+  );
+  return showBcConfirm(
+    context,
+    icon: Icons.assignment_late_outlined,
+    tone: BcDialogTone.danger,
+    title: tr('Ride closed by admin'),
+    confirmLabel: tr('OK'),
+    content: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        row(tr('Ride ID'), Format.rideIdLabel(run.rideCode, run.id)),
+        row(tr('Status'), tr('Closed by admin')),
+        row(tr('Reason'), _reasonOf(run) ?? tr('No reason was given.')),
+        row(tr('Closed on'), Format.dateTime(closed)),
+        row(tr('Branch'), run.storeName.trim().isEmpty ? '—' : run.storeName.trim()),
+      ],
+    ),
+  ).then((_) {});
 }
 
 class _Meta extends StatelessWidget {
@@ -531,6 +591,7 @@ bool _isCompleted(JobHistoryItem i) =>
     i.displayStatus != 'CANCELLED';
 
 bool _isCancelled(JobHistoryItem i) =>
+    i.isAdminClosed ||
     i.status == 'ABANDONED' ||
     i.status == 'CANCELLED' ||
     i.displayStatus == 'ABANDONED' ||

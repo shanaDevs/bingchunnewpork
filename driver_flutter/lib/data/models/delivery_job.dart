@@ -142,6 +142,9 @@ class JobHistoryItem {
     cancelReason: strOrNull(j, 'cancelReason'),
   );
 
+  /// Closed by an admin (the server reports "ADMIN_CLOSED", or a CANCELLED run in history).
+  bool get isAdminClosed => displayStatus == 'ADMIN_CLOSED' || status == 'ADMIN_CLOSED' || status == 'CANCELLED';
+
   bool get isIncomplete =>
       displayStatus == 'ABANDONED' || displayStatus == 'PARTIALLY_COMPLETED' || displayStatus == 'VEHICLE_FAILURE';
 }
