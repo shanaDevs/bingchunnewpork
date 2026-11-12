@@ -16,9 +16,9 @@ Do **not** commit real `.env` secrets. Use templates and CapRover/GitLab variabl
 | `JWT_SECRET` | **Yes in prod** | Access token secret (dev default exists in code — change it) |
 | `JWT_REFRESH_SECRET` | **Yes in prod** | Refresh token secret |
 | `JWT_EXPIRES_IN` | No (default `15m`) | Admin access token TTL |
-| `JWT_USER_EXPIRES_IN` | No (default `3650d`) | Defined in config; **customer access signing currently ignores expiry** (non-expiring JWT) |
-| `JWT_REFRESH_EXPIRES_IN` | No (default `7d`) | Admin refresh TTL |
-| `JWT_USER_REFRESH_EXPIRES_IN` | No (default `3650d`) | Customer refresh TTL |
+| `JWT_USER_EXPIRES_IN` | No (default `1d`) | Customer access token TTL (renewed via refresh keep-alive) |
+| `JWT_REFRESH_EXPIRES_IN` | No (default `3650d`) | Admin/cashier refresh TTL (~10y; stays signed in) |
+| `JWT_USER_REFRESH_EXPIRES_IN` | No (default `3650d`) | Customer refresh TTL (~10y; sessions stay signed in) |
 | `FRONTEND_URL` | Recommended | CORS + links |
 | `LIVE_SHOP_URL` | Production | Customer shop origin for CORS and payment redirects |
 | `CORS_EXTRA_ORIGINS` | Optional | Comma-separated extra HTTPS origins (staging previews) |

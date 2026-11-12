@@ -163,6 +163,8 @@ async function loadGoogleMutantLayer(map: L.Map): Promise<L.Layer | null> {
 
 /**
  * Attach the Google basemap to a plain Leaflet map (or fall back to OSM).
+ * Prefer Maps JavaScript API (GoogleMutant) so browser-restricted keys still show
+ * Google tiles when Map Tiles API createSession returns 403 on the server.
  * Returns a cleanup that removes the layer.
  */
 export async function attachAppMapBasemap(
@@ -178,14 +180,16 @@ export async function attachAppMapBasemap(
   };
 
   try {
-    const serverTiles = await readServerMapTiles();
+    // 1) Google Maps JS API via Leaflet.GoogleMutant (works with HTTP-referrer keys)
+    const mutantLayer = await loadGoogleMutantLayer(map);
     if (cancelled()) return () => undefined;
-    if (serverTiles) {
-      layer = addGoogleTileLayer(map, serverTiles);
+    if (mutantLayer) {
+      layer = mutantLayer;
     } else {
-      const mutantLayer = await loadGoogleMutantLayer(map);
+      // 2) Server Map Tiles session (needs a key allowed for tile.googleapis.com)
+      const serverTiles = await readServerMapTiles();
       if (cancelled()) return () => undefined;
-      if (mutantLayer) layer = mutantLayer;
+      if (serverTiles) layer = addGoogleTileLayer(map, serverTiles);
       else useOsm();
     }
   } catch (err) {
@@ -201,7 +205,7 @@ export async function attachAppMapBasemap(
   };
 }
 
-/** Basemap for every Leaflet map. Uses server map tiles, then Maps JS API, then OSM. */
+/** Basemap for every Leaflet map. Uses Maps JS API, then server map tiles, then OSM. */
 export default function AppMapTiles() {
   const map = useMap();
 

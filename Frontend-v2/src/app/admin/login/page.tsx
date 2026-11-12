@@ -177,7 +177,7 @@ export default function AdminLoginPage() {
             {loggedIn.storeName && (
               <p className="text-brand text-xs mt-2">{loggedIn.storeName.replace('Bing Chun - ', '')}</p>
             )}
-            <p className="text-muted text-xs mt-3">Session auto-expires after 15 minutes of inactivity.</p>
+            <p className="text-muted text-xs mt-3">Session stays signed in via refresh token until you sign out.</p>
           </div>
 
           <div className="space-y-3">
@@ -261,7 +261,7 @@ export default function AdminLoginPage() {
         </form>
 
         <p className="text-center text-xs text-muted mt-4">
-          Sessions expire after 15 minutes of inactivity.
+          Sessions stay signed in via refresh token until you sign out.
         </p>
 
         <div className="mt-6 space-y-3">

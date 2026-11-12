@@ -35,6 +35,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     pathname?.startsWith('/product/') ||
     pathname === '/promotions' ||
     pathname === '/stores' ||
+    pathname === '/cart' ||
+    pathname?.startsWith('/checkout') ||
     pathname === '/account/login' ||
     ACCOUNT_SHELL_PATHS.has(pathname ?? '') ||
     /^\/order\/[^/]+\/receipt\/?$/.test(pathname ?? '')
