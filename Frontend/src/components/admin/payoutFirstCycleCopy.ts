@@ -26,6 +26,6 @@ export const PAYOUT_FIRST_ONLINE_DELIVERY_SUBTOTAL_LABEL = 'Subtotal — Deliver
 export const PAYOUT_SECOND_CYCLE_PRIOR_ONLINE_WALLET_LABEL =
   '– Already paid in Payout 1 (net payout)';
 
-/** Payout 2 — subtotal after platform deduction, before PayHere gateway fee. */
+/** Payout 2 — subtotal after platform deduction and bank penalty, before PayHere gateway fee. */
 export const PAYOUT_SECOND_BRANCH_WALLET_BEFORE_GATEWAY_LABEL =
   'Branch wallet before gateway';

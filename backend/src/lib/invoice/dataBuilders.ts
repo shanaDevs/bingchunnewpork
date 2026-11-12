@@ -471,7 +471,7 @@ export function buildNetBranchPayoutRows(
       ),
     });
   }
-  const branchWalletBeforeGatewayCents = Math.max(
+  const gatewayBaseCents = Math.max(
     0,
     statement.onlineWalletCents +
       statement.jasonPayoutTopUpCents -
@@ -479,11 +479,26 @@ export function buildNetBranchPayoutRows(
       statement.nonReturningRefundsCents -
       Math.abs(statement.netPlatformAmountCents),
   );
+  const branchWalletBeforeGatewayCents = Math.max(
+    0,
+    gatewayBaseCents - statement.bankPenaltyCents,
+  );
   const gatewayFeeCentsForRows =
     statement.priorOnlineWalletAmountCents > 0
       ? Math.round(branchWalletBeforeGatewayCents * (statement.gatewayRatePct / 100))
       : statement.gatewayFeeCents;
-  if (statement.priorOnlineWalletAmountCents > 0) {
+  const showBeforeGatewaySubtotal = statement.priorOnlineWalletAmountCents > 0;
+  const bankPenaltyRow: WithdrawalTableRow = {
+    label: '– Bank penalty (branch cancellation)',
+    amount: formatFirstPayoutInvoiceAmount(
+      '– Bank penalty (branch cancellation)',
+      statement.bankPenaltyCents,
+      stage,
+    ),
+    hint: bankHint,
+  };
+  if (showBeforeGatewaySubtotal) {
+    rows.push(bankPenaltyRow);
     rows.push({
       label: 'Branch wallet before gateway',
       amount: formatInvoiceLkr(branchWalletBeforeGatewayCents),
@@ -498,15 +513,9 @@ export function buildNetBranchPayoutRows(
       stage,
     ),
   });
-  rows.push({
-    label: '– Bank penalty (branch cancellation)',
-    amount: formatFirstPayoutInvoiceAmount(
-      '– Bank penalty (branch cancellation)',
-      statement.bankPenaltyCents,
-      stage,
-    ),
-    hint: bankHint,
-  });
+  if (!showBeforeGatewaySubtotal) {
+    rows.push(bankPenaltyRow);
+  }
   rows.push({
     label: 'Branch Net Payout',
     amount: formatFirstPayoutInvoiceAmount(

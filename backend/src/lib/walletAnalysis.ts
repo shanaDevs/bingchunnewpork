@@ -1,6 +1,10 @@
 import { prisma } from './prisma';
 import { isOnlinePaymentMethod } from './orderPayment';
-import { onlinePayablesPaidOrderWhere, orderCreatedAtFilter } from './walletRevenue';
+import {
+  remainingOnlinePayablesFeeWhere,
+  orderCreatedAtFilter,
+} from './walletRevenue';
+import { toUtcDateStr } from './utcDateString';
 import {
   chartBucketKey,
   resolveChartBucketDateRange,
@@ -31,6 +35,19 @@ import { txnAmountCents } from './walletApiMoney';
 import { promiseAllLimited } from '../utils/promiseAllLimited';
 import { getPrismaFanOutLimit } from './prisma';
 
+async function loadStorePlatformPaybackEnabledMap(
+  storeIds: string[],
+): Promise<Map<string, boolean>> {
+  if (storeIds.length === 0) return new Map();
+  const storeRows = await prisma.store.findMany({
+    where: { id: { in: storeIds } },
+    select: { id: true, platformDiscountPaybackEnabled: true },
+  });
+  return new Map(
+    storeRows.map((row) => [row.id, row.platformDiscountPaybackEnabled ?? false]),
+  );
+}
+
 export type WalletAnalysisTrendPoint = {
   day: number;
   label: string;
@@ -58,9 +75,9 @@ export type WalletAnalysisHealthSlice = {
 };
 
 export type WalletAnalysisExcludedFees = {
-  /** Online payables delivery fees (excluded from Online Available Balance). */
+  /** Remaining online-payable delivery fees (excluded from Online Available Balance). */
   deliveryFee: number;
-  /** Online payables convenience fees (excluded from Online Available Balance). */
+  /** Remaining online-payable convenience fees (excluded from Online Available Balance). */
   convenienceFee: number;
 };
 
@@ -73,7 +90,7 @@ export type WalletAnalysisResult = {
   /** Cumulative pickup + delivery online from day one, LKR (not reduced by payouts). */
   onlineAvailableBalance: number;
   health: { percent: number; slices: WalletAnalysisHealthSlice[] };
-  /** All-time fee totals for scoped branches (LKR). */
+  /** Remaining (unsettled) online-payable fee totals for scoped branches (LKR). */
   excludedFees: WalletAnalysisExcludedFees;
   trend: WalletAnalysisTrendPoint[];
   branchContribution: WalletAnalysisBranchContribution[];
@@ -342,13 +359,7 @@ async function loadOutgoingFlows(params: {
   let commissionFeeCents = 0;
   let gatewayFeeCents = 0;
   if (activeStoreIds.length > 0) {
-    const storeRows = await prisma.store.findMany({
-      where: { id: { in: activeStoreIds } },
-      select: { id: true, platformDiscountPaybackEnabled: true },
-    });
-    const paybackByStore = new Map(
-      storeRows.map((row) => [row.id, row.platformDiscountPaybackEnabled ?? false]),
-    );
+    const paybackByStore = await loadStorePlatformPaybackEnabledMap(activeStoreIds);
     const breakdowns = await promiseAllLimited(
       getPrismaFanOutLimit(),
       activeStoreIds.map(
@@ -524,16 +535,7 @@ async function computeOutgoingTotalsByChartBuckets(
     activeStoreIds.add(order.storeId);
   }
 
-  const paybackByStore = new Map<string, boolean>();
-  if (activeStoreIds.size > 0) {
-    const storeRows = await prisma.store.findMany({
-      where: { id: { in: [...activeStoreIds] } },
-      select: { id: true, platformDiscountPaybackEnabled: true },
-    });
-    for (const row of storeRows) {
-      paybackByStore.set(row.id, row.platformDiscountPaybackEnabled ?? false);
-    }
-  }
+  const paybackByStore = await loadStorePlatformPaybackEnabledMap([...activeStoreIds]);
 
   const rows = await promiseAllLimited(
     DASHBOARD_OUTGOING_BUCKET_FANOUT,
@@ -622,6 +624,46 @@ export function invalidateWalletAnalysisCache(): void {
   invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-analysis']));
 }
 
+/** Remaining online-payable fees after approved payout windows (wallet card only). */
+async function sumRemainingOnlinePayablesFees(
+  storeIds: string[],
+): Promise<WalletAnalysisExcludedFees> {
+  if (storeIds.length === 0) {
+    return { deliveryFee: 0, convenienceFee: 0 };
+  }
+
+  const windows = await prisma.storeWithdrawal.findMany({
+    where: {
+      storeId: { in: storeIds },
+      status: 'APPROVED',
+      periodFrom: { not: null },
+      periodTo: { not: null },
+    },
+    select: { storeId: true, periodFrom: true, periodTo: true },
+  });
+
+  const settledWindows = windows.flatMap((row) => {
+    if (!row.periodFrom || !row.periodTo) return [];
+    return [
+      {
+        storeId: row.storeId,
+        from: toUtcDateStr(row.periodFrom),
+        to: toUtcDateStr(row.periodTo),
+      },
+    ];
+  });
+
+  const agg = await prisma.order.aggregate({
+    where: remainingOnlinePayablesFeeWhere(storeIds, settledWindows),
+    _sum: { deliveryFee: true, convenientFee: true },
+  });
+
+  return {
+    deliveryFee: roundLkr(agg._sum.deliveryFee ?? 0),
+    convenienceFee: roundLkr(agg._sum.convenientFee ?? 0),
+  };
+}
+
 async function computeWalletAnalysis(params: {
   monthKey: string;
   storeId?: string | null;
@@ -636,25 +678,15 @@ async function computeWalletAnalysis(params: {
   });
   const storeIds = wallets.map((w) => w.storeId);
 
-  const [payablesBreakdowns, onlinePayablesFeeAgg] = await Promise.all([
+  const [payablesBreakdowns, excludedFees] = await Promise.all([
     storeIds.length > 0
       ? promiseAllLimited(
           getPrismaFanOutLimit(),
           storeIds.map((id) => () => computeBranchPayablesBreakdown(id)),
         )
       : Promise.resolve([]),
-    storeIds.length > 0
-      ? prisma.order.aggregate({
-          where: onlinePayablesPaidOrderWhere({ storeId: { in: storeIds } }),
-          _sum: { deliveryFee: true, convenientFee: true },
-        })
-      : Promise.resolve({ _sum: { deliveryFee: null, convenientFee: null } }),
+    sumRemainingOnlinePayablesFees(storeIds),
   ]);
-
-  const excludedFees: WalletAnalysisExcludedFees = {
-    deliveryFee: roundLkr(onlinePayablesFeeAgg._sum.deliveryFee ?? 0),
-    convenienceFee: roundLkr(onlinePayablesFeeAgg._sum.convenientFee ?? 0),
-  };
 
   const balanceCents = payablesBreakdowns.reduce(
     (sum, breakdown) => sum + breakdown.allTimeAvailableBalanceCents,

@@ -64,6 +64,7 @@ import { getConvenienceFeeRates, getGatewayFeeRate } from './appSchema';
 import {
   addDaysToDateStr,
   buildElapsedPayoutWindowsFromStart,
+  payoutWindowOverlapsRange,
   listElapsedPayoutWindows,
   PAYOUT_PERIOD_DAYS,
   resolveOpenRollingPayoutWindow,
@@ -1087,6 +1088,7 @@ async function loadAllSuperAdminPayoutsDueItems(): Promise<SuperAdminPayoutDueIt
 export async function listSuperAdminPayoutsDueItems(query?: {
   from?: string;
   to?: string;
+  storeId?: string;
   page?: number;
   limit?: number;
   search?: string;
@@ -1094,8 +1096,18 @@ export async function listSuperAdminPayoutsDueItems(query?: {
   await ensureWithdrawalInReviewEnumReady();
   const limit = Math.min(100, Math.max(1, query?.limit ?? PAYOUTS_DUE_PAGE_SIZE));
   const search = (query?.search ?? '').trim().toLowerCase();
+  const storeId = (query?.storeId ?? '').trim();
   const all = await loadAllSuperAdminPayoutsDueItems();
-  const filtered = search ? all.filter((item) => matchesPayoutDueSearch(item.storeName, search)) : all;
+  const from = query?.from && isValidYmdDate(query.from) ? query.from : null;
+  const to = query?.to && isValidYmdDate(query.to) ? query.to : null;
+  const inMonth =
+    from && to
+      ? all.filter((item) => payoutWindowOverlapsRange(item.periodFrom, item.periodTo, from, to))
+      : all;
+  const byStore = storeId ? inMonth.filter((item) => item.storeId === storeId) : inMonth;
+  const filtered = search
+    ? byStore.filter((item) => matchesPayoutDueSearch(item.storeName, search))
+    : byStore;
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total / limit) || 1);
   const page = Math.min(Math.max(1, query?.page ?? 1), pages);

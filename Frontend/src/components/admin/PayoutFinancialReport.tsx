@@ -2,7 +2,7 @@
 
 import { hasAnyPositiveLkr, hasPositiveLkr } from '@/components/admin/settlementTypes';
 import {
-  resolveBranchWalletBeforeGatewayLkr,
+  resolveDisplayedBranchWalletBeforeGatewayLkr,
   resolveReportNetPayoutFinalPayLkr,
   type PayoutReportValues,
 } from '@/components/admin/resolvePayoutReportValues';
@@ -39,7 +39,7 @@ type Props = {
 
 export default function PayoutFinancialReport({ values, className = 'mb-4' }: Props) {
   const isFirstCyclePayout = values.cycleStage === 'FIRST';
-  const branchWalletBeforeGatewayLkr = resolveBranchWalletBeforeGatewayLkr(values);
+  const branchWalletBeforeGatewayLkr = resolveDisplayedBranchWalletBeforeGatewayLkr(values);
   const hasRefundSection =
     !isFirstCyclePayout &&
     hasAnyPositiveLkr(
@@ -66,6 +66,20 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
     values.gatewayLkr,
     values.cancelledByBranchGatewayFeeLkr,
   );
+  const bankPenaltyRow = hasPositiveLkr(values.cancelledByBranchGatewayFeeLkr) ? (
+    <ReportRow
+      label="- Bank penalty (branch cancellation)"
+      value={signedAmount(values.cancelledByBranchGatewayFeeLkr, '−')}
+      valueTone="red"
+      hint={
+        values.cancelledByBranchOrderCount > 0
+          ? `LKR 150 × ${values.cancelledByBranchOrderCount} order${
+              values.cancelledByBranchOrderCount === 1 ? '' : 's'
+            }`
+          : 'LKR 150 per branch-cancelled paid order (refund completed)'
+      }
+    />
+  ) : null;
 
   return (
     <div
@@ -243,6 +257,7 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
                 valueTone="red"
               />
             )}
+            {!isFirstCyclePayout && bankPenaltyRow}
             {!isFirstCyclePayout && branchWalletBeforeGatewayLkr != null && (
               <ReportSubtotalRow
                 label={PAYOUT_SECOND_BRANCH_WALLET_BEFORE_GATEWAY_LABEL}
@@ -256,20 +271,7 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
                 valueTone="red"
               />
             )}
-            {hasPositiveLkr(values.cancelledByBranchGatewayFeeLkr) && (
-              <ReportRow
-                label="- Bank penalty (branch cancellation)"
-                value={signedAmount(values.cancelledByBranchGatewayFeeLkr, '−')}
-                valueTone="red"
-                hint={
-                  values.cancelledByBranchOrderCount > 0
-                    ? `LKR 150 × ${values.cancelledByBranchOrderCount} order${
-                        values.cancelledByBranchOrderCount === 1 ? '' : 's'
-                      }`
-                    : 'LKR 150 per branch-cancelled paid order (refund completed)'
-                }
-              />
-            )}
+            {isFirstCyclePayout && bankPenaltyRow}
           </>
         )}
         {isFirstCyclePayout ? (

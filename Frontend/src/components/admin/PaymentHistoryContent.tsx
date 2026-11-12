@@ -6,7 +6,7 @@ import { getApiBaseUrl } from '@/lib/apiBase';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlertCircle,
@@ -44,6 +44,7 @@ import {
   openPlatformProviderSettlementInvoice,
   openWithdrawalInvoice,
 } from '@/lib/adminProtectedFile';
+import { platformPayoutInvoiceSettlementId } from '@/lib/platformPayoutInvoice';
 import {
   fetchPlatformPayoutStatement,
   type PlatformPayoutStatement,
@@ -63,6 +64,7 @@ import {
   filterPayoutRowsForDisplay,
 } from '@/components/admin/paymentHistoryPayoutFilter';
 import AdminTablePagination from '@/components/admin/AdminTablePagination';
+import PayoutInlineBreakdown from '@/components/admin/reports/PayoutInlineBreakdown';
 import { buildAdminMetaPagination } from '@/lib/pagination';
 
 type PayoutRow = {
@@ -407,19 +409,32 @@ export default function PaymentHistoryContent({
       setPeriodFrom(row.periodFrom);
       setPeriodTo(row.periodTo);
     }
+
+    if (selectedPayoutId === row.id) {
+      setSelectedPayoutId(null);
+      setStatement(null);
+      setPlatformStatement(null);
+      return;
+    }
+
     setSelectedPayoutId(row.id);
+
     if (showPlatformPayoutHistoryTab && payoutHistoryView === 'platform') {
+      setStatement(null);
       void openPlatformPayoutBreakdown(row.id);
       return;
     }
+
+    setPlatformStatement(null);
+
     if (row.payoutSource === 'branchWithdrawal') {
-      if (hasWithdrawalInvoice(row.invoiceUrl)) {
-        void openWithdrawalInvoice(row.invoiceUrl).catch(() => {
-          toast.error('Could not open payout invoice');
-        });
+      setStatement(null);
+      if (!row.walletTransactionId) {
+        toast.error('Payout breakdown is not available for this record');
       }
       return;
     }
+
     void openSettlement(row.id);
   };
 
@@ -718,15 +733,15 @@ export default function PaymentHistoryContent({
                       <TabsContent value="commission" className="mt-0 outline-none">
                         <p className="text-xs text-[var(--color-text-muted)]">
                           {hideLocalPeriodControls
-                            ? `Branch commission settlements · ${formatPeriodLabel(periodFrom, periodTo)}`
-                            : 'Branch commission settlements · filter by billing period or paid date'}
+                            ? `Click a row to view the branch payout breakdown · ${formatPeriodLabel(periodFrom, periodTo)}`
+                            : 'Click a row to view the branch payout breakdown · filter by billing period or paid date'}
                         </p>
                       </TabsContent>
                       <TabsContent value="platform" className="mt-0 outline-none">
                         <p className="text-xs text-[var(--color-text-muted)]">
                           {hideLocalPeriodControls
-                            ? `Platform provider receivable from processed branch payouts · ${formatPeriodLabel(periodFrom, periodTo)}`
-                            : 'Platform provider receivable from processed branch payouts · filter by billing period or paid date'}
+                            ? `Click a row to view the platform receivable breakdown · ${formatPeriodLabel(periodFrom, periodTo)}`
+                            : 'Click a row to view the platform receivable breakdown · filter by billing period or paid date'}
                         </p>
                       </TabsContent>
                     </div>
@@ -879,11 +894,17 @@ export default function PaymentHistoryContent({
                 const isSelected =
                   selectedPayoutId === row.id ||
                   (row.periodFrom === periodFrom && row.periodTo === periodTo);
+                const showBranchPayoutBreakdown =
+                  payoutHistoryView === 'commission' &&
+                  selectedPayoutId === row.id &&
+                  row.payoutSource === 'branchWithdrawal' &&
+                  !!row.walletTransactionId;
                 return (
+                  <Fragment key={row.id}>
                   <tr
-                    key={row.id}
                     className={[
-                      'cursor-pointer border-b border-[var(--color-navy-border)]/60 last:border-b-0 hover:bg-[var(--color-input-bg)]/40',
+                      'cursor-pointer border-b border-[var(--color-navy-border)]/60 hover:bg-[var(--color-input-bg)]/40',
+                      showBranchPayoutBreakdown ? 'border-b-0' : 'last:border-b-0',
                       isSelected ? 'bg-[var(--color-brand-subtle)]/50' : '',
                     ].join(' ')}
                     onClick={() => selectPayoutPeriod(row)}
@@ -916,30 +937,27 @@ export default function PaymentHistoryContent({
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       {showPlatformPayoutHistoryTab && payoutHistoryView === 'platform' ? (
-                        row.storeWithdrawalId ? (
-                          row.platformReceivableSettlementId ? (
-                          <button
-                            type="button"
-                            className="text-[13px] font-medium text-[var(--color-brand)] hover:underline"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void openPlatformProviderSettlementInvoice(
-                                row.platformReceivableSettlementId!,
-                              ).catch(() => {
-                                toast.error('Could not open invoice');
-                              });
-                            }}
-                          >
-                            View Invoice
-                          </button>
+                        (() => {
+                          const invoiceSettlementId = platformPayoutInvoiceSettlementId(row);
+                          return invoiceSettlementId ? (
+                            <button
+                              type="button"
+                              className="text-[13px] font-medium text-[var(--color-brand)] hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void openPlatformProviderSettlementInvoice(invoiceSettlementId).catch(
+                                  () => {
+                                    toast.error('Could not open invoice');
+                                  },
+                                );
+                              }}
+                            >
+                              View Invoice
+                            </button>
                           ) : (
-                            <span className="text-xs text-[var(--color-text-muted)]">
-                              Process payment
-                            </span>
-                          )
-                        ) : (
-                          <span className="text-xs text-[var(--color-text-muted)]">—</span>
-                        )
+                            <span className="text-xs text-[var(--color-text-muted)]">—</span>
+                          );
+                        })()
                       ) : hasWithdrawalInvoice(row.invoiceUrl) ? (
                         <button
                           type="button"
@@ -981,6 +999,12 @@ export default function PaymentHistoryContent({
                       )}
                     </td>
                   </tr>
+                  <PayoutInlineBreakdown
+                    transactionId={row.walletTransactionId}
+                    open={showBranchPayoutBreakdown}
+                    colSpan={payoutTableColSpan}
+                  />
+                  </Fragment>
                 );
               })}
             </tbody>

@@ -178,9 +178,11 @@ export async function getPayoutPeriodInfoHandler(req: Request, res: Response, ne
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /admin/wallet/payouts-due
-// Super Admin queue: all elapsed unpaid branch payout periods (oldest first).
-// Optional query `from`/`to` are ignored (wallet month filter does not scope this list).
-// `page` / `limit` (default 10) paginate due periods. Optional `search` filters by branch name.
+// Super Admin queue: elapsed unpaid branch payout periods (oldest first).
+// Optional `from`/`to` keep periods that overlap a custom range (legacy; wallet UI omits these).
+// Optional `storeId` scopes to one branch. `page` / `limit` (default 10) paginate due periods.
+// Optional `search` filters by branch name.
+// `isOldestUnpaid` is still computed on the full unpaid chain, not the filtered page.
 // ──────────────────────────────────────────────────────────────────────────────
 function invalidateWalletPayoutsDueCache(): void {
   invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-payouts-due']));
@@ -196,7 +198,8 @@ export async function getPayoutsDueHandler(req: Request, res: Response, next: Ne
   try {
     if (req.user?.role !== 'SYSTEM_ADMIN') throw new AppError('Forbidden', 403);
 
-    const { page, limit, search, from, to } = walletPayoutsDueQuerySchema.parse(req.query);
+    const { page, limit, search, storeId, from, to } =
+      walletPayoutsDueQuerySchema.parse(req.query);
 
     await ensureWithdrawalInReviewEnumReady();
 
@@ -207,6 +210,7 @@ export async function getPayoutsDueHandler(req: Request, res: Response, next: Ne
           page,
           limit,
           ...(search ? { search } : {}),
+          ...(storeId ? { storeId } : {}),
           ...(from ? { from } : {}),
           ...(to ? { to } : {}),
         }),

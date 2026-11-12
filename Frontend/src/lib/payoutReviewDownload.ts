@@ -49,7 +49,14 @@ function formatLongPeriodLabel(from: string, to: string): string {
     });
   };
   const sameYear = from.slice(0, 4) === to.slice(0, 4);
-  return sameYear ? `${fmt(from, false)} – ${fmt(to, false)}` : `${fmt(from, true)} – ${fmt(to, true)}`;
+  return sameYear ? `${fmt(from, false)} - ${fmt(to, false)}` : `${fmt(from, true)} - ${fmt(to, true)}`;
+}
+
+function normalizePayoutDownloadFilename(filename: string): string {
+  return filename
+    .replace(/\u2013|\u2014|\u2212/g, '-')
+    .replace(/[^\x20-\x7E]/g, '_')
+    .replace(/["\\]/g, '_');
 }
 
 export function payoutReviewPdfFilename(
@@ -60,7 +67,9 @@ export function payoutReviewPdfFilename(
 ): string {
   const branch = formatBranchName(storeName).replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
   const ordinal = cycleStage === 'SECOND' ? 'Second Payout' : 'First Payout';
-  return `${branch || 'Branch'} - ${formatLongPeriodLabel(displayFrom, displayTo)} (${ordinal}).pdf`;
+  return normalizePayoutDownloadFilename(
+    `${branch || 'Branch'} - ${formatLongPeriodLabel(displayFrom, displayTo)} (${ordinal}).pdf`,
+  );
 }
 
 function filenameFromDisposition(header: string | null): string | null {
@@ -86,7 +95,8 @@ async function saveAdminDownload(path: string, init: RequestInit, fallbackName: 
     throw new Error(json.message || 'Could not download the payout invoice');
   }
   const blob = await res.blob();
-  const filename = filenameFromDisposition(res.headers.get('Content-Disposition')) || fallbackName;
+  const rawName = filenameFromDisposition(res.headers.get('Content-Disposition')) || fallbackName;
+  const filename = normalizePayoutDownloadFilename(rawName);
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;

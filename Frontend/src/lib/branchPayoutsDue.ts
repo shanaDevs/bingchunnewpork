@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { PayoutDueRow } from '@/components/admin/PayoutsDuePanel';
+import { formatBranchName } from '@/lib/deliveryDisplay';
 import { adminAuthHeaders } from '@/lib/adminSession';
 
 export type BranchPayoutCompletedMeta = {
@@ -25,6 +26,9 @@ export type FetchBranchPayoutsDueParams = {
   page?: number;
   limit?: number;
   search?: string;
+  storeId?: string | null;
+  from?: string | null;
+  to?: string | null;
 };
 
 /** Match API rows (ISO timestamps) with form dates (YYYY-MM-DD). */
@@ -46,8 +50,14 @@ function payoutPeriodMatches(
   );
 }
 
-export function branchPayoutsDueQueryKey(page = 1, search = '') {
-  return [...BRANCH_PAYOUTS_DUE_QUERY_KEY, page, search] as const;
+export function branchPayoutsDueQueryKey(
+  page = 1,
+  search = '',
+  storeId = '',
+  from = '',
+  to = '',
+) {
+  return [...BRANCH_PAYOUTS_DUE_QUERY_KEY, page, search, storeId, from, to] as const;
 }
 
 export function sortBranchPayoutDueRows(rows: PayoutDueRow[]): PayoutDueRow[] {
@@ -73,6 +83,40 @@ export function isOldestUnpaidBranchPayoutRow(row: PayoutDueRow, allRows: Payout
   return oldest.periodFrom === row.periodFrom && oldest.periodTo === row.periodTo;
 }
 
+const DRAFT_PAY_EARLIER_PERIOD_NOTE =
+  'Only the oldest unpaid period per branch can be saved as draft. Complete or pay earlier periods in the queue first.';
+
+export function payoutDueDraftDisabledNote(canDraft: boolean): string | null {
+  return canDraft ? null : DRAFT_PAY_EARLIER_PERIOD_NOTE;
+}
+
+function formatUtcYmdLabel(ymd: string): string {
+  const [year, month, day] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(year, (month ?? 1) - 1, day ?? 1)).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/** Turn payout-review API errors into admin-friendly copy. */
+export function formatPayoutReviewDraftError(
+  message: string,
+  branchName?: string,
+): string {
+  const prefix = branchName ? `${formatBranchName(branchName)}: ` : '';
+  const startMatch = message.match(/must start on (\d{4}-\d{2}-\d{2})/i);
+  if (startMatch) {
+    const startLabel = formatUtcYmdLabel(startMatch[1]);
+    return `${prefix}You can only draft the next payout in line for this branch. The period must start on ${startLabel} (the day after the last payout request). ${DRAFT_PAY_EARLIER_PERIOD_NOTE}`;
+  }
+  if (/already paid/i.test(message)) {
+    return `${prefix}This payout period is already paid and cannot be saved as draft again.`;
+  }
+  return prefix ? `${prefix}${message}` : message;
+}
+
 async function readPayoutsDueApiError(res: Response, fallback: string): Promise<string> {
   try {
     const json = (await res.json()) as { message?: string };
@@ -91,11 +135,17 @@ export async function fetchBranchPayoutsDue(
   const page = Math.max(1, params.page ?? 1);
   const limit = Math.max(1, params.limit ?? PAYOUTS_DUE_PAGE_SIZE);
   const search = params.search?.trim() ?? '';
+  const storeId = params.storeId?.trim() ?? '';
+  const from = params.from?.trim() ?? '';
+  const to = params.to?.trim() ?? '';
   const qs = new URLSearchParams({
     page: String(page),
     limit: String(limit),
   });
   if (search) qs.set('search', search);
+  if (storeId) qs.set('storeId', storeId);
+  if (from) qs.set('from', from);
+  if (to) qs.set('to', to);
 
   const res = await fetch(`${apiBase}/admin/wallet/payouts-due?${qs}`, {
     headers: adminAuthHeaders(),

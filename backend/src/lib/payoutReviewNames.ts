@@ -27,7 +27,7 @@ export function payoutReviewDisplayRange(input: {
   return { from: addDaysToUtcDateStr(input.to, -29), to: input.to };
 }
 
-/** September 6 – September 20. Year is added only when the range crosses a year. */
+/** September 6 - September 20 (ASCII hyphen for download-safe names). */
 export function formatPayoutReviewPeriodLabel(from: string, to: string): string {
   const fmt = (ymd: string, withYear: boolean) => {
     const [year, month, day] = ymd.split('-').map(Number);
@@ -39,7 +39,15 @@ export function formatPayoutReviewPeriodLabel(from: string, to: string): string 
     });
   };
   const sameYear = from.slice(0, 4) === to.slice(0, 4);
-  return sameYear ? `${fmt(from, false)} – ${fmt(to, false)}` : `${fmt(from, true)} – ${fmt(to, true)}`;
+  return sameYear ? `${fmt(from, false)} - ${fmt(to, false)}` : `${fmt(from, true)} - ${fmt(to, true)}`;
+}
+
+/** Payout PDF/ZIP names must stay ASCII — Windows mishandles UTF-8 en dashes in saved file names. */
+export function normalizePayoutDownloadFilename(filename: string): string {
+  return filename
+    .replace(/\u2013|\u2014|\u2212/g, '-')
+    .replace(/[^\x20-\x7E]/g, '_')
+    .replace(/["\\]/g, '_');
 }
 
 export function sanitizePayoutFileSegment(value: string): string {
@@ -59,7 +67,7 @@ export function payoutReviewZipEntryPath(
   const branch = sanitizePayoutFileSegment(branchDisplayName(storeName));
   const period = formatPayoutReviewPeriodLabel(displayFrom, displayTo);
   const ordinal = payoutReviewOrdinalLabel(cycleStage);
-  return `${branch}/${period} (${ordinal}).pdf`;
+  return normalizePayoutDownloadFilename(`${branch}/${period} (${ordinal}).pdf`);
 }
 
 export function payoutReviewDownloadFilename(
@@ -71,7 +79,7 @@ export function payoutReviewDownloadFilename(
   const branch = sanitizePayoutFileSegment(branchDisplayName(storeName));
   const period = formatPayoutReviewPeriodLabel(displayFrom, displayTo);
   const ordinal = payoutReviewOrdinalLabel(cycleStage);
-  return `${branch} - ${period} (${ordinal}).pdf`;
+  return normalizePayoutDownloadFilename(`${branch} - ${period} (${ordinal}).pdf`);
 }
 
 export function uniqueZipEntryPaths(paths: string[]): string[] {

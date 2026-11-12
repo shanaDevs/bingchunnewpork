@@ -359,6 +359,38 @@ export function onlinePayablesPaidOrderWhere(
   };
 }
 
+export type OnlinePayablesSettledWindow = {
+  storeId: string;
+  from: string;
+  to: string;
+};
+
+/**
+ * Online-payable orders that still sit in Online Available Balance.
+ * Approved payout windows are excluded so remaining delivery/convenience fees
+ * match remaining (not all-time) online wallet — display only, not used for payouts.
+ */
+export function remainingOnlinePayablesFeeWhere(
+  storeIds: string[],
+  settledWindows: OnlinePayablesSettledWindow[] = [],
+): Prisma.OrderWhereInput {
+  const base = onlinePayablesPaidOrderWhere({ storeId: { in: storeIds } });
+  if (settledWindows.length === 0) return base;
+  return {
+    AND: [
+      base,
+      {
+        NOT: {
+          OR: settledWindows.map((window) => ({
+            storeId: window.storeId,
+            ...orderCreatedAtFilter(window.from, window.to),
+          })),
+        },
+      },
+    ],
+  };
+}
+
 /**
  * Branch-wallet payables credit for one paid order (same basis as Revenue Summary):
  * subtotal − promo discount. Online cents feed All-Time Available Balance.

@@ -25,9 +25,9 @@ export type WalletAnalysisHealthSlice = {
 };
 
 export type WalletAnalysisExcludedFees = {
-  /** Online payables delivery fees (excluded from Online Available Balance). */
+  /** Remaining online-payable delivery fees (excluded from Online Available Balance). */
   deliveryFee: number;
-  /** Online payables convenience fees (excluded from Online Available Balance). */
+  /** Remaining online-payable convenience fees (excluded from Online Available Balance). */
   convenienceFee: number;
 };
 

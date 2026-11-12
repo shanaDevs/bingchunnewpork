@@ -29,18 +29,18 @@ describe('payout review archive names', () => {
     );
 
     expect(formatPayoutReviewPeriodLabel('2026-09-06', '2026-09-20')).toBe(
-      'September 6 – September 20',
+      'September 6 - September 20',
     );
-    expect(first).toBe('Nugegoda/September 6 – September 20 (First Payout).pdf');
+    expect(first).toBe('Nugegoda/September 6 - September 20 (First Payout).pdf');
     expect(secondRange).toEqual({ from: '2026-09-06', to: '2026-10-05' });
-    expect(second).toBe('Nugegoda/September 6 – October 5 (Second Payout).pdf');
+    expect(second).toBe('Nugegoda/September 6 - October 5 (Second Payout).pdf');
   });
 
   it('keeps a colliding file name instead of overwriting it', () => {
-    const path = 'Nugegoda/September 6 – September 20 (First Payout).pdf';
+    const path = 'Nugegoda/September 6 - September 20 (First Payout).pdf';
     expect(uniqueZipEntryPaths([path, path])).toEqual([
       path,
-      'Nugegoda/September 6 – September 20 (First Payout) (2).pdf',
+      'Nugegoda/September 6 - September 20 (First Payout) (2).pdf',
     ]);
   });
 });
@@ -50,8 +50,8 @@ describe('stored zip', () => {
     const first = Buffer.from('invoice-one');
     const second = Buffer.from('invoice-two');
     const zip = buildStoredZip([
-      { path: 'Nugegoda/September 6 – September 20 (First Payout).pdf', data: first },
-      { path: 'Nugegoda/September 6 – October 5 (Second Payout).pdf', data: second },
+      { path: 'Nugegoda/September 6 - September 20 (First Payout).pdf', data: first },
+      { path: 'Nugegoda/September 6 - October 5 (Second Payout).pdf', data: second },
     ]);
 
     expect(zip.readUInt32LE(0)).toBe(0x04034b50);

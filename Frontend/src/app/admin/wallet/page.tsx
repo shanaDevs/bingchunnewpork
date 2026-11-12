@@ -17,11 +17,12 @@ import BranchWalletTabs from '@/components/admin/BranchWalletTabs';
 import SuperAdminWalletTabs from '@/components/admin/SuperAdminWalletTabs';
 import type { PayoutDueRow } from '@/components/admin/PayoutsDuePanel';
 import {
-  duePeriodFocusFromRow,
+  dueRowToPeriodView,
   type DuePeriodFocus,
 } from '@/components/admin/payoutPeriodView';
 import type { StoreWallet } from '@/components/admin/SuperAdminSystemWalletTab';
 import WalletPeriodFilterBar from '@/components/admin/WalletPeriodFilterBar';
+import WalletPayoutsDueBranchFilter from '@/components/admin/WalletPayoutsDueBranchFilter';
 import {
   adminWalletOverviewQueryKey,
   adminWalletWithdrawalsQueryKey,
@@ -104,10 +105,12 @@ function WalletOverviewPageContent() {
     days: number;
     withdrawalId?: string;
   } | null>(null);
+  const [duePayoutViewRow, setDuePayoutViewRow] = useState<PayoutDueRow | null>(null);
   const [payoutPeriodsRefresh, setPayoutPeriodsRefresh] = useState(0);
 
   const apiBase = getApiBaseUrl();
   const dueTabActive = searchParams.get('tab') === 'due';
+  const dueStoreId = searchParams.get('dueStoreId');
   const urlFrom = searchParams.get('from');
   const urlTo = searchParams.get('to');
 
@@ -281,6 +284,11 @@ function WalletOverviewPageContent() {
     wallets.map((w) => [w.storeId, branchDisplayName(w.store.name)]),
   );
 
+  const branchFilterStores = useMemo(
+    () => wallets.map((w) => ({ id: w.storeId, name: w.store.name })),
+    [wallets],
+  );
+
   const walletFromDueRow = (row: PayoutDueRow): StoreWallet => {
     const existing = wallets.find((w) => w.storeId === row.storeId);
     return (
@@ -296,9 +304,7 @@ function WalletOverviewPageContent() {
   };
 
   const handleViewDuePayout = (row: PayoutDueRow) => {
-    setAutoInitiatePayout(false);
-    setDuePeriodFocus(duePeriodFocusFromRow(row));
-    setBranchWalletTarget(walletFromDueRow(row));
+    setDuePayoutViewRow(row);
   };
 
   const handleReviewDuePayout = (row: PayoutDueRow) => {
@@ -374,7 +380,11 @@ function WalletOverviewPageContent() {
               : 'Manage branch wallet, payouts and transaction history'}
           </p>
         </div>
-        <WalletPeriodFilterBar filter={periodFilter} className="shrink-0" />
+        {superAdmin && dueTabActive ? (
+          <WalletPayoutsDueBranchFilter stores={branchFilterStores} className="shrink-0" />
+        ) : (
+          <WalletPeriodFilterBar filter={periodFilter} className="shrink-0" />
+        )}
       </div>
 
       {error && (
@@ -430,7 +440,8 @@ function WalletOverviewPageContent() {
               setDuePeriodFocus(null);
               setBranchWalletTarget(wallet);
             }}
-            dueListEnabled={dueTabActive && Boolean(periodFrom && periodTo)}
+            dueListEnabled={dueTabActive}
+            dueStoreId={dueStoreId}
             onViewDuePayout={handleViewDuePayout}
             onReviewDuePayout={handleReviewDuePayout}
             tabActions={walletTabActions}
@@ -478,6 +489,32 @@ function WalletOverviewPageContent() {
           }}
         />
       )}
+
+      {superAdmin && duePayoutViewRow && (() => {
+        const dueWallet = walletFromDueRow(duePayoutViewRow);
+        const dueView = dueRowToPeriodView(duePayoutViewRow);
+        return (
+          <WalletWithdrawalModal
+            open
+            onClose={() => setDuePayoutViewRow(null)}
+            viewWithdrawal={dueView.withdrawal}
+            viewPeriodOnly={dueView.viewPeriodOnly}
+            viewPeriodDisplay={dueView.periodDisplay}
+            walletBalance={dueWallet.balance ?? dueWallet.currentBalance ?? 0}
+            availableBalance={
+              dueWallet.availableBalance ??
+              Math.max(
+                0,
+                (dueWallet.netTransferableEarnings ?? 0) - (dueWallet.totalWithdrawn ?? 0),
+              )
+            }
+            storeId={duePayoutViewRow.storeId}
+            apiBase={apiBase}
+            onSubmitted={() => undefined}
+            showGatewayFees={false}
+          />
+        );
+      })()}
 
       {superAdmin && initiatePayoutTarget && (
         <AdminInitiatePayoutModal

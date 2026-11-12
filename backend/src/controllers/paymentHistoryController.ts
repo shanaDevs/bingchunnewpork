@@ -886,6 +886,7 @@ async function mapSettlementToPlatformPayout(
     amount: platformReceivable,
     platformReceivable,
     platformInvoiceUrl: platformProviderSettlementInvoiceApiPath(settlement.id),
+    platformReceivableSettlementId: settlement.id,
   };
 }
 

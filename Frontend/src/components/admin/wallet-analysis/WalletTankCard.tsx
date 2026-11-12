@@ -28,7 +28,6 @@ function healthLabel(percent: number) {
 }
 
 const WHITE = '#ffffff';
-const SECONDARY = 'rgba(255,255,255,0.72)';
 const MUTED = 'rgba(220,235,255,0.7)';
 
 function BlinkingStatusDot({ className = '' }: { className?: string }) {
@@ -237,32 +236,26 @@ export default function WalletTankCard({
           </>
         ) : (
           <>
-            <div className="min-w-0">
+            <div className="flex min-w-0 flex-col justify-center">
               <p className="m-0 text-[11px] font-medium leading-tight" style={{ color: MUTED }}>
-                Delivery fee
+                Online available delivery fee
               </p>
               <p
-                className="mt-1 mb-0 truncate text-[14px] font-semibold tabular-nums leading-tight"
+                className="mt-1.5 mb-0 truncate text-[17px] font-semibold tabular-nums leading-tight sm:text-[19px]"
                 style={{ color: WHITE }}
               >
                 {formatMoney(deliveryFee)}
               </p>
-              <p className="mt-0.5 mb-0 text-[10px] leading-tight" style={{ color: SECONDARY }}>
-                Online · excluded from Online Available Balance
-              </p>
             </div>
-            <div className="min-w-0 border-l border-white/15 pl-3">
+            <div className="flex min-w-0 flex-col justify-center border-l border-white/15 pl-3">
               <p className="m-0 text-[11px] font-medium leading-tight" style={{ color: MUTED }}>
-                Convenience fee
+                Online available convenience fee
               </p>
               <p
-                className="mt-1 mb-0 truncate text-[14px] font-semibold tabular-nums leading-tight"
+                className="mt-1.5 mb-0 truncate text-[17px] font-semibold tabular-nums leading-tight sm:text-[19px]"
                 style={{ color: WHITE }}
               >
                 {formatMoney(convenienceFee)}
-              </p>
-              <p className="mt-0.5 mb-0 text-[10px] leading-tight" style={{ color: SECONDARY }}>
-                Online · excluded from Online Available Balance
               </p>
             </div>
           </>
