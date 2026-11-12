@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "cross-env TZ=Asia/Colombo PORT=3100 next dev --webpack",
-    "build": "next build",
-    "start": "cross-env PORT=3100 next start",
+    "dev": "node init && cross-env TZ=Asia/Colombo PORT=3100 next dev --webpack",
+    "build": "node init && next build",
+    "start": "node init && cross-env PORT=3100 next start",
     "lint": "eslint",
     "test": "vitest run",
     "sync-from-main": "powershell -ExecutionPolicy Bypass -File ../scripts/sync-delivery-frontend.ps1"
