@@ -6,6 +6,7 @@ import {
   minDateStr,
   nextPeriodStartFromPeriodTo,
   resolveLiveDeliveryWalletRange,
+  resolveOpenDeliveryPayoutWindow,
   toBusinessDateStr,
   todayUtcDateStr,
   validateDeliveryPayoutRange,
@@ -170,5 +171,51 @@ describe('minDateStr', () => {
 
   it('returns null when there are no valid dates', () => {
     expect(minDateStr([null, undefined, ''])).toBeNull();
+  });
+});
+
+describe('resolveOpenDeliveryPayoutWindow', () => {
+  const days = DELIVERY_PAYOUT_PERIOD_DAYS[0];
+
+  it('returns the in-progress window when today falls inside the first cycle', () => {
+    expect(
+      resolveOpenDeliveryPayoutWindow({
+        periodStart: '2026-09-01',
+        days,
+        today: '2026-09-10',
+      }),
+    ).toEqual({
+      days: 15,
+      from: '2026-09-01',
+      cycleTo: '2026-09-15',
+      through: '2026-09-10',
+      capped: true,
+    });
+  });
+
+  it('skips fully elapsed windows and returns the cycle containing today', () => {
+    expect(
+      resolveOpenDeliveryPayoutWindow({
+        periodStart: '2026-08-01',
+        days,
+        today: '2026-09-10',
+      }),
+    ).toEqual({
+      days: 15,
+      from: '2026-08-31',
+      cycleTo: '2026-09-14',
+      through: '2026-09-10',
+      capped: true,
+    });
+  });
+
+  it('returns null when period start is after today', () => {
+    expect(
+      resolveOpenDeliveryPayoutWindow({
+        periodStart: '2026-09-20',
+        days,
+        today: '2026-09-10',
+      }),
+    ).toBeNull();
   });
 });

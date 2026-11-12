@@ -43,6 +43,10 @@ const secretKeys = [
   'INTERNAL_SERVICE_SECRET',
   'DELIVERY_OTP_PEPPER',
   'DRIVER_PIN_PEPPER',
+  'DO_SPACES_KEY',
+  'DO_SPACES_SECRET',
+  'DO_SPACES_BUCKET',
+  'DO_SPACES_ENDPOINT',
 ];
 
 let yaml = fs.readFileSync(specPath, 'utf8');

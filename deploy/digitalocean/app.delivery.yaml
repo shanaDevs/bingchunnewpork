@@ -99,6 +99,28 @@ services:
       - key: GOOGLE_MAPS_API_KEY
         value: REPLACE_ME
         type: SECRET
+      - key: DO_SPACES_KEY
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_SECRET
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_BUCKET
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_REGION
+        scope: RUN_TIME
+        value: "sgp1"
+      - key: DO_SPACES_ENDPOINT
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: DO_SPACES_PREFIX
+        scope: RUN_TIME
+        value: "bingchun"
       - key: DELIVERY_FRONTEND_URL
         scope: RUN_TIME
         value: "https://delivery.bingchunsrilanka.com"

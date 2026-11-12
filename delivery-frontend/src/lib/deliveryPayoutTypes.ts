@@ -36,7 +36,12 @@ export type DeliveryPayoutHistoryRow = {
   periodFrom: string;
   periodTo: string;
   requestedById?: string;
+  paymentMethod?: string | null;
+  /** Always null in list API; use hasProof + proof-url endpoint. */
   proofUrl?: string | null;
+  hasProof?: boolean;
+  checkNumber?: string | null;
+  checkDate?: string | null;
   breakdown?: DeliveryWalletSummary | null;
   createdAt: string;
 };

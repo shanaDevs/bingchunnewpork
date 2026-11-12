@@ -348,6 +348,7 @@ All require `authenticate` + `requireDeliveryDriver`.
 | GET | `/jobs` | List jobs (includes rideCode, cups, estimates, delivery fee) |
 | GET | `/jobs/active` | Active job (ASSIGNED / IN_PROGRESS / RETURNING / QUEUED) |
 | GET | `/jobs/:id` | Job detail (includes completionRadiusM on store, canComplete) |
+| GET | `/jobs/history` | Recent completed / terminal runs for the History tab (query `limit`, max 100) |
 | GET | `/jobs/:id/route` | Job route geometry (see redaction note below) |
 | POST | `/jobs/:id/assign` | Claim job |
 | POST | `/jobs/:id/claim` | Claim job (preferred) |
@@ -356,6 +357,45 @@ All require `authenticate` + `requireDeliveryDriver`.
 | POST | `/jobs/:id/complete` | Complete job — body `{ lat, lng }`; requires RETURNING + within branch radius |
 | PUT | `/orders/:orderId/status` | Update order on job; last delivered order moves ride to RETURNING |
 | GET | `/me/stats` | Rider's own performance figures for the driver app's Stats tab |
+| GET | `/me/notifications` | Account inbox (complaint / branch-request updates from admin); query `unread`, `limit` |
+| PATCH | `/me/notifications/:id/read` | Mark one notification read |
+| POST | `/me/notifications/read-all` | Mark all notifications read |
+
+Admin complaint or branch-request review creates rows in `delivery.driver_notifications` and sends FCM `DRIVER_UPDATE` when the rider has a registered device token.
+
+### GET `/jobs/history`
+
+Each job in `data[]` includes existing aggregates (`deliveredCount`, `deliveredTotal`, …) plus:
+
+- `failedCount` — stops on this job with a latest non-`DELIVERED` delivery attempt (same basis as job detail `deliveryFailed`).
+- `orders[]` — per stop: `orderId`, `status`, `cancelledAtStatus`, `deliveryFailed`, `failureOutcome`, `failureNote`, `failureReason`.
+- HQ **admin-closed** terminal rides (`status: CANCELLED` with a `delivery_job_admin_cancellations` row) are included for the assigned rider. Those rows use `displayStatus: ADMIN_CLOSED`, `cancelReason` (HQ closure reason), and `completedAt` as the close time (falls back to the admin-cancellation timestamp when needed). `rideCode` identifies the run in the app. Pre-pickup admin closes that re-offer the job to the branch pool are not listed here.
+
+```jsonc
+{
+  "success": true,
+  "data": [
+    {
+      "id": "…",
+      "deliveredCount": 3,
+      "failedCount": 1,
+      "orders": [
+        {
+          "orderId": "…",
+          "status": "DELIVERED",
+          "cancelledAtStatus": null,
+          "deliveryFailed": false,
+          "failureOutcome": null,
+          "failureNote": null,
+          "failureReason": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+Handlers: `backend/src/controllers/deliveryJobController.ts` and `delivery-service/src/controllers/jobsController.ts`.
 
 ### GET `/jobs/:id/route` — what an unclaimed job reveals
 

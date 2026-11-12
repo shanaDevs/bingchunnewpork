@@ -5,7 +5,7 @@ import { logger } from '../utils/logger';
 const PROXY_TIMEOUT_MS = 15_000;
 
 /** Driver complaint/branch-request writes stay on core when the DS is slow or DB-flaky. */
-const CORE_ONLY_PREFIXES = ['/me/complaints', '/me/branch-requests'];
+const CORE_ONLY_PREFIXES = ['/me/complaints', '/me/branch-requests', '/me/notifications'];
 
 export type DeliveryProxyOptions = {
   /** When omitted, uses `DELIVERY_SERVICE_ENABLED`. */
