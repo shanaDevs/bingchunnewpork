@@ -7,7 +7,7 @@ import { prisma } from './prisma';
 import { haversineKm } from '../utils/geo';
 import { isCorsAllowedOrigin } from './resolveFrontendUrl';
 import { getLiveTrackingForOrder } from './liveDriverTracking';
-import { resolveOrderAccess, orderIdentifierWhere } from './orderAccess';
+import { resolveCustomerOrderAccess, orderIdentifierWhere } from './orderAccess';
 import { isBranchScopedRole, assertDriverSession, SESSION_SUPERSEDED, type JwtPayload } from '../middleware/auth';
 import { getDriverAccessibleStoreIds } from './driverAccess';
 import { getRedisPubSub } from './redisClient';
@@ -235,14 +235,14 @@ async function authorizeTrackOrder(
 
   const order = await prisma.order.findFirst({
     where: orderIdentifierWhere(identifier),
-    select: { id: true, orderNumber: true, trackToken: true, userId: true },
+    select: { id: true, orderNumber: true, trackToken: true, userId: true, guestPhone: true },
   });
   if (!order) return null;
 
   const token = readHandshakeToken(socket);
   const jwtPayload = token ? verifyToken(token) : null;
 
-  const access = resolveOrderAccess({
+  const access = await resolveCustomerOrderAccess({
     order,
     identifier,
     trackToken,

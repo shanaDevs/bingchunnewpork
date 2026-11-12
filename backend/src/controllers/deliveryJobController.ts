@@ -1057,9 +1057,10 @@ export async function startJob(req: Request, res: Response, next: NextFunction) 
     );
 
     // Always issue delivery PIN SMS on start-run (includes rider + vehicle details).
-    await Promise.all(
-      orderIds.map((id) => ensureOtpForOrder(id, { startedByDriverId: driverId }).catch(() => {})),
-    );
+    // Sequential so SmsLenz rate limits are not tripped by multi-stop fan-out.
+    for (const id of orderIds) {
+      await ensureOtpForOrder(id, { startedByDriverId: driverId }).catch(() => {});
+    }
 
     broadcastDeliveryJobUpdated(job.storeId, { jobId: job.id, status: 'IN_PROGRESS' });
 
