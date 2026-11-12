@@ -312,7 +312,9 @@ export async function loadPayoutPeriodItems(storeId: string) {
       }
     }
     const withdrawalForRow =
-      breakdown === withdrawal.breakdown ? withdrawal : { ...withdrawal, breakdown };
+      breakdown === withdrawal.breakdown
+        ? withdrawal
+        : { ...withdrawal, breakdown: breakdown as Prisma.JsonValue };
     items.push({
       key: `wd-${withdrawal.id}`,
       periodFrom,
