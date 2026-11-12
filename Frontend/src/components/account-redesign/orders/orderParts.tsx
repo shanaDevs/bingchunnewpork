@@ -211,7 +211,15 @@ export function useReorder() {
       try {
         const product = await api.get<{ isAvailable: boolean } & Record<string, unknown>>(`/menu/products/${item.productId}`);
         if (!product.isAvailable) continue;
-        const result = addItem({ product: product as never, size: item.size as never, toppings: [], quantity: item.quantity, unitPrice: item.unitPrice });
+        const result = addItem({
+          product: product as never,
+          size: item.size as never,
+          sugarLevel: item.sugarLevel ?? null,
+          iceLevel: item.iceLevel ?? null,
+          toppings: [],
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        });
         if (result?.ok !== false) added++;
       } catch (err) {
         // Gone from the menu: skipped, as before.

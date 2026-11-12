@@ -49,7 +49,7 @@ function sameToppingIds(a: string[], b: string[]): boolean {
 }
 
 function formatNewItemOptionLine(toppingNames: string[]): string {
-  const base = 'Regular · 100% Sugar · Regular Ice';
+  const base = 'Regular · 100% Sugar · Normal Ice';
   if (toppingNames.length === 0) return base;
   return `${base} · + ${toppingNames.join(', ')}`;
 }
@@ -416,7 +416,7 @@ export default function AdminOrderEditModal({ open, order, mode, onClose, onSave
           item.productId === product.id &&
           item.size === 'REGULAR' &&
           item.sugarLevel === 'HUNDRED' &&
-          item.iceLevel === 'REGULAR' &&
+          item.iceLevel === 'NORMAL_ICE' &&
           sameToppingIds(item.toppingIds, toppingIds),
       );
       if (existingNew && existingNew.kind === 'new') {
@@ -435,7 +435,7 @@ export default function AdminOrderEditModal({ open, order, mode, onClose, onSave
           productName: product.name,
           size: 'REGULAR' as const,
           sugarLevel: 'HUNDRED' as const,
-          iceLevel: 'REGULAR' as const,
+          iceLevel: 'NORMAL_ICE' as const,
           toppingIds,
           unitPrice,
           quantity,

@@ -11,6 +11,7 @@ import { cn } from "@/components/home-redesign/lib/cn";
 import { cancellationReasonLabel } from "@/lib/cancellationReasons";
 import { formatRefundAmount } from "@/lib/orderCancel";
 import type { Order, PaymentMethod } from "@/types";
+import { itemOptionLine } from "@/lib/receipt";
 import { useMyOrders } from "../accountData";
 import { LiveOrderRow } from "../AccountHome";
 import { BrowseMenuLink, card, cardFrame, focusRing, primaryButton, secondaryButton } from "../accountUi";
@@ -954,7 +955,7 @@ function OrderDetails({ tracking, order, reference }: { tracking: OrderTracking;
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-brand-950 sm:text-base">{item.productName}</p>
                       <p className="text-xs text-slate-500 sm:text-sm">
-                        × {item.quantity} · {sizeLabel(item.size)}
+                        × {item.quantity} · {itemOptionLine(item)}
                         {item.toppings?.length > 0 && <> · {item.toppings.map((topping) => topping.toppingName).join(", ")}</>}
                       </p>
                     </div>
@@ -1003,8 +1004,6 @@ function OrderDetails({ tracking, order, reference }: { tracking: OrderTracking;
     </>
   );
 }
-
-const sizeLabel = (size: string) => (size === "LARGE" ? "Large" : size === "REGULAR" ? "Regular" : size.charAt(0) + size.slice(1).toLowerCase());
 
 /** Phones: Reorder, on a white pill floating above the bottom bar (clear of its raised Order Now button), sliding up as the page opens. */
 function PhoneReorderBar({ order }: { order: Order }) {
@@ -1061,7 +1060,7 @@ function OrderAgainPanel({ order }: { order: Order }) {
               <div className="min-w-0 flex-1">
                 <p className={cn("text-sm font-semibold wrap-break-word text-brand-950", off && "line-through decoration-slate-400")}>{item.productName}</p>
                 <p className="text-xs text-slate-500">
-                  × {item.quantity} · {sizeLabel(item.size)}
+                  × {item.quantity} · {itemOptionLine(item)}
                 </p>
                 {status !== "ready" ? (
                   <p className={cn("text-xs font-medium", status === "checking" ? "text-slate-500" : "text-rose-700")}>{AGAIN_NOTES[status]}</p>

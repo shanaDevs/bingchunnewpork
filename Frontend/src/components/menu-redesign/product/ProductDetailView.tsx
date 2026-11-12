@@ -11,13 +11,25 @@ import { Container } from '@/components/home-redesign/ui/Container';
 import { heroBackdropImage } from '@/components/home-redesign/sections/hero/hero.config';
 import { cn } from '@/components/home-redesign/lib/cn';
 import { formatLkr } from '@/components/menu-redesign/lib/formatMenuPrice';
-import { QuantityStepper, ToppingsField } from '@/components/menu-redesign/product/ProductOptions';
+import {
+  IceLevelField,
+  QuantityStepper,
+  SugarLevelField,
+  ToppingsField,
+} from '@/components/menu-redesign/product/ProductOptions';
 import { ProductReviewsSection } from '@/components/menu-redesign/product/ProductReviewsSection';
 import { RelatedProducts } from '@/components/menu-redesign/product/RelatedProducts';
 import OnlineOrderingClosedBanner from '@/components/order/OnlineOrderingClosedBanner';
 import { openOrderModal } from '@/components/order/SiteOrderPrompt';
 import { useCartHydrated } from '@/hooks/useCartHydrated';
 import { useBranchOrderingHours } from '@/hooks/useBranchOrderingHours';
+import {
+  DEFAULT_ICE_LEVEL,
+  DEFAULT_SUGAR_LEVEL,
+  productNeedsDrinkOptions,
+  type IceLevel,
+  type SugarLevel,
+} from '@/lib/drinkOptions';
 import { hasCompletedOrderSetup } from '@/lib/orderSetup';
 import { cameFromMenu } from '@/lib/menuReturn';
 import { trackRecentlyViewed } from '@/lib/recentlyViewed';
@@ -43,6 +55,8 @@ export default function ProductDetailView() {
   const photoRef = useRef<HTMLImageElement>(null);
 
   const [selectedToppings, setSelectedToppings] = useState<Topping[]>([]);
+  const [sugarLevel, setSugarLevel] = useState<SugarLevel>(DEFAULT_SUGAR_LEVEL);
+  const [iceLevel, setIceLevel] = useState<IceLevel>(DEFAULT_ICE_LEVEL);
   const [quantity, setQuantity] = useState(1);
 
   const addItem = useCartStore((s) => s.addItem);
@@ -74,6 +88,7 @@ export default function ProductDetailView() {
     () => (product?.toppings ?? []).map((pt) => pt.topping).filter((t) => t.isAvailable),
     [product?.toppings],
   );
+  const needsDrinkOptions = product ? productNeedsDrinkOptions(product) : false;
 
   const inStock = product ? isProductInStock(product) : false;
   const comingSoon = product ? isProductComingSoon(product) : false;
@@ -120,6 +135,8 @@ export default function ProductDetailView() {
     const result = addItem({
       product,
       size: 'REGULAR',
+      sugarLevel: needsDrinkOptions ? sugarLevel : null,
+      iceLevel: needsDrinkOptions ? iceLevel : null,
       toppings: selectedToppings,
       quantity: pickerQuantity,
       unitPrice,
@@ -252,9 +269,16 @@ export default function ProductDetailView() {
 
             {orderingClosed && <OnlineOrderingClosedBanner className="mt-6" message={branchOrdering.closedMessage} />}
 
+            {needsDrinkOptions && (
+              <fieldset disabled={!inStock} className={cn('mt-8 space-y-6 lg:mt-5 lg:space-y-5', !inStock && 'opacity-50')}>
+                <legend className="sr-only">Ice and sugar</legend>
+                <IceLevelField value={iceLevel} onChange={setIceLevel} disabled={!inStock} />
+                <SugarLevelField value={sugarLevel} onChange={setSugarLevel} disabled={!inStock} />
+              </fieldset>
+            )}
             {availableToppings.length > 0 && (
               <fieldset disabled={!inStock} className={cn('mt-8 lg:mt-5', !inStock && 'opacity-50')}>
-                <legend className="sr-only">Customize</legend>
+                <legend className="sr-only">Toppings</legend>
                 <ToppingsField toppings={availableToppings} value={selectedToppings} onToggle={toggleTopping} />
               </fieldset>
             )}

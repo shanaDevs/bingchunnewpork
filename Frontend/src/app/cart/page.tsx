@@ -12,6 +12,7 @@ import CupIcon, { cupFillFromCount } from '@/components/cart/CupIcon';
 import { useCupPourPulse } from '@/hooks/useCupPourPulse';
 import { openOrderModal } from '@/components/order/SiteOrderPrompt';
 import ProductImage from '@/components/ui/ProductImage';
+import { formatDrinkOptionLine } from '@/lib/drinkOptions';
 import { getMaxLineQty, getProductOrderableQty } from '@/lib/productAvailability';
 import toast from 'react-hot-toast';
 import PromoOffersPanel from '@/components/promotions/PromoOffersPanel';
@@ -107,8 +108,13 @@ function CartItemRow({
       <div className="flex-1 min-w-0">
         <h3 className="font-semibold text-fg text-sm line-clamp-1">{item.product.name}</h3>
         <p className="text-muted text-xs mt-0.5">
-          {item.size}
-          {item.toppings.length > 0 && ` · ${item.toppings.map((t) => t.name).join(', ')}`}
+          {[
+            item.size,
+            formatDrinkOptionLine({ iceLevel: item.iceLevel, sugarLevel: item.sugarLevel }),
+            item.toppings.length > 0 ? item.toppings.map((t) => t.name).join(', ') : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </p>
         {item.fulfillmentStore && (
           <p className="text-amber-400 text-xs mt-1">

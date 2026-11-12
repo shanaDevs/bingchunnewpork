@@ -168,9 +168,14 @@ async function attachCustomerCancelFields(order: OrderCancelFieldsInput) {
   );
 }
 
+const sugarLevelSchema = z.enum(['FIFTY', 'HUNDRED']);
+const iceLevelSchema = z.enum(['LESS_ICE', 'NORMAL_ICE']);
+
 const placeOrderItemSchema = z.object({
   productId: z.string(),
   size: z.enum(['REGULAR', 'LARGE']).default('REGULAR'),
+  sugarLevel: sugarLevelSchema.optional().nullable(),
+  iceLevel: iceLevelSchema.optional().nullable(),
   toppingIds: z.array(z.string()).default([]),
   quantity: z.number().int().min(1),
 });
@@ -297,6 +302,8 @@ type ResolvedCartLine = {
   productId: string;
   product: { id: string; name: string };
   size: string;
+  sugarLevel: z.infer<typeof sugarLevelSchema> | null;
+  iceLevel: z.infer<typeof iceLevelSchema> | null;
   quantity: number;
   unitPrice: number;
   toppings: { toppingId: string; topping: { id: string; name: string; extraPrice: number } }[];
@@ -336,6 +343,8 @@ async function resolveCartLines(
         productId: item.productId,
         product: { id: product.id, name: product.name },
         size: item.size,
+        sugarLevel: item.sugarLevel ?? null,
+        iceLevel: item.iceLevel ?? null,
         quantity: item.quantity,
         unitPrice: priced.unitPrice,
         toppings: priced.toppings,
@@ -381,6 +390,8 @@ async function resolveCartLines(
       productId: item.productId,
       product: { id: item.product.id, name: item.product.name },
       size: item.size,
+      sugarLevel: item.sugarLevel ?? null,
+      iceLevel: item.iceLevel ?? null,
       quantity: item.quantity,
       unitPrice: priced.unitPrice,
       toppings: priced.toppings,
@@ -1158,6 +1169,8 @@ export async function placeOrder(req: Request, res: Response, next: NextFunction
               productId: i.productId,
               productName: i.product.name,
               size: i.size as 'REGULAR' | 'LARGE',
+              sugarLevel: i.sugarLevel ?? undefined,
+              iceLevel: i.iceLevel ?? undefined,
               quantity: i.quantity,
               unitPrice: i.unitPrice,
               totalPrice: i.unitPrice * i.quantity,
@@ -1689,6 +1702,8 @@ export async function getMyOrders(req: Request, res: Response, next: NextFunctio
               unitPrice: true,
               totalPrice: true,
               size: true,
+              sugarLevel: true,
+              iceLevel: true,
               toppings: { select: { toppingName: true, extraPrice: true } },
               product: { select: { imageUrl: true } },
             },
@@ -2370,6 +2385,8 @@ export async function updateOrderItems(req: Request, res: Response, next: NextFu
             productId: line.productId,
             productName: line.product.name,
             size: line.size as 'REGULAR' | 'LARGE',
+            sugarLevel: line.sugarLevel ?? undefined,
+            iceLevel: line.iceLevel ?? undefined,
             quantity: line.quantity,
             unitPrice: line.unitPrice,
             totalPrice: line.unitPrice * line.quantity,

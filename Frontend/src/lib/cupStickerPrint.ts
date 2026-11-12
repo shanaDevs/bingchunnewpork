@@ -1,6 +1,7 @@
 import type { Order, OrderItem } from '@/types';
 import { adminApiFetch } from '@/lib/adminApi';
 import { getAdminSession } from '@/lib/adminAuth';
+import { formatDrinkOptionLine } from '@/lib/drinkOptions';
 
 /**
  * Chrome blocks HTTPS admin pages from calling http://127.0.0.1 directly.
@@ -139,17 +140,26 @@ function toppingNames(item: OrderItem): string[] {
     .filter(Boolean);
 }
 
+function drinkOptionAddons(item: OrderItem): string[] {
+  const line = formatDrinkOptionLine({
+    iceLevel: item.iceLevel,
+    sugarLevel: item.sugarLevel,
+  });
+  return line ? [line] : [];
+}
+
 /**
  * One sticker per cup unit (quantity expanded), labeled 1/N … N/N.
  * Each addon/topping on that cup gets its own extra sticker with the same cup number
  * (e.g. Bobo 1/2, Pearl 1/2, Matcha 2/2).
+ * Ice/sugar print as one options sticker when set (e.g. Less Ice · 100% Sugar).
  */
 export function buildCupStickers(order: Order, printedAt = formatStickerDateTime()): CupSticker[] {
   const orderLabel = stickerOrderLabel(order);
   const units: { itemName: string; addons: string[] }[] = [];
   for (const item of order.items || []) {
     const qty = item.quantity < 1 ? 1 : item.quantity;
-    const addons = toppingNames(item);
+    const addons = [...drinkOptionAddons(item), ...toppingNames(item)];
     for (let i = 0; i < qty; i++) {
       units.push({ itemName: item.productName, addons });
     }
