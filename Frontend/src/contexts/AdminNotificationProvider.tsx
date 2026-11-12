@@ -1079,19 +1079,6 @@ export function AdminNotificationProvider({
   useEffect(() => {
     if (!adminUserId) return;
 
-    void syncUnreadOrderAlerts(30 * 60_000);
-    const poll = window.setInterval(() => {
-      void syncUnreadOrderAlerts(30_000);
-    }, 15_000);
-
-    return () => {
-      window.clearInterval(poll);
-    };
-  }, [adminUserId, enableOrderAlerts, syncUnreadOrderAlerts]);
-
-  useEffect(() => {
-    if (!adminUserId) return;
-
     const prime = () => primeBranchOrderAudio();
     window.addEventListener('pointerdown', prime);
     window.addEventListener('keydown', prime);
@@ -1100,6 +1087,20 @@ export function AdminNotificationProvider({
     let cancelled = false;
     let authRetryTimer: number | null = null;
     let authFailCount = 0;
+    let pollTimer: number | null = null;
+    let socketLive = false;
+
+    const scheduleUnreadPoll = () => {
+      if (pollTimer != null) window.clearInterval(pollTimer);
+      // Socket carries new-order events; poll sparsely while connected.
+      const intervalMs = socketLive ? 60_000 : 15_000;
+      pollTimer = window.setInterval(() => {
+        void syncUnreadOrderAlerts(30_000);
+      }, intervalMs);
+    };
+
+    void syncUnreadOrderAlerts(30 * 60_000);
+    scheduleUnreadPoll();
 
     const joinRooms = () => {
       socket?.emit('joinAdmin', {
@@ -1137,8 +1138,15 @@ export function AdminNotificationProvider({
 
       socket.on('connect', () => {
         authFailCount = 0;
+        socketLive = true;
+        scheduleUnreadPoll();
         joinRooms();
         void syncUnreadOrderAlerts(30_000);
+      });
+
+      socket.on('disconnect', () => {
+        socketLive = false;
+        scheduleUnreadPoll();
       });
 
       socket.on('adminNotification', (payload: AdminNotificationPayload) => {
@@ -1266,6 +1274,7 @@ export function AdminNotificationProvider({
     return () => {
       cancelled = true;
       if (authRetryTimer != null) window.clearTimeout(authRetryTimer);
+      if (pollTimer != null) window.clearInterval(pollTimer);
       window.removeEventListener('pointerdown', prime);
       window.removeEventListener('keydown', prime);
       socket?.disconnect();

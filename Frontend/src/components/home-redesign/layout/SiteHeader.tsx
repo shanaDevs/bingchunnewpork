@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Globe, MapPin, ShoppingBag, Sparkles, UserRound } from "lucide-react";
+import { Check, ChevronDown, Globe, MapPin, ShoppingBag, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type Ref } from "react";
@@ -10,8 +10,6 @@ import { isCurrentNav, mainNav } from "@/components/home-redesign/config/site";
 import { cn } from "@/components/home-redesign/lib/cn";
 import { useHeaderState } from "@/components/home-redesign/hooks/useHeaderState";
 import { openOrderModal } from "@/components/order/SiteOrderPrompt";
-import { useSpinHeaderButton } from "@/hooks/useSpinHeaderButton";
-import { useSpinStore } from "@/store/spinStore";
 import { MOBILE_MENU_ID, MenuIcon, MobileMenu } from "./MobileMenu";
 
 /**
@@ -233,29 +231,38 @@ type HeaderActionsProps = {
 };
 
 /**
- * Language, Spin & Win (when the customer may spin), account, cart, pickup and (on tablets) the menu button. Rendered in
- * the header and again in the open mobile menu's top row, so opening the menu reads as the same row with the icon
- * turning into a cross. Below 400px the buttons and gaps tighten a little (the wordmark shrinks too), so the row fits
- * with the Spin & Win button; on the narrowest phones (below 360px) the language, account and spin buttons move out to
- * make room. Account and cart link to their pages; the store control opens the app's order setup (delivery or pickup).
- * The language pill is only in place for now: the site is English only, so it doesn't open anything yet.
+ * Language, account, cart, pickup and (on tablets) the menu button. Rendered in the header and again in the open mobile
+ * menu's top row, so opening the menu reads as the same row with the icon turning into a cross. Below 400px the buttons
+ * and gaps tighten a little (the wordmark shrinks too). On the narrowest phones (below 360px) the language and account
+ * buttons move out to make room. Account and cart link to their pages; the store control opens the app's order setup.
  */
 function HeaderActions({ onLight, menuOpen = false, inMenu = false, onMenuClick, menuButtonRef }: HeaderActionsProps) {
   const { accountHref, cartCount, storeKicker, storeLabel } = useHeaderState();
-  const { visible: showSpin } = useSpinHeaderButton();
-  const requestOpenSpin = useSpinStore((s) => s.requestOpenSpin);
-  // In the open menu, links close it on the way out; the order setup and the wheel wait for it to finish closing.
+  const [langOpen, setLangOpen] = useState(false);
+  const langRef = useRef<HTMLDivElement>(null);
+  // In the open menu, links close it on the way out; the order setup waits for the menu to finish closing.
   const leaveMenu = inMenu ? onMenuClick : undefined;
   const chooseStore = () => {
     if (!inMenu) return openOrderModal({ allowSkip: true });
     onMenuClick();
     window.setTimeout(() => openOrderModal({ allowSkip: true }), MENU_CLOSE_MS);
   };
-  const openSpin = () => {
-    if (!inMenu) return requestOpenSpin();
-    onMenuClick();
-    window.setTimeout(requestOpenSpin, MENU_CLOSE_MS);
-  };
+
+  useEffect(() => {
+    if (!langOpen) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!langRef.current?.contains(event.target as Node)) setLangOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setLangOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [langOpen]);
 
   const focusRing = cn(focusBase, onLight ? "focus-visible:outline-brand-600" : "focus-visible:outline-white");
   const roundButton = cn(
@@ -267,35 +274,54 @@ function HeaderActions({ onLight, menuOpen = false, inMenu = false, onMenuClick,
 
   return (
     <div className="flex items-center justify-self-end gap-1 min-[400px]:gap-1.5 sm:gap-2">
-      {/* Placeholder for the language choice (English / 中文), as in the design: no menu behind it yet. */}
-      <button
-        type="button"
-        aria-label="Language: English"
-        title="Language"
-        className={cn(
-          "flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold ring-1 ring-inset max-[400px]:px-2.5 max-[359px]:hidden",
-          fade,
-          focusRing,
-          onLight ? "text-brand-700 ring-brand-200 hover:bg-brand-50" : "text-snow ring-white/30 hover:bg-white/10",
-        )}
-      >
-        {/* Phones: just the code, so it fits the row beside the other buttons. */}
-        <Globe className="size-4 max-sm:hidden" aria-hidden="true" />
-        <span>EN</span>
-      </button>
-
-      {showSpin && (
+      <div ref={langRef} className="relative max-[359px]:hidden">
         <button
           type="button"
-          data-loyalty-target="spin-wheel"
-          onClick={openSpin}
-          aria-label="Spin to win"
-          title="Spin to win"
-          className={cn(roundButton, "cursor-pointer max-[359px]:hidden")}
+          aria-label="Language: English"
+          aria-haspopup="listbox"
+          aria-expanded={langOpen}
+          title="Language"
+          onClick={() => setLangOpen((open) => !open)}
+          className={cn(
+            "flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-semibold ring-1 ring-inset max-[400px]:px-2.5",
+            fade,
+            focusRing,
+            onLight ? "text-brand-700 ring-brand-200 hover:bg-brand-50" : "text-snow ring-white/30 hover:bg-white/10",
+          )}
         >
-          <Sparkles className="size-5" aria-hidden="true" />
+          <Globe className="size-4 max-sm:hidden" aria-hidden="true" />
+          <span>EN</span>
+          <ChevronDown className={cn("size-3.5 opacity-80 transition-transform", langOpen && "rotate-180")} aria-hidden="true" />
         </button>
-      )}
+        {langOpen && (
+          <ul
+            role="listbox"
+            aria-label="Choose language"
+            className={cn(
+              "absolute top-[calc(100%+0.4rem)] right-0 z-50 min-w-44 overflow-hidden rounded-2xl p-1 shadow-lg ring-1 ring-inset",
+              onLight ? "bg-white text-brand-900 ring-brand-100" : "bg-brand-700 text-snow ring-white/20",
+            )}
+          >
+            <li role="option" aria-selected className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold">
+              <Check className="size-4 shrink-0 text-sun-400" aria-hidden="true" />
+              English
+            </li>
+            <li>
+              <button
+                type="button"
+                role="option"
+                disabled
+                aria-selected={false}
+                title="Coming soon"
+                className="flex w-full cursor-not-allowed items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold opacity-55"
+              >
+                <span>中文</span>
+                <span className="text-[0.625rem] font-bold tracking-wide uppercase">Coming soon</span>
+              </button>
+            </li>
+          </ul>
+        )}
+      </div>
 
       <Link href={accountHref} onClick={leaveMenu} aria-label="Account" className={cn(roundButton, "max-[359px]:hidden")}>
         <UserRound className="size-5" aria-hidden="true" />

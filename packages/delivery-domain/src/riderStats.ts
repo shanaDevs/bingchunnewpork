@@ -202,7 +202,7 @@ export async function computeRiderStats(
       ? []
       : await prisma.deliveryAttempt.findMany({
           where: {
-            jobId: { in: jobs.map((job) => job.id) },
+            jobId: { in: jobs.map((job: { id: string }) => job.id) },
             outcome: { not: 'DELIVERED' },
           },
           select: { jobId: true, orderId: true },
@@ -225,7 +225,7 @@ export async function computeRiderStats(
 
   const shiftMetrics = computeShiftMetrics(shifts, from, to);
   const meritPoints = driver?.meritPoints ?? 0;
-  const ratingSum = ratings.reduce((sum, r) => sum + r.stars, 0);
+  const ratingSum = ratings.reduce((sum: number, r: { stars: number }) => sum + r.stars, 0);
 
   return {
     period: {
@@ -241,16 +241,16 @@ export async function computeRiderStats(
       onlineMinutes: shiftMetrics.onlineMinutes,
       attendanceDays: shiftMetrics.attendanceDays,
       averagePickupMinutes: averageMinutes(
-        jobs.map((j) => durationMs(j.assignedAt, j.startedAt)),
+        jobs.map((j: { assignedAt: Date | null; startedAt: Date | null }) => durationMs(j.assignedAt, j.startedAt)),
       ),
       averageDeliveryMinutes: averageMinutes(
-        jobs.map((j) => durationMs(j.startedAt, j.completedAt)),
+        jobs.map((j: { startedAt: Date | null; completedAt: Date | null }) => durationMs(j.startedAt, j.completedAt)),
       ),
     },
     rating: {
       average: ratings.length > 0 ? round1(ratingSum / ratings.length) : null,
       count: ratings.length,
-      recent: ratings.slice(0, 5).map((r) => ({
+      recent: ratings.slice(0, 5).map((r: { id: string; order?: { orderNumber?: string | null } | null; stars: number; comment: string | null; createdAt: Date }) => ({
         id: r.id,
         orderNumber: r.order?.orderNumber ?? null,
         stars: r.stars,
@@ -261,7 +261,7 @@ export async function computeRiderStats(
     merit: {
       points: meritPoints,
       status: meritStatusBand(meritPoints),
-      recent: meritRows.map((row) => ({
+      recent: meritRows.map((row: any) => ({
         id: row.id,
         changedPoints: row.changedPoints,
         newPoints: row.newPoints,

@@ -15,6 +15,7 @@ import LoyaltyPointsFloat from '@/components/cart/LoyaltyPointsFloat';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import CustomerSocketProvider from '@/components/notifications/CustomerSocketProvider';
 import { useSpinStore } from '@/store/spinStore';
+import { RouteProgress } from '@/components/ui/RouteProgress';
 
 const SpinWheelModal = dynamic(() => import('@/components/promo/SpinWheelModal'), {
   ssr: false,
@@ -69,6 +70,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
+        <RouteProgress />
         <CustomerSocketProvider>
         <CustomerAuthSync />
         <CartAuthSync />

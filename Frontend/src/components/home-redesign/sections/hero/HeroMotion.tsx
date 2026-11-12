@@ -48,8 +48,9 @@ export function HeroMotion({ children, ...props }: ComponentPropsWithoutRef<"sec
           const headerItems = Array.from(document.querySelectorAll("[data-header-row] > *"));
           // Every layout shows the full composition, so they share its choreography; the portrait ones
           // (`compact`) start the drinks further down, as they fill more of the hero there.
-          const ambient = buildStageAmbient(q);
-          const intro = buildStageIntro(q, ambient, !wide);
+          const compact = !wide;
+          const ambient = buildStageAmbient(q, compact);
+          const intro = buildStageIntro(q, ambient, compact);
 
           ScrollTrigger.create({
             trigger: scope.current,

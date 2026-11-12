@@ -83,7 +83,7 @@ export type HeroDrinkConfig = {
 export const heroDrinks: HeroDrinkConfig[] = [
   {
     id: "far-left",
-    src: "/images/products/Lemon-Green-Tea-700ml.png",
+    src: "/images/products/Lemon-Green-Tea-700ml.webp",
     alt: "Lemon Green Tea",
     width: 313,
     height: 800,
@@ -93,7 +93,7 @@ export const heroDrinks: HeroDrinkConfig[] = [
   },
   {
     id: "far-right",
-    src: "/images/products/Strawberry-Bobo-Jasmine-Milk-Tea-700ml.png",
+    src: "/images/products/Strawberry-Bobo-Jasmine-Milk-Tea-700ml.webp",
     alt: "Strawberry Bobo Jasmine Milk Tea",
     width: 346,
     height: 800,
@@ -103,7 +103,7 @@ export const heroDrinks: HeroDrinkConfig[] = [
   },
   {
     id: "left",
-    src: "/images/products/Strawberry-Mango-Lemon-Tea-v2.png",
+    src: "/images/products/Strawberry-Mango-Lemon-Tea-v2.webp",
     alt: "Strawberry Mango Lemon Tea",
     width: 463,
     height: 800,
@@ -114,7 +114,7 @@ export const heroDrinks: HeroDrinkConfig[] = [
   },
   {
     id: "right",
-    src: "/images/products/Blueberry-Bobo-Tea-500u.png",
+    src: "/images/products/Blueberry-Bobo-Tea-500u.webp",
     alt: "Blueberry Bobo Tea",
     width: 481,
     height: 800,
@@ -125,7 +125,7 @@ export const heroDrinks: HeroDrinkConfig[] = [
   },
   {
     id: "main",
-    src: "/images/products/Brown-Black-Sugar-Boba-Milk-Tea-500u.png",
+    src: "/images/products/Brown-Black-Sugar-Boba-Milk-Tea-500u.webp",
     alt: "Brown Black Sugar Boba Milk Tea",
     width: 463,
     height: 800,

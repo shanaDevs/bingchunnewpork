@@ -134,7 +134,7 @@ export default function AdminDeliveryClassificationTable({ visible, adminFetch }
       qc.invalidateQueries({ queryKey: ['admin-delivery-jobs-active'] });
       qc.invalidateQueries({ queryKey: ['admin-delivery-jobs-completed'] });
       qc.invalidateQueries({ queryKey: ['admin-orders'] });
-      qc.invalidateQueries({ queryKey: ['admin-orders-count'] });
+      qc.invalidateQueries({ queryKey: ['admin-orders-queue-counts'] });
       toast.success('Delivery job created');
       setRouteModalOpen(false);
       setPendingJob(null);

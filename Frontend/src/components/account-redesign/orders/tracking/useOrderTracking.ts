@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 import { useOrderTrackSocket, type DeliveryCodePayload, type DeliveryStatePayload, type EtaUpdatePayload } from "@/hooks/useCustomerSocket";
 import { api } from "@/lib/api";
 import { invalidateCustomerOrderLists, patchOrderInQueryCache } from "@/lib/orderCache";
+import { markSelfCancelledOrder } from "@/lib/orderCancel";
 import { buildStatusTimestampMap, getTrackingStepIndex, getTrackingSteps, isNewCompletionStatus, isTrackingComplete } from "@/lib/orderStatus";
 import { orderApiPath, rememberOrderTrackToken } from "@/lib/orderTrackSession";
 import { openPayHereCheckout } from "@/lib/openPayHereCheckout";
@@ -52,8 +53,8 @@ export function useOrderTracking(reference: string, initial?: Order) {
       const data = current.state.data;
       if (data && (data.status === "DELIVERED" || data.status === "CANCELLED")) return false;
       if (data && (data.paymentMethod === "PAYHERE" || data.paymentMethod === "CARD") && data.paymentStatus === "PENDING") return 8000;
-      // Keep checking during a delivery even with the socket on: events can be missed through proxies or reconnects.
-      if (data?.orderMode === "DELIVERY") return socketConnected.current ? 10_000 : 8_000;
+      // Socket is primary; sparse HTTP backup catches missed proxy events.
+      if (data?.orderMode === "DELIVERY") return socketConnected.current ? 45_000 : 8_000;
       if (socketConnected.current) return false;
       return data?.orderMode === "TAKEAWAY" ? 15_000 : 30_000;
     },
@@ -145,8 +146,10 @@ export function useOrderTracking(reference: string, initial?: Order) {
     mutationFn: ({ reason, customText }: { reason: string; customText?: string }) =>
       api.post(`/orders/${encodeURIComponent(reference)}/cancel`, { cancellationReason: reason, customReasonText: customText }, true),
     onSuccess: () => {
+      const orderNumber = order?.orderNumber ?? reference;
+      markSelfCancelledOrder(orderNumber);
       setLiveStatus("CANCELLED");
-      patchOrderInQueryCache(queryClient, [reference, order?.id, order?.orderNumber], { orderId: order?.id, orderNumber: order?.orderNumber ?? reference, status: "CANCELLED" });
+      patchOrderInQueryCache(queryClient, [reference, order?.id, order?.orderNumber], { orderId: order?.id, orderNumber, status: "CANCELLED" });
       void queryClient.invalidateQueries({ queryKey: ["order", reference] });
       invalidateCustomerOrderLists(queryClient);
       toast.success("Order cancelled");
@@ -207,7 +210,8 @@ export function useOrderTracking(reference: string, initial?: Order) {
     canCancel: Boolean(order?.canCancel) && !cancelled && !awaitingPayment,
     queuePosition: liveQueue?.queuePosition ?? order?.queuePosition,
     scheduledPickupAt: liveQueue?.scheduledPickupAt ?? order?.scheduledPickupAt,
-    etaMinutes: liveEtaMinutes ?? order?.estimatedMinutes,
+    etaMinutes:
+      liveEtaMinutes ?? (order?.estimatedMinutes && order.estimatedMinutes > 0 ? order.estimatedMinutes : null),
     onEtaUpdate,
     deliveryState,
     deliveryCode: order?.deliveryCode ?? socketCode,

@@ -13,6 +13,7 @@ import { SiteHeader } from "@/components/home-redesign/layout/SiteHeader";
 import { cn } from "@/components/home-redesign/lib/cn";
 import { heroBackdropImage } from "@/components/home-redesign/sections/hero/hero.config";
 import { api } from "@/lib/api";
+import { orderApiPath, rememberOrderTrackToken } from "@/lib/orderTrackSession";
 import { getOrderTrackUrl, receiptWasOpenedFromApp } from "@/lib/orderLinks";
 import { getStatusLabel } from "@/lib/orderStatus";
 import { customerLabel, customerPhone, formatMoney, formatReceiptDate, getPaymentStatusLabel, PAYMENT_METHOD_LABELS } from "@/lib/receipt";
@@ -34,7 +35,11 @@ export function ReceiptPage() {
   const router = useRouter();
   const { data: order, isLoading, isError } = useQuery<Order>({
     queryKey: ["order", id, "receipt"],
-    queryFn: () => api.get<Order>(`/orders/${id}`, true),
+    queryFn: async () => {
+      const data = await api.get<Order>(orderApiPath(id), false);
+      if (data?.orderNumber && data.trackToken) rememberOrderTrackToken(data.orderNumber, data.trackToken);
+      return data;
+    },
   });
 
   const back = () => (receiptWasOpenedFromApp() ? router.back() : router.push(BACK_FALLBACK));

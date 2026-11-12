@@ -71,14 +71,10 @@ export function statusHeadline(order: Order) {
   }
 }
 
-/**
- * When it should be ready (pickup) or with the customer (delivery): the scheduled pickup if there is one, else the
- * kitchen's estimate from when it was placed. Null when the backend has no estimate.
- */
-export function orderEta(order: Order): Date | null {
-  if (!isDelivery(order) && order.scheduledPickupAt) return new Date(order.scheduledPickupAt);
-  if (!order.estimatedMinutes) return null;
-  return new Date(new Date(order.createdAt).getTime() + order.estimatedMinutes * 60_000);
+/** Kitchen ETA in minutes from the backend only (no clock time derived from placement). */
+export function orderEtaMinutes(order: Order): number | null {
+  const minutes = order.estimatedMinutes;
+  return typeof minutes === "number" && minutes > 0 ? minutes : null;
 }
 
 /** Pickup or Delivery, with its icon. */

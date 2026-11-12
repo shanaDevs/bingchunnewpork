@@ -196,8 +196,6 @@ function DetailsStep({
     if (saving) return;
     const next = {
       ...(name.trim().length < 2 && { name: "Enter your name (at least 2 letters)." }),
-      // The backend can change an email but not remove one.
-      ...(!trimmedEmail && user.email && { email: "Your email can be changed, but not removed." }),
       ...(trimmedEmail && !EMAIL_PATTERN.test(trimmedEmail) && { email: "Enter a valid email, e.g. nimali@example.com." }),
     };
     setErrors(next);
@@ -208,7 +206,11 @@ function DetailsStep({
     }
     setSaving(true);
     try {
-      const updated = await api.put<User>("/auth/me", { name: name.trim(), ...(trimmedEmail ? { email: trimmedEmail } : {}) }, true);
+      const updated = await api.put<User>(
+        "/auth/me",
+        { name: name.trim(), email: trimmedEmail ? trimmedEmail : null },
+        true,
+      );
       updateUser(updated);
       void queryClient.invalidateQueries({ queryKey: ["me"] });
       toast.success("Your details are saved.");

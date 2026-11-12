@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { keepPreviousData, useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Search,
   X,
@@ -129,7 +129,6 @@ const STATUS_LABELS: Record<string, string> = {
 /** Default view — hides completed orders; use status dropdown for Delivered / All */
 const DEFAULT_STATUS_FILTER = 'active';
 const DELIVERY_ACTIVE_EXCLUDE = 'DELIVERED,OUT_FOR_DELIVERY';
-const QUEUE_EXCLUDE_STATUS = 'DELIVERED,OUT_FOR_DELIVERY,CANCELLED';
 
 function activeExcludeStatus(mode: OrderModeFilter): string {
   return mode === 'DELIVERY' ? DELIVERY_ACTIVE_EXCLUDE : 'DELIVERED';
@@ -469,8 +468,7 @@ function AdminOrdersContent() {
 
       upsertOptimisticAdminOrder(qc, order);
       void qc.refetchQueries({ queryKey: ['admin-orders'] });
-      void qc.refetchQueries({ queryKey: ['admin-orders-count'] });
-      void qc.refetchQueries({ queryKey: ['admin-orders-status-count'] });
+      void qc.refetchQueries({ queryKey: ['admin-orders-queue-counts'] });
     };
     window.addEventListener(ADMIN_NEW_ORDER_EVENT, onNewOrder);
     return () => window.removeEventListener(ADMIN_NEW_ORDER_EVENT, onNewOrder);
@@ -488,66 +486,53 @@ function AdminOrdersContent() {
     return () => window.clearTimeout(timer);
   }, [searchInput, activeTab, archiveView]);
 
-  const countQueries = useQueries({
-    queries: (['TAKEAWAY', 'DELIVERY'] as const).map((mode) => ({
-      queryKey: ['admin-orders-count', mode, dateRange.startDate, dateRange.endDate, channelFilter, processedById],
-      queryFn: async () => {
-        const params = new URLSearchParams({
-          page: '1',
-          limit: '1',
-          excludeStatus: QUEUE_EXCLUDE_STATUS,
-        });
-        params.set('orderMode', mode);
-        params.set('fulfillmentQueue', mode === 'TAKEAWAY' ? 'pickup' : 'delivery');
-        if (dateRange.startDate) params.set('startDate', dateRange.startDate);
-        if (dateRange.endDate) params.set('endDate', dateRange.endDate);
-        if (channelFilter) params.set('channel', channelFilter);
-        if (processedById) params.set('processedById', processedById);
-        const res = await adminFetch(`/orders?${params}`);
-        return (res as { meta?: { total?: number } }).meta?.total ?? 0;
-      },
-      enabled: mounted && !(pickupOnly && mode === 'DELIVERY'),
-      refetchInterval: 30_000,
-      refetchIntervalInBackground: false,
-    })),
-  });
-
-  const tabCounts: Record<OrderTab, number> = {
-    pickup: countQueries[0]?.data ?? 0,
-    delivery: pickupOnly ? 0 : (countQueries[1]?.data ?? 0),
-  };
-
   const queueStatuses = queueStatusesForTab(activeTab);
   const showQueueStatusTabs = !archiveView && isQueueStatusFilter(statusFilter);
 
-  const statusCountQueries = useQueries({
-    queries: queueStatuses.map((status) => ({
-      queryKey: ['admin-orders-status-count', activeTab, status, dateRange.startDate, dateRange.endDate, channelFilter, processedById],
-      queryFn: async () => {
-        const params = new URLSearchParams({
-          page: '1',
-          limit: '1',
-          status,
-        });
-        if (dateRange.startDate) params.set('startDate', dateRange.startDate);
-        if (dateRange.endDate) params.set('endDate', dateRange.endDate);
-        if (channelFilter) params.set('channel', channelFilter);
-        if (processedById) params.set('processedById', processedById);
-        params.set('orderMode', activeTab === 'pickup' ? 'TAKEAWAY' : 'DELIVERY');
-        params.set('fulfillmentQueue', activeTab === 'pickup' ? 'pickup' : 'delivery');
-        const res = await adminFetch(`/orders?${params}`);
-        return (res as { meta?: { total?: number } }).meta?.total ?? 0;
-      },
-      enabled: mounted && !archiveView,
-      refetchInterval: 30_000,
-      refetchIntervalInBackground: false,
-    })),
+  type QueueCountsPayload = {
+    tabs: { pickup: number; delivery: number };
+    status: Record<QueueStatusTab, number>;
+  };
+
+  /** Single aggregate counts call — socket/new-order invalidates; HTTP is a slow backup. */
+  const { data: queueCounts } = useQuery({
+    queryKey: [
+      'admin-orders-queue-counts',
+      activeTab,
+      dateRange.startDate,
+      dateRange.endDate,
+      channelFilter,
+      processedById,
+    ],
+    queryFn: async (): Promise<QueueCountsPayload> => {
+      const params = new URLSearchParams({ queue: activeTab });
+      if (dateRange.startDate) params.set('startDate', dateRange.startDate);
+      if (dateRange.endDate) params.set('endDate', dateRange.endDate);
+      if (channelFilter) params.set('channel', channelFilter);
+      if (processedById) params.set('processedById', processedById);
+      const res = await adminFetch(`/orders/queue-counts?${params}`);
+      const payload = (res as { data?: QueueCountsPayload }).data;
+      return (
+        payload ?? {
+          tabs: { pickup: 0, delivery: 0 },
+          status: { RECEIVED: 0, PREPARING: 0, READY: 0 },
+        }
+      );
+    },
+    enabled: mounted,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
   });
 
+  const tabCounts: Record<OrderTab, number> = {
+    pickup: queueCounts?.tabs.pickup ?? 0,
+    delivery: pickupOnly ? 0 : (queueCounts?.tabs.delivery ?? 0),
+  };
+
   const statusCounts: Record<QueueStatusTab, number> = {
-    RECEIVED: statusCountQueries[0]?.data ?? 0,
-    PREPARING: statusCountQueries[1]?.data ?? 0,
-    READY: statusCountQueries[2]?.data ?? 0,
+    RECEIVED: queueCounts?.status.RECEIVED ?? 0,
+    PREPARING: queueCounts?.status.PREPARING ?? 0,
+    READY: queueCounts?.status.READY ?? 0,
   };
 
   const { data: cashiers = [] } = useQuery<{ id: string; name: string }[]>({
@@ -618,7 +603,8 @@ function AdminOrdersContent() {
     },
     enabled: mounted,
     placeholderData: keepPreviousData,
-    refetchInterval: appliedSearch ? false : 30_000,
+    // Socket + new-order event refresh the board; HTTP backup every 60s.
+    refetchInterval: appliedSearch ? false : 60_000,
     refetchIntervalInBackground: false,
   });
 

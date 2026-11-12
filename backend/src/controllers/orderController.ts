@@ -2667,6 +2667,96 @@ export async function getCashierActivity(req: Request, res: Response, next: Next
   } catch (err) { next(err); }
 }
 
+/**
+ * One round-trip for cashier tab + status badge counts (replaces N× GET /orders?limit=1).
+ * Query: startDate, endDate, channel, processedById, queue=pickup|delivery (status bucket scope).
+ */
+export async function getQueueCounts(req: Request, res: Response, next: NextFunction) {
+  try {
+    const {
+      startDate,
+      endDate,
+      channel,
+      processedById,
+      queue = 'pickup',
+      storeId,
+    } = req.query as Record<string, string>;
+
+    const baseWhere: Prisma.OrderWhereInput = {};
+    if (
+      channel === 'WEB' ||
+      channel === 'APP' ||
+      channel === 'POS' ||
+      channel === 'WHATSAPP' ||
+      channel === 'TELEGRAM'
+    ) {
+      baseWhere.channel = channel;
+    }
+    if (processedById?.trim()) {
+      baseWhere.processedByAdminId = processedById.trim();
+    }
+    if (isBranchScopedRole(req.user?.role)) {
+      baseWhere.storeId = await requireBranchStoreId(req);
+    } else if (storeId) {
+      baseWhere.storeId = storeId;
+    }
+
+    const createdAtFilter: { gte?: Date; lte?: Date } = {};
+    if (startDate) {
+      const from = new Date(startDate);
+      if (!Number.isNaN(from.getTime())) {
+        from.setHours(0, 0, 0, 0);
+        createdAtFilter.gte = from;
+      }
+    }
+    if (endDate) {
+      const to = new Date(endDate);
+      if (!Number.isNaN(to.getTime())) {
+        to.setHours(23, 59, 59, 999);
+        createdAtFilter.lte = to;
+      }
+    }
+    if (createdAtFilter.gte || createdAtFilter.lte) {
+      baseWhere.createdAt = createdAtFilter;
+    }
+
+    const queueExclude = ['DELIVERED', 'OUT_FOR_DELIVERY', 'CANCELLED'] as const;
+    const statusTabs = ['RECEIVED', 'PREPARING', 'READY'] as const;
+    const activeQueue: FulfillmentQueueKind = queue === 'delivery' ? 'delivery' : 'pickup';
+    const activeMode = activeQueue === 'pickup' ? 'TAKEAWAY' : 'DELIVERY';
+
+    const withQueue = (mode: 'TAKEAWAY' | 'DELIVERY', fq: FulfillmentQueueKind): Prisma.OrderWhereInput => ({
+      ...baseWhere,
+      orderMode: mode,
+      status: { notIn: [...queueExclude] },
+      AND: [fulfillmentQueuePaymentWhere(fq)],
+    });
+
+    const withStatus = (status: (typeof statusTabs)[number]): Prisma.OrderWhereInput => ({
+      ...baseWhere,
+      orderMode: activeMode,
+      status,
+      AND: [fulfillmentQueuePaymentWhere(activeQueue)],
+    });
+
+    const [pickup, delivery, received, preparing, ready] = await Promise.all([
+      prisma.order.count({ where: withQueue('TAKEAWAY', 'pickup') }),
+      prisma.order.count({ where: withQueue('DELIVERY', 'delivery') }),
+      prisma.order.count({ where: withStatus('RECEIVED') }),
+      prisma.order.count({ where: withStatus('PREPARING') }),
+      prisma.order.count({ where: withStatus('READY') }),
+    ]);
+
+    return success(res, {
+      tabs: { pickup, delivery },
+      status: { RECEIVED: received, PREPARING: preparing, READY: ready },
+      queue: activeQueue,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getAllOrders(req: Request, res: Response, next: NextFunction) {
   try {
     const {

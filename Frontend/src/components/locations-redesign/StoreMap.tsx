@@ -187,8 +187,11 @@ export function StoreMap({ stores, selectableIds, selectedId, highlightedId, use
         markers.set(store.id, marker);
       }
 
-      // Keep the attribution link out of the tab order (see the note above).
-      container.querySelectorAll("a").forEach((link) => link.setAttribute("tabindex", "-1"));
+      container.querySelectorAll(".leaflet-control-attribution a").forEach((link) => {
+        link.setAttribute("target", "_blank");
+        link.setAttribute("rel", "noopener noreferrer");
+        link.setAttribute("tabindex", "-1");
+      });
       mapRef.current = map;
       setMapVersion((version) => version + 1);
     });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { homeFontVariables } from "@/components/home-redesign/fonts";
 import { BottomNav } from "@/components/home-redesign/layout/BottomNav";
 import { SiteFooter } from "@/components/home-redesign/layout/SiteFooter";
@@ -52,6 +52,18 @@ export default function OffersPage() {
   const { data, status, refetch } = useOffersPagePromos();
   const promotions = useMemo(() => toPromotions(data ?? []), [data]);
   useRemeasureOnResize();
+
+  useEffect(() => {
+    if (status !== "success") return;
+    const hash = window.location.hash;
+    if (!hash.startsWith("#promo-")) return;
+    const id = hash.slice(1);
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const run = () =>
+      document.getElementById(id)?.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
+    const t = window.setTimeout(run, 120);
+    return () => window.clearTimeout(t);
+  }, [status, promotions]);
 
   return (
     <div className={`home-redesign ${homeFontVariables} relative flex min-h-dvh flex-col antialiased`}>

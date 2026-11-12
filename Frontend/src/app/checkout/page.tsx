@@ -256,8 +256,8 @@ function CheckoutPage() {
 
   const paymentMethods = paymentConfig?.methods ?? [];
   const availablePaymentMethods = useMemo(
-    () => filterCheckoutPaymentMethods(paymentMethods, orderMode, sub),
-    [paymentMethods, orderMode, sub],
+    () => filterCheckoutPaymentMethods(paymentMethods, orderMode, sub, pickupMaxOrderAmount),
+    [paymentMethods, orderMode, sub, pickupMaxOrderAmount],
   );
   const baseDeliveryFee =
     orderMode === 'DELIVERY' ? (deliveryInfo?.fee ?? validation?.zone?.fee ?? 0) : 0;

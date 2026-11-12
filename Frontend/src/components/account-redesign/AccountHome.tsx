@@ -83,7 +83,7 @@ export function PhoneAccountMenu() {
   const figures: Partial<Record<(typeof accountNav)[number]["id"], string>> = {
     orders: count(orders?.length, "order", "orders"),
     addresses: count(addresses?.length, "saved", "saved"),
-    rewards: summary ? `${balance.toLocaleString("en-US")} pts` : undefined,
+    rewards: summary && balance != null ? `${balance.toLocaleString("en-US")} pts` : undefined,
   };
   const rowClass = cn("flex min-h-15 w-full items-center gap-3.5 px-4 py-2.5 text-left transition-colors active:bg-brand-50", focusRing, "focus-visible:-outline-offset-2");
 

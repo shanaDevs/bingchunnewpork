@@ -302,6 +302,7 @@ export interface Order {
     createdAt: string;
   } | null;
   refund?: Refund;
+  cancelledBy?: string | null;
 }
 
 export interface OrderItem {

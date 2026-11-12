@@ -4,13 +4,15 @@ import { ArrowLeft, Banknote, Bike, Check, ChevronDown, ChevronRight, Clock, Cre
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import { cn } from "@/components/home-redesign/lib/cn";
+import { cancellationReasonLabel } from "@/lib/cancellationReasons";
+import { formatRefundAmount } from "@/lib/orderCancel";
 import type { Order, PaymentMethod } from "@/types";
 import { useMyOrders } from "../accountData";
 import { LiveOrderRow } from "../AccountHome";
-import { useNow } from "../colomboTime";
 import { BrowseMenuLink, card, cardFrame, focusRing, primaryButton, secondaryButton } from "../accountUi";
 import {
   DoneBadge,
@@ -22,14 +24,13 @@ import {
   LiveBadge,
   OrderThumbs,
   OrderTypeBadge,
-  orderEta,
+  orderEtaMinutes,
   orderHref,
   PLACED_FORMAT,
   ReorderButton,
   STATUS_MASCOTS,
   statusHeadline,
   StepsRow,
-  TIME_FORMAT,
   useAgainStatuses,
   itemsSummary,
   type AgainStatus,
@@ -47,7 +48,32 @@ const MONTH_FORMAT: Intl.DateTimeFormatOptions = { month: "long", year: "numeric
 const ROW_FORMAT: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Colombo" };
 const PICKUP_FORMAT: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Colombo" };
 const formatPlaced = formatWith(PLACED_FORMAT);
-const formatTime = formatWith(TIME_FORMAT);
+
+function isCompletedOrder(order: Order) {
+  return order.status === "DELIVERED" || (order.orderMode === "TAKEAWAY" && order.status === "READY");
+}
+
+const DEFAULT_FILTER = {
+  search: "",
+  status: "ALL" as StatusFilter,
+  mode: "ALL" as ModeFilter,
+  range: "ALL" as RangeFilter,
+  sort: "NEWEST" as SortFilter,
+};
+
+function readOrderListFilters(params: URLSearchParams) {
+  const status = params.get("status");
+  const mode = params.get("mode");
+  const range = params.get("range");
+  const sort = params.get("sort");
+  return {
+    search: params.get("q") ?? DEFAULT_FILTER.search,
+    status: STATUS_FILTERS.some((option) => option.value === status) ? (status as StatusFilter) : DEFAULT_FILTER.status,
+    mode: MODE_FILTERS.some((option) => option.value === mode) ? (mode as ModeFilter) : DEFAULT_FILTER.mode,
+    range: RANGE_FILTERS.some((option) => option.value === range) ? (range as RangeFilter) : DEFAULT_FILTER.range,
+    sort: SORT_FILTERS.some((option) => option.value === sort) ? (sort as SortFilter) : DEFAULT_FILTER.sort,
+  };
+}
 /** "2026-10": the month in Sri Lanka an order was placed in. */
 const colomboMonth = (iso: string) => new Date(new Date(iso).getTime() + 330 * 60_000).toISOString().slice(0, 7);
 
@@ -193,13 +219,51 @@ function Orders() {
 
 /** The old page's filtering and sorting, unchanged; `orders` is the result. */
 function useOrderFilters(all: Order[]) {
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("ALL");
-  const [mode, setMode] = useState<ModeFilter>("ALL");
-  const [range, setRange] = useState<RangeFilter>("ALL");
-  const [sort, setSort] = useState<SortFilter>("NEWEST");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initial = readOrderListFilters(searchParams);
+  const [search, setSearch] = useState(initial.search);
+  const [status, setStatus] = useState<StatusFilter>(initial.status);
+  const [mode, setMode] = useState<ModeFilter>(initial.mode);
+  const [range, setRange] = useState<RangeFilter>(initial.range);
+  const [sort, setSort] = useState<SortFilter>(initial.sort);
   // When the time filter last changed: the cutoff counts back from then.
-  const [rangeFrom, setRangeFrom] = useState(0);
+  const [rangeFrom, setRangeFrom] = useState(() => (initial.range === "ALL" ? 0 : Date.now()));
+
+  const syncUrl = useCallback(
+    (next: typeof DEFAULT_FILTER) => {
+      const params = new URLSearchParams(searchParams.toString());
+      const ref = params.get("ref");
+      const celebrate = params.get("celebrate");
+      const order = params.get("order");
+      const query = new URLSearchParams();
+      if (ref) query.set("ref", ref);
+      if (celebrate) query.set("celebrate", celebrate);
+      if (order) query.set("order", order);
+      const trimmed = next.search.trim();
+      if (trimmed) query.set("q", trimmed);
+      if (next.status !== "ALL") query.set("status", next.status);
+      if (next.mode !== "ALL") query.set("mode", next.mode);
+      if (next.range !== "ALL") query.set("range", next.range);
+      if (next.sort !== "NEWEST") query.set("sort", next.sort);
+      const qs = query.toString();
+      router.replace(qs ? `/account/orders?${qs}` : "/account/orders", { scroll: false });
+    },
+    [router, searchParams],
+  );
+
+  const patchFilters = useCallback(
+    (patch: Partial<typeof DEFAULT_FILTER>) => {
+      const next = { search, status, mode, range, sort, ...patch };
+      if (patch.search !== undefined) setSearch(patch.search);
+      if (patch.status !== undefined) setStatus(patch.status);
+      if (patch.mode !== undefined) setMode(patch.mode);
+      if (patch.range !== undefined) setRange(patch.range);
+      if (patch.sort !== undefined) setSort(patch.sort);
+      syncUrl(next);
+    },
+    [search, status, mode, range, sort, syncUrl],
+  );
 
   const orders = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -207,7 +271,7 @@ function useOrderFilters(all: Order[]) {
     const cutoff = days ? rangeFrom - days * 24 * 60 * 60 * 1000 : null;
     const next = all.filter((order) => {
       if (status === "ACTIVE" && !isLive(order)) return false;
-      if (status === "DELIVERED" && order.status !== "DELIVERED") return false;
+      if (status === "DELIVERED" && !isCompletedOrder(order)) return false;
       if (status === "CANCELLED" && order.status !== "CANCELLED") return false;
       if (mode !== "ALL" && order.orderMode !== mode) return false;
       if (cutoff && new Date(order.createdAt).getTime() < cutoff) return false;
@@ -232,7 +296,7 @@ function useOrderFilters(all: Order[]) {
     const result: Record<StatusFilter, number> = { ALL: all.length, ACTIVE: 0, DELIVERED: 0, CANCELLED: 0 };
     for (const order of all) {
       if (isLive(order)) result.ACTIVE++;
-      else if (order.status === "DELIVERED") result.DELIVERED++;
+      else if (isCompletedOrder(order)) result.DELIVERED++;
       else if (order.status === "CANCELLED") result.CANCELLED++;
     }
     return result;
@@ -240,11 +304,8 @@ function useOrderFilters(all: Order[]) {
 
   const active = search.trim() !== "" || status !== "ALL" || mode !== "ALL" || range !== "ALL" || sort !== "NEWEST";
   const clear = () => {
-    setSearch("");
-    setStatus("ALL");
-    setMode("ALL");
-    setRange("ALL");
-    setSort("NEWEST");
+    setRangeFrom(0);
+    patchFilters(DEFAULT_FILTER);
   };
 
   return {
@@ -253,18 +314,18 @@ function useOrderFilters(all: Order[]) {
     active,
     clear,
     search,
-    setSearch,
+    setSearch: (value: string) => patchFilters({ search: value }),
     status,
-    setStatus,
+    setStatus: (value: StatusFilter) => patchFilters({ status: value }),
     mode,
-    setMode,
+    setMode: (value: ModeFilter) => patchFilters({ mode: value }),
     range,
     setRange: (value: RangeFilter) => {
-      setRange(value);
       setRangeFrom(Date.now());
+      patchFilters({ range: value });
     },
     sort,
-    setSort,
+    setSort: (value: SortFilter) => patchFilters({ sort: value }),
   };
 }
 
@@ -277,16 +338,32 @@ function FilterSelect<T extends string>({ label, value, options, onChange, align
   const id = useId();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const current = options.find((option) => option.value === value) ?? options[0];
 
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    setMenuStyle({
+      position: "fixed",
+      top: rect.bottom + 8,
+      left: align === "end" ? rect.right : rect.left,
+      transform: align === "end" ? "translateX(-100%)" : undefined,
+      minWidth: Math.max(rect.width, 176),
+      zIndex: 60,
+    });
+  }, [open, align, value]);
+
   useEffect(() => {
     if (!open) return;
     listRef.current?.focus();
     const away = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || listRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
@@ -347,43 +424,44 @@ function FilterSelect<T extends string>({ label, value, options, onChange, align
         {current.label}
         <ChevronDown className={cn("size-4 text-brand-600 transition-transform duration-200", open && "rotate-180")} aria-hidden="true" />
       </button>
-      {open && (
-        <ul
-          ref={listRef}
-          id={`${id}-list`}
-          role="listbox"
-          tabIndex={-1}
-          aria-label={label}
-          aria-activedescendant={`${id}-${active}`}
-          onKeyDown={onListKey}
-          className={cn(
-            "absolute top-full z-30 mt-2 min-w-44 rounded-2xl bg-white p-1.5 shadow-xl shadow-brand-950/15 ring-1 ring-brand-100 outline-none transition-[opacity,translate] duration-150 starting:-translate-y-1 starting:opacity-0",
-            align === "end" ? "right-0" : "left-0",
-          )}
-        >
-          {options.map((option, index) => {
-            const chosen = option.value === value;
-            return (
-              <li
-                key={option.value}
-                id={`${id}-${index}`}
-                role="option"
-                aria-selected={chosen}
-                onPointerMove={() => setActive(index)}
-                onClick={() => choose(option)}
-                className={cn(
-                  "flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm font-semibold whitespace-nowrap transition-colors",
-                  index === active && "bg-brand-50",
-                  chosen ? "text-brand-700" : "text-slate-700",
-                )}
-              >
-                {option.label}
-                {chosen && <Check className="size-4 shrink-0 text-brand-600" strokeWidth={3} aria-hidden="true" />}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      {open &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <ul
+            ref={listRef}
+            id={`${id}-list`}
+            role="listbox"
+            tabIndex={-1}
+            aria-label={label}
+            aria-activedescendant={`${id}-${active}`}
+            onKeyDown={onListKey}
+            style={menuStyle}
+            className="rounded-2xl bg-white p-1.5 shadow-xl shadow-brand-950/15 ring-1 ring-brand-100 outline-none transition-[opacity,translate] duration-150 starting:-translate-y-1 starting:opacity-0"
+          >
+            {options.map((option, index) => {
+              const chosen = option.value === value;
+              return (
+                <li
+                  key={option.value}
+                  id={`${id}-${index}`}
+                  role="option"
+                  aria-selected={chosen}
+                  onPointerMove={() => setActive(index)}
+                  onClick={() => choose(option)}
+                  className={cn(
+                    "flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm font-semibold whitespace-nowrap transition-colors",
+                    index === active && "bg-brand-50",
+                    chosen ? "text-brand-700" : "text-slate-700",
+                  )}
+                >
+                  {option.label}
+                  {chosen && <Check className="size-4 shrink-0 text-brand-600" strokeWidth={3} aria-hidden="true" />}
+                </li>
+              );
+            })}
+          </ul>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -542,7 +620,7 @@ function PhoneOrderRow({ order }: { order: Order }) {
  * an order is under way.
  */
 function LiveOrderCard({ order }: { order: Order }) {
-  const eta = orderEta(order);
+  const etaMinutes = orderEtaMinutes(order);
   const titleId = `live-${order.id}`;
 
   return (
@@ -564,7 +642,7 @@ function LiveOrderCard({ order }: { order: Order }) {
               </p>
             </div>
           </div>
-          {eta && <EtaBox order={order} eta={eta} />}
+          {etaMinutes != null && <EtaBox order={order} minutes={etaMinutes} />}
         </div>
         <StepsRow order={order} className="mt-5 lg:mt-3" />
       </div>
@@ -587,17 +665,12 @@ function LiveOrderCard({ order }: { order: Order }) {
   );
 }
 
-/** "Ready by 3:45 PM" (pickup) or "Arriving by" (delivery), from the kitchen's estimate, with how long that is from now. */
-function EtaBox({ order, eta }: { order: Order; eta: Date }) {
-  const now = useNow();
-  const minutesLeft = Math.ceil((eta.getTime() - now.getTime()) / 60_000);
+/** Kitchen ETA in minutes when the backend provides one (no invented clock time). */
+function EtaBox({ order, minutes }: { order: Order; minutes: number }) {
   return (
     <p className="flex items-center justify-between gap-4 rounded-2xl bg-white/80 px-4 py-3 ring-1 ring-brand-100 ring-inset sm:block sm:shrink-0 sm:text-center lg:py-2">
-      <span className="text-[0.6875rem] font-semibold tracking-[0.1em] text-slate-500 uppercase sm:block">{isDelivery(order) ? "Arriving by" : "Ready by"}</span>
-      <span className="block text-right sm:text-center">
-        <span className="font-numeric block text-2xl leading-tight font-extrabold text-brand-950 sm:text-3xl">{formatTime(eta)}</span>
-        <span className="block text-xs text-slate-500">{minutesLeft > 0 ? `in about ${minutesLeft} min` : "any moment now"}</span>
-      </span>
+      <span className="text-[0.6875rem] font-semibold tracking-[0.1em] text-slate-500 uppercase sm:block">{isDelivery(order) ? "Delivery ETA" : "Ready in about"}</span>
+      <span className="font-numeric block text-right text-2xl leading-tight font-extrabold text-brand-950 sm:text-center sm:text-3xl">{minutes} min</span>
     </p>
   );
 }
@@ -821,6 +894,34 @@ function OrderDetails({ tracking, order, reference }: { tracking: OrderTracking;
             </div>
 
             <dl className="grid gap-x-6 gap-y-4 p-5 sm:grid-cols-2 sm:p-7">
+              {tracking.cancelled && (
+                <>
+                  {order.refund?.cancellationReason && (
+                    <Detail icon={X} label="Cancel reason">
+                      {cancellationReasonLabel(order.refund.cancellationReason)}
+                      {order.refund.cancellationReason === "OTHER" && order.refund.customReasonText
+                        ? `: ${order.refund.customReasonText}`
+                        : ""}
+                    </Detail>
+                  )}
+                  {order.cancelledBy && (
+                    <Detail icon={Store} label="Cancelled by">
+                      {order.cancelledBy === "customer" ? "You" : order.cancelledBy}
+                    </Detail>
+                  )}
+                  {order.refund && (
+                    <Detail icon={Receipt} label="Refund">
+                      {order.refund.status === "COMPLETE"
+                        ? `Processed${order.refund.refundAmount != null ? ` — ${formatRefundAmount(order.refund.refundAmount)}` : ""}`
+                        : order.refund.status === "RECEIVED"
+                          ? "Requested — processing"
+                          : order.refund.status === "REJECTED"
+                            ? "Not approved"
+                            : order.refund.status}
+                    </Detail>
+                  )}
+                </>
+              )}
               <Detail icon={delivery ? Bike : Store} label="Method">
                 {delivery ? "Delivery" : "Pickup"}
               </Detail>

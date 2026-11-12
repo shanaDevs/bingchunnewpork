@@ -12,10 +12,12 @@ export function filterCheckoutPaymentMethods<T extends { id: string }>(
   methods: T[],
   orderMode: 'DELIVERY' | 'TAKEAWAY' | null | undefined,
   subtotal: number,
+  /** Admin pickup amount limit when set; otherwise the built-in online-payment threshold. */
+  cashAtCounterLimit?: number | null,
 ): T[] {
-  if (orderMode !== 'TAKEAWAY' || !requiresOnlinePaymentForPickup(subtotal)) {
-    return methods;
-  }
+  if (orderMode !== 'TAKEAWAY') return methods;
+  const threshold = activePickupMaxOrderAmount(cashAtCounterLimit) ?? PICKUP_ONLINE_PAYMENT_THRESHOLD;
+  if (!requiresOnlinePaymentForPickup(subtotal, threshold)) return methods;
   return methods.filter((method) => method.id !== 'CASH_AT_COUNTER');
 }
 

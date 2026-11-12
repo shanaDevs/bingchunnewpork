@@ -8,12 +8,14 @@ import { useCartStore } from "@/store/cartStore";
 import type { DailySpecial, Product, PromoCode } from "@/types";
 
 /**
- * The Overview's live menu and offers. The backend doesn't announce menu, special or offer changes, so each is
- * checked again every minute and on every return to the tab (as the Offers page does): an admin's change shows
- * without a reload.
+ * Overview menu/offers. Prefer focus refetch over aggressive polling — the full product catalog
+ * is heavy, and admins rarely change it mid-session.
  */
-const REFRESH_MS = 60_000;
-const live = { staleTime: 30_000, refetchInterval: REFRESH_MS, refetchOnWindowFocus: "always" as const };
+const live = {
+  staleTime: 5 * 60_000,
+  refetchInterval: 5 * 60_000,
+  refetchOnWindowFocus: true as const,
+};
 
 /** The menu for the customer's branch (all products until they pick one), with each product's stock there. */
 export function useLiveMenu() {
