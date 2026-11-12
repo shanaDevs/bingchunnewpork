@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Clock, List, LocateFixed, LocateOff, Map, MapPin, Navigation, Phone, RotateCw, Search, ShoppingBag, X } from "lucide-react";
+import { Bike, Clock, List, LocateFixed, LocateOff, Map, MapPin, Navigation, Phone, RotateCw, Search, ShoppingBag, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -18,6 +18,7 @@ import { Container } from "@/components/home-redesign/ui/Container";
 import { useClientHydrated } from "@/hooks/useClientHydrated";
 import { api } from "@/lib/api";
 import { branchManuallyClosedMessage, isBranchManuallyClosed } from "@/lib/storeOrderingHours";
+import { openOrderModal } from "@/components/order/SiteOrderPrompt";
 import { useCartStore } from "@/store/cartStore";
 import type { Store } from "@/types";
 import {
@@ -610,7 +611,8 @@ type StoreCardProps = {
  * (and moves the map to it); open, it adds the hours, phone number, Order pickup here, Directions and Call.
  */
 function StoreCard({ store, from, fromLabel, status, open, hovered, onToggle, onHover }: StoreCardProps) {
-  const orderHere = useOrderPickupHere();
+  const orderPickup = useOrderPickupHere();
+  const deliverFrom = useDeliverFromHere();
   const detailsId = `store-${store.id}`;
   const directions = directionsHref(store);
   const phone = store.phone?.trim();
@@ -657,15 +659,27 @@ function StoreCard({ store, from, fromLabel, status, open, hovered, onToggle, on
           <div className="mt-4 grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => orderHere(store)}
+              onClick={() => orderPickup(store)}
               disabled={closedToday}
               className={cn(
-                "col-span-2 inline-flex h-11 items-center justify-center gap-2 rounded-full bg-brand-600 px-5 text-sm font-semibold text-snow shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none",
+                "inline-flex h-11 items-center justify-center gap-2 rounded-full bg-brand-600 px-4 text-sm font-semibold text-snow shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none",
                 focusRing,
               )}
             >
-              <ShoppingBag className="size-4" aria-hidden="true" />
-              {closedToday ? "Closed for online orders today" : "Order pickup here"}
+              <ShoppingBag className="size-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">{closedToday ? "Pickup closed today" : "Order pickup here"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => deliverFrom(store)}
+              disabled={closedToday}
+              className={cn(
+                "inline-flex h-11 items-center justify-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-brand-700 ring-1 ring-brand-200 ring-inset transition-colors hover:bg-brand-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400",
+                focusRing,
+              )}
+            >
+              <Bike className="size-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">{closedToday ? "Delivery closed today" : "Deliver from here"}</span>
             </button>
             {directions && (
               <ActionLink href={directions} external label={`Directions to ${store.name} (opens Google Maps)`} wide={!phone}>
@@ -690,6 +704,16 @@ function StoreCard({ store, from, fromLabel, status, open, hovered, onToggle, on
  * "Order pickup here": sets pickup from that store, as choosing it in the order pop-up does, and opens the menu.
  * A branch closed for the day from the admin panel can't be chosen (its button is disabled; this is the backstop).
  */
+function useDeliverFromHere() {
+  return (store: Store) => {
+    if (isBranchManuallyClosed(store)) {
+      toast.error(branchManuallyClosedMessage());
+      return;
+    }
+    openOrderModal({ allowSkip: true, initialMode: "DELIVERY", startAtSetup: true });
+  };
+}
+
 function useOrderPickupHere() {
   const router = useRouter();
   return (store: Store) => {

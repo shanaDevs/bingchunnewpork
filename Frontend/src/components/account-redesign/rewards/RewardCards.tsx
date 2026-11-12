@@ -74,7 +74,7 @@ export function RewardCards() {
         )}
       >
         {rewards.map((reward) => (
-          <RewardCard key={reward.id} reward={reward} balance={balance} />
+          <RewardCard key={reward.id} reward={reward} balance={balance ?? 0} />
         ))}
       </ul>
     </section>

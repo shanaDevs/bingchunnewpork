@@ -4,6 +4,12 @@ import type { Product, Topping } from '@/types';
 import { notifyCartItemAdded, triggerLoyaltyPointsFloat } from '@/lib/cartCelebration';
 import { cartPersistStorage, persistClearedCartItems } from '@/lib/cartPersistStorage';
 import {
+  normalizeIceLevel,
+  normalizeSugarLevel,
+  type IceLevel,
+  type SugarLevel,
+} from '@/lib/drinkOptions';
+import {
   getCartProductQty,
   getMaxLineQty,
   getProductOrderableQty,
@@ -17,6 +23,8 @@ export interface LocalCartItem {
   id: string;
   product: Product;
   size: ProductSize;
+  sugarLevel?: SugarLevel | null;
+  iceLevel?: IceLevel | null;
   toppings: Topping[];
   quantity: number;
   unitPrice: number;
@@ -142,7 +150,7 @@ export const useCartStore = create<CartState>()(
         }
         const orderableQty = getProductOrderableQty(item.product);
         const branchKey = item.fulfillmentStore?.id ?? 'primary';
-        const id = `${item.product.id}-${item.size}-${item.toppings.map((t) => t.id).join(',')}-${branchKey}`;
+        const id = `${item.product.id}-${item.size}-${item.sugarLevel ?? ''}-${item.iceLevel ?? ''}-${item.toppings.map((t) => t.id).join(',')}-${branchKey}`;
         const existing = state.items.find((i) => i.id === id);
         const otherLinesQty = getCartProductQty(state.items, item.product.id, id);
         const maxTotalForProduct = orderableQty === Number.MAX_SAFE_INTEGER
@@ -310,6 +318,21 @@ export const useCartStore = create<CartState>()(
         reservationUuid: state.reservationUuid,
         reservationExpiresAt: state.reservationExpiresAt,
       }),
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<CartState>;
+        const items = Array.isArray(saved.items)
+          ? saved.items.map((item) => ({
+              ...item,
+              sugarLevel: normalizeSugarLevel(item.sugarLevel),
+              iceLevel: normalizeIceLevel(item.iceLevel),
+            }))
+          : current.items;
+        return {
+          ...current,
+          ...saved,
+          items,
+        };
+      },
     }
   )
 );

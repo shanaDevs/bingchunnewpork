@@ -84,7 +84,7 @@ export function MoodCard({ product, onOrder }: { product: Product; onOrder: () =
         </div>
         <span
           aria-hidden="true"
-          className="absolute right-0 bottom-0 z-10 grid size-9 place-items-center rounded-full bg-brand-600 text-snow shadow-md shadow-brand-900/25 transition-[background-color,color] duration-200 group-hover:bg-white group-hover:text-brand-700 sm:size-10"
+          className="pointer-events-none absolute right-0 bottom-0 z-10 grid size-9 place-items-center rounded-full bg-brand-600 text-snow shadow-md shadow-brand-900/25 transition-[background-color,color] duration-200 group-hover:bg-white group-hover:text-brand-700 sm:size-10"
         >
           <Plus className="size-5" strokeWidth={3} />
         </span>

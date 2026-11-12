@@ -183,3 +183,31 @@ export function formatRefundAmount(amount: number | null | undefined): string {
   if (amount == null) return '—';
   return `LKR ${formatMoneyAmount(amount)}`;
 }
+
+const SELF_CANCEL_SESSION_PREFIX = 'bc-self-cancel:';
+
+/** Skip duplicate cancel toasts when the customer just cancelled in-app. */
+export function markSelfCancelledOrder(orderNumber: string): void {
+  if (typeof window === 'undefined') return;
+  const key = orderNumber?.trim();
+  if (!key) return;
+  try {
+    sessionStorage.setItem(`${SELF_CANCEL_SESSION_PREFIX}${key}`, '1');
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export function consumeSelfCancelledOrder(orderNumber: string): boolean {
+  if (typeof window === 'undefined') return false;
+  const key = orderNumber?.trim();
+  if (!key) return false;
+  try {
+    const storageKey = `${SELF_CANCEL_SESSION_PREFIX}${key}`;
+    if (!sessionStorage.getItem(storageKey)) return false;
+    sessionStorage.removeItem(storageKey);
+    return true;
+  } catch {
+    return false;
+  }
+}

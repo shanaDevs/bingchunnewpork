@@ -2,9 +2,106 @@ import { Check, Minus, Plus } from 'lucide-react';
 import type { Topping } from '@/types';
 import { formatLkr } from '@/components/menu-redesign/lib/formatMenuPrice';
 import { cn } from '@/components/home-redesign/lib/cn';
+import {
+  ICE_LEVELS,
+  ICE_LEVEL_LABELS,
+  SUGAR_LEVELS,
+  SUGAR_LEVEL_LABELS,
+  type IceLevel,
+  type SugarLevel,
+} from '@/lib/drinkOptions';
 
 const focusWithin =
   'has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-brand-600';
+
+type ChoiceFieldProps<T extends string> = {
+  legend: string;
+  options: readonly T[];
+  labels: Record<T, string>;
+  value: T;
+  onChange: (value: T) => void;
+  disabled?: boolean;
+};
+
+function ChoiceField<T extends string>({
+  legend,
+  options,
+  labels,
+  value,
+  onChange,
+  disabled = false,
+}: ChoiceFieldProps<T>) {
+  return (
+    <fieldset disabled={disabled}>
+      <legend className="text-base font-semibold text-brand-950">{legend}</legend>
+      <div className="mt-3 grid grid-cols-2 gap-2 lg:mt-2 lg:gap-1.5" role="radiogroup" aria-label={legend}>
+        {options.map((option) => {
+          const checked = value === option;
+          return (
+            <label
+              key={option}
+              className={cn(
+                'flex cursor-pointer items-center justify-center rounded-xl px-2 py-2.5 text-center ring-1 ring-inset transition-[background-color,box-shadow] duration-150',
+                focusWithin,
+                checked ? 'bg-brand-50 ring-brand-600' : 'bg-white ring-brand-100 hover:bg-brand-50',
+                disabled && 'cursor-not-allowed opacity-50',
+              )}
+            >
+              <input
+                type="radio"
+                name={legend}
+                checked={checked}
+                onChange={() => onChange(option)}
+                className="sr-only"
+              />
+              <span className="text-[0.8125rem] leading-snug font-semibold text-brand-950">
+                {labels[option]}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+type IceLevelFieldProps = {
+  value: IceLevel;
+  onChange: (value: IceLevel) => void;
+  disabled?: boolean;
+};
+
+export function IceLevelField({ value, onChange, disabled }: IceLevelFieldProps) {
+  return (
+    <ChoiceField
+      legend="Ice"
+      options={ICE_LEVELS}
+      labels={ICE_LEVEL_LABELS}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+    />
+  );
+}
+
+type SugarLevelFieldProps = {
+  value: SugarLevel;
+  onChange: (value: SugarLevel) => void;
+  disabled?: boolean;
+};
+
+export function SugarLevelField({ value, onChange, disabled }: SugarLevelFieldProps) {
+  return (
+    <ChoiceField
+      legend="Sugar"
+      options={SUGAR_LEVELS}
+      labels={SUGAR_LEVEL_LABELS}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+    />
+  );
+}
 
 type ToppingsFieldProps = {
   toppings: Topping[];

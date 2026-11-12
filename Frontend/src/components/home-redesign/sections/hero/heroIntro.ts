@@ -109,14 +109,16 @@ export function buildHeaderIntro(headerItems: Element[], desktop: boolean) {
  */
 export function buildStageIntro(q: Selector, ambient: gsap.core.Timeline, compact = false) {
   const tl = gsap.timeline({ paused: true, defaults: { ease: "power3.out" } });
+  const scale = compact ? 0.72 : 1;
+  const at = (t: number) => t * scale;
 
   // A — decoration fades up (0–1.4s); the header runs alongside via buildHeaderIntro
-  tl.from(q('[data-decor="glow"]'), { autoAlpha: 0, scale: 0.7, duration: 1.4, ease: "power2.out" }, 0)
-    .from(q('[data-decor^="ring"]'), { autoAlpha: 0, scale: 0.75, duration: 1.4, stagger: 0.12 }, 0.05)
+  tl.from(q('[data-decor="glow"]'), { autoAlpha: 0, scale: 0.7, duration: 1.4 * scale, ease: "power2.out" }, 0)
+    .from(q('[data-decor^="ring"]'), { autoAlpha: 0, scale: 0.75, duration: 1.4 * scale, stagger: 0.12 * scale }, at(0.05))
     .from(
       q('[data-decor^="sparkle"]'),
-      { autoAlpha: 0, scale: 0, rotation: -90, duration: 0.7, stagger: 0.08, ease: "back.out(2)" },
-      0.25,
+      { autoAlpha: 0, scale: 0, rotation: -90, duration: 0.7 * scale, stagger: 0.08 * scale, ease: "back.out(2)" },
+      at(0.25),
     );
 
   // B — headline lines punch up from their baseline (0.3–1.3s)
@@ -127,29 +129,29 @@ export function buildStageIntro(q: Selector, ambient: gsap.core.Timeline, compac
       yPercent: 45,
       scale: 0.9,
       transformOrigin: "50% 100%",
-      duration: 0.85,
-      stagger: 0.14,
+      duration: 0.85 * scale,
+      stagger: 0.14 * scale,
       ease: "back.out(1.5)",
     },
-    0.3,
+    at(0.3),
   );
 
   // C — drinks fly in on staggered, overlapping paths (0.7–2.3s)
   (Object.keys(stageDrinks) as HeroDrinkId[]).forEach((id) => {
-    const { at, duration, ease, from } = stageDrinks[id];
+    const { at: startAt, duration, ease, from } = stageDrinks[id];
     const start = compact ? { ...from, yPercent: yPercentBelowHero(from) } : from;
-    tl.from(drinkMotion(q, id), { ...start, duration, ease }, at);
+    tl.from(drinkMotion(q, id), { ...start, duration: duration * scale, ease }, at(startAt));
   });
 
   // D — supporting details land around the composition (1.45–2.85s)
   tl.from(
     q('[data-decor^="pearl"]'),
-    { autoAlpha: 0, scale: 0, duration: 0.6, stagger: 0.07, ease: "back.out(2.2)" },
-    1.45,
+    { autoAlpha: 0, scale: 0, duration: 0.6 * scale, stagger: 0.07 * scale, ease: "back.out(2.2)" },
+    at(1.45),
   )
-    .from(q('[data-hero="cta"]'), { autoAlpha: 0, y: 22, duration: 0.8 }, 1.68)
-    .from(q('[data-decor="badge"]'), { autoAlpha: 0, scale: 0.4, duration: 0.9, ease: "back.out(1.8)" }, 1.75)
-    .from(q('[data-decor="badge"] svg'), { rotation: -150, duration: 1.1 }, 1.75);
+    .from(q('[data-hero="cta"]'), { autoAlpha: 0, y: 22, duration: 0.8 * scale }, at(1.68))
+    .from(q('[data-decor="badge"]'), { autoAlpha: 0, scale: 0.4, duration: 0.9 * scale, ease: "back.out(1.8)" }, at(1.75))
+    .from(q('[data-decor="badge"] svg'), { rotation: -150, duration: 1.1 * scale }, at(1.75));
 
   const mainLands = stageDrinks.main.at + stageDrinks.main.duration;
   tl.call(() => void ambient.play(), undefined, mainLands);
@@ -162,26 +164,33 @@ export function buildStageIntro(q: Selector, ambient: gsap.core.Timeline, compac
  * the badge text and dashed halo turn slowly. Built paused; played by the intro (or directly
  * when the intro is skipped).
  */
-export function buildStageAmbient(q: Selector) {
+export function buildStageAmbient(q: Selector, compact = false) {
   const loop = { repeat: -1, yoyo: true, ease: "sine.inOut" } as const;
   const tl = gsap.timeline({ paused: true });
+  const motion = compact ? 0.55 : 1;
 
   (Object.keys(drinkFloat) as HeroDrinkId[]).forEach((id) => {
     const { y, rotation, duration, delay } = drinkFloat[id];
-    tl.to(drinkMotion(q, id), { y, rotation, duration, ...loop }, delay);
+    tl.to(
+      drinkMotion(q, id),
+      { y: y * motion, rotation: rotation * motion, duration: duration * (compact ? 1.15 : 1), ...loop },
+      delay,
+    );
   });
 
-  q('[data-decor^="pearl"]').forEach((pearl, i) => {
-    tl.to(pearl, { y: -8 - (i % 3) * 3, duration: 2.6 + i * 0.5, ...loop }, i * 0.3);
-  });
+  if (!compact) {
+    q('[data-decor^="pearl"]').forEach((pearl, i) => {
+      tl.to(pearl, { y: -8 - (i % 3) * 3, duration: 2.6 + i * 0.5, ...loop }, i * 0.3);
+    });
 
-  q('[data-decor^="sparkle"]').forEach((sparkle, i) => {
-    tl.to(sparkle, { scale: 0.7, opacity: 0.55, duration: 1.4 + i * 0.35, ...loop }, i * 0.45);
-  });
+    q('[data-decor^="sparkle"]').forEach((sparkle, i) => {
+      tl.to(sparkle, { scale: 0.7, opacity: 0.55, duration: 1.4 + i * 0.35, ...loop }, i * 0.45);
+    });
 
-  // The badge spin waits for the badge's own entrance (which ends ~0.6s after the main cup lands).
-  tl.to(q('[data-decor="badge"] svg'), { rotation: 360, duration: 28, ease: "none", repeat: -1 }, 0.7)
-    .to(q('[data-decor="ring-outer"]'), { rotation: 360, duration: 120, ease: "none", repeat: -1 }, 0);
+    // The badge spin waits for the badge's own entrance (which ends ~0.6s after the main cup lands).
+    tl.to(q('[data-decor="badge"] svg'), { rotation: 360, duration: 28, ease: "none", repeat: -1 }, 0.7)
+      .to(q('[data-decor="ring-outer"]'), { rotation: 360, duration: 120, ease: "none", repeat: -1 }, 0);
+  }
 
   return tl;
 }

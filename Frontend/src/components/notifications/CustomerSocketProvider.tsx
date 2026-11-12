@@ -2,7 +2,7 @@
 
 import { useCustomerSocket } from '@/hooks/useCustomerSocket';
 
-/** Keeps customer WebSocket connected app-wide when logged in */
+/** Connects the customer socket only while signed in (no anonymous connection). */
 export default function CustomerSocketProvider({ children }: { children: React.ReactNode }) {
   useCustomerSocket();
   return <>{children}</>;

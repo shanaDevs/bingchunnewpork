@@ -30,6 +30,11 @@ import {
   formatConvenienceFeeLabel,
   resolveCheckoutConvenienceRates,
 } from '@/lib/fees';
+import {
+  formatDrinkOptionLine,
+  normalizeIceLevel,
+  normalizeSugarLevel,
+} from '@/lib/drinkOptions';
 import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
 import { isPlaceholderCustomerName, resolveCheckoutContactName } from '@/lib/customerName';
 import OrderSchedulePicker from '@/components/order/OrderSchedulePicker';
@@ -256,8 +261,8 @@ function CheckoutPage() {
 
   const paymentMethods = paymentConfig?.methods ?? [];
   const availablePaymentMethods = useMemo(
-    () => filterCheckoutPaymentMethods(paymentMethods, orderMode, sub),
-    [paymentMethods, orderMode, sub],
+    () => filterCheckoutPaymentMethods(paymentMethods, orderMode, sub, pickupMaxOrderAmount),
+    [paymentMethods, orderMode, sub, pickupMaxOrderAmount],
   );
   const baseDeliveryFee =
     orderMode === 'DELIVERY' ? (deliveryInfo?.fee ?? validation?.zone?.fee ?? 0) : 0;
@@ -799,6 +804,8 @@ function CheckoutPage() {
       const orderItems = items.map((item) => ({
         productId: item.product.id,
         size: item.size,
+        sugarLevel: normalizeSugarLevel(item.sugarLevel),
+        iceLevel: normalizeIceLevel(item.iceLevel),
         toppingIds: item.toppings.map((t) => t.id),
         quantity: item.quantity,
       }));
@@ -1514,8 +1521,16 @@ function CheckoutPage() {
                   <div className="min-w-0 flex-1">
                     <p className="text-fg text-xs font-medium line-clamp-1">{item.product.name}</p>
                     <p className="text-muted text-[11px]">
-                      × {item.quantity}
-                      {item.size ? ` · ${item.size}` : ''}
+                      {[
+                        `× ${item.quantity}`,
+                        item.size || null,
+                        formatDrinkOptionLine({
+                          iceLevel: item.iceLevel,
+                          sugarLevel: item.sugarLevel,
+                        }),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
                     </p>
                   </div>
                   <span className="text-fg shrink-0 tabular-nums text-xs font-medium">

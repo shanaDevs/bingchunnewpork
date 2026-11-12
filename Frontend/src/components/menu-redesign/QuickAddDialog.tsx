@@ -7,9 +7,21 @@ import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 're
 import toast from 'react-hot-toast';
 import { cn } from '@/components/home-redesign/lib/cn';
 import { formatLkr } from '@/components/menu-redesign/lib/formatMenuPrice';
-import { QuantityStepper, ToppingsField } from '@/components/menu-redesign/product/ProductOptions';
+import {
+  IceLevelField,
+  QuantityStepper,
+  SugarLevelField,
+  ToppingsField,
+} from '@/components/menu-redesign/product/ProductOptions';
 import { openOrderModal } from '@/components/order/SiteOrderPrompt';
 import { useBranchOrderingHours } from '@/hooks/useBranchOrderingHours';
+import {
+  DEFAULT_ICE_LEVEL,
+  DEFAULT_SUGAR_LEVEL,
+  productNeedsDrinkOptions,
+  type IceLevel,
+  type SugarLevel,
+} from '@/lib/drinkOptions';
 import { hasCompletedOrderSetup } from '@/lib/orderSetup';
 import {
   getProductOrderableQty,
@@ -40,7 +52,11 @@ export function QuickAddDialog({ product, onClose }: QuickAddDialogProps) {
     [product.toppings],
   );
 
+  const needsDrinkOptions = productNeedsDrinkOptions(product);
+
   const [selectedToppings, setSelectedToppings] = useState<Topping[]>([]);
+  const [sugarLevel, setSugarLevel] = useState<SugarLevel>(DEFAULT_SUGAR_LEVEL);
+  const [iceLevel, setIceLevel] = useState<IceLevel>(DEFAULT_ICE_LEVEL);
   const [quantity, setQuantity] = useState(1);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const pressedOnBackdrop = useRef(false);
@@ -97,6 +113,8 @@ export function QuickAddDialog({ product, onClose }: QuickAddDialogProps) {
     const result = addItem({
       product,
       size: 'REGULAR',
+      sugarLevel: needsDrinkOptions ? sugarLevel : null,
+      iceLevel: needsDrinkOptions ? iceLevel : null,
       toppings: selectedToppings,
       quantity,
       unitPrice,
@@ -178,16 +196,24 @@ export function QuickAddDialog({ product, onClose }: QuickAddDialogProps) {
           </button>
         </header>
 
-        {availableToppings.length > 0 && (
-          <div className="min-h-0 overflow-y-auto px-5 py-4">
-            <ToppingsField toppings={availableToppings} value={selectedToppings} onToggle={toggleTopping} />
+        {(needsDrinkOptions || availableToppings.length > 0) && (
+          <div className="min-h-0 space-y-5 overflow-y-auto px-5 py-4">
+            {needsDrinkOptions && (
+              <>
+                <IceLevelField value={iceLevel} onChange={setIceLevel} disabled={!inStock} />
+                <SugarLevelField value={sugarLevel} onChange={setSugarLevel} disabled={!inStock} />
+              </>
+            )}
+            {availableToppings.length > 0 && (
+              <ToppingsField toppings={availableToppings} value={selectedToppings} onToggle={toggleTopping} />
+            )}
           </div>
         )}
 
         <footer
           className={cn(
             'flex shrink-0 items-center gap-2 px-5 py-4 max-md:pb-[max(1rem,env(safe-area-inset-bottom))] sm:gap-3 sm:p-5 sm:max-md:pb-[max(1.25rem,env(safe-area-inset-bottom))]',
-            availableToppings.length > 0 && 'border-t border-brand-100',
+            (needsDrinkOptions || availableToppings.length > 0) && 'border-t border-brand-100',
           )}
         >
           <QuantityStepper value={quantity} onChange={setQuantity} max={maxQty} disabled={!inStock || maxQty <= 0} />

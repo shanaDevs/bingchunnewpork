@@ -168,9 +168,14 @@ async function attachCustomerCancelFields(order: OrderCancelFieldsInput) {
   );
 }
 
+const sugarLevelSchema = z.enum(['FIFTY', 'HUNDRED']);
+const iceLevelSchema = z.enum(['LESS_ICE', 'NORMAL_ICE']);
+
 const placeOrderItemSchema = z.object({
   productId: z.string(),
   size: z.enum(['REGULAR', 'LARGE']).default('REGULAR'),
+  sugarLevel: sugarLevelSchema.optional().nullable(),
+  iceLevel: iceLevelSchema.optional().nullable(),
   toppingIds: z.array(z.string()).default([]),
   quantity: z.number().int().min(1),
 });
@@ -297,6 +302,8 @@ type ResolvedCartLine = {
   productId: string;
   product: { id: string; name: string };
   size: string;
+  sugarLevel: z.infer<typeof sugarLevelSchema> | null;
+  iceLevel: z.infer<typeof iceLevelSchema> | null;
   quantity: number;
   unitPrice: number;
   toppings: { toppingId: string; topping: { id: string; name: string; extraPrice: number } }[];
@@ -336,6 +343,8 @@ async function resolveCartLines(
         productId: item.productId,
         product: { id: product.id, name: product.name },
         size: item.size,
+        sugarLevel: item.sugarLevel ?? null,
+        iceLevel: item.iceLevel ?? null,
         quantity: item.quantity,
         unitPrice: priced.unitPrice,
         toppings: priced.toppings,
@@ -381,6 +390,8 @@ async function resolveCartLines(
       productId: item.productId,
       product: { id: item.product.id, name: item.product.name },
       size: item.size,
+      sugarLevel: item.sugarLevel ?? null,
+      iceLevel: item.iceLevel ?? null,
       quantity: item.quantity,
       unitPrice: priced.unitPrice,
       toppings: priced.toppings,
@@ -1158,6 +1169,8 @@ export async function placeOrder(req: Request, res: Response, next: NextFunction
               productId: i.productId,
               productName: i.product.name,
               size: i.size as 'REGULAR' | 'LARGE',
+              sugarLevel: i.sugarLevel ?? undefined,
+              iceLevel: i.iceLevel ?? undefined,
               quantity: i.quantity,
               unitPrice: i.unitPrice,
               totalPrice: i.unitPrice * i.quantity,
@@ -1689,6 +1702,8 @@ export async function getMyOrders(req: Request, res: Response, next: NextFunctio
               unitPrice: true,
               totalPrice: true,
               size: true,
+              sugarLevel: true,
+              iceLevel: true,
               toppings: { select: { toppingName: true, extraPrice: true } },
               product: { select: { imageUrl: true } },
             },
@@ -2370,6 +2385,8 @@ export async function updateOrderItems(req: Request, res: Response, next: NextFu
             productId: line.productId,
             productName: line.product.name,
             size: line.size as 'REGULAR' | 'LARGE',
+            sugarLevel: line.sugarLevel ?? undefined,
+            iceLevel: line.iceLevel ?? undefined,
             quantity: line.quantity,
             unitPrice: line.unitPrice,
             totalPrice: line.unitPrice * line.quantity,
@@ -2665,6 +2682,96 @@ export async function getCashierActivity(req: Request, res: Response, next: Next
     const cashiers = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
     return success(res, { from: from ?? null, to: to ?? null, storeId: storeId ?? null, cashiers });
   } catch (err) { next(err); }
+}
+
+/**
+ * One round-trip for cashier tab + status badge counts (replaces N× GET /orders?limit=1).
+ * Query: startDate, endDate, channel, processedById, queue=pickup|delivery (status bucket scope).
+ */
+export async function getQueueCounts(req: Request, res: Response, next: NextFunction) {
+  try {
+    const {
+      startDate,
+      endDate,
+      channel,
+      processedById,
+      queue = 'pickup',
+      storeId,
+    } = req.query as Record<string, string>;
+
+    const baseWhere: Prisma.OrderWhereInput = {};
+    if (
+      channel === 'WEB' ||
+      channel === 'APP' ||
+      channel === 'POS' ||
+      channel === 'WHATSAPP' ||
+      channel === 'TELEGRAM'
+    ) {
+      baseWhere.channel = channel;
+    }
+    if (processedById?.trim()) {
+      baseWhere.processedByAdminId = processedById.trim();
+    }
+    if (isBranchScopedRole(req.user?.role)) {
+      baseWhere.storeId = await requireBranchStoreId(req);
+    } else if (storeId) {
+      baseWhere.storeId = storeId;
+    }
+
+    const createdAtFilter: { gte?: Date; lte?: Date } = {};
+    if (startDate) {
+      const from = new Date(startDate);
+      if (!Number.isNaN(from.getTime())) {
+        from.setHours(0, 0, 0, 0);
+        createdAtFilter.gte = from;
+      }
+    }
+    if (endDate) {
+      const to = new Date(endDate);
+      if (!Number.isNaN(to.getTime())) {
+        to.setHours(23, 59, 59, 999);
+        createdAtFilter.lte = to;
+      }
+    }
+    if (createdAtFilter.gte || createdAtFilter.lte) {
+      baseWhere.createdAt = createdAtFilter;
+    }
+
+    const queueExclude = ['DELIVERED', 'OUT_FOR_DELIVERY', 'CANCELLED'] as const;
+    const statusTabs = ['RECEIVED', 'PREPARING', 'READY'] as const;
+    const activeQueue: FulfillmentQueueKind = queue === 'delivery' ? 'delivery' : 'pickup';
+    const activeMode = activeQueue === 'pickup' ? 'TAKEAWAY' : 'DELIVERY';
+
+    const withQueue = (mode: 'TAKEAWAY' | 'DELIVERY', fq: FulfillmentQueueKind): Prisma.OrderWhereInput => ({
+      ...baseWhere,
+      orderMode: mode,
+      status: { notIn: [...queueExclude] },
+      AND: [fulfillmentQueuePaymentWhere(fq)],
+    });
+
+    const withStatus = (status: (typeof statusTabs)[number]): Prisma.OrderWhereInput => ({
+      ...baseWhere,
+      orderMode: activeMode,
+      status,
+      AND: [fulfillmentQueuePaymentWhere(activeQueue)],
+    });
+
+    const [pickup, delivery, received, preparing, ready] = await Promise.all([
+      prisma.order.count({ where: withQueue('TAKEAWAY', 'pickup') }),
+      prisma.order.count({ where: withQueue('DELIVERY', 'delivery') }),
+      prisma.order.count({ where: withStatus('RECEIVED') }),
+      prisma.order.count({ where: withStatus('PREPARING') }),
+      prisma.order.count({ where: withStatus('READY') }),
+    ]);
+
+    return success(res, {
+      tabs: { pickup, delivery },
+      status: { RECEIVED: received, PREPARING: preparing, READY: ready },
+      queue: activeQueue,
+    });
+  } catch (err) {
+    next(err);
+  }
 }
 
 export async function getAllOrders(req: Request, res: Response, next: NextFunction) {

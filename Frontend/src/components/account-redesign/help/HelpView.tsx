@@ -212,7 +212,7 @@ const TOPICS: { id: string; icon: LucideIcon; title: string; text: string; link?
     id: "payments",
     icon: CreditCard,
     title: "Payments & refunds",
-    text: "Online payments are confirmed after PayHere settles. Refund questions can be raised with support using your order number.",
+    text: "Online card payments are confirmed once your bank approves the charge. Refund questions can be raised with support using your order number.",
   },
   {
     id: "offers",

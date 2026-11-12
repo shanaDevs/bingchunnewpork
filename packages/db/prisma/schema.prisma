@@ -161,6 +161,18 @@ enum ProductSize {
   @@schema("public")
 }
 
+enum SugarLevel {
+  FIFTY
+  HUNDRED
+  @@schema("public")
+}
+
+enum IceLevel {
+  LESS_ICE
+  NORMAL_ICE
+  @@schema("public")
+}
+
 model User {
   id                String               @id @default(uuid())
   name              String
@@ -771,6 +783,8 @@ model CartItem {
   cartId     String
   productId  String
   size       ProductSize       @default(REGULAR)
+  sugarLevel SugarLevel?
+  iceLevel   IceLevel?
   quantity   Int               @default(1)
   unitPrice  Int
 
@@ -938,6 +952,8 @@ model OrderItem {
   productId  String
   productName String
   size       ProductSize        @default(REGULAR)
+  sugarLevel SugarLevel?
+  iceLevel   IceLevel?
   quantity   Int
   unitPrice  Int
   totalPrice Int

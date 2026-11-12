@@ -1,6 +1,7 @@
 import type { Order, PaymentMethod } from '@/types';
 import { formatDateTime } from '@/lib/datetime';
 import { resolveCustomerDisplayName } from '@/lib/customerName';
+import { formatDrinkOptionLine } from '@/lib/drinkOptions';
 export {
   ONLINE_PAYMENT_LABEL,
   PAYMENT_METHOD_LABELS,
@@ -32,7 +33,11 @@ function formatSize(size: string): string {
 }
 
 export function itemOptionLine(item: Order['items'][0]): string {
-  return formatSize(item.size);
+  const drink = formatDrinkOptionLine({
+    iceLevel: item.iceLevel,
+    sugarLevel: item.sugarLevel,
+  });
+  return drink ? `${formatSize(item.size)} · ${drink}` : formatSize(item.size);
 }
 
 export function customerLabel(order: Order): string | null {
