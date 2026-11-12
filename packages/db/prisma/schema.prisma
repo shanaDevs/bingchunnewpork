@@ -1167,6 +1167,7 @@ model AdminUser {
   deliveryJobAdminCancellations DeliveryJobAdminCancellation[]
   driverComplaints DriverComplaint[]
   driverBranchRequests DriverBranchRequest[]
+  driverNotifications  DriverNotification[]
   meritPointHistory MeritPointHistory[]
   stockAuditLogs   StockAuditLog[]
   createdStockBatches StockBatch[]
@@ -2166,6 +2167,29 @@ model DriverBranchRequest {
   @@schema("delivery")
 
   @@map("driver_branch_requests")
+}
+
+/// In-app + push inbox for rider account events (complaint review, branch request review).
+model DriverNotification {
+  id              String   @id @default(uuid())
+  driverId        String
+  type            String   @default("ACCOUNT_UPDATE")
+  title           String
+  message         String   @db.Text
+  complaintId     String?
+  branchRequestId String?
+  orderId         String?
+  orderNumber     String?
+  read            Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  driver AdminUser @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([driverId, read])
+  @@index([driverId, createdAt])
+  @@schema("delivery")
+
+  @@map("driver_notifications")
 }
 
 /// Immutable merit point ledger — never overwrite historical rows.

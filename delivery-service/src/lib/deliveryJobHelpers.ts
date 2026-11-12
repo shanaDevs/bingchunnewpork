@@ -294,6 +294,35 @@ export function formatJobOrder(
   };
 }
 
+export type FailedAttemptSummary = {
+  outcome: string;
+  note: string | null;
+};
+
+/** Latest non-delivered attempt per order on a job (for driver history / order detail). */
+export async function fetchLatestFailedAttemptsForJob(
+  jobId: string,
+  orderIds: string[],
+): Promise<Map<string, FailedAttemptSummary>> {
+  if (orderIds.length === 0) return new Map();
+  const rows = await prisma.deliveryAttempt.findMany({
+    where: {
+      orderId: { in: orderIds },
+      jobId,
+      outcome: { not: 'DELIVERED' },
+    },
+    select: { orderId: true, outcome: true, note: true, attemptNo: true, createdAt: true },
+    orderBy: [{ attemptNo: 'desc' }, { createdAt: 'desc' }],
+  });
+  const map = new Map<string, FailedAttemptSummary>();
+  for (const row of rows) {
+    if (!map.has(row.orderId)) {
+      map.set(row.orderId, { outcome: row.outcome, note: row.note });
+    }
+  }
+  return map;
+}
+
 export type JobWithOrders = {
   id: string;
   title: string;
@@ -328,28 +357,24 @@ export async function formatJob(
     !!opts.viewerDriverId && !!job.driverId && job.driverId === opts.viewerDriverId;
   const redactCustomer = !isAssignedToViewer;
   const orderIds = job.jobOrders.map((jo) => jo.orderId);
-  const failedAttempts = orderIds.length
-    ? await prisma.deliveryAttempt.findMany({
-        where: {
-          orderId: { in: orderIds },
-          jobId: job.id,
-          outcome: { not: 'DELIVERED' },
-        },
-        select: { orderId: true },
-        distinct: ['orderId'],
-      })
-    : [];
-  const failedOrderIds = new Set(failedAttempts.map((a) => a.orderId));
+  const failedByOrder = await fetchLatestFailedAttemptsForJob(job.id, orderIds);
+  const failedOrderIds = new Set(failedByOrder.keys());
   const complaintsByOrder =
     opts.viewerDriverId && orderIds.length
       ? await fetchDriverComplaintsByOrderIds(opts.viewerDriverId, orderIds)
       : new Map();
 
-  const orders = job.jobOrders.map((jo) => ({
-    ...formatJobOrder(jo.order, jo.sequence, { redactCustomer, redactPricing: true }),
-    deliveryFailed: failedOrderIds.has(jo.orderId),
-    complaints: complaintsByOrder.get(jo.orderId) ?? [],
-  }));
+  const orders = job.jobOrders.map((jo) => {
+    const failed = failedByOrder.get(jo.orderId);
+    const deliveryFailed = failedOrderIds.has(jo.orderId);
+    return {
+      ...formatJobOrder(jo.order, jo.sequence, { redactCustomer, redactPricing: true }),
+      deliveryFailed,
+      failureOutcome: deliveryFailed ? (failed?.outcome ?? null) : null,
+      failureNote: deliveryFailed ? (failed?.note ?? null) : null,
+      complaints: complaintsByOrder.get(jo.orderId) ?? [],
+    };
+  });
   // Failed attempts count as resolved so the driver app can finish the run.
   const deliveredCount = orders.filter(
     (o) => o.status === 'DELIVERED' || o.status === 'CANCELLED' || o.deliveryFailed,
@@ -364,7 +389,7 @@ export async function formatJob(
         (jo.order as { cancelledAtStatus?: string | null }).cancelledAtStatus ?? null,
     },
   }));
-  const { deliveredTotal } = creditedDeliveredTotals(creditedLinks, failedOrderIds);
+  const { deliveredTotal } = creditedDeliveredTotals(creditedLinks, failedByOrder);
 
   const terminalFeeSnapshot =
     job.status === 'COMPLETED' || job.status === 'VEHICLE_FAILURE' || job.status === 'CANCELLED';
