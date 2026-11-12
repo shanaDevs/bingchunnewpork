@@ -59,8 +59,34 @@ class AuthRepository {
     (d) => _list(d, DriverBranchRequest.fromJson),
   );
 
-  Future<DriverProfile> getMe() =>
-      _api.call(() => _api.core.get<dynamic>('delivery/me'), (d) => DriverProfile.fromJson(asJson(d)));
+  Future<DriverProfile> getMe() async {
+    final profile = await _api.call(
+      () => _api.core.get<dynamic>('delivery/me'),
+      (d) => DriverProfile.fromJson(asJson(d)),
+    );
+    return ensureLicenseImageUrl(profile);
+  }
+
+  /// When the DB has a licence but GET /me omitted presign, fetch a dedicated signed URL.
+  Future<DriverProfile> ensureLicenseImageUrl(DriverProfile profile) async {
+    final hasUrl = profile.licenseImageUrl != null && profile.licenseImageUrl!.trim().isNotEmpty;
+    if (!profile.hasLicenseImage || hasUrl) return profile;
+    final url = await fetchLicenseImageUrl();
+    if (url == null) return profile;
+    return profile.copyWith(licenseImageUrl: url);
+  }
+
+  Future<String?> fetchLicenseImageUrl() async {
+    try {
+      final data = await _api.call(
+        () => _api.core.get<dynamic>('delivery/me/license-image'),
+        (d) => asJson(d),
+      );
+      return strOrNull(data, 'licenseImageUrl');
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<List<DriverShiftEntry>> getShiftHistory() =>
       _api.call(() => _api.core.get<dynamic>('delivery/me/shifts'), (d) => _list(d, DriverShiftEntry.fromJson));

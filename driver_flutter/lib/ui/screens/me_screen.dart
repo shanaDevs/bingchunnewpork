@@ -1080,7 +1080,7 @@ class _ProfileDetailsSheet extends StatelessWidget {
             ],
           ),
         BcSheetLabel(tr('License document')),
-        if (license == null)
+        if (license == null && p?.hasLicenseImage != true)
           BcSheetCard(
             child: Row(
               children: [
@@ -1089,6 +1089,11 @@ class _ProfileDetailsSheet extends StatelessWidget {
                 Text(tr('Not uploaded yet'), style: TextStyle(fontSize: 13, color: c.textMuted)),
               ],
             ),
+          )
+        else if (license == null)
+          AspectRatio(
+            aspectRatio: 16 / 10,
+            child: _LicenseLoadError(onRetry: onRetryLicense),
           )
         else ...[
           GestureDetector(

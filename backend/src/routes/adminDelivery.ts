@@ -59,6 +59,18 @@ router.get(
   requireDeliveryWalletUnlock,
   deliveryWalletController.listDeliveryPayoutsHandler,
 );
+router.post(
+  '/delivery-wallet/payouts/statement-zip',
+  requirePermission('DELIVERY_WALLET', 'read'),
+  requireDeliveryWalletUnlock,
+  deliveryWalletController.downloadDeliveryPayoutStatementZipHandler,
+);
+router.get(
+  '/delivery-wallet/payouts/:id/statement',
+  requirePermission('DELIVERY_WALLET', 'read'),
+  requireDeliveryWalletUnlock,
+  deliveryWalletController.getDeliveryPayoutStatementHandler,
+);
 router.get(
   '/delivery-wallet/payouts/:id/proof-url',
   requireSystemAdmin,

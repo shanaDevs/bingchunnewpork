@@ -8,7 +8,11 @@ import { openDriverShift, closeDriverShift, listDriverShifts } from '../lib/driv
 import { broadcastDriverDutyChanged, broadcastDeliveryJobUpdated } from '../lib/socket';
 import { getDriverAccessibleStoreIds } from '../lib/driverAccess';
 import { patchDriverOpsProfile } from '@bingchun/delivery-domain';
-import { viewableLicenseImageUrlWithTimeout } from '../lib/spaces';
+import {
+  RIDER_LICENSE_IMAGE_ENDPOINT_TIMEOUT_MS,
+  RIDER_LICENSE_PRESIGN_TIMEOUT_MS,
+  viewableLicenseImageUrlWithTimeout,
+} from '../lib/spaces';
 import { meritStatusBand } from '../lib/meritPoints';
 import { computeRiderStats, isRiderStatsPeriod } from '@bingchun/delivery-domain';
 import { deriveDriverJobFlags, DRIVER_HELD_JOB_STATUSES } from '../lib/deliveryJobHelpers';
@@ -72,9 +76,14 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
         select: { status: true },
       }),
     ]);
+    const storedLicense = driver.licenseImageUrl?.trim() || null;
+    const hasLicenseImage = Boolean(storedLicense);
     let licenseImageUrl: string | null = null;
     try {
-      licenseImageUrl = await viewableLicenseImageUrlWithTimeout(driver.licenseImageUrl, 1500);
+      licenseImageUrl = await viewableLicenseImageUrlWithTimeout(
+        storedLicense,
+        RIDER_LICENSE_PRESIGN_TIMEOUT_MS,
+      );
     } catch {
       licenseImageUrl = null;
     }
@@ -95,6 +104,7 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
       disabilities: driver.disabilities,
       profilePhotoUrl: driver.profilePhotoUrl,
       licenseImageUrl,
+      hasLicenseImage,
       dutyStatus: driver.dutyStatus,
       storeId: driver.storeId,
       store: driver.store,
@@ -119,6 +129,32 @@ const fcmTokenSchema = z.object({
 });
 
 /** Register/refresh this driver's FCM token so new-job pushes reach the device. */
+/** Fresh presigned licence URL for the profile sheet (decoupled from GET /me latency). */
+export async function getMyLicenseImage(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.user!.sub;
+    const driver = await prisma.adminUser.findFirst({
+      where: { id: driverId, role: { name: 'DELIVERY_DRIVER' } },
+      select: { licenseImageUrl: true },
+    });
+    if (!driver) throw new AppError('Driver not found', 404);
+    const stored = driver.licenseImageUrl?.trim() || null;
+    if (!stored) {
+      throw new AppError('No licence image on file', 404, 'LICENSE_NOT_UPLOADED');
+    }
+    const licenseImageUrl = await viewableLicenseImageUrlWithTimeout(
+      stored,
+      RIDER_LICENSE_IMAGE_ENDPOINT_TIMEOUT_MS,
+    );
+    if (!licenseImageUrl) {
+      throw new AppError('Could not prepare licence image', 503, 'LICENSE_SIGN_FAILED');
+    }
+    return success(res, { licenseImageUrl, hasLicenseImage: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function updateFcmToken(req: Request, res: Response, next: NextFunction) {
   try {
     const driverId = req.user!.sub;

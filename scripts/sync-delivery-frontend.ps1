@@ -50,7 +50,10 @@ Copy-Tree 'components\maps'
 
 $libDst = Join-Path $dst 'lib'
 New-Item -ItemType Directory -Force -Path $libDst | Out-Null
-$libPreserve = @('deliveryApi.ts', 'deliveryAdminPaths.ts', 'adminApi.ts', 'deliveryWalletApi.ts')
+$libPreserve = @(
+  'deliveryApi.ts', 'deliveryAdminPaths.ts', 'adminApi.ts', 'deliveryWalletApi.ts',
+  'deliveryPayoutStatementDownload.ts'
+)
 $libBackups = @{}
 foreach ($name in $libPreserve) {
   $p = Join-Path $libDst $name
@@ -103,7 +106,8 @@ $adminGlob = @(
   'CustomerStopsWizard.tsx', 'DeliveryRouteTimeline.tsx', 'TimelineScooterIcon.tsx',
   'ApiBaseUrlDialog.tsx', 'AdminOrderItemsCompact.tsx',
   'DashboardPeriodFilter.tsx',
-  'DeliveryWallet*', 'DeliveryApprovePayoutModal.tsx', 'DeliveryFeesByBranchBreakdown.tsx',
+  'DeliveryWallet*', 'DeliveryApprovePayoutModal.tsx', 'DeliveryPayoutPayModal.tsx', 'DeliveryPayoutsDuePanel.tsx',
+  'AdminPinGateModal.tsx', 'DeliveryFeesByBranchBreakdown.tsx',
   'DashboardKpiCard.tsx', 'BrandKpiIconBox.tsx', 'DateRangePicker.tsx', 'AdminTablePagination.tsx'
 )
 $adminDst = Join-Path $dst 'components\admin'

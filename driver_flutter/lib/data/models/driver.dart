@@ -20,6 +20,8 @@ class DriverProfile {
   final String? vehicleNumber;
   final String? profilePhotoUrl;
   final String? licenseImageUrl;
+  /// True when a licence file exists in admin but presign may still be pending.
+  final bool hasLicenseImage;
   final String dutyStatus;
   final String? storeId;
   final StoreRef? store;
@@ -53,6 +55,7 @@ class DriverProfile {
     this.vehicleNumber,
     this.profilePhotoUrl,
     this.licenseImageUrl,
+    this.hasLicenseImage = false,
     this.dutyStatus = 'OFF_DUTY',
     this.storeId,
     this.store,
@@ -83,6 +86,7 @@ class DriverProfile {
       vehicleNumber: strOrNull(j, 'vehicleNumber'),
       profilePhotoUrl: strOrNull(j, 'profilePhotoUrl'),
       licenseImageUrl: strOrNull(j, 'licenseImageUrl'),
+      hasLicenseImage: boolOf(j, 'hasLicenseImage', strOrNull(j, 'licenseImageUrl') != null),
       dutyStatus: str(j, 'dutyStatus', 'OFF_DUTY'),
       storeId: strOrNull(j, 'storeId'),
       store: store == null ? null : StoreRef.fromJson(store),
@@ -118,6 +122,8 @@ class DriverProfile {
     String? activeRidePhase,
     bool? canClaimMore,
     List<String>? branchPoolStoreIds,
+    String? licenseImageUrl,
+    bool? hasLicenseImage,
   }) {
     return DriverProfile(
       id: id,
@@ -126,7 +132,8 @@ class DriverProfile {
       nicNumber: nicNumber,
       vehicleNumber: vehicleNumber,
       profilePhotoUrl: profilePhotoUrl,
-      licenseImageUrl: licenseImageUrl,
+      licenseImageUrl: licenseImageUrl ?? this.licenseImageUrl,
+      hasLicenseImage: hasLicenseImage ?? this.hasLicenseImage,
       dutyStatus: dutyStatus ?? this.dutyStatus,
       storeId: storeId,
       store: store,
