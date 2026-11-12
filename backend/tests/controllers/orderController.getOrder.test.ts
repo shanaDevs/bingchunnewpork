@@ -7,6 +7,9 @@ vi.mock('../../src/lib/prisma', () => ({
     order: {
       findFirst: vi.fn(),
     },
+    user: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
     deliveryJobOrder: {
       findFirst: vi.fn().mockResolvedValue(null),
     },
@@ -231,7 +234,12 @@ describe('getOrder', () => {
   });
 
   it('blocks random users from guest orders without the track token', async () => {
-    vi.mocked(prisma.order.findFirst).mockResolvedValue({ ...baseOrder, userId: null } as never);
+    vi.mocked(prisma.order.findFirst).mockResolvedValue({
+      ...baseOrder,
+      userId: null,
+      guestPhone: '0779999999',
+    } as never);
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({ phone: '0771234567' } as never);
 
     const req = createMockReq({
       params: { id: 'order-uuid-1' },
@@ -243,6 +251,31 @@ describe('getOrder', () => {
 
     expect(next).toHaveBeenCalledWith(expect.any(AppError));
     expect((asMockFn(next).mock.calls[0][0] as AppError).statusCode).toBe(403);
+  });
+
+  it('allows a signed-in customer to open an unclaimed guest order that matches their phone', async () => {
+    vi.mocked(prisma.order.findFirst).mockResolvedValue({
+      ...baseOrder,
+      userId: null,
+      guestPhone: '0771234567',
+    } as never);
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({ phone: '0771234567' } as never);
+
+    const req = createMockReq({
+      params: { id: 'BC260722-1001' },
+      user: { sub: 'user-phone-match', type: 'user' },
+    });
+    const res = createMockRes();
+
+    await getOrder(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({ id: 'order-uuid-1', orderNumber: 'BC260722-1001' }),
+      }),
+    );
   });
 
   it('serialises platform rating timestamps to ISO strings when present', async () => {

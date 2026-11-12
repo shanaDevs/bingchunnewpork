@@ -172,6 +172,51 @@ export async function sendOrderCancelledToDriver(
   return { tokensSent };
 }
 
+export type DriverAccountUpdatePushPayload = {
+  notificationId: string;
+  kind: 'COMPLAINT' | 'BRANCH_REQUEST';
+  title: string;
+  body: string;
+  complaintId?: string;
+  branchRequestId?: string;
+};
+
+/**
+ * Data-only account update (complaint / branch review). Rider app shows its own notification UI.
+ */
+export async function sendDriverAccountUpdateToDriver(
+  driverId: string,
+  payload: DriverAccountUpdatePushPayload,
+): Promise<{ tokensSent: number }> {
+  if (!isFcmConfigured()) return { tokensSent: 0 };
+
+  const devices = await prisma.driverDevice.findMany({
+    where: { driverId, fcmToken: { not: null } },
+    select: { id: true, fcmToken: true },
+  });
+  if (devices.length === 0) return { tokensSent: 0 };
+
+  const data: Record<string, string> = {
+    type: 'DRIVER_UPDATE',
+    notificationId: payload.notificationId,
+    kind: payload.kind,
+    title: payload.title,
+    body: payload.body,
+  };
+  if (payload.complaintId) data.complaintId = payload.complaintId;
+  if (payload.branchRequestId) data.branchRequestId = payload.branchRequestId;
+
+  const sent = await Promise.all(
+    devices.map((device) => deliverToDevice(device.id, device.fcmToken!, data)),
+  );
+  const tokensSent = sent.reduce((n, one) => n + one, 0);
+
+  logger.debug(
+    `Driver account push (${payload.kind}) to driver ${driverId}: ${tokensSent}/${devices.length} tokens`,
+  );
+  return { tokensSent };
+}
+
 /** FCM to a single rider — used when admin assigns a redelivery rather than broadcasting the pool. */
 export async function sendPushToDriver(
   driverId: string,

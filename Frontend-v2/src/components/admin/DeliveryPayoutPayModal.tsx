@@ -16,8 +16,15 @@ import type { DeliveryPayoutDueRow, DeliveryWalletSummary } from '@/lib/delivery
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import DeliveryFeesByBranchBreakdown from '@/components/admin/DeliveryFeesByBranchBreakdown';
 import AdminPinGateModal from '@/components/admin/AdminPinGateModal';
+import { cn } from '@/lib/utils';
 
 type PaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CHECK' | '';
+
+const DELIVERY_PAYOUT_PAYMENT_OPTIONS: { value: Exclude<PaymentMethod, ''>; label: string }[] = [
+  { value: 'BANK_TRANSFER', label: 'Bank transfer' },
+  { value: 'CASH', label: 'Cash' },
+  { value: 'CHECK', label: 'Check' },
+];
 
 type Props = {
   open: boolean;
@@ -286,33 +293,48 @@ export default function DeliveryPayoutPayModal({
                   )}
 
                   {!readOnly && summary && (
-                    <div className="mt-4 space-y-4 rounded-xl border border-navy-border/80 bg-input-bg/25 px-4 py-3.5">
+                    <div className="delivery-payout-payment-fields mt-4 space-y-4 rounded-xl border border-navy-border/80 bg-input-bg/25 px-4 py-3.5">
                       <div>
-                        <label
-                          htmlFor="delivery-pay-method"
+                        <p
+                          id="delivery-pay-method-label"
                           className="text-sm font-medium text-white"
                         >
                           Payment method
-                        </label>
-                        <select
-                          id="delivery-pay-method"
-                          value={paymentMethod}
-                          onChange={(e) => {
-                            const value = e.target.value as PaymentMethod;
-                            setPaymentMethod(value);
-                            if (value !== 'CHECK') {
-                              setCheckNumber('');
-                              setCheckDate('');
-                            }
-                          }}
-                          disabled={submitting}
-                          className="input-field mt-2 w-full text-sm"
+                        </p>
+                        <div
+                          className="mt-2 flex flex-wrap gap-2"
+                          role="radiogroup"
+                          aria-labelledby="delivery-pay-method-label"
                         >
-                          <option value="">Select method</option>
-                          <option value="BANK_TRANSFER">Bank transfer</option>
-                          <option value="CASH">Cash</option>
-                          <option value="CHECK">Check</option>
-                        </select>
+                          {DELIVERY_PAYOUT_PAYMENT_OPTIONS.map(({ value, label }) => {
+                            const selected = paymentMethod === value;
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                role="radio"
+                                aria-checked={selected}
+                                disabled={submitting}
+                                onClick={() => {
+                                  setPaymentMethod(value);
+                                  if (value !== 'CHECK') {
+                                    setCheckNumber('');
+                                    setCheckDate('');
+                                  }
+                                }}
+                                className={cn(
+                                  'min-w-[7.5rem] flex-1 rounded-[var(--radius-btn)] border px-3 py-2.5 text-sm font-semibold transition-colors',
+                                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-navy-card)]',
+                                  selected
+                                    ? 'border-brand bg-brand text-white shadow-sm'
+                                    : 'border-navy-border bg-[var(--color-navy-card)] text-[var(--color-text)] hover:border-brand/60 hover:bg-brand/10',
+                                )}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
 
                       {isCheck && (

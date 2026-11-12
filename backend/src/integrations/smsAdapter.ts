@@ -12,6 +12,113 @@ interface SmsAdapter {
 
 const SMS_MAX_CHARS = 1500;
 
+/** Cap concurrent SmsLenz HTTP calls (burst of 1000+ must queue, not fire at once). */
+const SMS_OUTBOUND_MAX_CONCURRENT = Math.max(
+  1,
+  parseInt(process.env.SMS_OUTBOUND_MAX_CONCURRENT || '2', 10) || 2,
+);
+/** Minimum gap between starting outbound SMS requests. */
+const SMS_OUTBOUND_MIN_INTERVAL_MS = Math.max(
+  0,
+  parseInt(process.env.SMS_OUTBOUND_MIN_INTERVAL_MS || '200', 10) || 200,
+);
+/** Retries on gateway rate-limit / transient failures. */
+const SMS_OUTBOUND_MAX_RETRIES = Math.max(
+  0,
+  parseInt(process.env.SMS_OUTBOUND_MAX_RETRIES || '5', 10) || 5,
+);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isSmsRateLimitedError(err: unknown): boolean {
+  const detail = err instanceof Error ? err.message : String(err);
+  return /too many|rate.?limit|429|throttl|slow down|try again/i.test(detail);
+}
+
+function isSmsTransientError(err: unknown): boolean {
+  if (isSmsRateLimitedError(err)) return true;
+  const detail = err instanceof Error ? err.message : String(err);
+  return /timed out|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|fetch failed|HTTP 5\d\d/i.test(detail);
+}
+
+/**
+ * Process-wide SMS outbound gate: serializes/pace sends so a burst of 1000+
+ * messages is drained at a SmsLenz-safe rate instead of all in one second.
+ */
+class SmsOutboundGate {
+  private active = 0;
+  private lastStartedAt = 0;
+  private readonly waiters: Array<() => void> = [];
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    await this.acquire();
+    try {
+      return await fn();
+    } finally {
+      this.release();
+    }
+  }
+
+  private acquire(): Promise<void> {
+    return new Promise((resolve) => {
+      const tryStart = () => {
+        if (this.active >= SMS_OUTBOUND_MAX_CONCURRENT) {
+          this.waiters.push(tryStart);
+          return;
+        }
+        const waitMs = Math.max(0, SMS_OUTBOUND_MIN_INTERVAL_MS - (Date.now() - this.lastStartedAt));
+        if (waitMs > 0) {
+          setTimeout(() => {
+            if (this.active >= SMS_OUTBOUND_MAX_CONCURRENT) {
+              this.waiters.push(tryStart);
+              return;
+            }
+            this.active += 1;
+            this.lastStartedAt = Date.now();
+            resolve();
+          }, waitMs);
+          return;
+        }
+        this.active += 1;
+        this.lastStartedAt = Date.now();
+        resolve();
+      };
+      tryStart();
+    });
+  }
+
+  private release() {
+    this.active = Math.max(0, this.active - 1);
+    const next = this.waiters.shift();
+    if (next) next();
+  }
+}
+
+const smsOutboundGate = new SmsOutboundGate();
+
+async function sendWithRetry(adapter: SmsAdapter, payload: SmsPayload): Promise<void> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      await smsOutboundGate.run(() => adapter.send(payload));
+      return;
+    } catch (err) {
+      if (attempt >= SMS_OUTBOUND_MAX_RETRIES || !isSmsTransientError(err)) throw err;
+      attempt += 1;
+      const backoffMs = Math.min(30_000, SMS_OUTBOUND_MIN_INTERVAL_MS * 2 ** attempt);
+      logger.warn('SMS send retrying after transient failure', {
+        to: payload.to,
+        attempt,
+        backoffMs,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+      await sleep(backoffMs);
+    }
+  }
+}
+
 /** SMSlenz requires E.164 Sri Lankan numbers, e.g. +94771234567. */
 export function toSmsLenzContact(phone: string): string | null {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -126,6 +233,9 @@ export class SmsLenzSmsAdapter implements SmsAdapter {
 
     if (!res.ok || body.success === false) {
       const detail = body.message || raw || `HTTP ${res.status}`;
+      if (res.status === 429 || /too many|rate.?limit|throttl/i.test(detail)) {
+        throw new Error(`SMSlenz send failed: too many requests (${detail})`);
+      }
       throw new Error(`SMSlenz send failed: ${detail}`);
     }
 
@@ -159,9 +269,13 @@ class RoutingSmsAdapter implements SmsAdapter {
     }
     const { getSmsRuntimeConfig } = await import('../lib/smsSettings');
     const runtime = await getSmsRuntimeConfig();
-    if (!runtime.enabled || runtime.provider === 'mock') return this.mock.send(payload);
-    if (runtime.provider === 'dialog') return this.dialog.send(payload);
-    return this.live.send(payload);
+    if (!runtime.enabled || runtime.provider === 'mock') {
+      return sendWithRetry(this.mock, payload);
+    }
+    if (runtime.provider === 'dialog') {
+      return sendWithRetry(this.dialog, payload);
+    }
+    return sendWithRetry(this.live, payload);
   }
 }
 

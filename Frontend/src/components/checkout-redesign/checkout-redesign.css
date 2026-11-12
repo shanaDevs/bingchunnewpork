@@ -1,0 +1,59 @@
+/*
+ * Soft restyle of legacy checkout cards inside the redesign shell,
+ * so existing checkout logic keeps working with the new brand look.
+ */
+.checkout-redesign-shell .checkout-redesign-panel .card,
+.checkout-redesign-shell .checkout-redesign-panel .order-branch-card {
+  border-radius: 1.5rem;
+  border: 1px solid color-mix(in oklab, var(--color-brand-200) 80%, transparent);
+  background: #fff;
+  box-shadow: 0 14px 36px -26px rgb(15 33 71 / 0.35);
+  color: var(--color-brand-950);
+}
+
+.checkout-redesign-shell .checkout-redesign-panel .card h3,
+.checkout-redesign-shell .checkout-redesign-panel .font-semibold.text-fg,
+.checkout-redesign-shell .checkout-redesign-panel .text-fg {
+  color: var(--color-brand-950);
+}
+
+.checkout-redesign-shell .checkout-redesign-panel .text-muted {
+  color: rgb(100 116 139);
+}
+
+.checkout-redesign-shell .checkout-redesign-panel .btn-primary {
+  border-radius: 9999px;
+  background: var(--color-brand-600);
+  box-shadow: 0 12px 28px -12px color-mix(in oklab, var(--color-brand-600) 55%, transparent);
+}
+
+.checkout-redesign-shell .checkout-redesign-panel .btn-primary:hover {
+  background: var(--color-brand-700);
+}
+
+.checkout-redesign-shell .checkout-redesign-panel .btn-outline {
+  border-radius: 9999px;
+  border-color: var(--color-brand-200);
+  color: var(--color-brand-700);
+  background: #fff;
+}
+
+.checkout-redesign-shell .checkout-redesign-panel .step-badge {
+  background: var(--color-brand-50);
+  color: var(--color-brand-700);
+  border-color: var(--color-brand-100);
+}
+
+.checkout-redesign-shell .checkout-redesign-panel .step-badge-active {
+  background: var(--color-brand-600);
+  color: #fff;
+  border-color: var(--color-brand-600);
+}
+
+.checkout-redesign-shell .checkout-redesign-panel .border-navy-border {
+  border-color: var(--color-brand-100);
+}
+
+.checkout-redesign-shell .checkout-redesign-panel .bg-navy-light\/40 {
+  background: var(--color-brand-50);
+}

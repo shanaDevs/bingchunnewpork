@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import type { Request } from 'express';
 import type { JwtPayload } from '../middleware/auth';
+import { isSocialPlaceholderPhone, phoneLookupVariants } from '../utils/phone';
 import { stripStaffAttribution } from './orderActor';
 
 export function generateTrackToken(): string {
@@ -12,6 +13,8 @@ type OrderAccessRow = {
   orderNumber: string;
   trackToken: string | null;
   userId: string | null;
+  /** Present for unclaimed guest checkouts; used with callerPhoneVariants. */
+  guestPhone?: string | null;
 };
 
 export type OrderAccessResult =
@@ -23,15 +26,25 @@ function normalizeToken(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+/** Phone variants for the signed-in customer (same set as GET /orders/my). */
+export function callerPhoneVariantsFor(phone: string | null | undefined): string[] {
+  if (!phone || isSocialPlaceholderPhone(phone)) return [];
+  return phoneLookupVariants(phone);
+}
+
 /**
  * Resolve whether the caller may access an order.
  * Public/guest access requires the unguessable track token — not the order number alone.
+ * Signed-in customers may also open unclaimed guest orders that match their phone
+ * (aligned with getMyOrders).
  */
 export function resolveOrderAccess(opts: {
   order: OrderAccessRow;
   identifier: string;
   trackToken?: string | null;
   user?: JwtPayload;
+  /** From callerPhoneVariantsFor(user.phone) — required for guest-phone ownership. */
+  callerPhoneVariants?: string[];
 }): OrderAccessResult {
   const { order, identifier, user } = opts;
   const trackToken = normalizeToken(opts.trackToken);
@@ -42,6 +55,20 @@ export function resolveOrderAccess(opts: {
 
   if (user?.type === 'user' && order.userId && order.userId === user.sub) {
     return { allowed: true, mode: 'owner' };
+  }
+
+  // Same rule as getMyOrders: unclaimed guest orders whose guestPhone matches the account.
+  if (
+    user?.type === 'user' &&
+    !order.userId &&
+    order.guestPhone &&
+    opts.callerPhoneVariants &&
+    opts.callerPhoneVariants.length > 0
+  ) {
+    const guest = order.guestPhone.trim();
+    if (guest && opts.callerPhoneVariants.includes(guest)) {
+      return { allowed: true, mode: 'owner' };
+    }
   }
 
   const orderTrackToken = normalizeToken(order.trackToken);
@@ -105,6 +132,33 @@ export function toPublicOrderView<T extends Record<string, unknown>>(order: T): 
 
 export function buildOrderTrackPath(trackToken: string): string {
   return `/order/${encodeURIComponent(trackToken)}`;
+}
+
+/** Load phone variants for a customer account (used when resolving guest-order ownership). */
+export async function loadCallerPhoneVariants(userId: string): Promise<string[]> {
+  const { prisma } = await import('./prisma');
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { phone: true },
+  });
+  return callerPhoneVariantsFor(user?.phone);
+}
+
+/**
+ * Same as resolveOrderAccess, but loads the caller's phone variants when the order
+ * is an unclaimed guest checkout (so profile /orders?ref= works without a track token).
+ */
+export async function resolveCustomerOrderAccess(opts: {
+  order: OrderAccessRow;
+  identifier: string;
+  trackToken?: string | null;
+  user?: JwtPayload;
+}): Promise<OrderAccessResult> {
+  let callerPhoneVariants: string[] | undefined;
+  if (opts.user?.type === 'user' && !opts.order.userId && opts.order.guestPhone) {
+    callerPhoneVariants = await loadCallerPhoneVariants(opts.user.sub);
+  }
+  return resolveOrderAccess({ ...opts, callerPhoneVariants });
 }
 
 export function readTrackToken(req: Request): string | null {

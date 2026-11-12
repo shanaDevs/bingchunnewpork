@@ -1,5 +1,5 @@
 import { prisma } from '@bingchun/db';
-import { creditedDeliveredTotals, groupFailedOrderIdsByJob } from './gpsPath';
+import { creditedDeliveredTotals, groupLatestFailedAttemptsByJob } from './gpsPath';
 import { meritStatusBand } from './jobStateMachine';
 import { jobRiderDistanceKm, roundDistanceKm, sumRiderDistanceKm } from './riderDistance';
 
@@ -205,10 +205,17 @@ export async function computeRiderStats(
             jobId: { in: jobs.map((job: { id: string }) => job.id) },
             outcome: { not: 'DELIVERED' },
           },
-          select: { jobId: true, orderId: true },
-          distinct: ['jobId', 'orderId'],
+          select: {
+            jobId: true,
+            orderId: true,
+            outcome: true,
+            note: true,
+            attemptNo: true,
+            createdAt: true,
+          },
+          orderBy: [{ attemptNo: 'desc' }, { createdAt: 'desc' }],
         });
-  const failedByJob = groupFailedOrderIdsByJob(failedAttempts);
+  const latestFailedByJob = groupLatestFailedAttemptsByJob(failedAttempts);
 
   let deliveredStops = 0;
   let earningsLkr = 0;
@@ -216,8 +223,15 @@ export async function computeRiderStats(
     // Same basis as `deliveredTotal` on the job-history endpoint, so the Stats tab
     // and the History tab always add up to the same number.
     const credited = creditedDeliveredTotals(
-      job.jobOrders,
-      failedByJob.get(job.id) ?? new Set(),
+      job.jobOrders.map((jo) => ({
+        orderId: jo.orderId,
+        order: {
+          status: jo.order.status,
+          deliveryFee: jo.order.deliveryFee,
+          cancelledAtStatus: jo.order.cancelledAtStatus ?? null,
+        },
+      })),
+      latestFailedByJob.get(job.id) ?? new Map(),
     );
     deliveredStops += credited.deliveredCount;
     earningsLkr += credited.deliveredTotal;

@@ -267,6 +267,7 @@
   [data-theme='light'] .text-yellow-400 { color: var(--status-warning) !important; }
   [data-theme='light'] .text-amber-400 { color: var(--status-warning) !important; }
   [data-theme='light'] .text-amber-300 { color: var(--status-warning) !important; }
+  [data-theme='light'] .text-red-300 { color: var(--status-error) !important; }
   [data-theme='light'] .text-red-400 { color: var(--status-error) !important; }
   [data-theme='light'] .text-orange-400 { color: var(--status-orange) !important; }
 

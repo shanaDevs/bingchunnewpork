@@ -294,6 +294,12 @@ export async function viewableLicenseImageUrl(
   }
 }
 
+/** Presign budget for GET /delivery/me (milliseconds). */
+export const RIDER_LICENSE_PRESIGN_TIMEOUT_MS = 4000;
+
+/** Longer budget for on-demand GET /delivery/me/license-image. */
+export const RIDER_LICENSE_IMAGE_ENDPOINT_TIMEOUT_MS = 5000;
+
 /** Avoid blocking rider profile on slow Spaces presign (e.g. go-online refresh). */
 export async function viewableLicenseImageUrlWithTimeout(
   stored: string | null | undefined,

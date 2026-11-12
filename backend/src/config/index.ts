@@ -10,10 +10,19 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'bingchun-dev-secret-change-in-prod',
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || 'bingchun-refresh-secret-change-in-prod',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '15m',
-  /** Customer access tokens. Refresh rotation covers longer sessions. */
+  /**
+   * Customer access token TTL (short-lived). Keep-alive + /auth/refresh rotate
+   * a new access token so shoppers stay signed in like Facebook.
+   */
   jwtUserExpiresIn: process.env.JWT_USER_EXPIRES_IN || '1d',
-  jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
-  jwtUserRefreshExpiresIn: process.env.JWT_USER_REFRESH_EXPIRES_IN || '30d',
+  /**
+   * Admin/cashier refresh TTL — ~10y so staff (especially cashiers) stay signed
+   * in via keep-alive refresh, Facebook-style. Access tokens still rotate every
+   * JWT_EXPIRES_IN (default 15m).
+   */
+  jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '3650d',
+  /** Customer refresh TTL — ~10y so sessions effectively never idle-expire. */
+  jwtUserRefreshExpiresIn: process.env.JWT_USER_REFRESH_EXPIRES_IN || '3650d',
   frontendUrl: (() => {
     const fromEnv = process.env.FRONTEND_URL?.trim();
     if (fromEnv && !/^https?:\/\/(localhost|127\.0\.0\.1)/i.test(fromEnv)) return fromEnv;
@@ -60,6 +69,10 @@ export const config = {
     provider: process.env.SMS_PROVIDER || (process.env.SMSLENZ_API_KEY ? 'smslenz' : 'mock'),
     apiKey: process.env.SMSLENZ_API_KEY || process.env.SMS_API_KEY || '',
     senderId: process.env.SMSLENZ_SENDER_ID || process.env.SMS_SENDER_ID || 'BingChun',
+    /** Outbound pacing for SmsLenz (see smsAdapter outbound gate). */
+    outboundMaxConcurrent: parseInt(process.env.SMS_OUTBOUND_MAX_CONCURRENT || '2', 10),
+    outboundMinIntervalMs: parseInt(process.env.SMS_OUTBOUND_MIN_INTERVAL_MS || '200', 10),
+    outboundMaxRetries: parseInt(process.env.SMS_OUTBOUND_MAX_RETRIES || '5', 10),
     smslenz: {
       baseUrl: process.env.SMSLENZ_BASE_URL || 'https://smslenz.lk',
       userId: process.env.SMSLENZ_USER_ID || '',
