@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Info, Loader2, ShieldCheck, Undo2, X, XCircle } from 'lucide-react';
+import { FileText, ImageIcon, Info, Loader2, ShieldCheck, Undo2, X, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { deliveryWalletFetch } from '@/lib/deliveryWalletApi';
 import { useDeliveryWalletUnlockToken } from '@/components/admin/DeliveryWalletUnlockContext';
@@ -15,6 +15,8 @@ import {
 } from '@/lib/deliveryPayoutTypes';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import DeliveryFeesByBranchBreakdown from '@/components/admin/DeliveryFeesByBranchBreakdown';
+import DeliveryPayoutPaymentCell from '@/components/admin/DeliveryPayoutPaymentCell';
+import { openPayoutProofById } from '@/lib/adminProtectedFile';
 
 type Props = {
   open: boolean;
@@ -24,6 +26,8 @@ type Props = {
   onRejected?: () => void | Promise<void>;
   /** History: snapshot only. Pending review: approve / reject with optional proof. */
   readOnly?: boolean;
+  onDownloadReceipt?: () => void | Promise<void>;
+  receiptDownloading?: boolean;
 };
 
 function formatPeriod(from: string, to: string) {
@@ -43,6 +47,8 @@ export default function DeliveryApprovePayoutModal({
   onApproved,
   onRejected,
   readOnly = true,
+  onDownloadReceipt,
+  receiptDownloading = false,
 }: Props) {
   const [portalReady, setPortalReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -246,7 +252,7 @@ export default function DeliveryApprovePayoutModal({
                         </div>
                         <div className="flex items-center justify-between gap-3 border-t border-navy-border/40 pt-2">
                           <dt>− Platform fee ({breakdown.platformFeePercent}%)</dt>
-                          <dd className="font-semibold tabular-nums text-red-300">
+                          <dd className="font-semibold tabular-nums text-red-700 dark:text-red-300">
                             − {formatMoneyAmount(breakdown.platformFee)}
                           </dd>
                         </div>
@@ -258,7 +264,7 @@ export default function DeliveryApprovePayoutModal({
                         </div>
                         <div className="flex items-center justify-between gap-3">
                           <dt>− Gateway fee ({breakdown.gatewayFeePercent}%)</dt>
-                          <dd className="font-semibold tabular-nums text-red-300">
+                          <dd className="font-semibold tabular-nums text-red-700 dark:text-red-300">
                             − {formatMoneyAmount(breakdown.gatewayFee)}
                           </dd>
                         </div>
@@ -287,6 +293,52 @@ export default function DeliveryApprovePayoutModal({
                   <p className="mt-4 rounded-lg border border-navy-border px-3 py-2 text-xs text-muted">
                     {payout.remarks}
                   </p>
+                )}
+
+                {readOnly && payout.status === 'APPROVED' && (
+                  <div className="mt-4 rounded-xl border border-navy-border/80 bg-input-bg/25 px-4 py-3.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                      Payment settlement
+                    </p>
+                    <div className="mt-3">
+                      <DeliveryPayoutPaymentCell row={payout} />
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-3 border-t border-navy-border/60 pt-3">
+                      {payout.hasProof ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void openPayoutProofById('deliveryPayout', payout.id).catch((err) => {
+                              toast.error(
+                                err instanceof Error ? err.message : 'Could not open payment proof',
+                              );
+                            });
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-navy-border px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-navy-light"
+                        >
+                          <ImageIcon size={14} />
+                          View proof
+                        </button>
+                      ) : (
+                        <p className="text-xs text-muted">No payment proof on file.</p>
+                      )}
+                      {onDownloadReceipt && (
+                        <button
+                          type="button"
+                          disabled={receiptDownloading}
+                          onClick={() => void onDownloadReceipt()}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-brand px-3 py-2 text-xs font-semibold text-brand transition-colors hover:bg-brand/15 disabled:opacity-50"
+                        >
+                          {receiptDownloading ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <FileText size={14} />
+                          )}
+                          View receipt
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 )}
 
                 {!readOnly && (

@@ -500,7 +500,14 @@ export async function getCustomerMapTiles(): Promise<{ provider: 'google' | 'osm
           body: JSON.stringify({ mapType: 'roadmap', language: 'en-US', region: 'LK' }),
         },
       );
-      if (!res.ok) return OSM_TILES;
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        logger.warn('[MAPS] Google tile session HTTP error', {
+          status: res.status,
+          detail: detail.slice(0, 300),
+        });
+        return OSM_TILES;
+      }
       const data = await res.json() as { session?: string; expiry?: string };
       if (!data.session) return OSM_TILES;
       const expirySeconds = Number(data.expiry);

@@ -19,6 +19,10 @@ import { buildDeliveryRoutePayload } from '../lib/deliveryRouteResponse';
 import { decimalFieldToLkrNumber, parseDecimalFromDb } from '../lib/moneyDecimal';
 import { serializeDeliveryJobFees } from '../lib/walletApiMoney';
 import {
+  notifyDriverBranchRequestReviewed,
+  notifyDriverComplaintStatusChange,
+} from '../lib/driverNotifications';
+import {
   adminJobOrdersInclude,
   classifyIncompleteJob,
   deriveAdminOrderDeliveryState,
@@ -1894,6 +1898,10 @@ export async function updateDriverComplaint(req: Request, res: Response, next: N
       }).catch(() => {});
     }
 
+    if (existing.status !== updated.status) {
+      notifyDriverComplaintStatusChange(existing.status, updated).catch(() => {});
+    }
+
     return success(res, updated);
   } catch (err) {
     next(err);
@@ -2013,6 +2021,15 @@ export async function reviewDriverBranchRequest(req: Request, res: Response, nex
         reviewNote: body.reviewNote,
       },
     });
+
+    const store = updated.toStoreId
+      ? await prisma.store.findUnique({
+          where: { id: updated.toStoreId },
+          select: { name: true },
+        })
+      : null;
+    notifyDriverBranchRequestReviewed(updated, store?.name).catch(() => {});
+
     return success(res, updated);
   } catch (err) {
     next(err);

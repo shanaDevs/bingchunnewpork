@@ -38,6 +38,26 @@ import {
   withUploadedProofCleanup,
 } from '../lib/settlementProofUpload';
 import { parseSettlementCheckDate } from '../lib/walletControllerSupport';
+import {
+  renderDeliveryPayoutStatementForId,
+  renderDeliveryPayoutStatementZip,
+} from '../lib/deliveryPayoutStatement';
+
+const deliveryPayoutStatementZipSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(40),
+});
+
+function attachmentDisposition(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+function sendAttachment(res: Response, buffer: Buffer, contentType: string, filename: string): void {
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Disposition', attachmentDisposition(filename));
+  res.setHeader('Content-Length', buffer.length);
+  res.send(buffer);
+}
 
 const rangeSchema = z.object({
   from: z.string().regex(DATE_RE).optional(),
@@ -175,6 +195,31 @@ export async function listDeliveryPayoutsHandler(req: Request, res: Response, ne
       limit,
     });
     return success(res, result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function downloadDeliveryPayoutStatementZipHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const body = deliveryPayoutStatementZipSchema.parse(req.body ?? {});
+    const zip = await renderDeliveryPayoutStatementZip(body.ids);
+    const stamp = new Date().toISOString().slice(0, 10);
+    sendAttachment(res, zip, 'application/zip', `delivery-payouts-${stamp}.zip`);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getDeliveryPayoutStatementHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = String(req.params.id);
+    const file = await renderDeliveryPayoutStatementForId(id);
+    sendAttachment(res, file.buffer, 'application/pdf', file.filename);
   } catch (err) {
     next(err);
   }

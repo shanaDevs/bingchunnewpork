@@ -7,7 +7,7 @@ import {
   meritStatusBand,
   computeRiderStats,
   creditedDeliveredTotals,
-  groupFailedOrderIdsByJob,
+  groupLatestFailedAttemptsByJob,
   isRiderStatsPeriod,
   patchDriverOpsProfile,
 } from '@bingchun/delivery-domain';
@@ -22,22 +22,20 @@ import { todayDateRange } from '../lib/datetime';
 import { getEventPublisher } from '../sockets/eventPublisher';
 import { replayPendingJobsForDriverGoingOnline } from '../lib/pendingJobAlerts';
 import { logger } from '../utils/logger';
+import {
+  RIDER_LICENSE_IMAGE_ENDPOINT_TIMEOUT_MS,
+  RIDER_LICENSE_PRESIGN_TIMEOUT_MS,
+  viewableLicenseImageUrlWithTimeout,
+} from '@bingchun/backend/dist/lib/spaces';
 
-/** Private licence objects need a short-lived GET URL. Core owns the Spaces signer. */
-async function viewableLicenseImageUrl(stored: string | null | undefined): Promise<string | null> {
-  if (!stored) return null;
-  try {
-    const spaces = require('@bingchun/backend/dist/lib/spaces') as {
-      viewableLicenseImageUrl?: (url: string | null | undefined) => Promise<string | null>;
-    };
-    if (typeof spaces.viewableLicenseImageUrl === 'function') {
-      return await spaces.viewableLicenseImageUrl(stored);
-    }
-    logger.warn('Licence signer missing from backend build; licence image omitted');
-  } catch (err) {
-    logger.warn('Licence signer unavailable; licence image omitted', err);
-  }
-  return null;
+function accessibleStoreIdsFromDriver(driver: {
+  storeId: string | null;
+  accessibleStores: ReadonlyArray<{ id: string }>;
+}): string[] {
+  const ids = new Set<string>();
+  if (driver.storeId) ids.add(driver.storeId);
+  for (const s of driver.accessibleStores) ids.add(s.id);
+  return [...ids];
 }
 
 export async function getMe(req: Request, res: Response, next: NextFunction) {
@@ -49,10 +47,18 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
         id: true,
         name: true,
         phone: true,
+        nicNumber: true,
+        address: true,
+        vehicleType: true,
         vehicleNumber: true,
+        vehicleColor: true,
+        licenseNumber: true,
+        disabilities: true,
         profilePhotoUrl: true,
         licenseImageUrl: true,
         dutyStatus: true,
+        meritPoints: true,
+        consecutiveSuccessfulDeliveries: true,
         storeId: true,
         store: { select: { id: true, name: true, city: true } },
         accessibleStores: { select: { id: true, name: true, city: true } },
@@ -60,7 +66,7 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
     });
     if (!driver) throw new AppError('Driver not found', 404);
 
-    const storeIds = await getDriverAccessibleStoreIds(driverId, driver.storeId);
+    const storeIds = accessibleStoreIdsFromDriver(driver);
     const stores =
       storeIds.length === 0
         ? []
@@ -76,29 +82,74 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
       _count: { _all: true },
     });
 
-    const points = 100;
+    const storedLicense = driver.licenseImageUrl?.trim() || null;
+    const hasLicenseImage = Boolean(storedLicense);
+    let licenseImageUrl: string | null = null;
+    try {
+      licenseImageUrl = await viewableLicenseImageUrlWithTimeout(
+        storedLicense,
+        RIDER_LICENSE_PRESIGN_TIMEOUT_MS,
+      );
+    } catch (err) {
+      logger.warn('Licence presign failed for rider profile (delivery-service)', err);
+      licenseImageUrl = null;
+    }
+
+    const points = driver.meritPoints ?? 100;
     const claimMore = await canDriverClaimMore(driverId);
 
     return success(res, {
       id: driver.id,
       name: driver.name,
       phone: driver.phone,
+      nicNumber: driver.nicNumber,
+      address: driver.address,
+      vehicleType: driver.vehicleType,
       vehicleNumber: driver.vehicleNumber,
+      vehicleColor: driver.vehicleColor,
+      licenseNumber: driver.licenseNumber,
+      disabilities: driver.disabilities,
       profilePhotoUrl: driver.profilePhotoUrl,
-      licenseImageUrl: await viewableLicenseImageUrl(driver.licenseImageUrl),
+      licenseImageUrl,
+      hasLicenseImage,
       dutyStatus: driver.dutyStatus,
       storeId: driver.storeId,
       store: driver.store,
       accessibleStores: stores,
       meritPoints: points,
       meritStatus: meritStatusBand(points),
-      consecutiveSuccessfulDeliveries: 0,
+      consecutiveSuccessfulDeliveries: driver.consecutiveSuccessfulDeliveries ?? 0,
       avgRating: ratingAgg._avg.stars
         ? Math.round(ratingAgg._avg.stars * 10) / 10
         : null,
       ratingCount: ratingAgg._count._all,
       canClaimMore: claimMore,
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getMyLicenseImage(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.user!.sub;
+    const driver = await prisma.adminUser.findFirst({
+      where: { id: driverId, role: { name: 'DELIVERY_DRIVER' } },
+      select: { licenseImageUrl: true },
+    });
+    if (!driver) throw new AppError('Driver not found', 404);
+    const stored = driver.licenseImageUrl?.trim() || null;
+    if (!stored) {
+      throw new AppError('No licence image on file', 404, 'LICENSE_NOT_UPLOADED');
+    }
+    const licenseImageUrl = await viewableLicenseImageUrlWithTimeout(
+      stored,
+      RIDER_LICENSE_IMAGE_ENDPOINT_TIMEOUT_MS,
+    );
+    if (!licenseImageUrl) {
+      throw new AppError('Could not prepare licence image', 503, 'LICENSE_SIGN_FAILED');
+    }
+    return success(res, { licenseImageUrl, hasLicenseImage: true });
   } catch (err) {
     next(err);
   }
@@ -263,17 +314,31 @@ export async function getHistory(req: Request, res: Response, next: NextFunction
               jobId: { in: jobs.map((j) => j.id) },
               outcome: { not: 'DELIVERED' },
             },
-            select: { jobId: true, orderId: true },
-            distinct: ['jobId', 'orderId'],
+            select: {
+              jobId: true,
+              orderId: true,
+              outcome: true,
+              note: true,
+              attemptNo: true,
+              createdAt: true,
+            },
+            orderBy: [{ attemptNo: 'desc' }, { createdAt: 'desc' }],
           });
-    const failedByJob = groupFailedOrderIdsByJob(failedAttempts);
+    const latestFailedByJob = groupLatestFailedAttemptsByJob(failedAttempts);
 
     return success(
       res,
       jobs.map((j) => {
         const { deliveredCount, deliveredTotal } = creditedDeliveredTotals(
-          j.jobOrders,
-          failedByJob.get(j.id) ?? new Set(),
+          j.jobOrders.map((jo) => ({
+            orderId: jo.orderId,
+            order: {
+              status: jo.order.status,
+              deliveryFee: jo.order.deliveryFee,
+              cancelledAtStatus: jo.order.cancelledAtStatus ?? null,
+            },
+          })),
+          latestFailedByJob.get(j.id) ?? new Map(),
         );
         return {
           id: j.id,

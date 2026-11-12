@@ -47,6 +47,11 @@ vi.mock('../../src/lib/settlementProofUpload', () => ({
   withUploadedProofCleanup: vi.fn(async (_url: string | null, work: () => Promise<unknown>) => work()),
 }));
 
+vi.mock('../../src/lib/deliveryPayoutStatement', () => ({
+  renderDeliveryPayoutStatementForId: vi.fn(),
+  renderDeliveryPayoutStatementZip: vi.fn(),
+}));
+
 import { verifyAdminPin } from '../../src/lib/verifyAdminPin';
 import { getDeliveryWalletSummary } from '../../src/lib/deliveryWalletService';
 import {
@@ -61,9 +66,15 @@ import {
   requireSettlementProofUpload,
 } from '../../src/lib/settlementProofUpload';
 import {
+  renderDeliveryPayoutStatementForId,
+  renderDeliveryPayoutStatementZip,
+} from '../../src/lib/deliveryPayoutStatement';
+import {
   approveDeliveryPayoutHandler,
   attachDeliveryPayoutProofHandler,
   createDeliveryPayoutHandler,
+  downloadDeliveryPayoutStatementZipHandler,
+  getDeliveryPayoutStatementHandler,
   getDeliveryWalletHandler,
   payDeliveryPayoutHandler,
   unlockDeliveryWalletHandler,
@@ -224,6 +235,71 @@ describe('deliveryWalletController', () => {
     );
     expect(asMockFn(next)).toHaveBeenCalled();
     expect(payDeliveryPayout).not.toHaveBeenCalled();
+  });
+
+  describe('delivery payout statements', () => {
+    it('returns PDF attachment for a payout statement', async () => {
+      vi.mocked(renderDeliveryPayoutStatementForId).mockResolvedValue({
+        buffer: Buffer.from('%PDF-test'),
+        filename: 'Delivery Partner - Jan.pdf',
+      });
+      const res = createMockRes();
+      await getDeliveryPayoutStatementHandler(
+        createMockReq({
+          user: { sub: 'admin-1', type: 'admin', role: 'DELIVERY_ADMIN' },
+          params: { id: 'payout-1' },
+        }),
+        res,
+        createMockNext(),
+      );
+      expect(renderDeliveryPayoutStatementForId).toHaveBeenCalledWith('payout-1');
+      expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
+      expect(res.send).toHaveBeenCalledWith(Buffer.from('%PDF-test'));
+    });
+
+    it('propagates 404 when payout statement is missing', async () => {
+      vi.mocked(renderDeliveryPayoutStatementForId).mockRejectedValue(new AppError('Delivery payout not found', 404));
+      const next = createMockNext();
+      await getDeliveryPayoutStatementHandler(
+        createMockReq({
+          user: { sub: 'admin-1', type: 'admin', role: 'DELIVERY_ADMIN' },
+          params: { id: 'missing' },
+        }),
+        createMockRes(),
+        next,
+      );
+      expect(thrownError(next).statusCode).toBe(404);
+    });
+
+    it('rejects empty zip body', async () => {
+      const next = createMockNext();
+      await downloadDeliveryPayoutStatementZipHandler(
+        createMockReq({
+          user: { sub: 'admin-1', type: 'admin', role: 'DELIVERY_ADMIN' },
+          body: { ids: [] },
+        }),
+        createMockRes(),
+        next,
+      );
+      expect(next).toHaveBeenCalled();
+      expect(renderDeliveryPayoutStatementZip).not.toHaveBeenCalled();
+    });
+
+    it('returns zip attachment for multiple payout ids', async () => {
+      vi.mocked(renderDeliveryPayoutStatementZip).mockResolvedValue(Buffer.from('PK'));
+      const res = createMockRes();
+      await downloadDeliveryPayoutStatementZipHandler(
+        createMockReq({
+          user: { sub: 'admin-1', type: 'admin', role: 'DELIVERY_ADMIN' },
+          body: { ids: ['a', 'b'] },
+        }),
+        res,
+        createMockNext(),
+      );
+      expect(renderDeliveryPayoutStatementZip).toHaveBeenCalledWith(['a', 'b']);
+      expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/zip');
+      expect(res.send).toHaveBeenCalledWith(Buffer.from('PK'));
+    });
   });
 
   describe('createDeliveryPayoutHandler', () => {

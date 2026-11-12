@@ -6,18 +6,22 @@ import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
 import { cn } from '@/lib/utils';
 import type { DeliveryPayoutDueRow } from '@/lib/deliveryPayoutTypes';
 
-type Props = {
+type PropsBase = {
   rows: DeliveryPayoutDueRow[];
   loading?: boolean;
   onView?: (row: DeliveryPayoutDueRow) => void;
-  onReviewAndPay: (row: DeliveryPayoutDueRow) => void;
 };
+
+type Props =
+  | (PropsBase & { allowPay?: true; onReviewAndPay: (row: DeliveryPayoutDueRow) => void })
+  | (PropsBase & { allowPay: false; onReviewAndPay?: never });
 
 export default function DeliveryPayoutsDuePanel({
   rows,
   loading,
   onView,
   onReviewAndPay,
+  allowPay = true,
 }: Props) {
   const count = rows.length;
 
@@ -37,7 +41,9 @@ export default function DeliveryPayoutsDuePanel({
           </div>
           <p className="text-base font-semibold text-[var(--color-text)]">No delivery payouts due</p>
           <p className="mt-1 max-w-sm text-sm text-[var(--color-text-muted)]">
-            Completed 15-day delivery periods appear here for Super Admin payout.
+            {allowPay
+              ? 'Completed 15-day delivery periods appear here for Super Admin payout.'
+              : 'Completed 15-day periods. Pay from main admin Wallet → Payouts Due → Delivery.'}
           </p>
         </div>
       )}
@@ -61,7 +67,11 @@ export default function DeliveryPayoutsDuePanel({
                   <th className="px-3 py-2.5 text-right font-semibold">Net due</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Orders</th>
                   <th className="px-3 py-2.5 text-right font-semibold">View</th>
-                  <th className="px-3 py-2.5 text-right font-semibold">Action</th>
+                  {allowPay ? (
+                    <th className="px-3 py-2.5 text-right font-semibold">Action</th>
+                  ) : (
+                    <th className="px-3 py-2.5 text-right font-semibold">Status</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -106,20 +116,33 @@ export default function DeliveryPayoutsDuePanel({
                       </button>
                     </td>
                     <td className="px-3 py-3 text-right">
-                      {row.payable ? (
-                        <button
-                          type="button"
-                          onClick={() => onReviewAndPay(row)}
+                      {allowPay ? (
+                        row.payable ? (
+                          <button
+                            type="button"
+                            onClick={() => onReviewAndPay?.(row)}
+                            className={cn(
+                              'inline-flex items-center rounded-lg border border-[var(--color-brand)] px-3 py-1.5',
+                              'text-xs font-semibold text-[var(--color-brand)] transition-colors hover:bg-[var(--color-brand-subtle)]',
+                            )}
+                          >
+                            Review & Pay
+                          </button>
+                        ) : (
+                          <span className="text-[10px] font-medium text-[var(--color-text-muted)]">
+                            Pay earlier period first
+                          </span>
+                        )
+                      ) : (
+                        <span
                           className={cn(
-                            'inline-flex items-center rounded-lg border border-[var(--color-brand)] px-3 py-1.5',
-                            'text-xs font-semibold text-[var(--color-brand)] transition-colors hover:bg-[var(--color-brand-subtle)]',
+                            'text-[10px] font-semibold',
+                            row.payable
+                              ? 'text-emerald-400'
+                              : 'text-[var(--color-text-muted)]',
                           )}
                         >
-                          Review & Pay
-                        </button>
-                      ) : (
-                        <span className="text-[10px] font-medium text-[var(--color-text-muted)]">
-                          Pay earlier period first
+                          {row.payable ? 'Ready to pay' : 'Earlier period pending'}
                         </span>
                       )}
                     </td>

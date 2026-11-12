@@ -111,7 +111,7 @@ sequenceDiagram
   API-->>Client: accessToken + refreshToken + user/admin profile
   Client->>API: Bearer accessToken on protected routes
   API->>API: jwt.verify JWT_SECRET
-  Note over Client,API: Admin access ~15m refresh ~7d; Customer access no expiry refresh ~3650d
+  Note over Client,API: Admin/cashier access ~15m refresh ~3650d; Customer access ~1d refresh ~3650d (keep-alive)
   Client->>API: POST /api/auth/refresh or /auth/admin/refresh
   API-->>Client: New access token
 ```

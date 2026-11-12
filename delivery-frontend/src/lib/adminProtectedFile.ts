@@ -99,6 +99,38 @@ export async function openPayoutProof(proofUrl: string | null | undefined): Prom
   await openAdminProtectedFile(proofUrl);
 }
 
+export type PayoutProofKind = 'withdrawal' | 'deliveryPayout';
+
+type ProofAccessResponse = {
+  url: string;
+  expiresAt?: string | null;
+  legacyLocal?: boolean;
+};
+
+/** Fetch a short-lived signed URL (or legacy path) and open the payout proof. */
+export async function openPayoutProofById(
+  kind: PayoutProofKind,
+  id: string,
+  opts?: { storeId?: string },
+): Promise<void> {
+  await requireAdminSession();
+  const path =
+    kind === 'withdrawal'
+      ? `/admin/wallet/withdrawals/${encodeURIComponent(id)}/proof-url`
+      : `/admin/delivery-wallet/payouts/${encodeURIComponent(id)}/proof-url`;
+  const qs = opts?.storeId ? `?storeId=${encodeURIComponent(opts.storeId)}` : '';
+  const res = await fetch(adminApiUrl(`${path}${qs}`), withAdminCredentials());
+  if (!res.ok) throw new Error('Could not load payment proof');
+  const json = (await res.json()) as { data?: ProofAccessResponse };
+  const data = json.data;
+  if (!data?.url) throw new Error('No payment proof available');
+  if (data.legacyLocal) {
+    await openAdminProtectedFile(data.url);
+    return;
+  }
+  openUrlInNewTab(data.url);
+}
+
 /** Normalize stored invoice URLs into fetchable admin API paths. */
 export function resolveWithdrawalInvoiceApiPath(invoiceUrl: string | null | undefined): string | null {
   if (!invoiceUrl) return null;

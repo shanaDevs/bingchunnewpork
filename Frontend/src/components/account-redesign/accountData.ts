@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { useAuthHydrated } from "@/hooks/useAuthHydrated";
 import { api } from "@/lib/api";
 import type { LoyaltySummary } from "@/lib/loyalty";
+import { rememberOrderTrackToken } from "@/lib/orderTrackSession";
 import { useAuthStore } from "@/store/authStore";
 import { useCartStore } from "@/store/cartStore";
 import type { Address, Order, OrderStatus, User } from "@/types";
@@ -59,7 +60,13 @@ export function useMyOrders() {
     queryKey: ["my-orders", userId],
     queryFn: async () => {
       const result = await api.get<Order[]>("/orders/my?limit=50", true);
-      return Array.isArray(result) ? result : [];
+      const orders = Array.isArray(result) ? result : [];
+      for (const order of orders) {
+        if (order.orderNumber && order.trackToken) {
+          rememberOrderTrackToken(order.orderNumber, order.trackToken);
+        }
+      }
+      return orders;
     },
     enabled: signedIn,
     staleTime: 60_000,
