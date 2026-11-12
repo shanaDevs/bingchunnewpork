@@ -155,6 +155,30 @@ void main() {
     expect(product.isAvailable, isFalse);
   });
 
+  test('low-stock online-available quantity below 5 is still orderable', () {
+    final product = ProductDto.fromJson({
+      'id': 'p8b',
+      'name': 'Brown Sugar Boba Milk Tea',
+      'slug': 'brown-sugar-boba-milk-tea',
+      'basePrice': 480,
+      'isAvailable': true,
+      'isOutOfStock': false,
+      'storeAvailability': {
+        'atSelectedStore': true,
+        'branchStock': {
+          'inStock': true,
+          'isOutOfStock': false,
+          'isLowStock': true,
+          'quantity': 3,
+        },
+      },
+    }).toEntity();
+
+    expect(product.orderableQty, 3);
+    expect(product.canOrder, isTrue);
+    expect(product.isLowStock, isTrue);
+  });
+
   test('online-available quantity of 6 is fully orderable', () {
     final product = ProductDto.fromJson({
       'id': 'p8',

@@ -30,6 +30,7 @@ export interface ProductCardProps {
   layout?: 'grid' | 'list' | 'compact';
   isWishlisted?: boolean;
   onWishlistToggle?: () => void;
+  orderingClosed?: boolean;
   onSelect: () => void;
 }
 
@@ -61,6 +62,7 @@ export default function ProductCard({
   layout = 'grid',
   isWishlisted = false,
   onWishlistToggle,
+  orderingClosed = false,
   onSelect,
 }: ProductCardProps) {
   const router = useRouter();
@@ -89,7 +91,7 @@ export default function ProductCard({
       router.push(`/product/${id}`);
       return;
     }
-    if (!canAdd) return;
+    if (!canAdd || orderingClosed) return;
     onSelect();
   };
 
@@ -199,9 +201,11 @@ export default function ProductCard({
             <button
               type="button"
               className="product-card__add-btn"
-              aria-label={`Add ${name}`}
+              aria-label={orderingClosed ? 'Online ordering is closed' : `Add ${name}`}
+              disabled={orderingClosed}
               onClick={(e) => {
                 e.stopPropagation();
+                if (orderingClosed) return;
                 onSelect();
               }}
             >
@@ -267,9 +271,11 @@ export default function ProductCard({
               <button
                 type="button"
                 className="product-card__add-btn"
-                aria-label={`Add ${name}`}
+                aria-label={orderingClosed ? 'Online ordering is closed' : `Add ${name}`}
+                disabled={orderingClosed}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (orderingClosed) return;
                   onSelect();
                 }}
               >
@@ -283,9 +289,11 @@ export default function ProductCard({
                   <button
                     type="button"
                     className="product-card__add-btn"
-                    aria-label={`Add ${name}`}
+                    aria-label={orderingClosed ? 'Online ordering is closed' : `Add ${name}`}
+                    disabled={orderingClosed}
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (orderingClosed) return;
                       onSelect();
                     }}
                   >

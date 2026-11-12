@@ -44,6 +44,7 @@
     "seed:nuge-sep5-45x45-mixed": "ts-node --transpile-only src/scripts/seed-nugegoda-sep5-45x45-mixed-orders.ts",
     "seed:nuge-sep6-refund-penalty-patch": "ts-node --transpile-only src/scripts/seed-nugegoda-sep5-45x45-mixed-orders.ts --patch-sep6-refund",
     "seed:dehiwala-jun5-15": "ts-node --transpile-only src/scripts/seed-dehiwala-jun5-15-orders.ts",
+    "seed:dehiwala-jun20-15": "ts-node --transpile-only src/scripts/seed-dehiwala-jun20-15-orders.ts",
     "seed:nuge-sep620-15-mixed": "ts-node --transpile-only src/scripts/seed-nugegoda-sep620-15-mixed-orders.ts",
     "seed:nuge-sep21-15-mixed": "ts-node --transpile-only src/scripts/seed-nugegoda-sep21-15-mixed-orders.ts",
     "seed:nuge-sept1-15-delivery": "ts-node --transpile-only src/scripts/seed-nugegoda-sept1-15-delivery-promos.ts",

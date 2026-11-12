@@ -462,10 +462,14 @@ export function buildNetBranchPayoutRows(
     });
   }
   if (statement.netPlatformAmountCents !== 0 || opts?.cycleStage === 'FIRST') {
+    const isCredit = statement.netPlatformAmountCents < 0;
+    const netPlatformRowLabel = isCredit
+      ? '+ Net Platform Amount'
+      : '– Net Platform Amount';
     rows.push({
-      label: '– Net Platform Amount',
+      label: netPlatformRowLabel,
       amount: formatFirstPayoutInvoiceAmount(
-        '– Net Platform Amount',
+        netPlatformRowLabel,
         Math.abs(statement.netPlatformAmountCents),
         stage,
       ),
@@ -477,7 +481,7 @@ export function buildNetBranchPayoutRows(
       statement.jasonPayoutTopUpCents -
       statement.priorOnlineWalletAmountCents +
       statement.nonReturningRefundsCents -
-      Math.abs(statement.netPlatformAmountCents),
+      statement.netPlatformAmountCents,
   );
   const branchWalletBeforeGatewayCents = Math.max(
     0,

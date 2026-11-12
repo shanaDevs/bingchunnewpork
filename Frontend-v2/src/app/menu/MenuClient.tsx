@@ -476,6 +476,7 @@ function MenuPageContent() {
                       ratingCount={product.ratingCount}
                       isWishlisted={wishlisted}
                       onWishlistToggle={() => toggleWishlist(product.id, wishlisted)}
+                      orderingClosed={branchOrdering.hasBranch && !branchOrdering.isOpen}
                       onSelect={() => handleProductSelect(product)}
                     />
                   );

@@ -8,6 +8,7 @@ import { cn } from '@/components/home-redesign/lib/cn';
 import { formatLkrShort } from '@/components/menu-redesign/lib/formatMenuPrice';
 import { mapProductTag, productStageScale, tagStyles, type MenuCardTag } from '@/components/menu-redesign/lib/tagStyles';
 import { QuickAddDialog } from '@/components/menu-redesign/QuickAddDialog';
+import { getMenuUnavailableBadgeLabel, isProductComingSoon } from '@/lib/productAvailability';
 import { markMenuReturn } from '@/lib/menuReturn';
 import { resolveProductImageUrl } from '@/lib/productImageUrl';
 import type { Product } from '@/types';
@@ -17,6 +18,7 @@ type MenuProductCardProps = {
   available: boolean;
   layout?: 'grid' | 'list';
   fromMenu?: boolean;
+  orderingClosed?: boolean;
 };
 
 function TagBadge({ tag }: { tag: MenuCardTag }) {
@@ -60,29 +62,43 @@ function CardGlow() {
   );
 }
 
-function QuickAddButton({ product }: { product: Product }) {
+function QuickAddButton({ product, orderingClosed }: { product: Product; orderingClosed: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          if (orderingClosed) return;
+          setOpen(true);
+        }}
+        disabled={orderingClosed}
         aria-haspopup="dialog"
-        aria-label={`Add ${product.name} to cart`}
-        className="absolute right-0 bottom-0 z-10 grid size-9 place-items-center rounded-full bg-brand-600 text-snow shadow-md shadow-brand-900/25 transition-[background-color,color,scale] duration-200 hover:scale-110 hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 group-hover:bg-white group-hover:text-brand-700 group-hover:hover:bg-brand-50 sm:size-10"
+        aria-label={
+          orderingClosed ? 'Online ordering is closed' : `Add ${product.name} to cart`
+        }
+        className="absolute right-0 bottom-0 z-10 grid size-9 place-items-center rounded-full bg-brand-600 text-snow shadow-md shadow-brand-900/25 transition-[background-color,color,scale] duration-200 hover:scale-110 hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 group-hover:bg-white group-hover:text-brand-700 group-hover:hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100 disabled:group-hover:bg-brand-600 disabled:group-hover:text-snow sm:size-10"
       >
         <Plus className="size-5" strokeWidth={3} aria-hidden="true" />
       </button>
-      {open && <QuickAddDialog product={product} onClose={() => setOpen(false)} />}
+      {open && !orderingClosed && <QuickAddDialog product={product} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-export function MenuProductCard({ product, available, layout = 'grid', fromMenu = true }: MenuProductCardProps) {
+export function MenuProductCard({
+  product,
+  available,
+  layout = 'grid',
+  fromMenu = true,
+  orderingClosed = false,
+}: MenuProductCardProps) {
   const markReturn = fromMenu ? () => markMenuReturn(product.id) : undefined;
   const cardTag = mapProductTag(product.tag);
   const imageSrc = resolveProductImageUrl(product.imageUrl) ?? '/promos/menu-hero-cup.png';
   const isList = layout === 'list';
+  const comingSoon = isProductComingSoon(product);
+  const unavailableBadge = getMenuUnavailableBadgeLabel(product);
 
   if (isList) {
     return (
@@ -97,11 +113,13 @@ export function MenuProductCard({ product, available, layout = 'grid', fromMenu 
             </Link>
           </h3>
           <p className="font-numeric mt-1 text-brand-600 font-bold">{formatLkrShort(product.basePrice)}</p>
-          {!available && <p className="text-xs font-bold text-brand-950 uppercase mt-1">Sold out</p>}
+          {!available && (
+            <p className="text-xs font-bold text-brand-950 uppercase mt-1">{unavailableBadge}</p>
+          )}
         </div>
         {available && (
           <div className="self-center">
-            <QuickAddButton product={product} />
+            <QuickAddButton product={product} orderingClosed={orderingClosed} />
           </div>
         )}
       </article>
@@ -120,8 +138,13 @@ export function MenuProductCard({ product, available, layout = 'grid', fromMenu 
       {available && <CardMascot />}
       {cardTag && available && <TagBadge tag={cardTag} />}
       {!available && (
-        <p className="pointer-events-none absolute top-3 left-3 z-10 rounded-full bg-brand-950 px-2.5 py-1 text-[0.6875rem] font-bold tracking-[0.08em] text-snow uppercase sm:top-4 sm:left-4">
-          Sold out
+        <p
+          className={cn(
+            'pointer-events-none absolute top-3 left-3 z-10 rounded-full px-2.5 py-1 text-[0.6875rem] font-bold tracking-[0.08em] text-snow uppercase sm:top-4 sm:left-4',
+            comingSoon ? 'bg-brand-600' : 'bg-brand-950',
+          )}
+        >
+          {unavailableBadge}
         </p>
       )}
 
@@ -149,7 +172,7 @@ export function MenuProductCard({ product, available, layout = 'grid', fromMenu 
             )}
           />
         </div>
-        {available && <QuickAddButton product={product} />}
+        {available && <QuickAddButton product={product} orderingClosed={orderingClosed} />}
       </div>
 
       <div className="flex flex-1 flex-col gap-2 px-1 pt-3 pb-1 sm:gap-3 sm:px-2 sm:pt-4 sm:pb-1">
@@ -165,7 +188,7 @@ export function MenuProductCard({ product, available, layout = 'grid', fromMenu 
             className="rounded-sm after:absolute after:inset-0 after:rounded-[inherit] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-2 focus-visible:after:outline-brand-600"
           >
             {product.name}
-            {!available && <span className="sr-only"> (Sold out)</span>}
+            {!available && <span className="sr-only"> ({unavailableBadge})</span>}
           </Link>
         </h3>
         <p

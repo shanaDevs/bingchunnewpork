@@ -77,6 +77,7 @@ import { getSmsAdminView, updateSmsSettings } from '../lib/smsSettings';
 import { requireBranchStoreId } from '../middleware/auth';
 import { resolveStoreOrderingHours } from '../lib/storeOrderingHours';
 import { fetchStoreOrderingHours, fetchOrderingHoursMap, updateStoreOrderingHours } from '../lib/storeOrderingSchema';
+import { broadcastBranchOperating } from '../lib/socket';
 import { ensurePlatformPaybackSchema } from '../lib/platformPaybackSchema';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
@@ -842,6 +843,15 @@ export async function updateBranchOrderingHours(req: Request, res: Response, nex
     const data = branchOrderingHoursSchema.parse(req.body);
     const store = await updateStoreOrderingHours(storeId, data);
     const hours = resolveStoreOrderingHours(store);
+    broadcastBranchOperating({
+      storeId,
+      branchClosedAt: store.branchClosedAt ? new Date(store.branchClosedAt).toISOString() : null,
+      openTime: store.openTime,
+      closeTime: store.closeTime,
+      onlineOrderStartTime: store.onlineOrderStartTime,
+      onlineOrderStopTime: store.onlineOrderStopTime,
+      pickupCutoffMinutes: store.pickupCutoffMinutes,
+    });
     return success(res, {
       storeId: store.id,
       storeName: store.name,

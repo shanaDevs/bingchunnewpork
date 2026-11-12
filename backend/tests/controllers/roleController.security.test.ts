@@ -31,6 +31,10 @@ vi.mock('../../src/middleware/permission', () => ({
   assertMenuAction: vi.fn(),
 }));
 
+vi.mock('../../src/lib/verifyAdminPin', () => ({
+  verifyAdminPin: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('bcryptjs', () => ({
   default: {
     hash: vi.fn(async () => 'new-hash'),
@@ -41,6 +45,7 @@ import { createRole, deleteRole, updateRole } from '../../src/controllers/roleCo
 import { listUsers, updateAdminUser, updatePermissions } from '../../src/controllers/adminUserController';
 import { prisma } from '../../src/lib/prisma';
 import { assertMenuAction } from '../../src/middleware/permission';
+import { verifyAdminPin } from '../../src/lib/verifyAdminPin';
 
 describe('ROLE-001 roleController security', () => {
   const next = createMockNext();
@@ -164,24 +169,64 @@ describe('ROLE-001 requireSystemAdmin route gate', () => {
 
 describe('ROLE-002 updatePermissions security', () => {
   const next = createMockNext();
+  const permissionRow = {
+    menu: 'ORDERS',
+    canCreate: true,
+    canRead: true,
+    canUpdate: true,
+    canDelete: true,
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(verifyAdminPin).mockResolvedValue(undefined);
     vi.mocked(prisma.$transaction).mockImplementation(async (fn) => fn(prisma as never));
+  });
+
+  it('rejects updates without a PIN', async () => {
+    const req = createMockReq({
+      params: { id: 'staff-1' },
+      user: { sub: 'admin-other', type: 'admin', role: 'SYSTEM_ADMIN' },
+      body: { permissions: [permissionRow] },
+    });
+    const res = createMockRes();
+
+    await updatePermissions(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(ZodError));
+    expect(verifyAdminPin).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid PIN before mutating permissions', async () => {
+    vi.mocked(verifyAdminPin).mockRejectedValue(new AppError('Invalid PIN', 401));
+
+    const req = createMockReq({
+      params: { id: 'staff-1' },
+      user: { sub: 'admin-other', type: 'admin', role: 'SYSTEM_ADMIN' },
+      body: { password: 'wrong', permissions: [permissionRow] },
+    });
+    const res = createMockRes();
+
+    await updatePermissions(req, res, next);
+
+    expect(verifyAdminPin).toHaveBeenCalledWith('admin-other', 'wrong');
+    expect(next).toHaveBeenCalledWith(expect.any(AppError));
+    expect((asMockFn(next).mock.calls[0][0] as AppError).message).toBe('Invalid PIN');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('rejects self-permission edits', async () => {
     const req = createMockReq({
       params: { id: 'admin-self' },
       user: { sub: 'admin-self', type: 'admin', role: 'SYSTEM_ADMIN' },
-      body: {
-        permissions: [{ menu: 'ORDERS', canCreate: true, canRead: true, canUpdate: true, canDelete: true }],
-      },
+      body: { password: 'secret-pin', permissions: [permissionRow] },
     });
     const res = createMockRes();
 
     await updatePermissions(req, res, next);
 
+    expect(verifyAdminPin).toHaveBeenCalledWith('admin-self', 'secret-pin');
     expect(next).toHaveBeenCalledWith(expect.any(AppError));
     expect((asMockFn(next).mock.calls[0][0] as AppError).message).toBe('Cannot edit your own permissions');
     expect(prisma.$transaction).not.toHaveBeenCalled();
@@ -196,9 +241,7 @@ describe('ROLE-002 updatePermissions security', () => {
     const req = createMockReq({
       params: { id: 'super-1' },
       user: { sub: 'admin-other', type: 'admin', role: 'SYSTEM_ADMIN' },
-      body: {
-        permissions: [{ menu: 'ORDERS', canCreate: true, canRead: true, canUpdate: true, canDelete: true }],
-      },
+      body: { password: 'secret-pin', permissions: [permissionRow] },
     });
     const res = createMockRes();
 
@@ -214,6 +257,7 @@ describe('ROLE-002 updatePermissions security', () => {
       params: { id: 'staff-1' },
       user: { sub: 'admin-other', type: 'admin', role: 'SYSTEM_ADMIN' },
       body: {
+        password: 'secret-pin',
         permissions: [{ menu: 'FAKE_MENU', canCreate: true, canRead: true, canUpdate: true, canDelete: true }],
       },
     });
@@ -222,6 +266,7 @@ describe('ROLE-002 updatePermissions security', () => {
     await updatePermissions(req, res, next);
 
     expect(next).toHaveBeenCalledWith(expect.any(ZodError));
+    expect(verifyAdminPin).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -235,6 +280,7 @@ describe('ROLE-002 updatePermissions security', () => {
       params: { id: 'staff-1' },
       user: { sub: 'admin-other', type: 'admin', role: 'SYSTEM_ADMIN' },
       body: {
+        password: 'secret-pin',
         permissions: [{ menu: 'ORDERS', canCreate: false, canRead: true, canUpdate: true, canDelete: false }],
       },
     });
@@ -242,6 +288,7 @@ describe('ROLE-002 updatePermissions security', () => {
 
     await updatePermissions(req, res, next);
 
+    expect(verifyAdminPin).toHaveBeenCalledWith('admin-other', 'secret-pin');
     expect(prisma.$transaction).toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({
       success: true,

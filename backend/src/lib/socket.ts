@@ -546,6 +546,25 @@ export type DeliveryJobBroadcastPayload = {
   forceRing?: boolean;
 };
 
+export type BranchOperatingPayload = {
+  storeId: string;
+  branchClosedAt?: string | null;
+  openTime?: string;
+  closeTime?: string;
+  onlineOrderStartTime?: string | null;
+  onlineOrderStopTime?: string | null;
+  pickupCutoffMinutes?: number;
+};
+
+/** Public store hours change — guests on the website may not be in a room. */
+export function broadcastBranchOperating(payload: BranchOperatingPayload): void {
+  if (!io || !payload.storeId) return;
+  io.emit('branch:operating', payload);
+  logger.debug(
+    `Broadcast branch:operating ${payload.storeId} closedAt=${payload.branchClosedAt ?? 'unchanged'} stop=${payload.onlineOrderStopTime ?? 'unchanged'}`,
+  );
+}
+
 export function broadcastNewJob(storeId: string, job: DeliveryJobBroadcastPayload): void {
   if (!io) return;
   io.to(`branch-pool:${storeId}`).emit('newDeliveryJob', job);
