@@ -21,11 +21,15 @@ import {
   payoutWindowKey,
   type PayoutWindowBounds,
 } from './withdrawalPeriodNet';
-import type { PayoutCycleContext } from './payoutCycle';
+import {
+  secondPayoutPriorBeforeGatewayFeeCents,
+  type PayoutCycleContext,
+} from './payoutCycle';
 import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
 import { invalidateWalletAnalysisCache } from './walletAnalysis';
 import {
   computeBreakdownForPeriod,
+  refreshSecondPayoutGatewayAndNet,
   computeBranchPayablesBreakdown,
   computeNetTransferableEarnings,
   enrichWalletRow,
@@ -60,6 +64,7 @@ import { getConvenienceFeeRates, getGatewayFeeRate } from './appSchema';
 import {
   addDaysToDateStr,
   buildElapsedPayoutWindowsFromStart,
+  payoutWindowOverlapsRange,
   listElapsedPayoutWindows,
   PAYOUT_PERIOD_DAYS,
   resolveOpenRollingPayoutWindow,
@@ -243,6 +248,8 @@ export const PAYOUT_PERIOD_LIST_SELECT = {
   createdAt: true,
   isAdvance: true,
   breakdown: true,
+  cycleStage: true,
+  cyclePairId: true,
 } as const;
 
 /** Table-row summary: merged period net/orderCount without channel snapshot extras. */
@@ -293,6 +300,19 @@ export async function loadPayoutPeriodItems(storeId: string) {
     if (!periodFrom || !periodTo) continue;
     covered.add(periodKey(periodFrom, periodTo));
     const isInReview = withdrawal.status === 'IN_REVIEW';
+    let breakdown: unknown = withdrawal.breakdown ?? null;
+    if (withdrawal.cycleStage === 'SECOND' && breakdown && typeof breakdown === 'object') {
+      const prior = await secondPayoutPriorBeforeGatewayFeeCents(storeId, withdrawal.cyclePairId);
+      if (prior != null) {
+        breakdown = refreshSecondPayoutGatewayAndNet({
+          ...(breakdown as PeriodBreakdown),
+          cycleStage: 'SECOND',
+          priorOnlineWalletAmountCents: prior,
+        });
+      }
+    }
+    const withdrawalForRow =
+      breakdown === withdrawal.breakdown ? withdrawal : { ...withdrawal, breakdown };
     items.push({
       key: `wd-${withdrawal.id}`,
       periodFrom,
@@ -304,9 +324,9 @@ export async function loadPayoutPeriodItems(storeId: string) {
             ? 'PAYMENT_PENDING'
             : 'PENDING',
       amountCents: withdrawalAmountCents(withdrawal),
-      orderCount: breakdownOrderCount(withdrawal.breakdown),
-      breakdown: withdrawal.breakdown ?? null,
-      withdrawal,
+      orderCount: breakdownOrderCount(breakdown),
+      breakdown,
+      withdrawal: withdrawalForRow,
       draftInvoiceUrl: isInReview
         ? withdrawal.invoiceUrl ?? payoutDraftInvoiceApiPath(withdrawal.id)
         : undefined,
@@ -1068,6 +1088,7 @@ async function loadAllSuperAdminPayoutsDueItems(): Promise<SuperAdminPayoutDueIt
 export async function listSuperAdminPayoutsDueItems(query?: {
   from?: string;
   to?: string;
+  storeId?: string;
   page?: number;
   limit?: number;
   search?: string;
@@ -1075,8 +1096,18 @@ export async function listSuperAdminPayoutsDueItems(query?: {
   await ensureWithdrawalInReviewEnumReady();
   const limit = Math.min(100, Math.max(1, query?.limit ?? PAYOUTS_DUE_PAGE_SIZE));
   const search = (query?.search ?? '').trim().toLowerCase();
+  const storeId = (query?.storeId ?? '').trim();
   const all = await loadAllSuperAdminPayoutsDueItems();
-  const filtered = search ? all.filter((item) => matchesPayoutDueSearch(item.storeName, search)) : all;
+  const from = query?.from && isValidYmdDate(query.from) ? query.from : null;
+  const to = query?.to && isValidYmdDate(query.to) ? query.to : null;
+  const inMonth =
+    from && to
+      ? all.filter((item) => payoutWindowOverlapsRange(item.periodFrom, item.periodTo, from, to))
+      : all;
+  const byStore = storeId ? inMonth.filter((item) => item.storeId === storeId) : inMonth;
+  const filtered = search
+    ? byStore.filter((item) => matchesPayoutDueSearch(item.storeName, search))
+    : byStore;
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total / limit) || 1);
   const page = Math.min(Math.max(1, query?.page ?? 1), pages);
@@ -1454,7 +1485,7 @@ export async function finalizeWithdrawalWithInvoice(input: WithdrawalInvoiceFina
     netTransferableEarnings - totalWithdrawnBefore - withdrawnCents,
   );
 
-  const invoice = await generateWithdrawalInvoice({
+  const invoicePayload = await generateWithdrawalInvoice({
     storeId,
     withdrawalId: updated.id,
     storeName,
@@ -1483,14 +1514,17 @@ export async function finalizeWithdrawalWithInvoice(input: WithdrawalInvoiceFina
       storePaybackEnabled,
     ),
   });
+  const invoiceDataJson = JSON.parse(
+    JSON.stringify(invoicePayload.invoiceData),
+  ) as object;
 
   try {
     const finalized = await prisma.storeWithdrawal.update({
       where: { id: updated.id },
       data: {
-        invoiceRef: invoice.invoiceRef,
-        invoiceUrl: invoice.invoiceUrl,
-        invoiceData: invoice.invoiceData as object,
+        invoiceRef: invoicePayload.invoiceRef,
+        invoiceUrl: invoicePayload.invoiceUrl,
+        invoiceData: invoiceDataJson,
       },
     });
     invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));

@@ -37,9 +37,9 @@ import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
 import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
 import { centsToLkr, paybackEnabledFromBreakdown, toDateInputValue } from '@/lib/walletUtils';
 import {
-  addDaysToDateStr,
   formatBiweeklyPeriodLabel,
   isValidPayoutRange,
+  resolvePayoutPeriodIncompleteState,
   rollingPeriodLabel,
   todayDateStr,
   type RollingPeriodOption,
@@ -652,13 +652,13 @@ export default function WalletWithdrawalModal({
   const isAdvance = showAdvance;
   const rangeReady = isValidRange(dateFrom, dateTo);
   const periodInFuture = !!dateTo && dateTo > todayDateStr();
-  const selectedPeriodOption =
-    periodDays != null ? periodOptions.find((opt) => opt.days === periodDays) ?? null : null;
-  const periodIncomplete = selectedPeriodOption?.capped ?? false;
-  const periodCompleteEndDate =
-    selectedPeriodOption && periodIncomplete
-      ? addDaysToDateStr(selectedPeriodOption.from, selectedPeriodOption.days - 1)
-      : null;
+  const periodIncompleteState = resolvePayoutPeriodIncompleteState({
+    periodFrom: dateFrom,
+    periodTo: dateTo,
+    days: periodDays,
+  });
+  const periodIncomplete = periodIncompleteState.incomplete;
+  const periodCompleteEndDate = periodIncompleteState.completeEndDate;
   const slabRatePct = resolveSlabRatePctFromPreview(channelPreview);
   const periodLabel = dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : null;
   const withdrawalAmountCents =

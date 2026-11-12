@@ -13,11 +13,14 @@ import {
   paymentMethodLabel,
 } from './format';
 import { collectPdfBuffer } from './parsing';
-import { enrichWithdrawalInvoiceInputForRender, resolvePayoutStatement } from './payoutStatement';
+import {
+  enrichWithdrawalInvoiceInputForRender,
+  isFirstPayoutInvoiceCycle,
+  resolvePayoutStatement,
+} from './payoutStatement';
 import { withdrawalInvoiceRef } from './refs';
 import type { GenerateWithdrawalInvoiceInput, InvoicePageLayout } from './types';
 import {
-  computeWithdrawalFooterLayout,
   drawBilledTo,
   drawNotesBlock,
   drawPage1Header,
@@ -26,9 +29,9 @@ import {
   drawWhitePage,
   drawWithdrawalFooter,
   drawWithdrawalTable,
-  layoutFooterBelowNotes,
   measureNotesBlockHeight,
   resolvePage1SummaryRowH,
+  resolveWithdrawalFooterLayout,
   WD_LAYOUT,
 } from './withdrawalPdfDrawing';
 
@@ -49,8 +52,8 @@ function paymentFooterLines(
     'Virtual wallet : Branch wallet payout',
   ];
   if (input.paymentMethod === 'CHECK') {
-    lines.push(`Check no. ${input.checkNumber?.trim() || '—'}`);
-    if (checkDateLabel) lines.push(`Check date ${checkDateLabel}`);
+    lines.push(`Cheque no. ${input.checkNumber?.trim() || '—'}`);
+    lines.push(`Cheque date ${checkDateLabel ?? '—'}`);
   }
   return lines;
 }
@@ -110,7 +113,6 @@ export async function renderWithdrawalInvoiceToBuffer(
   const marginX = WD_INVOICE_MARGIN_X;
   const contentW = pageW - marginX * 2;
   const layout: InvoicePageLayout = { pageW, pageH, marginX, contentW };
-  const footer = computeWithdrawalFooterLayout(pageH);
   const payLines = paymentFooterLines(input, checkDateLabel, forReview);
 
   drawWhitePage(doc, pageW, pageH);
@@ -152,7 +154,14 @@ export async function renderWithdrawalInvoiceToBuffer(
   y += WD_LAYOUT.sectionGap;
 
   y = drawNotesBlock(doc, layout, y);
-  drawWithdrawalFooter(doc, layout, layoutFooterBelowNotes(pageH, y), payLines);
+  let page1Footer = resolveWithdrawalFooterLayout(pageH, y);
+  if (page1Footer.overflowsPage) {
+    doc.addPage();
+    drawWhitePage(doc, pageW, pageH);
+    y = WD_LAYOUT.contentTop;
+    page1Footer = resolveWithdrawalFooterLayout(pageH, y);
+  }
+  drawWithdrawalFooter(doc, layout, page1Footer, payLines);
 
   doc.addPage();
   drawWhitePage(doc, pageW, pageH);
@@ -160,7 +169,14 @@ export async function renderWithdrawalInvoiceToBuffer(
   y = drawPage2Pill(doc, layout, y);
 
   const statement = resolvePayoutStatement(enriched, statementOpts);
-  const sections = buildPage2PayoutSections(statement);
+  const sections = buildPage2PayoutSections(statement, {
+    cycleStage: isFirstPayoutInvoiceCycle(
+      renderOpts?.withdrawalBreakdown,
+      renderOpts?.cycleStage,
+    )
+      ? 'FIRST'
+      : renderOpts?.cycleStage,
+  });
   for (const section of sections) {
     y = drawSectionTitle(doc, marginX, y, contentW, section.title, true);
     y = drawWithdrawalTable(
@@ -176,7 +192,14 @@ export async function renderWithdrawalInvoiceToBuffer(
     y += 10;
   }
 
-  drawWithdrawalFooter(doc, layout, footer, payLines);
+  let page2Footer = resolveWithdrawalFooterLayout(pageH, y);
+  if (page2Footer.overflowsPage) {
+    doc.addPage();
+    drawWhitePage(doc, pageW, pageH);
+    y = WD_LAYOUT.contentTop - 6;
+    page2Footer = resolveWithdrawalFooterLayout(pageH, y);
+  }
+  drawWithdrawalFooter(doc, layout, page2Footer, payLines);
 
   doc.end();
   return bufferPromise;

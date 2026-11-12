@@ -6,6 +6,13 @@ export const PAYOUT_FIRST_CYCLE_DEFERRED_SECTION =
 export const PAYOUT_FIRST_CYCLE_COMMISSION_CARD_SUBTITLE =
   'Calculated and settled in Payout 2 for this cycle';
 
+/** Info popovers on Payout 1 — no amounts or slab formula. */
+export const PAYOUT_FIRST_CYCLE_COMMISSION_INFO_DESCRIPTION =
+  'Commission, platform discounts, and loyalty adjustments will be calculated and settled in your next payout (Payout 2).';
+
+export const PAYOUT_FIRST_CYCLE_NET_PLATFORM_INFO_DESCRIPTION =
+  'Settled in Payout 2 — not part of this payment. Commission, platform discounts, and loyalty for the full cycle are reconciled in Payout 2.';
+
 /** Payout 1 report: pickup + delivery online revenue after discounts. */
 export const PAYOUT_FIRST_ONLINE_COLLECTIONS_TITLE = 'Online order subtotal';
 export const PAYOUT_FIRST_ONLINE_COLLECTIONS_SECTION_HINT =
@@ -19,6 +26,6 @@ export const PAYOUT_FIRST_ONLINE_DELIVERY_SUBTOTAL_LABEL = 'Subtotal — Deliver
 export const PAYOUT_SECOND_CYCLE_PRIOR_ONLINE_WALLET_LABEL =
   '– Already paid in Payout 1 (net payout)';
 
-/** Payout 2 — subtotal after platform deduction, before PayHere gateway fee. */
+/** Payout 2 — subtotal after platform deduction and bank penalty, before PayHere gateway fee. */
 export const PAYOUT_SECOND_BRANCH_WALLET_BEFORE_GATEWAY_LABEL =
   'Branch wallet before gateway';

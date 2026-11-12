@@ -12,6 +12,13 @@ vi.mock('../../src/middleware/auth', () => ({
   resolveBranchStoreId: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock('../../src/lib/appSchema', () => ({
+  getCommissionSlabs: vi.fn().mockResolvedValue([
+    { min: 0, max: null, rate: 0.15, label: '15%' },
+  ]),
+  getConvenienceFeeRates: vi.fn().mockResolvedValue({ pickup: 0, delivery: 0 }),
+}));
+
 vi.mock('../../src/lib/prisma', () => ({
   prisma: {
     store: { findMany: vi.fn() },
@@ -119,6 +126,68 @@ describe('getPaymentHistory payout list', () => {
         }),
       }),
     );
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('paginates branch payout history rows', async () => {
+    const settlements = Array.from({ length: 25 }, (_, i) => ({
+      id: `settle-${i}`,
+      storeId: STORE_A,
+      statementRef: `STMT-${i}`,
+      createdAt: new Date(`2026-11-${String(10 - (i % 10)).padStart(2, '0')}T12:00:00.000Z`),
+      totalCommission: 1000,
+      platformPaybackAmount: 0,
+      paymentMethod: 'BANK_TRANSFER',
+      receiptUrl: null,
+      invoiceRef: null,
+      invoiceUrl: null,
+      status: 'VERIFIED',
+      periodFrom: new Date('2026-10-01T12:00:00.000Z'),
+      periodTo: new Date('2026-10-15T12:00:00.000Z'),
+      storeWithdrawalId: null,
+      store: { name: 'Branch A' },
+    }));
+
+    vi.mocked(prisma.commissionSettlement.findMany).mockImplementation(async (args) => {
+      const where = args?.where as {
+        periodFrom?: { lte: Date };
+        status?: { not: string };
+      };
+      if (where?.status?.not === 'REJECTED') {
+        return [] as never;
+      }
+      if (where?.periodFrom) {
+        return settlements as never;
+      }
+      return [] as never;
+    });
+
+    const req = createMockReq({
+      user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
+      query: { from: '2026-10-01', to: '2026-10-26', page: '2', limit: '10' },
+    });
+    const res = createMockRes();
+
+    await getPaymentHistory(req, res, next);
+
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({
+          payouts: expect.any(Array),
+          payoutsPagination: expect.objectContaining({
+            page: 2,
+            limit: 10,
+            total: 25,
+            pages: 3,
+          }),
+        }),
+      }),
+    );
+    const payload = vi.mocked(res.json).mock.calls[0]?.[0] as {
+      data: { payouts: unknown[] };
+    };
+    expect(payload.data.payouts).toHaveLength(10);
     expect(next).not.toHaveBeenCalled();
   });
 

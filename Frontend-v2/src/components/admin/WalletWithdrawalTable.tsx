@@ -4,6 +4,7 @@ import { Fragment, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, FileText, History, Image as ImageIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Skeleton } from '@/components/ui/skeleton';
+import { formatPayoutPeriodDate } from '@/lib/datetime';
 import { formatMoneyAmount } from '@/lib/receipt';
 import { cn } from '@/lib/utils';
 import { openPayoutProof, openPayoutProofById, openWithdrawalInvoice } from '@/lib/adminProtectedFile';
@@ -20,7 +21,7 @@ import WithdrawalPaymentCell from '@/components/admin/WithdrawalPaymentCell';
 export type WithdrawalRow = {
   id: string;
   amount: number;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'IN_REVIEW';
   remarks: string | null;
   periodFrom?: string | null;
   periodTo?: string | null;
@@ -39,12 +40,23 @@ export type WithdrawalRow = {
   breakdown?: WithdrawalBreakdown | null;
 };
 
+export function isWithdrawalInReview(row: Pick<WithdrawalRow, 'status'>): boolean {
+  return row.status === 'IN_REVIEW';
+}
+
+/** Completed Payout Summary — hide branch drafts still awaiting platform review. */
+export function filterWithdrawalsForCompletedPayoutTab(rows: WithdrawalRow[]): WithdrawalRow[] {
+  return rows.filter((row) => !isWithdrawalInReview(row));
+}
+
 function statusLabel(status: WithdrawalRow['status']) {
   switch (status) {
     case 'APPROVED':
       return 'Paid';
     case 'PENDING':
       return 'Pending Approval';
+    case 'IN_REVIEW':
+      return 'In review';
     case 'REJECTED':
       return 'Rejected';
     case 'CANCELLED':
@@ -76,11 +88,7 @@ function formatDate(iso: string) {
 }
 
 function formatPeriodDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-LK', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  return formatPayoutPeriodDate(iso);
 }
 
 function formatPeriod(row: WithdrawalRow) {
@@ -158,6 +166,8 @@ type Props = {
   onPageChange?: (page: number) => void;
   /** Shown in place of the empty-history message when the list request failed. */
   error?: string | null;
+  /** Hide title block (e.g. when nested under Payout Summary on branch wallet). */
+  hideHeader?: boolean;
 };
 
 async function openInvoice(row: WithdrawalRow) {
@@ -196,6 +206,7 @@ export default function WalletWithdrawalTable({
   pagination,
   onPageChange,
   error,
+  hideHeader = false,
 }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const colCount =
@@ -203,16 +214,23 @@ export default function WalletWithdrawalTable({
   const useModalView = !!onView;
 
   return (
-    <div className="admin-orders-table card overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-[var(--color-navy-border)] px-5 py-4">
-        <History size={18} className="text-[var(--color-brand)]" />
-        <div>
-          <h2 className="text-sm font-semibold text-[var(--color-text)]">Withdrawal History</h2>
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Fund payouts recorded for this branch
-          </p>
+    <div
+      className={cn(
+        'admin-orders-table overflow-hidden',
+        !hideHeader && 'card',
+      )}
+    >
+      {!hideHeader && (
+        <div className="flex items-center gap-2 border-b border-[var(--color-navy-border)] px-5 py-4">
+          <History size={18} className="text-[var(--color-brand)]" />
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--color-text)]">Withdrawal History</h2>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Fund payouts recorded for this branch
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[860px] text-left text-sm">

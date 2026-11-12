@@ -6,7 +6,7 @@ import { getApiBaseUrl } from '@/lib/apiBase';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlertCircle,
@@ -40,9 +40,11 @@ import { getAdminSession, isSuperAdmin, type AdminSession } from '@/lib/adminAut
 import {
   openCommissionSettlementReceipt,
   openPayoutProof,
+  openPayoutProofById,
   openPlatformProviderSettlementInvoice,
   openWithdrawalInvoice,
 } from '@/lib/adminProtectedFile';
+import { platformPayoutInvoiceSettlementId } from '@/lib/platformPayoutInvoice';
 import {
   fetchPlatformPayoutStatement,
   type PlatformPayoutStatement,
@@ -61,6 +63,9 @@ import {
 import {
   filterPayoutRowsForDisplay,
 } from '@/components/admin/paymentHistoryPayoutFilter';
+import AdminTablePagination from '@/components/admin/AdminTablePagination';
+import PayoutInlineBreakdown from '@/components/admin/reports/PayoutInlineBreakdown';
+import { buildAdminMetaPagination } from '@/lib/pagination';
 
 type PayoutRow = {
   id: string;
@@ -86,6 +91,15 @@ type PayoutRow = {
 
 type PayoutHistoryView = 'commission' | 'platform';
 
+type PayoutHistoryPagination = {
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
+};
+
+const PAYOUT_HISTORY_PAGE_SIZE = 20;
+
 type PaymentHistoryData = {
   pendingDues: number;
   totalSettled: number;
@@ -98,6 +112,8 @@ type PaymentHistoryData = {
   period?: { from: string; to: string; isCurrentMonth: boolean };
   payouts: PayoutRow[];
   platformPayouts?: PayoutRow[];
+  payoutsPagination?: PayoutHistoryPagination;
+  platformPayoutsPagination?: PayoutHistoryPagination;
 };
 
 function billingMonthOptions(count = 36) {
@@ -234,6 +250,7 @@ export default function PaymentHistoryContent({
   const [payoutDateFrom, setPayoutDateFrom] = useState('');
   const [payoutDateTo, setPayoutDateTo] = useState('');
   const [payoutHistoryView, setPayoutHistoryView] = useState<PayoutHistoryView>('commission');
+  const [payoutHistoryPage, setPayoutHistoryPage] = useState(1);
   const [actionsHost, setActionsHost] = useState<HTMLElement | null>(null);
   const [processHost, setProcessHost] = useState<HTMLElement | null>(null);
 
@@ -290,10 +307,27 @@ export default function PaymentHistoryContent({
 
   const showBranchColumn = superAdmin && !effectiveStoreId;
   const payoutTableColSpan = (showBranchColumn ? 8 : 7);
+  const branchTierScoped = !superAdmin || Boolean(effectiveStoreId);
 
-  const queryKey = ['payment-history', effectiveStoreId, periodFrom, periodTo];
+  useEffect(() => {
+    setPayoutHistoryPage(1);
+  }, [effectiveStoreId, periodFrom, periodTo, payoutHistoryView]);
+
+  const queryKey = [
+    'payment-history',
+    effectiveStoreId,
+    periodFrom,
+    periodTo,
+    payoutHistoryPage,
+    PAYOUT_HISTORY_PAGE_SIZE,
+  ];
   const endpoint = (() => {
-    const qs = new URLSearchParams({ from: periodFrom, to: periodTo });
+    const qs = new URLSearchParams({
+      from: periodFrom,
+      to: periodTo,
+      page: String(payoutHistoryPage),
+      limit: String(PAYOUT_HISTORY_PAGE_SIZE),
+    });
     if (effectiveStoreId) qs.set('storeId', effectiveStoreId);
     return `/admin/payment-history?${qs}`;
   })();
@@ -375,19 +409,32 @@ export default function PaymentHistoryContent({
       setPeriodFrom(row.periodFrom);
       setPeriodTo(row.periodTo);
     }
+
+    if (selectedPayoutId === row.id) {
+      setSelectedPayoutId(null);
+      setStatement(null);
+      setPlatformStatement(null);
+      return;
+    }
+
     setSelectedPayoutId(row.id);
+
     if (showPlatformPayoutHistoryTab && payoutHistoryView === 'platform') {
+      setStatement(null);
       void openPlatformPayoutBreakdown(row.id);
       return;
     }
+
+    setPlatformStatement(null);
+
     if (row.payoutSource === 'branchWithdrawal') {
-      if (hasWithdrawalInvoice(row.invoiceUrl)) {
-        void openWithdrawalInvoice(row.invoiceUrl).catch(() => {
-          toast.error('Could not open payout invoice');
-        });
+      setStatement(null);
+      if (!row.walletTransactionId) {
+        toast.error('Payout breakdown is not available for this record');
       }
       return;
     }
+
     void openSettlement(row.id);
   };
 
@@ -452,11 +499,22 @@ export default function PaymentHistoryContent({
   const payoutAmountColumnLabel =
     showPlatformPayoutHistoryTab && payoutHistoryView === 'platform'
       ? 'Platform receivable'
-      : 'Commission settled';
+      : 'Net branch payout';
 
   const payoutFiltersActive = hideLocalPeriodControls
     ? false
     : !!(payoutMonth || payoutDateFrom || payoutDateTo);
+
+  const activePayoutPagination =
+    showPlatformPayoutHistoryTab && payoutHistoryView === 'platform'
+      ? data?.platformPayoutsPagination
+      : data?.payoutsPagination;
+
+  const payoutTablePagination = useMemo(() => {
+    const meta = activePayoutPagination;
+    if (!meta || meta.total <= 0) return null;
+    return buildAdminMetaPagination(meta.total, meta.page, meta.limit, meta.pages);
+  }, [activePayoutPagination]);
 
   const clearPayoutFilters = () => {
     setPayoutMonth('');
@@ -475,6 +533,8 @@ export default function PaymentHistoryContent({
           value={effectiveStoreId}
           onChange={setSelectedStoreId}
           formatName={formatBranchName}
+          allowAll={false}
+          placeholder="Select branch"
           className="w-auto"
         />
       </div>
@@ -591,11 +651,15 @@ export default function PaymentHistoryContent({
           icon={Percent}
           loading={isLoading}
           hint={
-            data?.currentMonthRate != null && data.currentMonthRate > 0
+            branchTierScoped && data?.currentMonthRate != null && data.currentMonthRate > 0
               ? `Earned at ${formatCommissionRate(data.currentMonthRate)} tier rate`
               : viewingCurrentMonth
-                ? 'Current calendar month (tiered rate)'
-                : 'Selected period (tiered rate)'
+                ? branchTierScoped
+                  ? 'Current calendar month (tiered rate)'
+                  : 'Network commission — select a branch for tier rate'
+                : branchTierScoped
+                  ? 'Selected period (tiered rate)'
+                  : 'Network commission — select a branch for tier rate'
           }
         />
         <DashboardKpiCard
@@ -624,6 +688,20 @@ export default function PaymentHistoryContent({
           periodLabel={formatPeriodLabel(periodFrom, periodTo)}
           isCurrentMonth={viewingCurrentMonth}
           showActiveTierLabel={!superAdmin}
+          showCurrentTierStatus={branchTierScoped}
+          branchTierFilter={
+            superAdmin && stores.length > 0 ? (
+              <SearchableBranchSelect
+                stores={stores}
+                value={effectiveStoreId}
+                onChange={setSelectedStoreId}
+                formatName={formatBranchName}
+                allowAll={false}
+                placeholder="Select branch"
+                className="min-w-[10rem]"
+              />
+            ) : undefined
+          }
         />
       </div>
 
@@ -646,7 +724,7 @@ export default function PaymentHistoryContent({
                     <div className="min-w-0 flex-1">
                       <TabsList className="mb-2 h-8 w-fit justify-start gap-0.5 bg-transparent p-0 shadow-none">
                         <TabsTrigger value="commission" className={WALLET_TAB_TRIGGER_CLASS}>
-                          Payout History
+                          Branch Payout History
                         </TabsTrigger>
                         <TabsTrigger value="platform" className={WALLET_TAB_TRIGGER_CLASS}>
                           Platform Payout History
@@ -655,15 +733,15 @@ export default function PaymentHistoryContent({
                       <TabsContent value="commission" className="mt-0 outline-none">
                         <p className="text-xs text-[var(--color-text-muted)]">
                           {hideLocalPeriodControls
-                            ? `Branch commission settlements · ${formatPeriodLabel(periodFrom, periodTo)}`
-                            : 'Branch commission settlements · filter by billing period or paid date'}
+                            ? `Click a row to view the branch payout breakdown · ${formatPeriodLabel(periodFrom, periodTo)}`
+                            : 'Click a row to view the branch payout breakdown · filter by billing period or paid date'}
                         </p>
                       </TabsContent>
                       <TabsContent value="platform" className="mt-0 outline-none">
                         <p className="text-xs text-[var(--color-text-muted)]">
                           {hideLocalPeriodControls
-                            ? `Platform provider receivable from processed branch payouts · ${formatPeriodLabel(periodFrom, periodTo)}`
-                            : 'Platform provider receivable from processed branch payouts · filter by billing period or paid date'}
+                            ? `Click a row to view the platform receivable breakdown · ${formatPeriodLabel(periodFrom, periodTo)}`
+                            : 'Click a row to view the platform receivable breakdown · filter by billing period or paid date'}
                         </p>
                       </TabsContent>
                     </div>
@@ -816,11 +894,17 @@ export default function PaymentHistoryContent({
                 const isSelected =
                   selectedPayoutId === row.id ||
                   (row.periodFrom === periodFrom && row.periodTo === periodTo);
+                const showBranchPayoutBreakdown =
+                  payoutHistoryView === 'commission' &&
+                  selectedPayoutId === row.id &&
+                  row.payoutSource === 'branchWithdrawal' &&
+                  !!row.walletTransactionId;
                 return (
+                  <Fragment key={row.id}>
                   <tr
-                    key={row.id}
                     className={[
-                      'cursor-pointer border-b border-[var(--color-navy-border)]/60 last:border-b-0 hover:bg-[var(--color-input-bg)]/40',
+                      'cursor-pointer border-b border-[var(--color-navy-border)]/60 hover:bg-[var(--color-input-bg)]/40',
+                      showBranchPayoutBreakdown ? 'border-b-0' : 'last:border-b-0',
                       isSelected ? 'bg-[var(--color-brand-subtle)]/50' : '',
                     ].join(' ')}
                     onClick={() => selectPayoutPeriod(row)}
@@ -839,7 +923,9 @@ export default function PaymentHistoryContent({
                     <td className="px-4 py-2.5 font-semibold tabular-nums text-[var(--color-text)]">
                       {formatMoney(row.amount)}
                     </td>
-                    <td className="px-4 py-2.5 text-[var(--color-text-muted)]">{row.paymentMethod}</td>
+                    <td className="px-4 py-2.5 text-[var(--color-text-muted)]">
+                      <span className="block max-w-[14rem] text-xs leading-snug">{row.paymentMethod}</span>
+                    </td>
                     <td className="px-4 py-2.5">
                       <span
                         className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusChipClass(row.status)}`}
@@ -851,30 +937,27 @@ export default function PaymentHistoryContent({
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       {showPlatformPayoutHistoryTab && payoutHistoryView === 'platform' ? (
-                        row.storeWithdrawalId ? (
-                          row.platformReceivableSettlementId ? (
-                          <button
-                            type="button"
-                            className="text-[13px] font-medium text-[var(--color-brand)] hover:underline"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void openPlatformProviderSettlementInvoice(
-                                row.platformReceivableSettlementId!,
-                              ).catch(() => {
-                                toast.error('Could not open invoice');
-                              });
-                            }}
-                          >
-                            View Invoice
-                          </button>
+                        (() => {
+                          const invoiceSettlementId = platformPayoutInvoiceSettlementId(row);
+                          return invoiceSettlementId ? (
+                            <button
+                              type="button"
+                              className="text-[13px] font-medium text-[var(--color-brand)] hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void openPlatformProviderSettlementInvoice(invoiceSettlementId).catch(
+                                  () => {
+                                    toast.error('Could not open invoice');
+                                  },
+                                );
+                              }}
+                            >
+                              View Invoice
+                            </button>
                           ) : (
-                            <span className="text-xs text-[var(--color-text-muted)]">
-                              Process payment
-                            </span>
-                          )
-                        ) : (
-                          <span className="text-xs text-[var(--color-text-muted)]">—</span>
-                        )
+                            <span className="text-xs text-[var(--color-text-muted)]">—</span>
+                          );
+                        })()
                       ) : hasWithdrawalInvoice(row.invoiceUrl) ? (
                         <button
                           type="button"
@@ -901,7 +984,9 @@ export default function PaymentHistoryContent({
                             e.stopPropagation();
                             const open = row.receiptUrl
                               ? openPayoutProof(row.receiptUrl)
-                              : openCommissionSettlementReceipt(row.id);
+                              : row.payoutSource === 'branchWithdrawal'
+                                ? openPayoutProofById('withdrawal', row.storeWithdrawalId ?? row.id)
+                                : openCommissionSettlementReceipt(row.id);
                             void open.catch(() => {
                               toast.error('Could not open payment receipt');
                             });
@@ -914,11 +999,33 @@ export default function PaymentHistoryContent({
                       )}
                     </td>
                   </tr>
+                  <PayoutInlineBreakdown
+                    transactionId={row.walletTransactionId}
+                    open={showBranchPayoutBreakdown}
+                    colSpan={payoutTableColSpan}
+                  />
+                  </Fragment>
                 );
               })}
             </tbody>
           </table>
         </div>
+        {payoutTablePagination && (
+          <AdminTablePagination
+            className="border-t border-[var(--color-navy-border)] px-4 py-3"
+            pageSize={PAYOUT_HISTORY_PAGE_SIZE}
+            showPageSizeSelect={false}
+            rangeStart={payoutTablePagination.rangeStart}
+            rangeEnd={payoutTablePagination.rangeEnd}
+            totalItems={payoutTablePagination.totalItems}
+            safePage={payoutTablePagination.safePage}
+            totalPages={payoutTablePagination.totalPages}
+            pageList={payoutTablePagination.pageList}
+            onPageChange={setPayoutHistoryPage}
+            itemLabel="payouts"
+            ariaLabel="Payout history pagination"
+          />
+        )}
       </div>
 
       {superAdmin && (

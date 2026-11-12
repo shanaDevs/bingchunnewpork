@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { Banknote, BarChart2, CreditCard, ShoppingBag, Smartphone, Truck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -33,6 +34,10 @@ type Props = {
   isCurrentMonth?: boolean;
   /** Branch-facing label on the active tier row; off for Super Admin views. */
   showActiveTierLabel?: boolean;
+  /** When false (e.g. Super Admin with no branch), hide active tier badge, current rate, and progress. */
+  showCurrentTierStatus?: boolean;
+  /** Optional branch selector rendered inside the Commission Tier card (Super Admin). */
+  branchTierFilter?: ReactNode;
 };
 
 type ChannelConfig = {
@@ -111,19 +116,27 @@ export default function CommissionBreakdownBadges({
   periodLabel,
   isCurrentMonth = true,
   showActiveTierLabel = true,
+  showCurrentTierStatus = true,
+  branchTierFilter,
 }: Props) {
   const slabs = resolveCommissionSlabs(slabInfo?.slabs);
   const activeIndex = slabInfo?.slabIndex ?? 0;
   const effectiveRate = slabInfo?.effectiveRate;
   const next =
-    slabInfo != null ? getNextTierProgress(slabInfo.monthlyBase, slabInfo.slabIndex, slabs) : null;
+    showCurrentTierStatus && slabInfo != null
+      ? getNextTierProgress(slabInfo.monthlyBase, slabInfo.slabIndex, slabs)
+      : null;
 
-  const channelSubtitle = [
-    isCurrentMonth ? 'This month' : periodLabel ? `Period: ${periodLabel}` : 'Selected period',
-    effectiveRate
-      ? `sales and commission by channel (same tier rate applies to all (${formatCommissionRate(effectiveRate)}))`
-      : 'sales and commission by channel (same tier rate applies to all)',
-  ].join(' – ');
+  const periodPart = isCurrentMonth
+    ? 'This month'
+    : periodLabel
+      ? `Period: ${periodLabel}`
+      : 'Selected period';
+  const channelSubtitle = showCurrentTierStatus && effectiveRate
+    ? `${periodPart} – sales and commission by channel (same tier rate applies to all (${formatCommissionRate(effectiveRate)}))`
+    : showCurrentTierStatus
+      ? `${periodPart} – sales and commission by channel`
+      : `${periodPart} – network totals by channel (select a branch to see tier rate)`;
 
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -149,7 +162,10 @@ export default function CommissionBreakdownBadges({
                 const data = breakdown?.[channel.key];
                 const sales = data?.revenueSubtotal ?? 0;
                 const commission = data?.commission ?? 0;
-                const rate = effectiveRate ?? data?.rate ?? 0;
+                const rate =
+                  showCurrentTierStatus && effectiveRate
+                    ? effectiveRate
+                    : (data?.rate ?? 0);
                 const Icon = channel.icon;
 
                 return (
@@ -201,41 +217,61 @@ export default function CommissionBreakdownBadges({
       </div>
 
       <div className="card overflow-hidden !rounded-[10px] p-4">
-        <CardHeading
-          icon={BarChart2}
-          title="Commission Tier"
-          subtitle="Current commission rate and tier breakdown based on monthly sales"
-        />
-
-        {slabInfo ? (
-          <div className="space-y-2.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="bg-brand rounded-full px-2.5 py-0.5 text-[11px] font-bold !text-white">
-                Tier {activeIndex + 1}
-              </span>
-              <span className="text-xs font-semibold text-[var(--color-brand)]">
-                {formatCommissionRate(slabInfo.effectiveRate)} current rate
-              </span>
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <CardHeading
+            icon={BarChart2}
+            title="Commission Tier"
+            subtitle={
+              showCurrentTierStatus
+                ? 'Current commission rate and tier breakdown based on monthly sales'
+                : 'Select a branch to view its current rate and tier progress'
+            }
+          />
+          {branchTierFilter ? (
+            <div className="min-w-[10rem] shrink-0 [&_.input-field]:h-8 [&_.input-field]:text-xs">
+              {branchTierFilter}
             </div>
+          ) : null}
+        </div>
 
-            {next && next.remaining > 0 ? (
+        {slabs.length > 0 ? (
+          <div className="space-y-2.5">
+            {showCurrentTierStatus && slabInfo ? (
               <>
-                <p className="text-xs font-medium leading-snug text-[var(--color-text)]">
-                  LKR {formatMoneyAmount(next.remaining)} more period sales to Tier{' '}
-                  {next.nextTierNumber} ({formatCommissionRate(next.nextRate)})
-                </p>
-                <div className="h-1 overflow-hidden rounded-full bg-[var(--color-navy-border)]/40">
-                  <div
-                    className="h-full rounded-full bg-[var(--color-brand)]"
-                    style={{ width: `${Math.max(next.progressPercent, 2)}%` }}
-                  />
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="bg-brand rounded-full px-2.5 py-0.5 text-[11px] font-bold !text-white">
+                    Tier {activeIndex + 1}
+                  </span>
+                  <span className="text-xs font-semibold text-[var(--color-brand)]">
+                    {formatCommissionRate(slabInfo.effectiveRate)} current rate
+                  </span>
                 </div>
+
+                {next && next.remaining > 0 ? (
+                  <>
+                    <p className="text-xs font-medium leading-snug text-[var(--color-text)]">
+                      LKR {formatMoneyAmount(next.remaining)} more period sales to Tier{' '}
+                      {next.nextTierNumber} ({formatCommissionRate(next.nextRate)})
+                    </p>
+                    <div className="h-1 overflow-hidden rounded-full bg-[var(--color-navy-border)]/40">
+                      <div
+                        className="h-full rounded-full bg-[var(--color-brand)]"
+                        style={{ width: `${Math.max(next.progressPercent, 2)}%` }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                    Best tier rate unlocked
+                  </p>
+                )}
               </>
-            ) : (
-              <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                Best tier rate unlocked
+            ) : !showCurrentTierStatus ? (
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Tier rates below are global slabs. Choose a branch to see which tier applies and
+                progress to the next tier.
               </p>
-            )}
+            ) : null}
 
             <div className="overflow-x-auto pt-1">
               <table className="w-full min-w-[280px] text-left text-xs">
@@ -248,7 +284,7 @@ export default function CommissionBreakdownBadges({
                 </thead>
                 <tbody>
                   {slabs.map((slab, index) => {
-                    const isActive = index === activeIndex;
+                    const isActive = showCurrentTierStatus && index === activeIndex;
                     return (
                       <tr
                         key={slab.label}

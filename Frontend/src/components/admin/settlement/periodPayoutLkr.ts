@@ -51,6 +51,8 @@ export function computeBranchWalletBeforeGatewayLkr(params: {
   priorOnlineWalletAmountLkr?: number;
   nonReturningRefundsBranchGrossLkr?: number;
   netPlatformAmountLkr?: number;
+  /** Display subtotal only. Omit when computing the 1.9% gateway-fee base. */
+  bankPenaltyLkr?: number;
 }): number {
   return (
     Math.round(
@@ -58,7 +60,8 @@ export function computeBranchWalletBeforeGatewayLkr(params: {
         (params.jasonDiscountsLkr ?? 0) -
         (params.priorOnlineWalletAmountLkr ?? 0) +
         (params.nonReturningRefundsBranchGrossLkr ?? 0) -
-        (params.netPlatformAmountLkr ?? 0)) *
+        (params.netPlatformAmountLkr ?? 0) -
+        (params.bankPenaltyLkr ?? 0)) *
         100,
     ) / 100
   );

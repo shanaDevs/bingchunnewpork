@@ -26,7 +26,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   branchPayoutsDueQueryKey,
   fetchBranchPayoutsDue,
+  formatPayoutReviewDraftError,
   isOldestUnpaidBranchPayoutRow,
+  payoutDueDraftDisabledNote,
   PAYOUTS_DUE_PAGE_SIZE,
 } from '@/lib/branchPayoutsDue';
 import { buildAdminMetaPagination } from '@/lib/pagination';
@@ -47,6 +49,7 @@ export { PAYOUTS_DUE_PAGE_SIZE };
 
 type Props = {
   enabled?: boolean;
+  storeId?: string | null;
   onView?: (row: PayoutDueRow) => void;
   onReviewAndPay: (row: PayoutDueRow) => void;
   onTotalChange?: (total: number) => void;
@@ -105,6 +108,8 @@ function PayoutDueTableRow({
   netPreview,
   previewLoading,
   payEnabled,
+  draftEnabled,
+  draftDisabledNote,
   inReview,
   reviewBusy,
   downloadBusy,
@@ -121,6 +126,8 @@ function PayoutDueTableRow({
   netPreview?: Record<string, unknown> | null;
   previewLoading: boolean;
   payEnabled: boolean;
+  draftEnabled: boolean;
+  draftDisabledNote: string | null;
   inReview: boolean;
   reviewBusy: boolean;
   downloadBusy: boolean;
@@ -161,7 +168,8 @@ function PayoutDueTableRow({
         <input
           type="checkbox"
           checked={inReview}
-          disabled={!reviewsReady || reviewBusy}
+          disabled={!reviewsReady || reviewBusy || (!inReview && !draftEnabled)}
+          title={!inReview && !draftEnabled ? (draftDisabledNote ?? undefined) : undefined}
           aria-label={`Save ${branchName} payout as draft`}
           onChange={(event) => onToggleReview(row, event.target.checked)}
           className="h-4 w-4 accent-[var(--color-brand)] disabled:cursor-not-allowed"
@@ -252,6 +260,7 @@ function PayoutDueTableRow({
 
 export default function PayoutsDuePanel({
   enabled = true,
+  storeId = null,
   onView,
   onReviewAndPay,
   onTotalChange,
@@ -259,6 +268,7 @@ export default function PayoutsDuePanel({
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [reviewBusyKey, setReviewBusyKey] = useState<string | null>(null);
+  const [bulkReviewBusy, setBulkReviewBusy] = useState(false);
   const [downloadBusyKey, setDownloadBusyKey] = useState<string | null>(null);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const debouncedSearch = useDebouncedValue(searchQuery.trim(), 300);
@@ -267,14 +277,19 @@ export default function PayoutsDuePanel({
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch]);
+  }, [debouncedSearch, storeId]);
 
   const dueQuery = useQuery({
-    queryKey: branchPayoutsDueQueryKey(page, debouncedSearch),
+    queryKey: branchPayoutsDueQueryKey(page, debouncedSearch, storeId ?? '', '', ''),
     queryFn: ({ signal }) =>
       fetchBranchPayoutsDue(
         apiBase,
-        { page, limit: PAYOUTS_DUE_PAGE_SIZE, search: debouncedSearch },
+        {
+          page,
+          limit: PAYOUTS_DUE_PAGE_SIZE,
+          search: debouncedSearch,
+          storeId,
+        },
         signal,
       ),
     enabled,
@@ -285,11 +300,10 @@ export default function PayoutsDuePanel({
   const pageData = dueQuery.data;
   const rows = pageData?.items ?? [];
   const total = pageData?.total ?? 0;
-  const allTotal = pageData?.allTotal ?? total;
   const totalPages = Math.max(1, pageData?.pages ?? 1);
   const loading = dueQuery.isLoading || (dueQuery.isFetching && !dueQuery.isFetched);
   const pageFetching = dueQuery.isFetching && dueQuery.isFetched;
-  const count = allTotal;
+  const count = total;
 
   useEffect(() => {
     if (pageData && page > pageData.pages) setPage(pageData.pages);
@@ -297,7 +311,7 @@ export default function PayoutsDuePanel({
 
   useEffect(() => {
     if (!pageData) return;
-    onTotalChange?.(pageData.allTotal);
+    onTotalChange?.(pageData.total);
   }, [pageData, onTotalChange]);
 
   const reviewsQuery = useQuery({
@@ -318,6 +332,11 @@ export default function PayoutsDuePanel({
     [rows],
   );
 
+  const draftEligibleRows = useMemo(
+    () => rows.filter((row) => isOldestUnpaidBranchPayoutRow(row, rows)),
+    [rows],
+  );
+
   const { displayAmountsByDueKey, previewByKey, previewLoadingByKey, resolveDueRowBaseAmounts } =
     usePayoutDueAmountMaps(rows, rows, apiBase);
 
@@ -329,23 +348,113 @@ export default function PayoutsDuePanel({
     };
   }
 
+  function applyReviewMarksToCache(markList: PayoutReviewMark[], next: boolean) {
+    queryClient.setQueryData<PayoutReviewMark[]>(['branch-payout-reviews'], (current = []) => {
+      let updated = [...current];
+      for (const mark of markList) {
+        const key = payoutReviewMarkKey(mark);
+        updated = updated.filter((item) => payoutReviewMarkKey(item) !== key);
+        if (next) updated.push(mark);
+      }
+      return updated;
+    });
+  }
+
   async function toggleReview(row: PayoutDueRow, next: boolean) {
+    if (next && !isOldestUnpaidBranchPayoutRow(row, rows)) {
+      toast.error(
+        formatPayoutReviewDraftError('Payout period is out of order', row.storeName),
+      );
+      return;
+    }
     const mark = reviewMark(row);
     const key = payoutReviewMarkKey(mark);
     const previous = reviewsQuery.data ?? [];
     setReviewBusyKey(key);
-    queryClient.setQueryData<PayoutReviewMark[]>(['branch-payout-reviews'], (current = []) => {
-      const without = current.filter((item) => payoutReviewMarkKey(item) !== key);
-      return next ? [...without, mark] : without;
-    });
+    applyReviewMarksToCache([mark], next);
     try {
       await setPayoutInReview(mark, next);
       void queryClient.invalidateQueries({ queryKey: payoutPeriodsQueryKey(row.storeId) });
     } catch (err) {
       queryClient.setQueryData(['branch-payout-reviews'], previous);
-      toast.error(err instanceof Error ? err.message : 'Could not update review status');
+      const message = err instanceof Error ? err.message : 'Could not update review status';
+      toast.error(formatPayoutReviewDraftError(message, row.storeName));
     } finally {
       setReviewBusyKey(null);
+    }
+  }
+
+  const pageDraftSelection = useMemo(() => {
+    if (draftEligibleRows.length === 0) {
+      return { allSelected: false, someSelected: false };
+    }
+    let selectedCount = 0;
+    for (const row of draftEligibleRows) {
+      if (inReviewKeys.has(payoutReviewMarkKey(reviewMark(row)))) selectedCount += 1;
+    }
+    return {
+      allSelected: selectedCount === draftEligibleRows.length,
+      someSelected: selectedCount > 0 && selectedCount < draftEligibleRows.length,
+    };
+  }, [draftEligibleRows, inReviewKeys]);
+
+  async function toggleAllPageDrafts(next: boolean) {
+    if (bulkReviewBusy || !reviewsQuery.isSuccess) return;
+
+    const pool = next ? draftEligibleRows : rows;
+    const targets = pool.filter((row) => {
+      const selected = inReviewKeys.has(payoutReviewMarkKey(reviewMark(row)));
+      return next ? !selected : selected;
+    });
+    if (targets.length === 0) return;
+
+    const previous = reviewsQuery.data ?? [];
+    const marks = targets.map((row) => reviewMark(row));
+    setBulkReviewBusy(true);
+    applyReviewMarksToCache(marks, next);
+    try {
+      const results = await Promise.allSettled(
+        marks.map((mark) => setPayoutInReview(mark, next)),
+      );
+      const failed = results.flatMap((result, index) =>
+        result.status === 'rejected' ? [targets[index]] : [],
+      );
+      if (failed.length > 0) {
+        const succeededMarks = marks.filter((_, index) => results[index].status === 'fulfilled');
+        queryClient.setQueryData<PayoutReviewMark[]>(['branch-payout-reviews'], (current = []) => {
+          let updated = [...current];
+          for (const mark of marks) {
+            const key = payoutReviewMarkKey(mark);
+            updated = updated.filter((item) => payoutReviewMarkKey(item) !== key);
+          }
+          if (next) updated.push(...succeededMarks);
+          return updated;
+        });
+        const firstError = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+        const raw =
+          firstError.reason instanceof Error
+            ? firstError.reason.message
+            : 'Could not update review status';
+        toast.error(
+          failed.length === targets.length
+            ? formatPayoutReviewDraftError(raw, failed[0]?.storeName)
+            : `Saved ${succeededMarks.length} draft${succeededMarks.length === 1 ? '' : 's'}. ${failed.length} could not be saved — pay each branch’s oldest unpaid period first.`,
+        );
+      }
+      const storeIds = new Set(
+        targets
+          .filter((_, index) => results[index].status === 'fulfilled')
+          .map((row) => row.storeId),
+      );
+      for (const id of storeIds) {
+        void queryClient.invalidateQueries({ queryKey: payoutPeriodsQueryKey(id) });
+      }
+    } catch (err) {
+      queryClient.setQueryData(['branch-payout-reviews'], previous);
+      const message = err instanceof Error ? err.message : 'Could not update review status';
+      toast.error(formatPayoutReviewDraftError(message));
+    } finally {
+      setBulkReviewBusy(false);
     }
   }
 
@@ -369,6 +478,7 @@ export default function PayoutsDuePanel({
         page: 1,
         limit: 100,
         search: debouncedSearch,
+        storeId,
       });
       const draftRows = listed.items.filter((row) =>
         inReviewKeys.has(payoutReviewMarkKey(reviewMark(row))),
@@ -391,12 +501,15 @@ export default function PayoutsDuePanel({
 
   const searchActive = debouncedSearch.length > 0;
   const pageBusy = pageFetching && dueQuery.isPlaceholderData;
+  const showEmptyDue = dueQuery.isSuccess && count === 0 && !searchActive;
+  const showFullSkeleton =
+    !searchActive && count === 0 && !showEmptyDue && !dueQuery.isPlaceholderData;
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
-      {loading && count === 0 && !searchActive && <PayoutsDueTableSkeleton />}
+      {showFullSkeleton && <PayoutsDueTableSkeleton />}
 
-      {!loading && count === 0 && !searchActive && (
+      {showEmptyDue && (
         <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-400">
             <CheckCircle size={28} />
@@ -414,7 +527,8 @@ export default function PayoutsDuePanel({
             <div className="flex flex-wrap items-baseline gap-2">
               <h3 className="text-sm font-semibold text-[var(--color-text)]">Payouts Due</h3>
               <span className="text-xs text-[var(--color-text-muted)]">
-                {count} period{count === 1 ? '' : 's'} · oldest first · 15-day cycle
+                {count} period{count === 1 ? '' : 's'} · oldest first · 15-day cycle · draft
+                checkboxes apply to each branch&apos;s next unpaid period only
               </span>
             </div>
             <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
@@ -474,7 +588,18 @@ export default function PayoutsDuePanel({
           ) : (
             <div className={cn('overflow-x-auto', pageBusy && 'opacity-70')}>
               <table className="w-full min-w-[1240px] text-left text-xs">
-                <PayoutsDueTableHead />
+                <PayoutsDueTableHead
+                  selectAllChecked={pageDraftSelection.allSelected}
+                  selectAllIndeterminate={pageDraftSelection.someSelected}
+                  onSelectAllChange={(checked) => void toggleAllPageDrafts(checked)}
+                  selectAllDisabled={
+                    !reviewsQuery.isSuccess ||
+                    reviewsQuery.isError ||
+                    bulkReviewBusy ||
+                    draftEligibleRows.length === 0 ||
+                    pageBusy
+                  }
+                />
                 <tbody>
                   {rows.map((row) => {
                     const key = payoutDueRowKey(row);
@@ -488,8 +613,10 @@ export default function PayoutsDuePanel({
                         netPreview={previewByKey.get(key)}
                         previewLoading={previewLoadingByKey.get(key) ?? false}
                         payEnabled={canReviewAndPay(row)}
+                        draftEnabled={canReviewAndPay(row)}
+                        draftDisabledNote={payoutDueDraftDisabledNote(canReviewAndPay(row))}
                         inReview={inReviewKeys.has(reviewKey)}
-                        reviewBusy={reviewBusyKey === reviewKey}
+                        reviewBusy={reviewBusyKey === reviewKey || bulkReviewBusy}
                         downloadBusy={downloadBusyKey === key || downloadingAll}
                         reviewsReady={reviewsQuery.isSuccess}
                         reviewsError={reviewsQuery.isError}

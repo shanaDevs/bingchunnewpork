@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   resolveBranchWalletBeforeGatewayLkr,
+  resolveDisplayedBranchWalletBeforeGatewayLkr,
   resolveFinalNetPayoutPayLkr,
   resolvePayoutReportValues,
   resolveReportNetPayoutFinalPayLkr,
@@ -107,15 +108,22 @@ describe('resolvePayoutReportValues two-stage cycle', () => {
     });
 
     const beforeGateway = resolveBranchWalletBeforeGatewayLkr(values!);
+    const displayedBeforeGateway = resolveDisplayedBranchWalletBeforeGatewayLkr(values!);
     const displayFinal = resolveSecondCycleDisplayFinalPayLkr(values!);
     expect(beforeGateway).not.toBeNull();
+    expect(displayedBeforeGateway).toBeCloseTo(beforeGateway ?? 0, 2);
     expect(values!.gatewayLkr).toBeCloseTo((beforeGateway ?? 0) * 0.019, 2);
     expect(displayFinal).toBeCloseTo(
-      (beforeGateway ?? 0) - (values!.gatewayLkr + values!.cancelledByBranchGatewayFeeLkr),
+      (displayedBeforeGateway ?? 0) - values!.gatewayLkr,
       2,
     );
     expect(resolveFinalNetPayoutPayLkr(values!)).toBe(displayFinal);
     expect(resolveReportNetPayoutFinalPayLkr(values!)).toBe(displayFinal);
+    // Classic used to add Jason on top of branchNetPayoutLkr; finance already includes it.
+    expect(values!.branchNetPayoutLkr + values!.sharedPromoJasonLkr).not.toBeCloseTo(
+      displayFinal ?? 0,
+      2,
+    );
   });
 
   it('matches spec SECOND-stage net payout (30-day combined cycle)', () => {
@@ -152,5 +160,54 @@ describe('resolvePayoutReportValues two-stage cycle', () => {
     expect(values?.priorOnlineWalletAmountLkr).toBe(200_000);
     expect(values?.commissionLkr).toBe(19_500);
     expect(values?.branchNetPayoutLkr).toBeCloseTo(279_800, 2);
+  });
+
+  it('includes bank penalty in before-gateway and gateway fee base', () => {
+    const values = resolvePayoutReportValues({
+      preview: null,
+      periodBreakdownLkr: {
+        grossAmount: 818_669,
+        orderCount: 1,
+        commissionFee: 17_770.25,
+        gatewayFee: 8_040.28,
+        gatewayBase: 423_172.75,
+        gatewayRatePct: 1.9,
+        onlineWalletGross: 818_669,
+        onlinePaymentsCollected: 818_669,
+        netAmount: 415_132.47,
+        netPlatformEarning: 17_770.25,
+        platformPaybackTotal: 0,
+        periodDiscountsTotal: 0,
+        periodLoyaltyDiscountTotal: 0,
+        cycleStage: 'SECOND',
+        priorOnlineWalletAmountLkr: 409_180,
+        remainingOnlineWalletLkr: 409_489,
+        cancelledByBranchGatewayFee: 150,
+        cancelledByBranchOrderCount: 1,
+      },
+      onlineOrderSubtotalLkr: 818_669,
+      convenienceFeeLkr: 0,
+      paybackEnabled: false,
+      sharedPromo: {
+        totalDiscountLkr: 31_604,
+        branchContributionLkr: 0,
+        branchContributionPct: 0,
+        platformContributionLkr: 0,
+        platformContributionPct: 0,
+        jasonContributionLkr: 31_604,
+        jasonContributionPct: 100,
+        finalPayoutLkr: 415_132.47,
+      },
+    });
+
+    const gatewayBase = resolveBranchWalletBeforeGatewayLkr(values!);
+    const displayed = resolveDisplayedBranchWalletBeforeGatewayLkr(values!);
+    const displayFinal = resolveSecondCycleDisplayFinalPayLkr(values!);
+
+    expect(values?.cancelledByBranchGatewayFeeLkr).toBe(150);
+    expect(gatewayBase).toBeCloseTo(423_172.75, 2);
+    expect(displayed).toBeCloseTo(423_172.75, 2);
+    expect(values!.gatewayLkr).toBeCloseTo(8_040.28, 2);
+    expect(displayFinal).toBeCloseTo(415_132.47, 2);
   });
 });

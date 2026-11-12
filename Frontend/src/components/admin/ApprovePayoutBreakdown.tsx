@@ -5,6 +5,7 @@ import { formatMoneyAmount } from '@/lib/receipt';
 import { hasPositiveLkr } from '@/components/admin/settlementTypes';
 import {
   resolvePayoutReportValues,
+  resolveReportNetPayoutFinalPayLkr,
   type PayoutBreakdownDisplayInput,
   type PayoutReportValues,
 } from '@/components/admin/resolvePayoutReportValues';
@@ -179,7 +180,6 @@ export default function ApprovePayoutBreakdown({
     gatewayLkr,
     gatewayRatePct: resolvedGatewayRatePct,
     gatewayHint,
-    branchNetPayoutLkr,
     cancelledByBranchGatewayFeeLkr,
     cancelledByBranchOrderCount,
     customerLateCancelSubtotalLkr,
@@ -194,7 +194,13 @@ export default function ApprovePayoutBreakdown({
     showRejectedRefunds,
     showRefundSection,
     showPaybackDetails,
+    cycleStage,
   } = values;
+
+  const netPayoutFinalPayLkr = resolveReportNetPayoutFinalPayLkr(values);
+  /** Payout 2 walkthrough already includes Jason before gateway — do not add it again. */
+  const showJasonInClassicNet =
+    hasPositiveLkr(sharedPromoJasonLkr) && cycleStage !== 'SECOND';
 
   const { topGridCols, sharedPromoStep, refundStep } = payoutSectionLayout(
     showCommissionSection,
@@ -517,7 +523,7 @@ export default function ApprovePayoutBreakdown({
                 </div>
               </>
             )}
-            {hasPositiveLkr(sharedPromoJasonLkr) && (
+            {showJasonInClassicNet && (
               <>
                 <span className="font-normal text-[#94a3b8]">+</span>
                 <div className="text-center">
@@ -532,10 +538,7 @@ export default function ApprovePayoutBreakdown({
             )}
             <span className="text-[16px] font-normal text-[#2563eb]">=</span>
             <p className="text-[22px] font-bold tabular-nums text-[#2563eb]">
-              {finalLkr(
-                branchNetPayoutLkr +
-                  (hasPositiveLkr(sharedPromoJasonLkr) ? sharedPromoJasonLkr : 0),
-              )}
+              {finalLkr(netPayoutFinalPayLkr)}
             </p>
           </div>
         </div>

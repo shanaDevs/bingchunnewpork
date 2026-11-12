@@ -65,6 +65,7 @@ export {
   resolveOpenRollingPayoutWindow,
   listDuePayoutStoreIds,
   buildElapsedPayoutWindowsFromStart,
+  payoutWindowOverlapsRange,
   listElapsedPayoutWindows,
   isCalendarPeriodStart,
   getCalendarPeriodEnd,

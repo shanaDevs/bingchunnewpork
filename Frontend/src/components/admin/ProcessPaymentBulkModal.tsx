@@ -67,6 +67,26 @@ function formatWithdrawalPeriod(from: string | null, to: string | null): string 
   return formatBiweeklyPeriodLabel(from, to);
 }
 
+type PeriodBounds = { periodFrom: string | null; periodTo: string | null };
+
+/** One period label, or the spanning range when a branch has multiple payouts in the month. */
+function formatBranchWithdrawalPeriods(periods: PeriodBounds[]): string {
+  const withBounds = periods.filter((p) => p.periodFrom && p.periodTo);
+  if (withBounds.length === 0) return 'Period not set';
+  if (withBounds.length === 1) {
+    return formatWithdrawalPeriod(withBounds[0]!.periodFrom, withBounds[0]!.periodTo);
+  }
+  const from = withBounds.reduce(
+    (min, p) => (p.periodFrom! < min ? p.periodFrom! : min),
+    withBounds[0]!.periodFrom!,
+  );
+  const to = withBounds.reduce(
+    (max, p) => (p.periodTo! > max ? p.periodTo! : max),
+    withBounds[0]!.periodTo!,
+  );
+  return formatWithdrawalPeriod(from, to);
+}
+
 function branchExpandKey(month: string, storeId: string) {
   return `${month}:${storeId}`;
 }
@@ -211,10 +231,7 @@ function MonthBranchBreakdown({
         {branches.map((branch) => {
           const expandKey = branchExpandKey(month, branch.storeId);
           const isExpanded = !!expandedBranch[expandKey];
-          const periodLabel =
-            branch.periods.length === 1
-              ? formatWithdrawalPeriod(branch.periods[0]!.periodFrom, branch.periods[0]!.periodTo)
-              : `${branch.periods.length} payout periods`;
+          const periodLabel = formatBranchWithdrawalPeriods(branch.periods);
 
           return (
             <ProcessPaymentRequestTableRow

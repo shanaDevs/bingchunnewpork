@@ -1,3 +1,4 @@
+import { readPayoutCycleStageFromBreakdown } from '../paidPayoutAllTimeDeduction';
 import { readFirstPayoutOnlineSubtotalCentsFromBreakdown } from '../payoutCycle';
 import type {
   GenerateWithdrawalInvoiceInput,
@@ -87,6 +88,29 @@ function paybackEnabledFromWithdrawalBreakdown(o: Record<string, unknown>): bool
   return num(o, 'platformPaybackTotal') > 0;
 }
 
+export function isFirstPayoutInvoiceCycle(
+  breakdown?: unknown,
+  cycleStage?: string | null,
+): boolean {
+  if (cycleStage === 'FIRST') return true;
+  if (cycleStage === 'SECOND') return false;
+  return readPayoutCycleStageFromBreakdown(breakdown) === 'FIRST';
+}
+
+/** Payout 1: commission / platform discounts / loyalty are reconciled in Payout 2. */
+export function applyFirstCycleDeferredPlatformAmounts(
+  statement: InvoicePayoutStatement,
+): InvoicePayoutStatement {
+  return {
+    ...statement,
+    commissionCents: 0,
+    platformDiscountsReportCents: 0,
+    platformPaybackCents: 0,
+    loyaltyDiscountCents: 0,
+    netPlatformAmountCents: 0,
+  };
+}
+
 /** Build page-2 payout figures from the stored withdrawal breakdown (cents). */
 export function buildPayoutStatementFromBreakdown(
   breakdown: unknown,
@@ -135,7 +159,7 @@ export function buildPayoutStatementFromBreakdown(
       ? gatewayRateRaw
       : 1.9;
 
-  return {
+  const statement: InvoicePayoutStatement = {
     totalSaleCents,
     onlineWalletCents,
     commissionCents,
@@ -161,6 +185,10 @@ export function buildPayoutStatementFromBreakdown(
     branchNetPayoutCents: requestedCents,
     priorOnlineWalletAmountCents: resolvePriorOnlineWalletAmountCents(o),
   };
+
+  return isFirstPayoutInvoiceCycle(breakdown)
+    ? applyFirstCycleDeferredPlatformAmounts(statement)
+    : statement;
 }
 
 function fallbackFromPeriod(
@@ -205,43 +233,51 @@ export function resolvePayoutStatement(
     );
   }
 
-  if (statement.priorOnlineWalletAmountCents > 0) {
-    return statement;
+  if (statement.priorOnlineWalletAmountCents <= 0) {
+    const priorFromBreakdown = resolvePriorOnlineWalletAmountCentsFromBreakdown(
+      opts?.withdrawalBreakdown,
+      opts?.cycleStage,
+    );
+    if (priorFromBreakdown > 0) {
+      statement = { ...statement, priorOnlineWalletAmountCents: priorFromBreakdown };
+    }
   }
 
-  const priorFromBreakdown = resolvePriorOnlineWalletAmountCentsFromBreakdown(
-    opts?.withdrawalBreakdown,
-    opts?.cycleStage,
-  );
-  if (priorFromBreakdown > 0) {
-    return { ...statement, priorOnlineWalletAmountCents: priorFromBreakdown };
-  }
-
-  return statement;
+  return isFirstPayoutInvoiceCycle(opts?.withdrawalBreakdown, opts?.cycleStage)
+    ? applyFirstCycleDeferredPlatformAmounts(statement)
+    : statement;
 }
 
-/** Backfill payout-1 wallet on stored invoiceData when rendering PDF (display only). */
+/** Backfill payout-1 wallet / FIRST deferred platform lines when rendering PDF (display only). */
 export function enrichWithdrawalInvoiceInputForRender(
   input: GenerateWithdrawalInvoiceInput,
   withdrawal: { breakdown: unknown; cycleStage?: string | null },
 ): GenerateWithdrawalInvoiceInput {
+  const statementOpts = {
+    withdrawalBreakdown: withdrawal.breakdown,
+    cycleStage: withdrawal.cycleStage,
+  };
   const prior = resolvePriorOnlineWalletAmountCentsFromBreakdown(
     withdrawal.breakdown,
     withdrawal.cycleStage,
   );
-  if (prior <= 0) return input;
+  const firstCycle = isFirstPayoutInvoiceCycle(withdrawal.breakdown, withdrawal.cycleStage);
+  if (prior <= 0 && !firstCycle) return input;
 
   const base =
-    input.payoutStatement ??
-    resolvePayoutStatement(input, {
-      withdrawalBreakdown: withdrawal.breakdown,
-      cycleStage: withdrawal.cycleStage,
-    });
-  if (base.priorOnlineWalletAmountCents > 0) return input;
+    input.payoutStatement ?? resolvePayoutStatement(input, statementOpts);
+  let nextStatement = base;
+  if (prior > 0 && base.priorOnlineWalletAmountCents <= 0) {
+    nextStatement = { ...nextStatement, priorOnlineWalletAmountCents: prior };
+  }
+  if (firstCycle) {
+    nextStatement = applyFirstCycleDeferredPlatformAmounts(nextStatement);
+  }
+  if (nextStatement === base) return input;
 
   return {
     ...input,
-    payoutStatement: { ...base, priorOnlineWalletAmountCents: prior },
+    payoutStatement: nextStatement,
   };
 }
 

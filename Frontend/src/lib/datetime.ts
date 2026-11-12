@@ -52,6 +52,23 @@ export function dateStringInColombo(value: Date | string | number): string {
   );
 }
 
+/**
+ * Payout window label. Period end is stored as 23:59:59.999Z, which is the next
+ * calendar day in Colombo. Show the UTC date the window was saved with.
+ */
+export function formatPayoutPeriodDate(value: string): string {
+  const ymd = /^\d{4}-\d{2}-\d{2}/.test(value)
+    ? value.slice(0, 10)
+    : new Date(value).toISOString().slice(0, 10);
+  const [year, month, day] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(year, (month ?? 1) - 1, day ?? 1)).toLocaleDateString(APP_LOCALE, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 /** Day of week in Colombo (0 = Sunday … 6 = Saturday). */
 export function getColomboDayOfWeek(now = new Date()): number {
   const weekday = new Intl.DateTimeFormat('en-US', {
@@ -131,6 +148,14 @@ export function formatDateWithWeekday(value: Date | string | number): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+/** Normalize API date fields (string or Date) to ISO strings for table rows. */
+export function coerceToIsoString(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (value instanceof Date) return value.toISOString();
+  return null;
 }
 
 /** Human-readable duration from minutes for display only (does not alter stored values). */

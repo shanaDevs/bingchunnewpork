@@ -1,6 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 import { dateStringInColombo } from './datetime';
+import { payoutReviewDisplayRange } from './payoutReviewNames';
+import { toUtcDateStr } from './utcDateString';
 import { resolveSettlementReceiptUrl } from '../middleware/upload';
 import {
   dartCodesReceivesLkrFromBreakdown,
@@ -8,7 +10,7 @@ import {
 } from './platformSettlementHelpers';
 import { resolveFinalPayoutAmountFromBreakdown } from './sharedPromoContribution';
 import { withdrawalAmountCents } from './walletApiMoney';
-import { settlementPaymentMethodLabel } from './settlementPaymentMethod';
+import { formatSettlementPaymentMethodDisplay } from './settlementPaymentMethod';
 import {
   platformProviderSettlementInvoiceApiPath,
   withdrawalInvoiceApiPath,
@@ -21,6 +23,8 @@ export const APPROVED_WITHDRAWAL_PAYOUT_SELECT = {
   reviewedAt: true,
   createdAt: true,
   paymentMethod: true,
+  checkNumber: true,
+  checkDate: true,
   proofUrl: true,
   invoiceRef: true,
   invoiceUrl: true,
@@ -67,12 +71,32 @@ function withdrawalPaidAt(withdrawal: ApprovedWithdrawalPayoutRow): string {
 
 function withdrawalPeriodFrom(withdrawal: ApprovedWithdrawalPayoutRow): string {
   if (!withdrawal.periodFrom) return dateStringInColombo(withdrawal.createdAt);
-  return dateStringInColombo(withdrawal.periodFrom);
+  return toUtcDateStr(withdrawal.periodFrom);
 }
 
 function withdrawalPeriodTo(withdrawal: ApprovedWithdrawalPayoutRow): string {
   if (!withdrawal.periodTo) return withdrawalPeriodFrom(withdrawal);
-  return dateStringInColombo(withdrawal.periodTo);
+  return toUtcDateStr(withdrawal.periodTo);
+}
+
+/** SECOND payouts list the full 30-day cycle, not only the second 15-day window. */
+function displayedWithdrawalPeriod(withdrawal: ApprovedWithdrawalPayoutRow): {
+  from: string;
+  to: string;
+} {
+  const from = withdrawalPeriodFrom(withdrawal);
+  const to = withdrawalPeriodTo(withdrawal);
+  const breakdown = withdrawal.breakdown;
+  const cycle =
+    breakdown && typeof breakdown === 'object'
+      ? (breakdown as { cycleStage?: string | null; cycleFrom?: string | null })
+      : null;
+  return payoutReviewDisplayRange({
+    from,
+    to,
+    cycleStage: cycle?.cycleStage,
+    cycleFrom: cycle?.cycleFrom,
+  });
 }
 
 export async function fetchApprovedBranchPayoutWithdrawals(
@@ -105,10 +129,14 @@ export async function fetchApprovedBranchPayoutWithdrawals(
 
 export function mapApprovedWithdrawalToBranchPayoutRow(withdrawal: ApprovedWithdrawalPayoutRow) {
   const methodLabel = withdrawal.paymentMethod
-    ? settlementPaymentMethodLabel(withdrawal.paymentMethod)
+    ? formatSettlementPaymentMethodDisplay(withdrawal.paymentMethod, {
+        checkNumber: withdrawal.checkNumber,
+        checkDate: withdrawal.checkDate,
+      })
     : '—';
   const receipt = serializeWithdrawalReceiptFields(withdrawal.proofUrl, withdrawal.storeId);
   const invoiceUrl = withdrawal.invoiceUrl ?? withdrawalInvoiceApiPath(withdrawal.id);
+  const period = displayedWithdrawalPeriod(withdrawal);
 
   return {
     id: withdrawal.id,
@@ -122,8 +150,8 @@ export function mapApprovedWithdrawalToBranchPayoutRow(withdrawal: ApprovedWithd
     invoiceRef: withdrawal.invoiceRef ?? undefined,
     invoiceUrl,
     status: 'VERIFIED' as const,
-    periodFrom: withdrawalPeriodFrom(withdrawal),
-    periodTo: withdrawalPeriodTo(withdrawal),
+    periodFrom: period.from,
+    periodTo: period.to,
     storeWithdrawalId: withdrawal.id,
     walletTransactionId: withdrawal.walletTransactionId ?? undefined,
     isAdvance: withdrawal.isAdvance,
@@ -163,4 +191,29 @@ export function mergeBranchPayoutHistoryRows<
   return [...settlementRows, ...supplemental].sort(
     (a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime(),
   );
+}
+
+export type PayoutHistoryPagination = {
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
+};
+
+export const PAYMENT_HISTORY_PAYOUT_DEFAULT_LIMIT = 20;
+
+/** Slice a merged payout history list for admin table pagination (display only). */
+export function paginatePayoutHistoryRows<T>(
+  rows: T[],
+  page: number,
+  limit: number,
+): { items: T[]; pagination: PayoutHistoryPagination } {
+  const total = rows.length;
+  const pages = Math.max(1, Math.ceil(total / limit) || 1);
+  const safePage = Math.min(Math.max(1, page), pages);
+  const start = (safePage - 1) * limit;
+  return {
+    items: rows.slice(start, start + limit),
+    pagination: { page: safePage, limit, total, pages },
+  };
 }

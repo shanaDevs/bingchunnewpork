@@ -94,6 +94,24 @@ export async function customerCancelOrder(
   });
 }
 
+/** Branch reject after accept — refund submittedBy BRANCH_ADMIN (+ LKR 150 gateway penalty). */
+export async function branchCancelOrder(
+  orderId: string,
+  staff: HarnessUser & { type: 'admin' },
+  cancelReason: 'OUT_OF_STOCK' | 'CUSTOMER_REQUEST' | 'PAYMENT_OR_SYSTEM_ISSUE' = 'OUT_OF_STOCK',
+): Promise<void> {
+  await runHandler(updateOrderStatus, {
+    method: 'PUT',
+    params: { id: orderId },
+    user: staff,
+    body: {
+      status: 'CANCELLED',
+      cancelReason,
+      note: 'Seed: branch cancelled after accept (gateway penalty)',
+    },
+  });
+}
+
 export async function completeRefundForOrder(
   orderId: string,
   manager: HarnessUser & { type: 'admin' },

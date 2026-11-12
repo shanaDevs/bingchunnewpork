@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   FULL_CYCLE_INCLUSIVE_DAYS,
+  formatStoredPayoutPeriodLabel,
   resolveListedPayoutPeriodDisplay,
   resolvePayoutCycleDisplayRange,
   resolveSecondCycleFullDisplayRange,
@@ -69,6 +70,28 @@ describe('resolvePayoutCycleDisplayRange', () => {
       displayTo: '2026-10-05',
       displayDays: 30,
     });
+  });
+});
+
+describe('formatStoredPayoutPeriodLabel', () => {
+  it('uses the withdrawal cycle stage when the breakdown omits it', () => {
+    expect(
+      formatStoredPayoutPeriodLabel({
+        periodFrom: '2026-09-21',
+        periodTo: '2026-10-05',
+        cycleStage: 'SECOND',
+      }),
+    ).toBe('Sep 06, 2026 – Oct 05, 2026');
+  });
+
+  it('labels a second payout with the full cycle', () => {
+    expect(
+      formatStoredPayoutPeriodLabel({
+        periodFrom: '2026-09-21T00:00:00.000Z',
+        periodTo: '2026-10-05T23:59:59.999Z',
+        breakdown: { cycleStage: 'SECOND', cycleFrom: '2026-09-06' },
+      }),
+    ).toBe('Sep 06, 2026 – Oct 05, 2026');
   });
 });
 

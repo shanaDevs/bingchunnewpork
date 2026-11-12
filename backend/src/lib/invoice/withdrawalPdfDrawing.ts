@@ -50,6 +50,18 @@ export function layoutFooterBelowNotes(
   };
 }
 
+/** Footer position for content ending at `contentBottomY`; signals when a new page is required. */
+export function resolveWithdrawalFooterLayout(
+  pageH: number,
+  contentBottomY: number,
+): WithdrawalFooterLayout & { overflowsPage: boolean } {
+  const layout = layoutFooterBelowNotes(pageH, contentBottomY);
+  return {
+    ...layout,
+    overflowsPage: layout.colsStartY + WD_INVOICE_FOOTER_COLS_H > pageH - 8,
+  };
+}
+
 export function measureNotesBlockHeight(doc: PDFKit.PDFDocument, contentW: number): number {
   const pad = 12;
   const textW = contentW - pad * 2;

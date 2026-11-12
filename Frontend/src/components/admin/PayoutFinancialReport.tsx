@@ -2,7 +2,7 @@
 
 import { hasAnyPositiveLkr, hasPositiveLkr } from '@/components/admin/settlementTypes';
 import {
-  resolveBranchWalletBeforeGatewayLkr,
+  resolveDisplayedBranchWalletBeforeGatewayLkr,
   resolveReportNetPayoutFinalPayLkr,
   type PayoutReportValues,
 } from '@/components/admin/resolvePayoutReportValues';
@@ -22,7 +22,6 @@ import {
   ReportTotalRow,
 } from '@/components/admin/payoutFinancialReportUi';
 import {
-  PAYOUT_FIRST_CYCLE_DEFERRED_SECTION,
   PAYOUT_FIRST_CYCLE_HEADLINE,
   PAYOUT_FIRST_ONLINE_COLLECTIONS_SECTION_HINT,
   PAYOUT_FIRST_ONLINE_COLLECTIONS_TITLE,
@@ -40,7 +39,7 @@ type Props = {
 
 export default function PayoutFinancialReport({ values, className = 'mb-4' }: Props) {
   const isFirstCyclePayout = values.cycleStage === 'FIRST';
-  const branchWalletBeforeGatewayLkr = resolveBranchWalletBeforeGatewayLkr(values);
+  const branchWalletBeforeGatewayLkr = resolveDisplayedBranchWalletBeforeGatewayLkr(values);
   const hasRefundSection =
     !isFirstCyclePayout &&
     hasAnyPositiveLkr(
@@ -67,6 +66,20 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
     values.gatewayLkr,
     values.cancelledByBranchGatewayFeeLkr,
   );
+  const bankPenaltyRow = hasPositiveLkr(values.cancelledByBranchGatewayFeeLkr) ? (
+    <ReportRow
+      label="- Bank penalty (branch cancellation)"
+      value={signedAmount(values.cancelledByBranchGatewayFeeLkr, '−')}
+      valueTone="red"
+      hint={
+        values.cancelledByBranchOrderCount > 0
+          ? `LKR 150 × ${values.cancelledByBranchOrderCount} order${
+              values.cancelledByBranchOrderCount === 1 ? '' : 's'
+            }`
+          : 'LKR 150 per branch-cancelled paid order (refund completed)'
+      }
+    />
+  ) : null;
 
   return (
     <div
@@ -98,11 +111,11 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
       />
 
       {isFirstCyclePayout ? (
-        <ReportSection title="Discounts & platform share" amount="—">
-          <p className="text-[12px] font-medium leading-relaxed text-[#64748b] dark:text-slate-400">
-            {PAYOUT_FIRST_CYCLE_DEFERRED_SECTION}
-          </p>
-        </ReportSection>
+        <ReportSection
+          title="Discounts & platform share"
+          amount="—"
+          info={<DiscountDetailsInfoPopover values={values} />}
+        />
       ) : (
         <ReportSection
           title="Discounts"
@@ -169,14 +182,10 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
 
       <ReportSection
         title="Net Platform Amount"
+        amount={isFirstCyclePayout ? '—' : undefined}
         info={<NetPlatformAmountInfoPopover values={values} />}
       >
-        {isFirstCyclePayout ? (
-          <p className="text-[12px] font-medium leading-relaxed text-[#64748b] dark:text-slate-400">
-            {PAYOUT_FIRST_CYCLE_DEFERRED_SECTION} Commission, platform discounts, and loyalty for
-            the full cycle are reconciled in Payout 2.
-          </p>
-        ) : (
+        {isFirstCyclePayout ? null : (
           <>
             {hasNetPlatformBreakdown && (
               <>
@@ -248,6 +257,7 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
                 valueTone="red"
               />
             )}
+            {!isFirstCyclePayout && bankPenaltyRow}
             {!isFirstCyclePayout && branchWalletBeforeGatewayLkr != null && (
               <ReportSubtotalRow
                 label={PAYOUT_SECOND_BRANCH_WALLET_BEFORE_GATEWAY_LABEL}
@@ -261,20 +271,7 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
                 valueTone="red"
               />
             )}
-            {hasPositiveLkr(values.cancelledByBranchGatewayFeeLkr) && (
-              <ReportRow
-                label="- Bank penalty (branch cancellation)"
-                value={signedAmount(values.cancelledByBranchGatewayFeeLkr, '−')}
-                valueTone="red"
-                hint={
-                  values.cancelledByBranchOrderCount > 0
-                    ? `LKR 150 × ${values.cancelledByBranchOrderCount} order${
-                        values.cancelledByBranchOrderCount === 1 ? '' : 's'
-                      }`
-                    : 'LKR 150 per branch-cancelled paid order (refund completed)'
-                }
-              />
-            )}
+            {isFirstCyclePayout && bankPenaltyRow}
           </>
         )}
         {isFirstCyclePayout ? (

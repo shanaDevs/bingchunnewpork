@@ -1,4 +1,5 @@
 import { addDaysToDateStr } from '@/lib/biweeklyPeriods';
+import { formatPayoutPeriodDate } from '@/lib/datetime';
 import { findPairedFirstPayoutPeriodRow } from '@/components/admin/payoutPeriodRowCycleDisplay';
 
 export const FULL_CYCLE_INCLUSIVE_DAYS = 30;
@@ -112,4 +113,21 @@ export function resolveListedPayoutPeriodDisplay<T extends { periodFrom: string;
     periodTo: row.periodTo,
     periodDays,
   });
+}
+
+/** Withdrawal and payout-history label. SECOND shows the full 30-day cycle. */
+export function formatStoredPayoutPeriodLabel(row: {
+  periodFrom?: string | null;
+  periodTo?: string | null;
+  cycleStage?: 'FIRST' | 'SECOND' | null;
+  breakdown?: { cycleStage?: 'FIRST' | 'SECOND' | null; cycleFrom?: string | null } | null;
+}): string {
+  if (!row.periodFrom || !row.periodTo) return '—';
+  const range = resolvePayoutCycleDisplayRange({
+    cycleStage: row.breakdown?.cycleStage ?? row.cycleStage ?? null,
+    cycleFrom: row.breakdown?.cycleFrom ?? null,
+    periodFrom: row.periodFrom.slice(0, 10),
+    periodTo: row.periodTo.slice(0, 10),
+  });
+  return `${formatPayoutPeriodDate(range.displayFrom)} – ${formatPayoutPeriodDate(range.displayTo)}`;
 }

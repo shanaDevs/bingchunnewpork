@@ -208,6 +208,18 @@ export function computePlatformProviderReceivableLkr(
   return platformProviderReceivableToLkr(computePlatformProviderReceivable(centsInput));
 }
 
+/**
+ * Legacy snapshots stored Jason's shared-promo share in the platform fields.
+ * When the Jason amount is absent, the platform field is not a platform cost.
+ */
+function sharedPlatformPromoCents(breakdown: {
+  sharedPromoPlatformContributionAmount?: number;
+  sharedPromoJasonContributionAmount?: number;
+}): number {
+  if (typeof breakdown.sharedPromoJasonContributionAmount !== 'number') return 0;
+  return breakdown.sharedPromoPlatformContributionAmount ?? 0;
+}
+
 export function platformProviderReceivableInputFromBreakdownCents(
   breakdown: {
     commissionFee?: number;
@@ -216,6 +228,7 @@ export function platformProviderReceivableInputFromBreakdownCents(
     platformDiscountPaybackEnabled?: boolean;
     periodLoyaltyDiscountTotal?: number;
     sharedPromoPlatformContributionAmount?: number;
+    sharedPromoJasonContributionAmount?: number;
     convenienceFee?: number;
     refundConvenienceFee?: number;
     rejectedRefundConvenienceFee?: number;
@@ -223,19 +236,31 @@ export function platformProviderReceivableInputFromBreakdownCents(
     cycleStage?: 'FIRST' | 'SECOND';
   },
 ): PlatformProviderReceivableInput {
-  const payback = breakdown.platformPaybackTotal ?? 0;
-  const owned = breakdown.platformOwnedPromoDiscountTotal ?? 0;
+  /**
+   * Payout 1 still stores platformPaybackTotal, but those platform-owned and shared
+   * platform discounts are reconciled on payout 2 (full cycle). Counting payout 1
+   * again double-counts them on the monthly process-payment receivable.
+   */
+  const firstCycle = breakdown.cycleStage === 'FIRST';
+  const payback = firstCycle ? 0 : (breakdown.platformPaybackTotal ?? 0);
+  const owned = firstCycle ? 0 : (breakdown.platformOwnedPromoDiscountTotal ?? 0);
   const paybackEnabled =
     breakdown.platformDiscountPaybackEnabled ??
     (payback > 0);
-  const sppcCents = breakdown.sharedPromoPlatformContributionAmount ?? 0;
+  const sppcCents = firstCycle ? 0 : sharedPlatformPromoCents(breakdown);
+  /**
+   * Prefer the locked platform-owned promo total. platformPaybackTotal can be higher
+   * than that cost (payout 1's window is also inside payout 2), which overstated
+   * the process-payment payback line.
+   */
+  const platformPromoCents = owned > 0 ? owned : payback;
   /** FIRST 15-day branch payout: convenience is platform-retained but not payable until full cycle (SECOND). */
   const normalConvenienceFeeCents =
     breakdown.cycleStage === 'FIRST' ? 0 : (breakdown.convenienceFee ?? 0);
   return {
     commissionFeeCents: breakdown.commissionFee ?? 0,
-    platformPaybackCents: Math.max(payback, owned),
-    loyaltyDiscountCents: breakdown.periodLoyaltyDiscountTotal ?? 0,
+    platformPaybackCents: platformPromoCents,
+    loyaltyDiscountCents: firstCycle ? 0 : (breakdown.periodLoyaltyDiscountTotal ?? 0),
     sharedPromoPlatformCents: sppcCents,
     normalConvenienceFeeCents,
     completedRefundConvenienceFeeCents: breakdown.refundConvenienceFee ?? 0,

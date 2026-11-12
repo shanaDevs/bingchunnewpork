@@ -10,17 +10,10 @@ import {
   sharedPromoPlatformLkrFromBreakdown,
 } from './readyToProcessSupport';
 import { settlementPaymentMethodLabel } from './settlementPaymentMethod';
-import { dateStringInColombo } from './datetime';
+import { toUtcDateStr } from './utcDateString';
 import { platformProviderSettlementInvoiceApiPath } from './invoice/refs';
-
-function paybackEnabledFromBreakdown(breakdown: unknown): boolean {
-  const b = breakdown as {
-    platformDiscountPaybackEnabled?: boolean;
-    platformPaybackTotal?: number;
-  } | null;
-  if (b?.platformDiscountPaybackEnabled != null) return b.platformDiscountPaybackEnabled;
-  return (b?.platformPaybackTotal ?? 0) > 0;
-}
+import { paybackEnabledFromBreakdown } from './breakdownPayback';
+import { prismaStoreIdScope } from './prismaStoreScope';
 
 export type SettlementPlatformReceivableDetail = {
   id: string;
@@ -39,6 +32,26 @@ export type SettlementPlatformReceivableDetail = {
   platformInvoiceUrl: string;
 };
 
+type StoredPlatformReceivable = Awaited<ReturnType<typeof resolveStoredPlatformProviderReceivable>>;
+
+function receivableFieldsFromBreakdown(
+  breakdown: unknown,
+  stored: StoredPlatformReceivable,
+): Pick<
+  SettlementPlatformReceivableDetail,
+  | 'platformReceivable'
+  | 'platformProviderReceivable'
+  | 'platformDiscountPaybackEnabled'
+  | 'sharedPromoPlatformLkr'
+> {
+  return {
+    platformReceivable: dartCodesReceivesLkrFromBreakdown(stored),
+    platformProviderReceivable: { lkr: stored.lkr },
+    platformDiscountPaybackEnabled: paybackEnabledFromBreakdown(breakdown),
+    sharedPromoPlatformLkr: sharedPromoPlatformLkrFromBreakdown(breakdown),
+  };
+}
+
 async function loadWithdrawalPlatformReceivableDetail(
   withdrawalId: string,
   allowedStoreIds: string[],
@@ -47,11 +60,7 @@ async function loadWithdrawalPlatformReceivableDetail(
     where: {
       id: withdrawalId,
       status: 'APPROVED',
-      ...(allowedStoreIds.length === 1
-        ? { storeId: allowedStoreIds[0]! }
-        : allowedStoreIds.length > 0
-          ? { storeId: { in: allowedStoreIds } }
-          : {}),
+      ...prismaStoreIdScope(allowedStoreIds),
     },
     include: {
       store: { select: { name: true } },
@@ -70,7 +79,6 @@ async function loadWithdrawalPlatformReceivableDetail(
   }
 
   const stored = await resolveStoredPlatformProviderReceivable(withdrawal.breakdown);
-  const platformReceivable = dartCodesReceivesLkrFromBreakdown(stored);
 
   return {
     id: withdrawal.id,
@@ -83,14 +91,11 @@ async function loadWithdrawalPlatformReceivableDetail(
       : '—',
     status: 'VERIFIED',
     period: {
-      from: dateStringInColombo(withdrawal.periodFrom),
-      to: dateStringInColombo(withdrawal.periodTo),
+      from: toUtcDateStr(withdrawal.periodFrom),
+      to: toUtcDateStr(withdrawal.periodTo),
     },
     submittedAt: (withdrawal.reviewedAt ?? withdrawal.createdAt).toISOString(),
-    platformReceivable,
-    platformProviderReceivable: { lkr: stored.lkr },
-    platformDiscountPaybackEnabled: paybackEnabledFromBreakdown(withdrawal.breakdown),
-    sharedPromoPlatformLkr: sharedPromoPlatformLkrFromBreakdown(withdrawal.breakdown),
+    ...receivableFieldsFromBreakdown(withdrawal.breakdown, stored),
     platformInvoiceUrl: '',
   };
 }
@@ -104,11 +109,7 @@ export async function loadSettlementPlatformReceivableDetail(
   const settlement = await prisma.commissionSettlement.findFirst({
     where: {
       id: settlementId,
-      ...(allowedStoreIds.length === 1
-        ? { storeId: allowedStoreIds[0]! }
-        : allowedStoreIds.length > 0
-          ? { storeId: { in: allowedStoreIds } }
-          : {}),
+      ...prismaStoreIdScope(allowedStoreIds),
     },
     include: {
       store: { select: { name: true } },
@@ -121,11 +122,8 @@ export async function loadSettlementPlatformReceivableDetail(
     throw new AppError('No linked branch payout for platform receivable breakdown', 404);
   }
 
-  const stored = await resolveStoredPlatformProviderReceivable(
-    settlement.storeWithdrawal.breakdown,
-  );
-  const platformReceivable = dartCodesReceivesLkrFromBreakdown(stored);
   const breakdown = settlement.storeWithdrawal.breakdown;
+  const stored = await resolveStoredPlatformProviderReceivable(breakdown);
 
   return {
     id: settlement.id,
@@ -136,14 +134,11 @@ export async function loadSettlementPlatformReceivableDetail(
     paymentMethod: settlementPaymentMethodLabel(settlement.paymentMethod),
     status: settlement.status,
     period: {
-      from: dateStringInColombo(settlement.periodFrom),
-      to: dateStringInColombo(settlement.periodTo),
+      from: toUtcDateStr(settlement.periodFrom),
+      to: toUtcDateStr(settlement.periodTo),
     },
     submittedAt: settlement.createdAt.toISOString(),
-    platformReceivable,
-    platformProviderReceivable: { lkr: stored.lkr },
-    platformDiscountPaybackEnabled: paybackEnabledFromBreakdown(breakdown),
-    sharedPromoPlatformLkr: sharedPromoPlatformLkrFromBreakdown(breakdown),
+    ...receivableFieldsFromBreakdown(breakdown, stored),
     platformInvoiceUrl: platformProviderSettlementInvoiceApiPath(settlement.id),
   };
 }
@@ -158,11 +153,7 @@ export async function loadPlatformPayoutReceivableDetail(
   const settlement = await prisma.commissionSettlement.findFirst({
     where: {
       id,
-      ...(allowedStoreIds.length === 1
-        ? { storeId: allowedStoreIds[0]! }
-        : allowedStoreIds.length > 0
-          ? { storeId: { in: allowedStoreIds } }
-          : {}),
+      ...prismaStoreIdScope(allowedStoreIds),
     },
     select: { id: true },
   });

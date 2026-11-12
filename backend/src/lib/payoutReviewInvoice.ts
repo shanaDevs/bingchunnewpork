@@ -21,6 +21,7 @@ import type { GenerateWithdrawalInvoiceInput } from './invoice/types';
 import { payoutDraftInvoiceApiPath } from './payoutInReviewDraft';
 import { findInReviewWithdrawalForPeriod } from './withdrawalPayoutPeriod';
 import { toUtcDateStr } from './utcDateString';
+import { rebaseSecondPayoutPriorBeforeGateway } from './secondPayoutPriorDisplay';
 
 export type PayoutReviewPeriodRef = {
   storeId: string;
@@ -148,7 +149,23 @@ async function loadWithdrawalDraftForRender(input: {
   const invoiceInput = parseWithdrawalInvoiceInput(withdrawal.invoiceData);
   if (!invoiceInput) throw new AppError('Payout draft snapshot is invalid', 500);
 
-  const breakdownSnapshot = withdrawal.breakdown ?? withdrawal.invoiceData;
+  const rebased = await rebaseSecondPayoutPriorBeforeGateway({
+    storeId: withdrawal.storeId,
+    cycleStage:
+      withdrawal.cycleStage ??
+      (withdrawal.breakdown &&
+      typeof withdrawal.breakdown === 'object' &&
+      'cycleStage' in withdrawal.breakdown
+        ? ((withdrawal.breakdown as { cycleStage?: string }).cycleStage ?? null)
+        : null),
+    cyclePairId: withdrawal.cyclePairId,
+    breakdown: withdrawal.breakdown ?? withdrawal.invoiceData,
+    payoutStatement: invoiceInput.payoutStatement,
+  });
+  if (rebased.payoutStatement) {
+    invoiceInput.payoutStatement = rebased.payoutStatement;
+  }
+  const breakdownSnapshot = rebased.breakdown;
   const cycleStage =
     withdrawal.breakdown && typeof withdrawal.breakdown === 'object' && 'cycleStage' in withdrawal.breakdown
       ? (withdrawal.breakdown as { cycleStage?: string }).cycleStage ?? null

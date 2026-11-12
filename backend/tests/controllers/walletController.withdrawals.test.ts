@@ -28,6 +28,7 @@ vi.mock('../../src/lib/prisma', () => ({
 
 vi.mock('../../src/lib/withdrawalSchema', () => ({
   ensureWithdrawalSchema: vi.fn().mockResolvedValue(undefined),
+  ensureWithdrawalInReviewEnumReady: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../src/middleware/auth', async (importOriginal) => {
@@ -45,6 +46,7 @@ vi.mock('../../src/lib/walletService', () => ({
   enrichWalletRow: vi.fn((w) => w),
   getWalletSummary: vi.fn(),
   computeBreakdownForPeriod: vi.fn(),
+  refreshSecondPayoutGatewayAndNet: vi.fn((breakdown: unknown) => breakdown),
 }));
 
 vi.mock('../../src/lib/walletSync', () => ({
@@ -57,7 +59,14 @@ vi.mock('../../src/lib/settlementWithdrawalQuery', () => ({
 }));
 
 vi.mock('../../src/lib/periodChannelPreview', () => ({
-  buildPeriodChannelPreview: vi.fn(),
+  buildPeriodChannelPreview: vi.fn().mockResolvedValue({
+    breakdown: {
+      pickupCash: { revenueSubtotal: 0 },
+      pickupCard: { revenueSubtotal: 0 },
+      pickupOnline: { revenueSubtotal: 0 },
+      deliveryOnline: { revenueSubtotal: 0 },
+    },
+  }),
 }));
 
 vi.mock('../../src/lib/promoOwnershipTotals', () => ({
@@ -951,7 +960,7 @@ describe('getPayoutsDueHandler', () => {
     );
   });
 
-  it('returns pending branch periods (from/to query is forwarded but does not filter the queue)', async () => {
+  it('forwards from/to so the due queue can be month-filtered', async () => {
     const req = createMockReq({
       user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
       query: { from: '2026-07-01', to: '2026-07-31' },
@@ -961,6 +970,8 @@ describe('getPayoutsDueHandler', () => {
     await getPayoutsDueHandler(req, res, next);
 
     expect(walletControllerSupport.listSuperAdminPayoutsDueItems).toHaveBeenCalledWith({
+      page: 1,
+      limit: 10,
       from: '2026-07-01',
       to: '2026-07-31',
     });
@@ -985,7 +996,7 @@ describe('getPayoutsDueHandler', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('still returns due items when from/to would not overlap the period (queue is not month-scoped)', async () => {
+  it('forwards a non-overlapping from/to range to the list helper', async () => {
     const req = createMockReq({
       user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
       query: { from: '2026-08-01', to: '2026-08-31' },
@@ -995,6 +1006,8 @@ describe('getPayoutsDueHandler', () => {
     await getPayoutsDueHandler(req, res, next);
 
     expect(walletControllerSupport.listSuperAdminPayoutsDueItems).toHaveBeenCalledWith({
+      page: 1,
+      limit: 10,
       from: '2026-08-01',
       to: '2026-08-31',
     });
@@ -1014,19 +1027,20 @@ describe('getPayoutsDueHandler', () => {
     });
   });
 
-  it('forwards the store cursor to the next chunk', async () => {
+  it('forwards page and limit with the month range', async () => {
     const req = createMockReq({
       user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
-      query: { from: '2026-07-01', to: '2026-07-31', cursor: 'store-due' },
+      query: { from: '2026-07-01', to: '2026-07-31', page: '2', limit: '20' },
     });
     const res = createMockRes();
 
     await getPayoutsDueHandler(req, res, next);
 
     expect(walletControllerSupport.listSuperAdminPayoutsDueItems).toHaveBeenCalledWith({
+      page: 2,
+      limit: 20,
       from: '2026-07-01',
       to: '2026-07-31',
-      cursor: 'store-due',
     });
   });
 
@@ -1052,10 +1066,26 @@ describe('getPayoutsDueHandler', () => {
     await getPayoutsDueHandler(req, res, next);
 
     expect(walletControllerSupport.listSuperAdminPayoutsDueItems).toHaveBeenCalledWith({
-      from: undefined,
-      to: undefined,
+      page: 1,
+      limit: 10,
     });
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it('forwards storeId to scope the due queue to one branch', async () => {
+    const req = createMockReq({
+      user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
+      query: { storeId: 'store-due' },
+    });
+    const res = createMockRes();
+
+    await getPayoutsDueHandler(req, res, next);
+
+    expect(walletControllerSupport.listSuperAdminPayoutsDueItems).toHaveBeenCalledWith({
+      page: 1,
+      limit: 10,
+      storeId: 'store-due',
+    });
   });
 });
 
@@ -1079,7 +1109,7 @@ describe('listSuperAdminPayoutsDueItems', () => {
     } as never);
   });
 
-  it('returns elapsed unpaid windows from the next payout start (ignores month filter)', async () => {
+  it('keeps only unpaid windows that overlap the wallet month filter', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-29T12:00:00.000Z'));
     vi.mocked(prisma.storeWithdrawal.findMany).mockResolvedValue([
@@ -1099,16 +1129,13 @@ describe('listSuperAdminPayoutsDueItems', () => {
       to: '2026-10-31',
     });
 
-    expect(page.items.map((item) => item.periodFrom)).toEqual([
-      '2026-09-07',
-      '2026-09-22',
-      '2026-10-07',
-    ]);
-    expect(page.items[0].periodTo).toBe('2026-09-21');
+    expect(page.items.map((item) => item.periodFrom)).toEqual(['2026-09-22', '2026-10-07']);
+    expect(page.items[0].periodTo).toBe('2026-10-06');
+    expect(page.items.every((item) => item.isOldestUnpaid === false)).toBe(true);
     vi.useRealTimers();
   });
 
-  it('includes the full unpaid chain when explicit from/to is passed', async () => {
+  it('includes every unpaid window that overlaps the selected month', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-31T12:00:00.000Z'));
     vi.mocked(prisma.order.findFirst).mockResolvedValue({
@@ -1117,7 +1144,7 @@ describe('listSuperAdminPayoutsDueItems', () => {
     } as never);
 
     const page = await listSuperAdminPayoutsDueItems({
-      from: '2026-07-20',
+      from: '2026-07-01',
       to: '2026-07-31',
     });
 
