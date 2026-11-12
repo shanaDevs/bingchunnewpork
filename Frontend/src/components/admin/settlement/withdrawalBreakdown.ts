@@ -383,7 +383,7 @@ export function mergeSharedPromoContributionFieldsIntoBreakdown(
 /** Merge live net-preview cycle stage and Payout 1 math into a locked withdrawal snapshot. */
 /** Processed withdrawals — payout math must come from the stored breakdown only. */
 export function isWithdrawalFinancialSnapshotLocked(
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED',
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'IN_REVIEW',
 ): boolean {
   return status === 'APPROVED' || status === 'REJECTED' || status === 'CANCELLED';
 }
