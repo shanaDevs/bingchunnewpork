@@ -37,6 +37,7 @@ import {
   getNearbyFulfillmentStore,
   getProductOrderableQty,
   getRemainingOrderQty,
+  getMenuUnavailableBadgeLabel,
   isProductComingSoon,
   isProductInStock,
 } from '@/lib/productAvailability';
@@ -58,6 +59,7 @@ export default function ProductDetailView() {
   const [sugarLevel, setSugarLevel] = useState<SugarLevel>(DEFAULT_SUGAR_LEVEL);
   const [iceLevel, setIceLevel] = useState<IceLevel>(DEFAULT_ICE_LEVEL);
   const [quantity, setQuantity] = useState(1);
+  const [activeImgIndex, setActiveImgIndex] = useState(0);
 
   const addItem = useCartStore((s) => s.addItem);
   const cartItems = useCartStore((s) => s.items);
@@ -84,6 +86,10 @@ export default function ProductDetailView() {
     if (id) trackRecentlyViewed(id);
   }, [id]);
 
+  useEffect(() => {
+    setActiveImgIndex(0);
+  }, [product?.id]);
+
   const availableToppings = useMemo(
     () => (product?.toppings ?? []).map((pt) => pt.topping).filter((t) => t.isAvailable),
     [product?.toppings],
@@ -92,6 +98,7 @@ export default function ProductDetailView() {
 
   const inStock = product ? isProductInStock(product) : false;
   const comingSoon = product ? isProductComingSoon(product) : false;
+  const unavailableBadge = product ? getMenuUnavailableBadgeLabel(product) : 'Sold out';
   const orderableQty = product ? getProductOrderableQty(product) : 0;
   const remainingQty = product ? getRemainingOrderQty(product, cartItems) : 0;
   const maxPickerQty = remainingQty === Number.MAX_SAFE_INTEGER ? MAX_QUANTITY : remainingQty;
@@ -101,7 +108,22 @@ export default function ProductDetailView() {
 
   const unitPrice = product ? calcUnitPrice(product, 'REGULAR', selectedToppings) : 0;
   const total = unitPrice * pickerQuantity;
-  const imageSrc = resolveProductImageUrl(product?.imageUrl) ?? '/promos/menu-hero-cup.png';
+
+  const galleryImages = useMemo(() => {
+    if (!product) return [] as string[];
+    const raw =
+      product.imageUrls?.length
+        ? product.imageUrls
+        : product.imageUrl
+          ? [product.imageUrl]
+          : [];
+    const resolved = raw
+      .map((url) => resolveProductImageUrl(url))
+      .filter((url): url is string => Boolean(url));
+    return [...new Set(resolved)];
+  }, [product]);
+
+  const imageSrc = galleryImages[activeImgIndex] ?? galleryImages[0] ?? '/promos/menu-hero-cup.png';
 
   const toggleTopping = (topping: Topping) => {
     setSelectedToppings((current) =>
@@ -177,7 +199,7 @@ export default function ProductDetailView() {
         {band}
         <div className="rounded-t-[2.5rem] -mt-8 bg-white px-6 py-20 text-center">
           <h2 className="text-2xl font-bold text-brand-950">Product not found</h2>
-          <Link href="/menu" className="mt-6 inline-block rounded-full bg-brand-600 px-6 py-2.5 text-white font-semibold">
+          <Link href="/menu" className="mt-6 inline-block rounded-full bg-brand-600 px-6 py-2.5 text-snow font-semibold">
             Back to menu
           </Link>
         </div>
@@ -207,9 +229,10 @@ export default function ProductDetailView() {
             Back to menu
           </Link>
 
+          <div className="flex flex-col gap-3 self-start lg:sticky lg:top-32.5 lg:col-start-1 lg:row-start-1">
           <div
             className={cn(
-              'group relative flex aspect-[4/3.4] items-end justify-center self-start rounded-[2.5rem] sm:aspect-auto sm:h-112 lg:sticky lg:top-32.5 lg:col-start-1 lg:row-start-1 lg:h-(--visual-h)',
+              'group relative flex aspect-[4/3.4] items-end justify-center rounded-[2.5rem] sm:aspect-auto sm:h-112 lg:h-(--visual-h)',
               inStock
                 ? 'border-2 border-brand-600 bg-brand-50 shadow-[0_28px_60px_-24px_color-mix(in_srgb,var(--color-brand-600)_45%,transparent)]'
                 : 'border-2 border-slate-300 bg-brand-50',
@@ -239,23 +262,65 @@ export default function ProductDetailView() {
               Back to menu
             </Link>
             {!inStock && (
-              <p className="absolute top-5 right-5 rounded-full bg-brand-950 px-3 py-1.5 text-xs font-bold tracking-[0.08em] text-white uppercase">
-                Sold out
+              <p
+                className={cn(
+                  'absolute top-5 right-5 rounded-full px-3 py-1.5 text-xs font-bold tracking-[0.08em] text-snow uppercase',
+                  comingSoon ? 'bg-brand-600' : 'bg-brand-950',
+                )}
+              >
+                {unavailableBadge}
               </p>
             )}
             <Image
+              key={imageSrc}
               ref={photoRef}
               src={imageSrc}
               alt={product.name}
               width={463}
               height={800}
               sizes="(min-width: 1024px) 420px, 320px"
-              priority
+              priority={activeImgIndex === 0}
               className={cn(
                 'relative h-[84%] w-auto object-contain pb-[6%] drop-shadow-[0_16px_18px_rgb(15_33_71/0.18)]',
                 !inStock && 'opacity-60 grayscale',
               )}
             />
+          </div>
+
+          {galleryImages.length > 1 && (
+            <div
+              className="flex gap-2 overflow-x-auto pb-0.5 sm:gap-3"
+              role="tablist"
+              aria-label={`${product.name} photos`}
+            >
+              {galleryImages.map((src, idx) => {
+                const isActive = activeImgIndex === idx;
+                return (
+                  <button
+                    key={`${src}-${idx}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    aria-label={`Photo ${idx + 1} of ${galleryImages.length}`}
+                    onClick={() => setActiveImgIndex(idx)}
+                    className={cn(
+                      'grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-brand-50 ring-2 ring-inset transition sm:h-[4.5rem] sm:w-[4.5rem]',
+                      isActive ? 'ring-brand-600' : 'ring-brand-100 hover:ring-brand-300',
+                    )}
+                  >
+                    <Image
+                      src={src}
+                      alt=""
+                      width={80}
+                      height={80}
+                      sizes="72px"
+                      className="h-full w-full object-contain p-1.5"
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          )}
           </div>
 
           <div className="lg:col-start-2 lg:row-start-1">
@@ -286,12 +351,12 @@ export default function ProductDetailView() {
             <div className="z-30 mt-8 rounded-full bg-white/95 p-1.5 shadow-lg shadow-brand-950/15 ring-1 ring-brand-100 backdrop-blur-md ring-inset md:sticky md:bottom-0 md:-mx-8 md:rounded-none md:border-t md:border-brand-100 md:px-8 md:pt-3 md:pb-[max(0.75rem,env(safe-area-inset-bottom))] md:shadow-none md:ring-0 lg:static lg:mx-0 lg:mt-9 lg:w-fit lg:rounded-full lg:border-0 lg:bg-brand-50 lg:p-2 lg:ring-1 lg:ring-brand-100 lg:ring-inset">
               {inStock ? (
                 <div className="flex items-center gap-2 sm:gap-3">
-                  <QuantityStepper value={pickerQuantity} onChange={setQuantity} max={maxQty} />
+                  <QuantityStepper value={pickerQuantity} onChange={setQuantity} max={maxQty} disabled={orderingClosed} />
                   <button
                     type="button"
                     onClick={handleAddToCart}
-                    disabled={maxQty <= 0}
-                    className="flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-brand-600 px-4 text-sm font-semibold whitespace-nowrap text-white shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-700 disabled:opacity-50 sm:h-auto sm:px-5 sm:py-4 sm:text-lg lg:flex-none lg:px-8 lg:py-3 lg:text-base"
+                    disabled={maxQty <= 0 || orderingClosed}
+                    className="flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-brand-600 px-4 text-sm font-semibold whitespace-nowrap text-snow shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-700 disabled:opacity-50 sm:h-auto sm:px-5 sm:py-4 sm:text-lg lg:flex-none lg:px-8 lg:py-3 lg:text-base"
                   >
                     <ShoppingBag className="size-5 shrink-0 max-sm:hidden" aria-hidden="true" />
                     <span>Add to cart</span>
@@ -304,12 +369,14 @@ export default function ProductDetailView() {
               ) : (
                 <div className="flex items-center justify-between gap-3 px-3 py-2">
                   <p className="text-sm text-slate-700">
-                    <span className="font-semibold text-brand-950">Sold out at this branch.</span>
+                    <span className="font-semibold text-brand-950">
+                      {comingSoon ? 'Coming soon at this branch.' : 'Sold out at this branch.'}
+                    </span>
                   </p>
                   <button
                     type="button"
                     onClick={() => openOrderModal({ startAtSetup: true })}
-                    className="shrink-0 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
+                    className="shrink-0 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-snow hover:bg-brand-700"
                   >
                     Change branch
                   </button>

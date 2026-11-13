@@ -49,8 +49,7 @@ class Product {
 
   double get displayRating => avgRating ?? fallbackRating;
 
-  /// Max units a customer may order. [branchQuantity] from the API is online stock.
-  /// Qty under [outOfStockThreshold] (5) or unavailable → cannot order.
+  /// Max units a customer may order. [branchQuantity] is online-available from the API.
   int get orderableQty {
     if (!isAvailable || isComingSoon || isOutOfStock) return 0;
     if (!hasStoreAvailability) return unboundedQty;
@@ -58,7 +57,7 @@ class Product {
     if (branchInStock == false) return 0;
     final qty = branchQuantity;
     if (qty == null) return unboundedQty;
-    if (qty < outOfStockThreshold) return 0;
+    if (qty <= 0) return 0;
     return qty;
   }
 

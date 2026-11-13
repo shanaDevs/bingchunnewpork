@@ -1,9 +1,11 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  RefreshCw,
+  Download,
   Search,
   X,
   ShoppingBag,
@@ -13,6 +15,12 @@ import {
   PackageCheck,
   XCircle,
 } from 'lucide-react';
+import type { DateRange } from 'react-day-picker';
+import DashboardPeriodFilter, {
+  formatDashboardPeriodLabel,
+  orderDateRange,
+  type DashboardPeriod,
+} from '@/components/admin/DashboardPeriodFilter';
 // import AdminTakeawayQueuePanel from '@/components/admin/AdminTakeawayQueuePanel';
 import AdminClassificationFab from '@/components/admin/AdminClassificationFab';
 import AdminClassificationModal from '@/components/admin/AdminClassificationModal';
@@ -22,7 +30,7 @@ import AdminOrderCancelCountdownBadge from '@/components/admin/AdminOrderCancelC
 import AdminOrderItemsCompact from '@/components/admin/AdminOrderItemsCompact';
 import AdminReceiptModal from '@/components/admin/AdminReceiptModal';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { getAdminSession, isAllBranchView, isPickupOnlyBranchAdmin, type AdminSession } from '@/lib/adminAuth';
+import { getAdminSession, isAllBranchView, isCashier, isPickupOnlyBranchAdmin, type AdminSession } from '@/lib/adminAuth';
 import { isOrderPaid } from '@/lib/receipt';
 import {
   adminBadgeClass,
@@ -31,6 +39,7 @@ import {
 } from '@/lib/adminBadges';
 import type { PaymentMethod } from '@/types';
 import { ADMIN_TABLE_PAGE_SIZE, buildPageList } from '@/lib/pagination';
+import { isOrderChannel, type OrderChannel } from '@/lib/orderChannel';
 import { resolveCustomerDisplayName } from '@/lib/customerName';
 import { formatDateTime, formatTime, todayDateString } from '@/lib/datetime';
 import {
@@ -141,6 +150,13 @@ function isQueueStatusFilter(status: string): status is QueueStatusTab {
 function queueStatusesForTab(tab: OrderTab): readonly QueueStatusTab[] {
   return tab === 'pickup' ? PICKUP_QUEUE_STATUSES : DELIVERY_QUEUE_STATUSES;
 }
+
+const QUICK_FILTERS: { id: string; label: string; mode: OrderModeFilter; status: string; tab: OrderTab }[] = [
+  { id: 'active-pickup', label: 'Active pickup', mode: 'TAKEAWAY', status: DEFAULT_PICKUP_STATUS_FILTER, tab: 'pickup' },
+  { id: 'active-delivery', label: 'Active delivery', mode: 'DELIVERY', status: DEFAULT_DELIVERY_STATUS_FILTER, tab: 'delivery' },
+  { id: 'delivered-pickup', label: 'Delivered pickup', mode: 'TAKEAWAY', status: 'DELIVERED', tab: 'pickup' },
+  { id: 'delivered-delivery', label: 'Delivered delivery', mode: 'DELIVERY', status: 'DELIVERED', tab: 'delivery' },
+];
 
 function statusesForMode(mode: OrderModeFilter, tab: OrderTab): readonly string[] {
   if (mode === 'TAKEAWAY') {
@@ -332,11 +348,11 @@ function AdminOrdersContent() {
   const searchDebounceInit = useRef(true);
   const [activeTab, setActiveTab] = useState<OrderTab>('pickup');
   const [archiveView, setArchiveView] = useState<ArchiveView | null>(null);
+  const [period, setPeriod] = useState<DashboardPeriod>('today');
+  const [customRange, setCustomRange] = useState<DateRange | undefined>();
   const modeFilter = archiveView ? '' : tabToMode(activeTab);
-  const today = todayDateString();
-  const dateRange = { startDate: today, endDate: today };
   const [statusFilter, setStatusFilter] = useState(DEFAULT_PICKUP_STATUS_FILTER);
-  const channelFilter = '';
+  const [channelFilter, setChannelFilter] = useState<'' | OrderChannel>('');
   const [processedById, setProcessedById] = useState('');
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
@@ -351,7 +367,18 @@ function AdminOrdersContent() {
   const qc = useQueryClient();
   // All-branch roles see orders from every branch, so they need the store column.
   const showStoreColumn = isAllBranchView(admin);
+  const cashierMode = isCashier(admin);
+  const showAdminFilters = Boolean(admin) && !cashierMode;
   const pickupOnly = isPickupOnlyBranchAdmin(admin);
+  const dateRange = useMemo(() => {
+    if (cashierMode) {
+      const today = todayDateString();
+      return { startDate: today, endDate: today };
+    }
+    return orderDateRange(period, customRange);
+  }, [cashierMode, period, customRange]);
+  const customReady = cashierMode || period !== 'custom' || !!(customRange?.from && customRange?.to);
+  const periodLabel = formatDashboardPeriodLabel(period, customRange, { includeDates: true });
   const visibleOrderTabs = pickupOnly
     ? ORDER_TABS.filter((tab) => tab.id === 'pickup')
     : ORDER_TABS;
@@ -519,7 +546,7 @@ function AdminOrdersContent() {
         }
       );
     },
-    enabled: mounted,
+    enabled: mounted && customReady,
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
   });
@@ -545,7 +572,7 @@ function AdminOrdersContent() {
     enabled: mounted,
   });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: [
       'admin-orders',
       activeTab,
@@ -601,7 +628,7 @@ function AdminOrdersContent() {
       if (appliedSearch && !pickupQueueView && !deliveryQueueView) params.set('search', appliedSearch);
       return adminFetch(`/orders?${params}`);
     },
-    enabled: mounted,
+    enabled: mounted && customReady,
     placeholderData: keepPreviousData,
     // Socket + new-order event refresh the board; HTTP backup every 60s.
     refetchInterval: appliedSearch ? false : 60_000,
@@ -648,6 +675,34 @@ function AdminOrdersContent() {
     highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [appliedSearch, highlightId, orders]);
 
+  const hasActiveFilters = Boolean(
+    appliedSearch ||
+    archiveView ||
+    activeTab === 'delivery' ||
+    period !== 'today' ||
+    customRange ||
+    (activeTab === 'pickup' && !archiveView && statusFilter !== DEFAULT_PICKUP_STATUS_FILTER) ||
+    sortDir !== defaultSortDir(activeTab, archiveView) ||
+    channelFilter ||
+    processedById
+  );
+
+  function activeQuickFilterId(): string {
+    if (archiveView) return 'custom';
+    const match = QUICK_FILTERS.find(
+      (f) => f.tab === activeTab && f.mode === modeFilter && f.status === statusFilter && !appliedSearch
+    );
+    return match?.id ?? 'custom';
+  }
+
+  function applyQuickFilter(filter: (typeof QUICK_FILTERS)[number]) {
+    setArchiveView(null);
+    setActiveTab(filter.tab);
+    setStatusFilter(filter.status);
+    setSortDir(defaultSortDir(filter.tab, null));
+    setPage(1);
+  }
+
   function switchTab(tab: OrderTab) {
     if (pickupOnly && tab === 'delivery') return;
     setArchiveView(null);
@@ -689,6 +744,51 @@ function AdminOrdersContent() {
     setHighlightId(null);
   }
 
+  function resetFilters() {
+    setSearchInput('');
+    setAppliedSearch('');
+    setArchiveView(null);
+    setPeriod('today');
+    setCustomRange(undefined);
+    setActiveTab('pickup');
+    setStatusFilter(DEFAULT_PICKUP_STATUS_FILTER);
+    setSortDir(DEFAULT_PICKUP_SORT_DIR);
+    setChannelFilter('');
+    setProcessedById('');
+    setHighlightId(null);
+    setPage(1);
+    searchDebounceInit.current = true;
+  }
+
+  function deliveryLocation(order: {
+    orderMode: string;
+    deliveryAddressLine?: string | null;
+    deliveryLat?: number | null;
+    deliveryLng?: number | null;
+    address?: { addressLine: string; lat?: number | null; lng?: number | null } | null;
+  }) {
+    const line = order.deliveryAddressLine || order.address?.addressLine;
+    const lat = order.deliveryLat ?? order.address?.lat;
+    const lng = order.deliveryLng ?? order.address?.lng;
+    return { line, lat, lng };
+  }
+
+  function exportCsv() {
+    const headers = showStoreColumn
+      ? 'Order Number,Mode,Store,Delivery Location,Total,Status,Date\n'
+      : 'Order Number,Mode,Delivery Location,Total,Status,Date\n';
+    const rows = (orders as Array<Record<string, unknown>>).map((o) => {
+      const loc = deliveryLocation(o as Parameters<typeof deliveryLocation>[0]);
+      const store = o.store as { name?: string } | undefined;
+      const mode = (o.orderMode as string) === 'DELIVERY' ? 'Delivery' : 'Pick up';
+      const base = `${o.orderNumber},${mode}`;
+      const storePart = showStoreColumn ? `,${store?.name}` : '';
+      return `${base}${storePart},"${loc.line || ''}",${o.total},${o.status},${new Date(o.createdAt as string).toLocaleDateString()}`;
+    }).join('\n');
+    const blob = new Blob([headers + rows], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'orders.csv'; a.click();
+  }
+
   function runDeliverySearch() {
     setAppliedSearch(searchInput.trim());
     setPage(1);
@@ -712,6 +812,48 @@ function AdminOrdersContent() {
 
   return (
     <div>
+      {showAdminFilters && (
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-fg">Orders</h1>
+            <p className="text-muted text-sm mt-0.5">
+              {archiveView === 'delivered'
+                ? `${meta.total || 0} complete orders · ${periodLabel}`
+                : archiveView === 'cancelled'
+                  ? `${meta.total || 0} cancelled orders · ${periodLabel}`
+                  : activeTab === 'pickup'
+                    ? `${meta.total || 0} ${statusLabel(statusFilter, 'TAKEAWAY').toLowerCase()} pickup orders · ${periodLabel}`
+                    : activeTab === 'delivery'
+                      ? `${meta.total || 0} ${statusLabel(statusFilter, 'DELIVERY').toLowerCase()} delivery orders · ${periodLabel}`
+                      : `${meta.total || 0} orders in view`}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <DashboardPeriodFilter
+              period={period}
+              customRange={customRange}
+              onPeriodChange={(next) => {
+                setPeriod(next);
+                setPage(1);
+              }}
+              onCustomRangeChange={(range) => {
+                setCustomRange(range);
+                if (range?.from && range?.to) setPeriod('custom');
+                setPage(1);
+              }}
+              compact
+              showPresetDates
+            />
+            <button onClick={() => refetch()} className="btn-outline p-2.5" type="button" aria-label="Refresh orders">
+              <RefreshCw size={15} />
+            </button>
+            <button onClick={exportCsv} className="btn-outline px-3 py-2.5 text-sm flex items-center gap-1.5" type="button">
+              <Download size={14} /> Export
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Takeaway pickup queue — hidden for now
       <AdminTakeawayQueuePanel adminFetch={adminFetch} />
       */}
@@ -815,58 +957,131 @@ function AdminOrdersContent() {
             </Tabs>
           )}
 
-          <div className="admin-orders-toolbar__end">
-            {!archiveView && (
-              <div className="admin-orders-toolbar__search-group">
-                <div className={`input-icon-wrap admin-orders-toolbar__search${searchInput ? ' input-icon-wrap--end' : ''}`}>
-                  <Search size={16} className="input-icon" aria-hidden />
-                  <input
-                    type="text"
-                    inputMode={activeTab === 'pickup' ? 'numeric' : 'search'}
-                    value={searchInput}
-                    onChange={(e) => {
-                      const value = activeTab === 'pickup'
-                        ? e.target.value.replace(/\D/g, '')
-                        : e.target.value;
-                      setSearchInput(value);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && activeTab === 'delivery') {
-                        e.preventDefault();
-                        runDeliverySearch();
-                      }
-                    }}
-                    placeholder={
-                      activeTab === 'pickup'
-                        ? 'Search by token...'
-                        : 'Search by order number...'
+          {!archiveView && (
+            <div className={showAdminFilters ? 'admin-orders-toolbar__search-group' : 'admin-orders-toolbar__end admin-orders-toolbar__search-group'}>
+              <div className={`input-icon-wrap admin-orders-toolbar__search${searchInput ? ' input-icon-wrap--end' : ''}`}>
+                <Search size={16} className="input-icon" aria-hidden />
+                <input
+                  type="text"
+                  inputMode={activeTab === 'pickup' ? 'numeric' : 'search'}
+                  value={searchInput}
+                  onChange={(e) => {
+                    const value = activeTab === 'pickup'
+                      ? e.target.value.replace(/\D/g, '')
+                      : e.target.value;
+                    setSearchInput(value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && activeTab === 'delivery') {
+                      e.preventDefault();
+                      runDeliverySearch();
                     }
-                    className="search-bar"
-                  />
-                  {searchInput && (
-                    <button
-                      type="button"
-                      onClick={clearSearch}
-                      className="input-action p-1 text-muted hover:text-fg"
-                      aria-label="Clear search"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
-                {activeTab === 'delivery' && (
+                  }}
+                  placeholder={
+                    activeTab === 'pickup'
+                      ? 'Search by token...'
+                      : 'Search by order number...'
+                  }
+                  className="search-bar"
+                />
+                {searchInput && (
                   <button
                     type="button"
-                    onClick={runDeliverySearch}
-                    className="btn-primary admin-orders-toolbar__find shrink-0"
+                    onClick={clearSearch}
+                    className="input-action p-1 text-muted hover:text-fg"
+                    aria-label="Clear search"
                   >
-                    Find
+                    <X size={14} />
                   </button>
                 )}
               </div>
-            )}
+              {activeTab === 'delivery' && (
+                <button
+                  type="button"
+                  onClick={runDeliverySearch}
+                  className="btn-primary admin-orders-toolbar__find shrink-0"
+                >
+                  Find
+                </button>
+              )}
+            </div>
+          )}
 
-            {archiveView && (
+          {showAdminFilters ? (
+            <div className="admin-orders-toolbar__actions">
+              <select
+                value={channelFilter}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setChannelFilter(v && isOrderChannel(v) ? v : '');
+                  setPage(1);
+                }}
+                className="filter-select admin-orders-toolbar__sort"
+                aria-label="Filter by channel"
+              >
+                <option value="">All channels</option>
+                <option value="WEB">🌐 Website</option>
+                <option value="POS">🧾 POS</option>
+                <option value="APP">📱 App</option>
+                <option value="WHATSAPP">🟢 WhatsApp</option>
+                <option value="TELEGRAM">🔵 Telegram</option>
+              </select>
+              {archiveView && (
+                <select
+                  value={processedById}
+                  onChange={(e) => {
+                    setProcessedById(e.target.value);
+                    setPage(1);
+                  }}
+                  className="filter-select admin-orders-toolbar__sort"
+                  aria-label="Filter by cashier"
+                >
+                  <option value="">All cashiers</option>
+                  {cashiers.map((cashier) => (
+                    <option key={cashier.id} value={cashier.id}>{cashier.name}</option>
+                  ))}
+                </select>
+              )}
+              <select
+                value={sortDir}
+                onChange={(e) => { setSortDir(e.target.value as 'desc' | 'asc'); setPage(1); }}
+                className="filter-select admin-orders-toolbar__sort"
+                aria-label="Sort by ordered time"
+              >
+                <option value="desc">Newest first</option>
+                <option value="asc">Oldest first</option>
+              </select>
+              {!archiveView && (
+                <select
+                  value={
+                    activeQuickFilterId() === 'custom'
+                      ? (activeTab === 'pickup' ? 'active-pickup' : 'active-delivery')
+                      : activeQuickFilterId()
+                  }
+                  onChange={(e) => {
+                    const f = QUICK_FILTERS.find((q) => q.id === e.target.value);
+                    if (f) applyQuickFilter(f);
+                  }}
+                  className="filter-select admin-orders-toolbar__quick"
+                  aria-label="Quick filter"
+                >
+                  {QUICK_FILTERS.filter((f) => f.tab === activeTab).map((f) => (
+                    <option key={f.id} value={f.id}>{f.label}</option>
+                  ))}
+                </select>
+              )}
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="btn-outline admin-orders-toolbar__reset text-xs"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          ) : archiveView ? (
+            <div className="admin-orders-toolbar__end">
               <div className="admin-orders-toolbar__actions">
                 <select
                   value={processedById}
@@ -883,12 +1098,14 @@ function AdminOrdersContent() {
                   ))}
                 </select>
               </div>
-            )}
-          </div>
+            </div>
+          ) : null}
         </div>
 
         {isLoading ? (
           <div className="p-8 text-center text-muted">Loading orders...</div>
+        ) : !customReady ? (
+          <div className="p-8 text-center text-muted">Select a date range to view order history.</div>
         ) : orders.length === 0 ? (
           <div className="p-8 text-center text-muted">
             {appliedSearch
@@ -963,7 +1180,7 @@ function AdminOrdersContent() {
                       </td>
                     )}
                     <td className="px-4 py-3 text-muted text-xs align-top whitespace-nowrap tabular-nums">
-                      <div>{formatOrderedTime(order.createdAt, queueStatusRow)}</div>
+                      <div>{formatOrderedTime(order.createdAt, (cashierMode || period === 'today') && queueStatusRow)}</div>
                       {!archiveView && order.status === 'RECEIVED' && (
                         <AdminOrderCancelCountdownBadge order={order} />
                       )}

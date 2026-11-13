@@ -14,6 +14,7 @@ import CupPourOverlay from '@/components/cart/CupPourOverlay';
 import LoyaltyPointsFloat from '@/components/cart/LoyaltyPointsFloat';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import CustomerSocketProvider from '@/components/notifications/CustomerSocketProvider';
+import BranchOperatingLiveSync from '@/hooks/useBranchOperatingLiveSync';
 import SiteTranslatorProvider from '@/components/i18n/SiteTranslator';
 import { useSpinStore } from '@/store/spinStore';
 import { RouteProgress } from '@/components/ui/RouteProgress';
@@ -74,6 +75,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         <SiteTranslatorProvider>
         <RouteProgress />
         <CustomerSocketProvider>
+        <BranchOperatingLiveSync />
         <CustomerAuthSync />
         <CartAuthSync />
         <DeferredSpinWheelModal />

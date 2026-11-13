@@ -63,7 +63,10 @@ export default function OrderModeModal({
   const [wasOpen, setWasOpen] = useState(isOpen);
   if (isOpen !== wasOpen) {
     setWasOpen(isOpen);
-    if (isOpen) setStep(startAtSetup && initialMode ? 'setup' : 'type');
+    if (isOpen) {
+      setStep(startAtSetup && initialMode ? 'setup' : 'type');
+      setMode(initialMode);
+    }
   }
 
   const handleComplete = useCallback(() => {
@@ -117,7 +120,9 @@ export default function OrderModeModal({
           'home-redesign order-popup relative flex max-h-[calc(100dvh-0.75rem)] w-full flex-col overflow-clip rounded-t-[1.75rem] bg-white text-slate-900 shadow-2xl shadow-brand-950/30',
           'md:max-h-[min(54rem,100%)] md:rounded-[2rem]',
           // Phones: the setup step fills the sheet, so it doesn't jump in height as its content changes.
-          large ? 'max-md:h-[calc(100dvh-0.75rem)] md:max-w-6xl' : 'md:max-w-xl',
+          'transition-[opacity,translate,scale] duration-300 ease-out starting:translate-y-4 starting:scale-[0.98] starting:opacity-0',
+        )}
+      >
           'transition-[opacity,translate,scale] duration-300 ease-out starting:translate-y-4 starting:scale-[0.98] starting:opacity-0',
         )}
       >

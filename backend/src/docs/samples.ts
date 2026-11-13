@@ -516,7 +516,10 @@ const REQUESTS: Record<string, unknown> = {
     storeId: ID.store,
   },
   'PATCH /api/admin/users/:id': { name: 'Kasun Silva', isActive: true },
-  'PUT /api/admin/users/:id/permissions': { permissions: [{ menu: 'ORDERS', actions: ['read', 'update'] }] },
+  'PUT /api/admin/users/:id/permissions': {
+    permissions: [{ menu: 'ORDERS', actions: ['read', 'update'] }],
+    password: 'Secret123',
+  },
   'PUT /api/admin/users/:id/stores': { storeIds: [ID.store] },
   'POST /api/admin/roles': { name: 'AUDITOR', permissions: [{ menu: 'REPORTS', actions: ['read'] }] },
   'PUT /api/admin/roles/:id': { name: 'AUDITOR' },

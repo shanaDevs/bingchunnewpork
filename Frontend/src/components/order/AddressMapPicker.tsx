@@ -56,6 +56,13 @@ interface AddressMapPickerProps {
   overlayHeader?: ReactNode;
   /** Panel layout: content laid over the map (e.g. the phone branch cards along its bottom edge). */
   mapOverlay?: ReactNode;
+  /**
+   * Panel layout: search stacked above a map that fills the rest of the popup, instead of a side column
+   * and a fixed map height.
+   */
+  mapFocus?: boolean;
+  /** Panel layout: hide the search, status line, and current-location control. The map stays. */
+  hideSearch?: boolean;
 }
 
 /** Where the current address came from, for the panel layout's status line. */
@@ -85,6 +92,8 @@ export function AddressMapPicker({
   children,
   overlayHeader,
   mapOverlay: mapOverlayContent,
+  mapFocus = false,
+  hideSearch = false,
 }: AddressMapPickerProps) {
   const [source, setSource] = useState<AddressSource | null>(null);
   const [resolvedAddress, setResolvedAddress] = useState(value?.address ?? '');
@@ -438,10 +447,16 @@ export function AddressMapPicker({
     const FieldIcon = source === 'location' ? LocateFixed : MapPin;
     const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600';
     return (
-      // Upright phones: the search on top and the map filling the rest (with `mapOverlay` on it). From md, two
-      // columns at a fixed height; tablets split evenly, from lg the map takes the larger share.
-      <div className="flex min-h-0 flex-col gap-4 max-md:flex-1 md:mt-1 md:grid md:h-123 md:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] md:grid-rows-[minmax(0,1fr)] md:gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.4fr)]">
-        <div className="flex min-h-0 flex-col max-md:shrink-0">
+      // mapFocus: search on top and the map filling every leftover pixel of the popup. Otherwise, phones stack
+      // the same way and from md the search and children sit beside a fixed-height map.
+      <div
+        className={
+          mapFocus
+            ? 'flex min-h-0 flex-1 flex-col gap-3'
+            : 'flex min-h-0 flex-col gap-4 max-md:flex-1 md:mt-1 md:grid md:h-123 md:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] md:grid-rows-[minmax(0,1fr)] md:gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.4fr)]'
+        }
+      >
+        {!hideSearch && <div className={mapFocus ? 'flex shrink-0 flex-col' : 'flex min-h-0 flex-col max-md:shrink-0'}>
           <div ref={searchWrapRef} className="relative shrink-0">
             <label className="relative block">
               <span className="sr-only">Your delivery location</span>
@@ -546,10 +561,16 @@ export function AddressMapPicker({
           )}
 
           {children}
-        </div>
+        </div>}
 
         {/* Upright phones: at least a usable map, even under a tall message. */}
-        <div className="relative grid min-h-0 grid-rows-[minmax(0,1fr)] max-md:min-h-48 max-md:flex-1">
+        <div
+          className={
+            mapFocus
+              ? 'relative flex min-h-0 min-w-0 flex-1 flex-col'
+              : 'relative grid min-h-0 grid-rows-[minmax(0,1fr)] max-md:min-h-48 max-md:flex-1'
+          }
+        >
           <DeliveryMap
             lat={lat}
             lng={lng}
@@ -562,7 +583,7 @@ export function AddressMapPicker({
             look="redesign"
             customerPin="deliver"
             customerPinLabel="Deliver here"
-            className="h-full min-h-0"
+            className={mapFocus ? 'min-h-0 flex-1' : 'h-full min-h-0'}
           />
           {mapOverlayContent}
         </div>

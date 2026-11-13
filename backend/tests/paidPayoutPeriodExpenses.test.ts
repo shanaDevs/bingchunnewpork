@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   aggregatePaidPayoutPeriodExpensesCents,
   branchReceivableExcludingJasonFromWithdrawal,
+  jasonInvestmentCentsAfterNetPlatformCredit,
 } from '../src/lib/paidPayoutPeriodExpenses';
 
 describe('branchReceivableExcludingJasonFromWithdrawal', () => {
@@ -50,6 +51,17 @@ describe('branchReceivableExcludingJasonFromWithdrawal', () => {
   });
 });
 
+describe('jasonInvestmentCentsAfterNetPlatformCredit', () => {
+  it('reduces Jason investment when net platform amount is negative', () => {
+    expect(jasonInvestmentCentsAfterNetPlatformCredit(6_600, -66_092)).toBe(0);
+    expect(jasonInvestmentCentsAfterNetPlatformCredit(70_000, -66_092)).toBe(3_908);
+  });
+
+  it('leaves Jason unchanged when net platform is non-negative', () => {
+    expect(jasonInvestmentCentsAfterNetPlatformCredit(6_600, 500)).toBe(6_600);
+  });
+});
+
 describe('aggregatePaidPayoutPeriodExpensesCents', () => {
   it('sums actual branch receivable without Jason for all-time available balance', () => {
     const totals = aggregatePaidPayoutPeriodExpensesCents([
@@ -76,6 +88,28 @@ describe('aggregatePaidPayoutPeriodExpensesCents', () => {
 
     expect(totals.jasonInvestmentCents).toBe(18_100 + 12_400);
     expect(totals.branchReceivableExcludingJasonCents).toBe(1_917_184 + 968_045);
+  });
+
+  it('reduces summed Jason investment when a paid period has negative net platform', () => {
+    const totals = aggregatePaidPayoutPeriodExpensesCents([
+      {
+        amountCents: 915_363,
+        breakdown: {
+          cycleStage: 'SECOND',
+          commissionFee: 199_908,
+          platformOwnedPromoDiscountTotal: 266_000,
+          platformPaybackTotal: 266_000,
+          platformDiscountPaybackEnabled: true,
+          sharedPromoJasonContributionAmount: 6_600,
+          gatewayFee: 17_729,
+          netAmount: 915_363,
+          finalPayoutAmount: 915_363,
+        },
+      },
+    ]);
+
+    expect(totals.netPlatformAmountCents).toBe(-66_092);
+    expect(totals.jasonInvestmentCents).toBe(0);
   });
 
   it('does not count Payout 1 platform discounts as net platform amount', () => {

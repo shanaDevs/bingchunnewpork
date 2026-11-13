@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { MenuProductCard } from '@/components/menu-redesign/MenuProductCard';
 import { Container } from '@/components/home-redesign/ui/Container';
+import { useBranchOrderingHours } from '@/hooks/useBranchOrderingHours';
 import { api } from '@/lib/api';
 import { isProductInStock } from '@/lib/productAvailability';
 import type { Product } from '@/types';
@@ -10,6 +11,8 @@ import type { Product } from '@/types';
 const SUGGESTIONS = 4;
 
 export function RelatedProducts({ product }: { product: Product }) {
+  const branchOrdering = useBranchOrderingHours();
+  const orderingClosed = branchOrdering.hasBranch && !branchOrdering.isOpen;
   const { data: allProducts = [] } = useQuery<Product[]>({
     queryKey: ['products', 'related', product.category?.slug],
     queryFn: () => {
@@ -51,7 +54,13 @@ export function RelatedProducts({ product }: { product: Product }) {
         </div>
         <div className="mt-6 grid grid-cols-2 gap-4 sm:gap-6 md:grid-cols-4">
           {suggestions.map((item) => (
-            <MenuProductCard key={item.id} product={item} available={isProductInStock(item)} fromMenu={false} />
+            <MenuProductCard
+              key={item.id}
+              product={item}
+              available={isProductInStock(item)}
+              fromMenu={false}
+              orderingClosed={orderingClosed}
+            />
           ))}
         </div>
       </Container>

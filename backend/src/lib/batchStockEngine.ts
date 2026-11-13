@@ -6,7 +6,10 @@ import { logger } from '../utils/logger';
 import { assertReceivedAtIsToday } from './datetime';
 import { setBranchDeactivatedAt } from './branchDeactivation';
 import { ensureEnumTypeIfMissing, ensureEnumValueIfMissing } from './schemaPatch';
-import { InsufficientStockError } from '../repositories/inventoryReservationRepository';
+import {
+  completeReservationsForOrder,
+  InsufficientStockError,
+} from '../repositories/inventoryReservationRepository';
 
 export const LOW_STOCK_THRESHOLD = 25;
 export const OUT_OF_STOCK_THRESHOLD = 5;
@@ -162,6 +165,26 @@ export function isOnlineOutOfStockByOnlineQty(
 ): boolean {
   // Buffer is already removed when computing onlineAvailable; OOS when nothing left to sell online.
   return onlineAvailable <= 0;
+}
+
+/** Counter vs online sellable qty from on-hand (admin menu, checkout, stock list). */
+export function channelAvailabilityFromOnHand(
+  onHand: number,
+  reservedQty: number,
+  isAvailable: boolean,
+  thresholds: StoreProductThresholds,
+): Pick<ChannelAvailability, 'counterAvailable' | 'onlineAvailable' | 'isLowStock' | 'isOnlineOutOfStock'> {
+  const counterAvailable = isAvailable ? Math.max(0, onHand - reservedQty) : 0;
+  const onlineAvailable = isAvailable
+    ? Math.max(0, counterAvailable - thresholds.onlineOutOfStockThreshold)
+    : 0;
+  const isOnlineOutOfStock = isOnlineOutOfStockByOnlineQty(onlineAvailable, thresholds);
+  return {
+    counterAvailable,
+    onlineAvailable,
+    isOnlineOutOfStock,
+    isLowStock: isLowStockByOnlineQty(onlineAvailable, thresholds, isOnlineOutOfStock),
+  };
 }
 
 export function getColomboWeekBounds(reference = new Date()): { weekStart: Date; weekEnd: Date } {
@@ -454,16 +477,19 @@ export async function getChannelAvailability(
   const batchOnHand = await trackedActiveBatchQty(storeId, productId);
   const onHand = batchOnHand == null ? row.stock : Math.min(row.stock, batchOnHand);
   const reserved = await getActiveReservedQuantity(storeId, productId);
-  const counterAvailable = Math.max(0, onHand - reserved);
-  const onlineAvailable = Math.max(0, counterAvailable - thresholds.onlineOutOfStockThreshold);
-  const isOnlineOos = isOnlineOutOfStockByOnlineQty(onlineAvailable, thresholds);
+  const {
+    counterAvailable,
+    onlineAvailable,
+    isOnlineOutOfStock: isOnlineOos,
+    isLowStock,
+  } = channelAvailabilityFromOnHand(onHand, reserved, true, thresholds);
 
   return {
     onHand,
     reserved,
     onlineAvailable,
     counterAvailable,
-    isLowStock: isLowStockByOnlineQty(onlineAvailable, thresholds, isOnlineOos),
+    isLowStock,
     isOnlineOutOfStock: isOnlineOos,
     isCounterOutOfStock: onHand <= 0,
     thresholds,
@@ -473,7 +499,7 @@ export async function getChannelAvailability(
 export async function checkAndEmitThresholds(
   storeId: string,
   productId: string,
-  remaining: number,
+  _remainingHint?: number,
   thresholds?: StoreProductThresholds,
 ): Promise<void> {
   let io;
@@ -487,19 +513,21 @@ export async function checkAndEmitThresholds(
     where: { storeId_productId: { storeId, productId } },
     select: { lowStockThreshold: true, onlineOutOfStockThreshold: true, isAvailable: true },
   });
-  const effective = thresholds ?? getEffectiveThresholds(row ?? {});
+  // Branch-inactive is intentional — do not treat it as a depletion / restock alert.
+  if (row?.isAvailable === false) return;
+
+  const avail = await getChannelAvailability(storeId, productId, 'WEB');
+  if (!avail) return;
+
+  const effective = thresholds ?? avail.thresholds;
+  const onlineAvailable = avail.onlineAvailable;
+  const onHand = avail.onHand;
+  const isOnlineOos = avail.isOnlineOutOfStock;
 
   const [product, store] = await Promise.all([
     prisma.product.findUnique({ where: { id: productId }, select: { name: true, imageUrl: true } }),
     prisma.store.findUnique({ where: { id: storeId }, select: { name: true } }),
   ]);
-
-  const reserved = await getActiveReservedQuantity(storeId, productId);
-  const onlineAvailable = Math.max(
-    0,
-    Math.max(0, remaining - reserved) - effective.onlineOutOfStockThreshold,
-  );
-  const isOnlineOos = isOnlineOutOfStockByOnlineQty(onlineAvailable, effective);
 
   const payload = {
     storeId,
@@ -507,8 +535,8 @@ export async function checkAndEmitThresholds(
     productName: product?.name ?? 'Product',
     imageUrl: product?.imageUrl ?? null,
     storeName: store?.name ?? 'Branch',
-    weeklyRemainingQty: remaining,
-    onHandQty: remaining,
+    weeklyRemainingQty: onHand,
+    onHandQty: onHand,
     onlineAvailableQty: onlineAvailable,
     timestamp: new Date().toISOString(),
   };
@@ -1292,6 +1320,9 @@ export async function deductOrderItems(
     }
   });
 
+  // Release checkout holds before threshold alerts — otherwise reserved qty double-penalizes availability.
+  await completeReservationsForOrder(orderId).catch(() => undefined);
+
   const productIds = [...new Set(items.map((i) => i.productId))];
   for (const productId of productIds) {
     const row = await prisma.storeProduct.findUnique({
@@ -1325,6 +1356,8 @@ export async function deductOrderItemsOnce(
       await consumeFifo(tx, storeId, item.productId, item.quantity, orderId, item.orderItemId);
     }
   });
+
+  await completeReservationsForOrder(orderId).catch(() => undefined);
 
   const productIds = [...new Set(items.map((i) => i.productId))];
   for (const productId of productIds) {
@@ -1842,7 +1875,9 @@ export async function setBranchProductAvailability(input: {
       restoredQty: onHand,
     };
   }).then(async (result) => {
-    await checkAndEmitThresholds(input.storeId, input.productId, result.stock);
+    if (result.isAvailable) {
+      await checkAndEmitThresholds(input.storeId, input.productId, result.stock);
+    }
     await emitStockUpdated(input.storeId, input.productId);
     return result;
   });

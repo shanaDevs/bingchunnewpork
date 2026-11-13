@@ -329,7 +329,7 @@ function MenuListingContent() {
                 refetchCategories();
               }}
               className={cn(
-                'inline-flex items-center gap-2 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white',
+                'inline-flex items-center gap-2 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-snow',
                 focusRing,
               )}
             >
@@ -404,7 +404,7 @@ function MenuListingContent() {
                   type="button"
                   onClick={() => selectCategory('all')}
                   className={cn(
-                    'rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-700',
+                    'rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-snow transition-colors hover:bg-brand-700',
                     focusRing,
                   )}
                 >
@@ -420,6 +420,7 @@ function MenuListingContent() {
                 key={product.id}
                 product={product}
                 available={isProductInStock(product)}
+                orderingClosed={branchOrdering.hasBranch && !branchOrdering.isOpen}
               />
             ))}
           </div>
