@@ -97,4 +97,3 @@ deploy/digitalocean/.generated-app.shop.payment-envs.json
 deploy/digitalocean/.live-shop-spec.json
 deploy/digitalocean/.live-delivery-me-audit.json
 
-config.bat
