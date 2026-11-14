@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "prebuild": "node ../../node_modules/prisma/build/index.js generate",
-    "build": "node init && tsc",
+    "build": "tsc",
     "prisma:generate": "node ../../node_modules/prisma/build/index.js generate",
     "prisma:migrate": "node -r ./load-env.js ../../node_modules/prisma/build/index.js migrate dev",
     "prisma:deploy": "node -r ./load-env.js ../../node_modules/prisma/build/index.js migrate deploy",
