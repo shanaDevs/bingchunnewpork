@@ -9,7 +9,13 @@ import toast from 'react-hot-toast';
 import PlatformProviderReceivable from '@/components/admin/PlatformProviderReceivable';
 import { settlementStatusLabel } from '@/components/admin/settlementTypes';
 import type { PlatformPayoutStatement } from '@/lib/platformPayoutStatement';
-import { openCommissionSettlementReceipt, openPlatformProviderSettlementInvoice } from '@/lib/adminProtectedFile';
+import {
+  openCommissionSettlementReceipt,
+  openPayoutProofById,
+  openPlatformProviderSettlementInvoice,
+  openWithdrawalInvoice,
+} from '@/lib/adminProtectedFile';
+import { platformPayoutInvoiceSettlementId } from '@/lib/platformPayoutInvoice';
 import { formatMoney } from '@/lib/receipt';
 
 type Props = {
@@ -25,6 +31,52 @@ function formatPeriod(from: string, to: string): string {
       year: 'numeric',
     });
   return from === to ? fmt(from) : `${fmt(from)} – ${fmt(to)}`;
+}
+
+function invoiceTargets(statement: PlatformPayoutStatement) {
+  const settlementId = platformPayoutInvoiceSettlementId({
+    id: statement.id,
+    platformInvoiceUrl: statement.platformInvoiceUrl,
+  });
+  const platformInvoiceUrl = statement.platformInvoiceUrl?.trim() ?? '';
+  const canOpenInvoice = Boolean(platformInvoiceUrl || settlementId);
+  return { settlementId, platformInvoiceUrl, canOpenInvoice };
+}
+
+async function openPlatformStatementInvoice(statement: PlatformPayoutStatement): Promise<void> {
+  const { settlementId, platformInvoiceUrl } = invoiceTargets(statement);
+  if (platformInvoiceUrl) {
+    await openWithdrawalInvoice(platformInvoiceUrl);
+    return;
+  }
+  if (settlementId) {
+    await openPlatformProviderSettlementInvoice(settlementId);
+    return;
+  }
+  throw new Error('No invoice available');
+}
+
+const NO_RECEIPT_MESSAGE = 'No payment receipt was uploaded for this payout.';
+
+async function openPlatformStatementReceipt(statement: PlatformPayoutStatement): Promise<void> {
+  if (!statement.hasReceipt) {
+    throw new Error(NO_RECEIPT_MESSAGE);
+  }
+  const settlementId = invoiceTargets(statement).settlementId;
+  if (settlementId) {
+    try {
+      await openCommissionSettlementReceipt(settlementId);
+      return;
+    } catch {
+      /* platform payment proof may be on the branch withdrawal */
+    }
+  }
+  const withdrawalId = statement.storeWithdrawalId?.trim();
+  if (withdrawalId) {
+    await openPayoutProofById('withdrawal', withdrawalId, { storeId: statement.storeId });
+    return;
+  }
+  throw new Error(NO_RECEIPT_MESSAGE);
 }
 
 export default function PlatformPayoutStatementView({ statement, onClose }: Props) {
@@ -55,10 +107,14 @@ export default function PlatformPayoutStatementView({ statement, onClose }: Prop
 
   if (!portalReady || !statement) return null;
 
+  const { canOpenInvoice } = invoiceTargets(statement);
+  const canOpenReceipt = statement.hasReceipt === true;
+
   return createPortal(
     <>
       <AnimatePresence>
         <motion.div
+          key="platform-payout-statement-backdrop"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -67,6 +123,7 @@ export default function PlatformPayoutStatementView({ statement, onClose }: Prop
           aria-hidden
         />
         <motion.div
+          key="platform-payout-statement-dialog"
           role="dialog"
           aria-modal
           aria-label="Platform payout breakdown"
@@ -146,28 +203,32 @@ export default function PlatformPayoutStatementView({ statement, onClose }: Prop
               />
 
               <div className="mt-4 flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void openPlatformProviderSettlementInvoice(statement.id).catch(() => {
-                      toast.error('Could not open invoice');
-                    });
-                  }}
-                  className="rounded-lg border border-[var(--color-navy-border)] px-3 py-2 text-sm font-medium text-[var(--color-brand)] hover:bg-[var(--color-input-bg)]"
-                >
-                  View platform invoice PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void openCommissionSettlementReceipt(statement.id).catch(() => {
-                      toast.error('Could not open payment receipt');
-                    });
-                  }}
-                  className="rounded-lg border border-[var(--color-navy-border)] px-3 py-2 text-sm font-medium text-[var(--color-brand)] hover:bg-[var(--color-input-bg)]"
-                >
-                  View receipt
-                </button>
+                {canOpenInvoice ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void openPlatformStatementInvoice(statement).catch(() => {
+                        toast.error('Could not open invoice');
+                      });
+                    }}
+                    className="rounded-lg border border-[var(--color-navy-border)] px-3 py-2 text-sm font-medium text-[var(--color-brand)] hover:bg-[var(--color-input-bg)]"
+                  >
+                    View platform invoice PDF
+                  </button>
+                ) : null}
+                {canOpenReceipt ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void openPlatformStatementReceipt(statement).catch((err) => {
+                        toast.error(err instanceof Error ? err.message : 'Could not open payment receipt');
+                      });
+                    }}
+                    className="rounded-lg border border-[var(--color-navy-border)] px-3 py-2 text-sm font-medium text-[var(--color-brand)] hover:bg-[var(--color-input-bg)]"
+                  >
+                    View receipt
+                  </button>
+                ) : null}
               </div>
             </div>
 

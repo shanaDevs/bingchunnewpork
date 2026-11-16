@@ -1,35 +1,35 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Download, Printer, Search } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
 
 import { TopBranchesChannelTableSkeleton } from '@/components/admin/brand-sales/BrandSalesDashboardSkeleton';
+import {
+  topBranchesChannelColumns,
+  topBranchesChannelCsvRow,
+  topBranchesChannelPdfRow,
+  type BranchChannelMetric,
+  type TopBranchesChannelRow,
+} from '@/components/admin/brand-sales/topBranchesChannelReport';
+import AdminReportPreviewSheet from '@/components/admin/reports/AdminReportPreviewSheet';
 import DashboardPeriodFilter, {
+  formatDashboardPeriodLabel,
   type DashboardPeriod,
 } from '@/components/admin/DashboardPeriodFilter';
-import type { BranchTierFilter } from '@/components/admin/BranchSalesPerformanceTable';
-import { shortBranchName } from '@/lib/branchName';
+import {
+  BranchTablePagination,
+  BranchTierBadge,
+  branchMatchesSearch,
+  filterRowsByTier,
+  useTablePagination,
+  type BranchTierFilter,
+} from '@/components/admin/branchTableShared';
+import { downloadCsv } from '@/components/admin/reports/reportUtils';
 import { formatMoneyAmount } from '@/lib/receipt';
+import { shortBranchName } from '@/lib/branchName';
 
-export type BranchChannelMetric = {
-  amount: number;
-  orders: number;
-};
-
-export type TopBranchesChannelRow = {
-  storeId: string;
-  branchName: string;
-  tier: 'top' | 'standard';
-  totalOrders: number;
-  grossSales: number;
-  pickupCash: BranchChannelMetric;
-  pickupCard: BranchChannelMetric;
-  pickupOnline: BranchChannelMetric;
-  deliveryOnline: BranchChannelMetric;
-  totalDiscount: number;
-  totalRefunds: number;
-};
+export type { BranchChannelMetric, TopBranchesChannelRow };
 
 function ChannelAmountCell({ metric }: { metric: BranchChannelMetric }) {
   if (metric.amount <= 0) {
@@ -38,6 +38,11 @@ function ChannelAmountCell({ metric }: { metric: BranchChannelMetric }) {
   return (
     <span className="font-semibold tabular-nums text-fg">{formatMoneyAmount(metric.amount)}</span>
   );
+}
+
+function MoneyDashCell({ value }: { value: number }) {
+  if (value <= 0) return <span className="text-muted">—</span>;
+  return <span className="font-semibold tabular-nums text-fg">{formatMoneyAmount(value)}</span>;
 }
 
 type Props = {
@@ -68,38 +73,56 @@ export default function TopBranchesChannelTable({
   pageSize = 10,
 }: Props) {
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(0);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const periodLabel = formatDashboardPeriodLabel(period, customRange, { includeDates: true });
+
+  const reportOptions = useMemo(
+    () => ({ showTierColumn, hideDeliveryOnline }),
+    [showTierColumn, hideDeliveryOnline],
+  );
 
   const filteredRows = useMemo(() => {
+    let list = [...rows].sort(
+      (a, b) => b.grossSales - a.grossSales || b.totalOrders - a.totalOrders,
+    );
+    list = filterRowsByTier(list, tierFilter);
     const query = search.trim().toLowerCase();
-    let list = [...rows].sort((a, b) => b.grossSales - a.grossSales || b.totalOrders - a.totalOrders);
-    if (tierFilter === 'top') list = list.filter((row) => row.tier === 'top');
-    if (tierFilter === 'standard') list = list.filter((row) => row.tier === 'standard');
     if (query) {
-      list = list.filter((row) => {
-        const short = shortBranchName(row.branchName).toLowerCase();
-        return short.includes(query) || row.branchName.toLowerCase().includes(query);
-      });
+      list = list.filter((row) => branchMatchesSearch(row.branchName, query));
     }
     return list;
   }, [rows, search, tierFilter]);
 
-  useEffect(() => {
-    setPage(0);
-  }, [search, tierFilter, rows.length, period, customRange?.from, customRange?.to]);
+  const exportColumns = useMemo(() => topBranchesChannelColumns(reportOptions), [reportOptions]);
 
-  const totalPages = paginate ? Math.max(1, Math.ceil(filteredRows.length / pageSize)) : 1;
-  const safePage = Math.min(page, totalPages - 1);
+  const exportCsvRows = useMemo(
+    () => filteredRows.map((row) => topBranchesChannelCsvRow(row, reportOptions)),
+    [filteredRows, reportOptions],
+  );
 
-  useEffect(() => {
-    if (page !== safePage) setPage(safePage);
-  }, [page, safePage]);
+  const pdfRows = useMemo(
+    () => filteredRows.map((row) => topBranchesChannelPdfRow(row, reportOptions)),
+    [filteredRows, reportOptions],
+  );
 
-  const visibleRows = useMemo(() => {
-    if (!paginate) return filteredRows;
-    const start = safePage * pageSize;
-    return filteredRows.slice(start, start + pageSize);
-  }, [filteredRows, paginate, safePage, pageSize]);
+  const canExport = filteredRows.length > 0;
+
+  function exportCsv() {
+    if (!canExport) return;
+    downloadCsv(`branch-sales-performance-${period}.csv`, exportColumns, exportCsvRows);
+  }
+
+  const { safePage, totalPages, setPage, visibleSlice } = useTablePagination(
+    filteredRows.length,
+    paginate,
+    pageSize,
+    [search, tierFilter, rows.length, period, customRange?.from, customRange?.to],
+  );
+
+  const visibleRows = useMemo(
+    () => filteredRows.slice(visibleSlice.start, visibleSlice.end),
+    [filteredRows, visibleSlice],
+  );
 
   if (loading) {
     return <TopBranchesChannelTableSkeleton hideDeliveryOnline={hideDeliveryOnline} />;
@@ -107,8 +130,8 @@ export default function TopBranchesChannelTable({
 
   return (
     <div className="space-y-4">
-      <div className="grid w-full grid-cols-[minmax(160px,1fr)_auto] items-center gap-2">
-        <div className="relative min-w-0">
+      <div className="flex w-full flex-wrap items-center gap-2">
+        <div className="relative min-w-[160px] flex-1">
           <Search
             size={13}
             className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-muted"
@@ -122,13 +145,35 @@ export default function TopBranchesChannelTable({
             aria-label="Search branches by name"
           />
         </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            className="btn-outline flex items-center gap-1.5 px-3 py-1.5 text-xs"
+            disabled={!canExport}
+            onClick={() => setPreviewOpen(true)}
+            aria-label="Export branch sales performance as PDF"
+          >
+            <Printer size={13} />
+            PDF
+          </button>
+          <button
+            type="button"
+            className="btn-outline flex items-center gap-1.5 px-3 py-1.5 text-xs"
+            disabled={!canExport}
+            onClick={exportCsv}
+            aria-label="Export branch sales performance as CSV"
+          >
+            <Download size={13} />
+            CSV
+          </button>
+        </div>
         <DashboardPeriodFilter
           period={period}
           customRange={customRange}
           onPeriodChange={onPeriodChange}
           onCustomRangeChange={onCustomRangeChange}
           compact
-          className="justify-self-end"
+          className="ml-auto"
         />
       </div>
 
@@ -163,20 +208,10 @@ export default function TopBranchesChannelTable({
                   </td>
                   {showTierColumn && (
                     <td className="px-3 py-3">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
-                          row.tier === 'top'
-                            ? 'bg-indigo-500/15 text-indigo-400'
-                            : 'bg-amber-500/15 text-amber-500'
-                        }`}
-                      >
-                        {row.tier === 'top' ? 'Delivery & Pickup' : 'Pickup Only'}
-                      </span>
+                      <BranchTierBadge tier={row.tier} />
                     </td>
                   )}
-                  <td className="px-3 py-3 font-bold tabular-nums text-fg">
-                    {row.totalOrders}
-                  </td>
+                  <td className="px-3 py-3 font-bold tabular-nums text-fg">{row.totalOrders}</td>
                   <td className="px-3 py-3 font-bold tabular-nums text-fg">
                     {formatMoneyAmount(row.grossSales)}
                   </td>
@@ -194,11 +229,11 @@ export default function TopBranchesChannelTable({
                       <ChannelAmountCell metric={row.deliveryOnline} />
                     </td>
                   )}
-                  <td className="px-3 py-3 font-semibold tabular-nums text-fg">
-                    {row.totalDiscount > 0 ? formatMoneyAmount(row.totalDiscount) : '—'}
+                  <td className="px-3 py-3">
+                    <MoneyDashCell value={row.totalDiscount} />
                   </td>
-                  <td className="px-3 py-3 font-semibold tabular-nums text-fg">
-                    {row.totalRefunds > 0 ? formatMoneyAmount(row.totalRefunds) : '—'}
+                  <td className="px-3 py-3">
+                    <MoneyDashCell value={row.totalRefunds} />
                   </td>
                 </tr>
               ))}
@@ -208,36 +243,31 @@ export default function TopBranchesChannelTable({
       )}
 
       {paginate && filteredRows.length > 0 && (
-        <div className="flex items-center justify-between gap-3 border-t border-navy-border/60 pt-3">
-          <p className="text-xs text-muted">
-            Showing {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, filteredRows.length)} of{' '}
-            {filteredRows.length}
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs"
-              disabled={safePage <= 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-            >
-              <ChevronLeft size={14} />
-              Previous
-            </button>
-            <span className="text-xs font-medium text-muted">
-              Page {safePage + 1} of {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs"
-              disabled={safePage >= totalPages - 1}
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            >
-              Next
-              <ChevronRight size={14} />
-            </button>
-          </div>
-        </div>
+        <BranchTablePagination
+          safePage={safePage}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          itemCount={filteredRows.length}
+          onPageChange={setPage}
+        />
       )}
+
+      <AdminReportPreviewSheet
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        docTitle="Branch Sales"
+        reportTitle="Branch Sales Performance"
+        reportDescription="Compare performance across all branches."
+        scopeLabel="All Branches"
+        periodLabel={periodLabel}
+        statusLine={`Live Report · ${filteredRows.length} branch${filteredRows.length === 1 ? '' : 'es'}`}
+        referencePrefix="BSP"
+        columns={exportColumns}
+        rows={pdfRows}
+        alignRightFromColumn={showTierColumn ? 3 : 2}
+        rowCountLabel="branches"
+        onExportExcel={exportCsv}
+      />
     </div>
   );
 }

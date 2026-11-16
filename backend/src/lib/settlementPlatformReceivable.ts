@@ -14,6 +14,7 @@ import { toUtcDateStr } from './utcDateString';
 import { platformProviderSettlementInvoiceApiPath } from './invoice/refs';
 import { paybackEnabledFromBreakdown } from './breakdownPayback';
 import { prismaStoreIdScope } from './prismaStoreScope';
+import { resolveSettlementReceiptUrl } from '../middleware/upload';
 
 export type SettlementPlatformReceivableDetail = {
   id: string;
@@ -30,9 +31,29 @@ export type SettlementPlatformReceivableDetail = {
   platformDiscountPaybackEnabled: boolean;
   sharedPromoPlatformLkr: number;
   platformInvoiceUrl: string;
+  hasReceipt: boolean;
 };
 
 type StoredPlatformReceivable = Awaited<ReturnType<typeof resolveStoredPlatformProviderReceivable>>;
+
+function storedProofAvailable(
+  proofOrReceiptUrl: string | null | undefined,
+  storeId: string,
+): boolean {
+  const resolved = resolveSettlementReceiptUrl(proofOrReceiptUrl, storeId);
+  return Boolean(resolved?.trim());
+}
+
+function platformPayoutReceiptAvailable(
+  settlementReceiptUrl: string | null | undefined,
+  withdrawalProofUrl: string | null | undefined,
+  storeId: string,
+): boolean {
+  return (
+    storedProofAvailable(settlementReceiptUrl, storeId) ||
+    storedProofAvailable(withdrawalProofUrl, storeId)
+  );
+}
 
 function receivableFieldsFromBreakdown(
   breakdown: unknown,
@@ -62,9 +83,20 @@ async function loadWithdrawalPlatformReceivableDetail(
       status: 'APPROVED',
       ...prismaStoreIdScope(allowedStoreIds),
     },
-    include: {
+    select: {
+      id: true,
+      storeId: true,
+      proofUrl: true,
+      paymentMethod: true,
+      periodFrom: true,
+      periodTo: true,
+      reviewedAt: true,
+      createdAt: true,
+      breakdown: true,
       store: { select: { name: true } },
-      commissionSettlement: { select: { id: true, statementRef: true, paymentMethod: true, status: true, createdAt: true } },
+      commissionSettlement: {
+        select: { id: true, statementRef: true, paymentMethod: true, status: true, createdAt: true },
+      },
     },
   });
 
@@ -97,6 +129,7 @@ async function loadWithdrawalPlatformReceivableDetail(
     submittedAt: (withdrawal.reviewedAt ?? withdrawal.createdAt).toISOString(),
     ...receivableFieldsFromBreakdown(withdrawal.breakdown, stored),
     platformInvoiceUrl: '',
+    hasReceipt: storedProofAvailable(withdrawal.proofUrl, withdrawal.storeId),
   };
 }
 
@@ -111,9 +144,19 @@ export async function loadSettlementPlatformReceivableDetail(
       id: settlementId,
       ...prismaStoreIdScope(allowedStoreIds),
     },
-    include: {
+    select: {
+      id: true,
+      storeId: true,
+      statementRef: true,
+      paymentMethod: true,
+      status: true,
+      periodFrom: true,
+      periodTo: true,
+      createdAt: true,
+      receiptUrl: true,
+      storeWithdrawalId: true,
       store: { select: { name: true } },
-      storeWithdrawal: { select: { id: true, breakdown: true } },
+      storeWithdrawal: { select: { id: true, breakdown: true, proofUrl: true } },
     },
   });
 
@@ -140,6 +183,11 @@ export async function loadSettlementPlatformReceivableDetail(
     submittedAt: settlement.createdAt.toISOString(),
     ...receivableFieldsFromBreakdown(breakdown, stored),
     platformInvoiceUrl: platformProviderSettlementInvoiceApiPath(settlement.id),
+    hasReceipt: platformPayoutReceiptAvailable(
+      settlement.receiptUrl,
+      settlement.storeWithdrawal.proofUrl,
+      settlement.storeId,
+    ),
   };
 }
 

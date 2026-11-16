@@ -20,3 +20,8 @@ export function platformPayoutInvoiceSettlementId(row: {
 
   return null;
 }
+
+/** Api id for platform receivable breakdown (matches invoice settlement resolution). */
+export function platformPayoutBreakdownApiId(row: Parameters<typeof platformPayoutInvoiceSettlementId>[0]): string {
+  return platformPayoutInvoiceSettlementId(row) ?? row.id;
+}

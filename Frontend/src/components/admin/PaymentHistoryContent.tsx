@@ -13,6 +13,8 @@ import {
   Building2,
   Clock,
   CreditCard,
+  ChevronDown,
+  ChevronUp,
   History,
   Percent,
   RefreshCw,
@@ -44,7 +46,10 @@ import {
   openPlatformProviderSettlementInvoice,
   openWithdrawalInvoice,
 } from '@/lib/adminProtectedFile';
-import { platformPayoutInvoiceSettlementId } from '@/lib/platformPayoutInvoice';
+import {
+  platformPayoutBreakdownApiId,
+  platformPayoutInvoiceSettlementId,
+} from '@/lib/platformPayoutInvoice';
 import {
   fetchPlatformPayoutStatement,
   type PlatformPayoutStatement,
@@ -177,6 +182,16 @@ function formatPeriod(from: string, to: string) {
   return from === to ? fmt(from) : `${fmt(from)} – ${fmt(to)}`;
 }
 
+function payoutRowBreakdownAvailable(
+  row: PayoutRow,
+  view: PayoutHistoryView,
+  platformTabEnabled: boolean,
+): boolean {
+  if (platformTabEnabled && view === 'platform') return true;
+  if (row.payoutSource === 'branchWithdrawal') return !!row.walletTransactionId;
+  return true;
+}
+
 function statusChipClass(status: PayoutRow['status']) {
   switch (status) {
     case 'VERIFIED':
@@ -188,7 +203,17 @@ function statusChipClass(status: PayoutRow['status']) {
   }
 }
 
-const TABLE_SKELETON_WIDTHS = ['w-24', 'w-28', 'w-36', 'w-20', 'w-24', 'w-16', 'w-20', 'w-20'] as const;
+const TABLE_SKELETON_WIDTHS = [
+  'w-24',
+  'w-28',
+  'w-36',
+  'w-20',
+  'w-24',
+  'w-16',
+  'w-20',
+  'w-20',
+  'w-16',
+] as const;
 
 function PaymentHistoryTableSkeleton({ colSpan }: { colSpan: number }) {
   return (
@@ -306,7 +331,7 @@ export default function PaymentHistoryContent({
   const effectiveStoreId = superAdmin ? storeIdParam : adminUser?.storeId ?? undefined;
 
   const showBranchColumn = superAdmin && !effectiveStoreId;
-  const payoutTableColSpan = (showBranchColumn ? 8 : 7);
+  const payoutTableColSpan = showBranchColumn ? 9 : 8;
   const branchTierScoped = !superAdmin || Boolean(effectiveStoreId);
 
   useEffect(() => {
@@ -392,51 +417,72 @@ export default function PaymentHistoryContent({
     setSelectedPayoutId(null);
   }, [hideLocalPeriodControls]);
 
-  const openPlatformPayoutBreakdown = useCallback(async (id: string) => {
-    setLoadingStatementId(id);
+  const openPlatformPayoutBreakdown = useCallback(async (apiId: string, rowId: string) => {
+    setLoadingStatementId(rowId);
     try {
-      const result = await fetchPlatformPayoutStatement(id);
+      const result = await fetchPlatformPayoutStatement(apiId);
       setPlatformStatement(result);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load platform payout breakdown');
+      setSelectedPayoutId(null);
+      setPlatformStatement(null);
     } finally {
       setLoadingStatementId(null);
     }
   }, []);
+
+  const togglePayoutBreakdownForRow = useCallback(
+    (row: PayoutRow) => {
+      if (selectedPayoutId === row.id) {
+        setSelectedPayoutId(null);
+        setStatement(null);
+        setPlatformStatement(null);
+        return;
+      }
+
+      setSelectedPayoutId(row.id);
+
+      if (superAdmin && payoutHistoryView === 'platform') {
+        setStatement(null);
+        void openPlatformPayoutBreakdown(platformPayoutBreakdownApiId(row), row.id);
+        return;
+      }
+
+      setPlatformStatement(null);
+
+      if (row.payoutSource === 'branchWithdrawal') {
+        setStatement(null);
+        if (!row.walletTransactionId) {
+          toast.error('Payout breakdown is not available for this record');
+          setSelectedPayoutId(null);
+        }
+        return;
+      }
+
+      void openSettlement(row.id);
+    },
+    [openPlatformPayoutBreakdown, openSettlement, payoutHistoryView, selectedPayoutId, superAdmin],
+  );
 
   const selectPayoutPeriod = (row: PayoutRow) => {
     if (!hideLocalPeriodControls) {
       setPeriodFrom(row.periodFrom);
       setPeriodTo(row.periodTo);
     }
-
-    if (selectedPayoutId === row.id) {
-      setSelectedPayoutId(null);
-      setStatement(null);
-      setPlatformStatement(null);
-      return;
-    }
-
-    setSelectedPayoutId(row.id);
-
-    if (showPlatformPayoutHistoryTab && payoutHistoryView === 'platform') {
-      setStatement(null);
-      void openPlatformPayoutBreakdown(row.id);
-      return;
-    }
-
-    setPlatformStatement(null);
-
-    if (row.payoutSource === 'branchWithdrawal') {
-      setStatement(null);
-      if (!row.walletTransactionId) {
-        toast.error('Payout breakdown is not available for this record');
-      }
-      return;
-    }
-
-    void openSettlement(row.id);
+    togglePayoutBreakdownForRow(row);
   };
+
+  const isPayoutBreakdownOpen = useCallback(
+    (row: PayoutRow) => {
+      if (selectedPayoutId !== row.id) return false;
+      if (superAdmin && payoutHistoryView === 'platform') {
+        return !!platformStatement || loadingStatementId === row.id;
+      }
+      if (row.payoutSource === 'branchWithdrawal') return !!row.walletTransactionId;
+      return !!statement;
+    },
+  [loadingStatementId, payoutHistoryView, platformStatement, selectedPayoutId, superAdmin, statement],
+  );
 
   const billingMonths = useMemo(() => billingMonthOptions(), []);
 
@@ -854,6 +900,7 @@ export default function PaymentHistoryContent({
                 <th className="!bg-transparent px-4 py-2.5">Status</th>
                 <th className="!bg-transparent px-4 py-2.5 text-right">Invoice</th>
                 <th className="!bg-transparent px-4 py-2.5 text-right">Receipt</th>
+                <th className="!bg-transparent px-4 py-2.5 text-right">Breakdown</th>
               </tr>
             </thead>
             <tbody>
@@ -998,6 +1045,34 @@ export default function PaymentHistoryContent({
                         <span className="text-xs text-[var(--color-text-muted)]">—</span>
                       )}
                     </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {payoutRowBreakdownAvailable(row, payoutHistoryView, showPlatformPayoutHistoryTab) ? (
+                        <button
+                          type="button"
+                          className="inline-flex items-center justify-end gap-1 text-[13px] font-medium text-[var(--color-brand)] hover:underline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePayoutBreakdownForRow(row);
+                          }}
+                        >
+                          {loadingStatementId === row.id ? (
+                            'Loading…'
+                          ) : isPayoutBreakdownOpen(row) ? (
+                            <>
+                              <ChevronUp size={14} />
+                              Hide
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown size={14} />
+                              View
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-[var(--color-text-muted)]">—</span>
+                      )}
+                    </td>
                   </tr>
                   <PayoutInlineBreakdown
                     transactionId={row.walletTransactionId}
@@ -1043,10 +1118,19 @@ export default function PaymentHistoryContent({
         />
       )}
 
-      <SettlementStatementView statement={statement} onClose={() => setStatement(null)} />
+      <SettlementStatementView
+        statement={statement}
+        onClose={() => {
+          setStatement(null);
+          setSelectedPayoutId(null);
+        }}
+      />
       <PlatformPayoutStatementView
         statement={platformStatement}
-        onClose={() => setPlatformStatement(null)}
+        onClose={() => {
+          setPlatformStatement(null);
+          setSelectedPayoutId(null);
+        }}
       />
     </>
   );
