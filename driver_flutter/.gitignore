@@ -50,3 +50,6 @@ app.*.map.json
 # Firebase config (per-environment; download from the Firebase console)
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
+
+# Environment secrets
+.env
