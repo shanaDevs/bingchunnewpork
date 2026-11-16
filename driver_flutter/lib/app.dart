@@ -246,7 +246,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         try {
           await ensureNoUnfinishedRide(c, claimingJobId: alert.jobId);
           await c.jobsRepository.claimJob(alert.jobId);
-          if (!alert.isTest) OfferOutcomes.instance.record(alert.jobId, OfferOutcome.accepted);
+          OfferOutcomes.instance.record(alert.jobId, OfferOutcome.accepted);
           c.alertService.silenceJob(alert.jobId);
           AppRoutes.openDashboardFromRoot(alert.jobId);
         } catch (_) {
@@ -352,17 +352,11 @@ class _IncomingRideOverlayState extends State<_IncomingRideOverlay> {
   }
 
   static RideAlert? _currentAlert(AlertService alerts) =>
-      alerts.testAlert ??
       alerts.ringingAlert ??
       (alerts.postRejectHoldActive ? null : (alerts.activeAlerts.isEmpty ? null : alerts.activeAlerts.first));
   void _syncLockScreen() => SystemSettings.setRideAlertActive(_currentAlert(_alerts) != null);
 
   Future<void> _accept(AlertService alerts, RideAlert alert) async {
-    // Test alert: just close it — never reaches the server.
-    if (alert.isTest) {
-      alerts.endTestAlert();
-      return;
-    }
     setState(() {
       _acceptingId = alert.jobId;
       _error = null;
@@ -414,10 +408,6 @@ class _IncomingRideOverlayState extends State<_IncomingRideOverlay> {
             error: _errorFor == alert.jobId ? _error : null,
             onAccept: () => _accept(alerts, alert),
             onDismiss: () {
-              if (alert.isTest) {
-                alerts.endTestAlert();
-                return;
-              }
               OfferOutcomes.instance.record(alert.jobId, OfferOutcome.declined);
               alerts.silenceJob(alert.jobId);
             },

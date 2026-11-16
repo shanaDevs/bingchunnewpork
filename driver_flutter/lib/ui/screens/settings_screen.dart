@@ -250,12 +250,6 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
               onTap: _notif == null ? null : _requestPermission,
             ),
             _Row(
-              icon: Icons.send_rounded,
-              title: tr('Send a test alert'),
-              subtitle: tr('Preview the full-screen job alert. Nothing is recorded.'),
-              onTap: () => context.read<AlertService>().startTestAlert(),
-            ),
-            _Row(
               icon: Icons.tune_rounded,
               title: tr('Job alert reliability'),
               subtitle: tr('Background running, full-screen alerts and more'),

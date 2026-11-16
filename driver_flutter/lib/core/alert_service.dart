@@ -77,9 +77,6 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   bool _appInForeground = true;
 
   final _ring = _RingFeedback('new_job_alert');
-  final _testRing = _RingFeedback('test_job_alert');
-  RideAlert? _testAlert;
-  Timer? _testTimer;
   AudioPlayer? _cancelPlayer;
   SharedPreferences? _prefs;
 
@@ -96,8 +93,6 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
       : const [];
   Set<String> get activeAlertJobIds => activeAlerts.map((a) => a.jobId).toSet();
   RideAlert? get ringingAlert => alertEligible ? _ringingAlert : null;
-  /// Local preview of the full-screen alert (Settings → Send a test alert). Never touches the server.
-  RideAlert? get testAlert => _testAlert;
   bool get postRejectHoldActive => _isPostRejectHoldActive;
   List<CancelledOrderAlert> get pendingCancellations => List.unmodifiable(_pendingCancellations);
   bool get isRunning => _running;
@@ -141,7 +136,6 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     }
     _activeAlerts.clear();
     _pauseRingCycle();
-    endTestAlert();
     _postRejectTimer?.cancel();
     _stopCancelSound();
     _trackingJobId = null;
@@ -434,33 +428,10 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
     return until != null && DateTime.now().isBefore(until);
   }
 
-  // ---------------- Test alert (local only) ----------------
-
-  /// Shows the incoming-ride card with sample data and rings per the saved alert settings.
-  /// Purely local: no job exists, so nothing is claimed, rejected or recorded.
-  void startTestAlert() {
-    if (_testAlert != null || _ringingAlert != null) return;
-    _testAlert = RideAlert.test();
-    _testRing.start(force: true);
-    _testTimer?.cancel();
-    _testTimer = Timer(ringDuration, endTestAlert);
-    notifyListeners();
-  }
-
-  void endTestAlert() {
-    _testTimer?.cancel();
-    _testTimer = null;
-    _testRing.stop();
-    if (_testAlert != null) {
-      _testAlert = null;
-      notifyListeners();
-    }
-  }
-
   // ---------------- Ringing ----------------
 
   void _alertJob(RideAlert alert) {
-    if (alert.jobId.isEmpty || alert.isTest) return;
+    if (alert.jobId.isEmpty) return;
     if (_isSilenced(alert.jobId) || _activeAlerts.containsKey(alert.jobId)) return;
     if (!alertEligible) {
       // Local flag can be stale — verify via jobs list (GET /me often 504 on live).
@@ -517,7 +488,6 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _forceRingNow(RideAlert alert) {
-    if (alert.isTest) return;
     _activeAlerts[alert.jobId] = alert;
     notifyListeners();
     _startRingCycle(alert);
@@ -558,7 +528,6 @@ class AlertService extends ChangeNotifier with WidgetsBindingObserver {
   void _startRingCycle(RideAlert alert) {
     // Covers forced rings (admin re-ring, failure offers) too: nothing pops up mid-ride.
     if (!alertEligible) return;
-    if (_testAlert != null) endTestAlert();
     _ringBurstTimer?.cancel();
     _ringGapTimer?.cancel();
     final current = _activeAlerts[alert.jobId];
@@ -667,7 +636,7 @@ class _RingFeedback {
   Timer? _vibeTimer;
   bool _active = false;
 
-  Future<void> start({bool force = false}) async {
+  Future<void> start() async {
     if (_active) return;
     _active = true;
     final rc = RuntimeConfig.instance;
