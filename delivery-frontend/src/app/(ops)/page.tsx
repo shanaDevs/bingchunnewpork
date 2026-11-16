@@ -41,7 +41,6 @@ import AdminDeliveryJobsTable, {
 import AdminDeliveryJobDrawer from '@/components/admin/AdminDeliveryJobDrawer';
 import AdminDriversPanel from '@/components/admin/AdminDriversPanel';
 import AdminDeliveryRouteView from '@/components/admin/AdminDeliveryRouteView';
-import AdminActualRouteView from '@/components/admin/AdminActualRouteView';
 import AdminDriverOpsPanel, { type AnalyticsFilters } from '@/components/admin/AdminDriverOpsPanel';
 import AdminDeliveryDashboard from '@/components/admin/AdminDeliveryDashboard';
 import JobsScheduleStatusTabs from '@/components/admin/JobsScheduleStatusTabs';
@@ -59,7 +58,12 @@ type DeliveryTab =
   | 'requests'
   | 'analytics';
 
-type JobRef = { jobId: string; storeId: string };
+type JobRef = {
+  jobId: string;
+  storeId: string;
+  forceReplay?: boolean;
+  displayStatus?: string | null;
+};
 type RoutePanelState = JobRef & {
   mode: 'planned' | 'actual';
   initialStatus?: string;
@@ -477,6 +481,8 @@ function AdminDeliveryContent() {
     setDrawerJob({
       jobId: job.id,
       storeId: job.storeId ?? (effectiveStoreId ?? storeId),
+      forceReplay: jobsSubTab === 'incomplete' || Boolean(job.displayStatus),
+      displayStatus: job.displayStatus,
     });
   }
 
@@ -885,23 +891,22 @@ function AdminDeliveryContent() {
             onAnalyticsPageChange={setAnalyticsRiderPage}
           />
         </div>
-      ) : routePanel?.mode === 'planned' ? (
+      ) : routePanel?.mode === 'planned' || routePanel?.mode === 'actual' ? (
         <AdminDeliveryRouteView
           jobId={routePanel.jobId}
           storeId={routePanel.storeId}
           initialStatus={routePanel.initialStatus}
+          displayStatus={routePanel.displayStatus}
+          forceReplay={routePanel.forceReplay || routePanel.mode === 'actual'}
           focusDriver={routePanel.focusDriver}
+          initialPathLayers={
+            routePanel.mode === 'actual' ? { planned: false, actual: true } : { planned: true, actual: true }
+          }
           onFocusDriverHandled={() =>
             setRoutePanel((current) =>
               current ? { ...current, focusDriver: false } : current,
             )
           }
-          onBack={() => setRoutePanel(null)}
-        />
-      ) : routePanel?.mode === 'actual' ? (
-        <AdminActualRouteView
-          jobId={routePanel.jobId}
-          storeId={routePanel.storeId}
           onBack={() => setRoutePanel(null)}
         />
       ) : (
@@ -1036,6 +1041,7 @@ function AdminDeliveryContent() {
                       : 'No incomplete delivery schedules.'
                   }
                   onViewRoute={(view) => openRoute(view, 'planned')}
+                  onViewActualRoute={(view) => openRoute(view, 'actual')}
                   onRowClick={handleRowClick}
                 />
               )}
@@ -1048,6 +1054,8 @@ function AdminDeliveryContent() {
               storeId={drawerJob.storeId}
               open={!!drawerJob}
               hqCanCancelJobs={hqCanCancelJobs}
+              forceReplay={drawerJob.forceReplay}
+              displayStatus={drawerJob.displayStatus}
               onClose={() => setDrawerJob(null)}
               onViewRoute={(opts) => {
                 setDrawerJob(null);

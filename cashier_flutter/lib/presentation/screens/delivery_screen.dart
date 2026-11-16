@@ -208,7 +208,11 @@ class _JobCard extends StatelessWidget {
       padding: const EdgeInsets.all(PosSpacing.md),
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => DeliveryJobScreen(jobId: j.id, storeId: j.storeId ?? storeId),
+          builder: (_) => DeliveryJobScreen(
+            jobId: j.id,
+            storeId: j.storeId ?? storeId,
+            forceReplay: tab == DeliveryJobsTab.incomplete || j.displayStatus != null,
+          ),
         ),
       ),
       child: Column(
@@ -265,7 +269,7 @@ class _JobCard extends StatelessWidget {
                       label: Text(tr('View route')),
                       style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                     ),
-                    if (tab == DeliveryJobsTab.completed && j.hasActualRoute)
+                    if (tab != DeliveryJobsTab.active && jobLikelyHasRiderGps(j))
                       TextButton.icon(
                         onPressed: () => _openRoute(context, actual: true),
                         icon: const Icon(Icons.timeline_rounded, size: 17),

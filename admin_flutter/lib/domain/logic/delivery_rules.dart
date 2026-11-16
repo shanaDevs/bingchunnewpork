@@ -8,6 +8,21 @@ const activeDeliveryStatuses = {'SCHEDULED', 'ASSIGNED', 'QUEUED', 'IN_PROGRESS'
 /// Statuses where a rider is on the road and the live map is worth showing.
 const liveRunStatuses = {'ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING'};
 
+bool isLiveDeliveryRun(String status, {String? displayStatus}) =>
+    displayStatus == null && liveRunStatuses.contains(status);
+
+/// Incomplete/cancelled jobs that likely recorded rider GPS.
+bool jobLikelyHasRiderGps(DeliveryJob j) {
+  if (j.hasActualRoute) return true;
+  final label = j.effectiveStatus;
+  if (label == 'MISSED') return false;
+  if (j.driverId != null || (j.driverName != null && j.driverName!.isNotEmpty)) return true;
+  return label == 'CANCELLED' ||
+      label == 'VEHICLE_FAILURE' ||
+      label == 'ABANDONED' ||
+      label == 'PARTIALLY_COMPLETED';
+}
+
 bool isActiveDeliveryJob(DeliveryJob j) =>
     activeDeliveryStatuses.contains(j.status) && j.orderCount > 0 && j.displayStatus == null;
 
