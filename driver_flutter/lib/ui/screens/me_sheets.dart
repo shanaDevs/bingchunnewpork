@@ -200,7 +200,7 @@ class _JobAlertsSheetState extends State<_JobAlertsSheet> with WidgetsBindingObs
   bool _batteryUnrestricted = false;
   bool _canFsi = true;
   bool _fsiOn = RuntimeConfig.instance.fullScreenAlertsEnabled;
-  bool _bubbleOn = false;
+  bool _bubbleOn = true;
   bool _bubblePermitted = false;
 
   @override

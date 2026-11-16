@@ -42,7 +42,8 @@ import kotlin.math.hypot
 object QuickBubble {
 
     private const val PREFS = "bc_quick_bubble"
-    private const val KEY_ENABLED = "enabled"
+    // "_v2": on by default — older builds may have saved "off" under the previous key.
+    private const val KEY_ENABLED = "enabled_v2"
     private const val KEY_SIGNED_IN = "signedIn"
     private const val KEY_RIGHT = "right"
     private const val KEY_Y = "y"

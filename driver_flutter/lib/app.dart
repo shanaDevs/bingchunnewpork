@@ -22,6 +22,7 @@ import 'state/auth_controller.dart';
 import 'state/jobs_controller.dart';
 import 'ui/app_routes.dart';
 import 'ui/components/app_bottom_nav.dart';
+import 'ui/components/bc_dialog.dart';
 import 'ui/components/device_lock_overlay.dart';
 import 'ui/screens/app_lock_screen.dart';
 import 'ui/screens/history_screen.dart';
@@ -183,6 +184,19 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   StreamSubscription<int>? _tabSub;
   Timer? _updatesTimer;
 
+  Future<void> _promptQuickBubble() => SystemSettings.promptQuickBubblePermissionOnce(() async {
+    final ctx = AppRoutes.navigatorKey.currentContext;
+    if (!mounted || ctx == null) return false;
+    return showBcConfirm(
+      ctx,
+      icon: Icons.bubble_chart_outlined,
+      title: tr('Quick Action Bubble'),
+      message: tr('Allow "Display over other apps" so the floating Bring It bubble can show when you leave the app.'),
+      confirmLabel: tr('Allow'),
+      cancelLabel: tr('Not now'),
+    );
+  });
+
   /// Admin replies to complaints / branch requests → Notifications inbox.
   void _checkRequestUpdates() {
     if (!mounted) return;
@@ -201,7 +215,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkRequestUpdates());
     _updatesTimer = Timer.periodic(const Duration(minutes: 3), (_) => _checkRequestUpdates());
     // Ask once after login so new-job alerts can be posted (Android 13+ / iOS).
-    BcNotifications.requestPermission();
+    // Then, once per install, "Display over other apps" for the Quick Action Bubble.
+    BcNotifications.requestPermission().then((_) => _promptQuickBubble());
     _tapSub = BcNotifications.taps.listen(_onNotificationTap);
     _tabSub = AppRoutes.tabRequests.listen((i) {
       if (mounted) setState(() => _tab = i);

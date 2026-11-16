@@ -181,6 +181,7 @@ const Map<String, String> zhStrings = {
   '{ride} is not marked as completed yet. Complete it before starting or picking up your next ride.': '{ride} 尚未标记为已完成。请先完成它，再开始或取下一个行程。',
   'Complete previous ride': '完成上一个行程',
   'Not now': '暂不',
+  'Allow': '允许',
   'Complaint update': '投诉更新',
   'Branch request update': '分店申请更新',
   'Your complaint "{category}" is now {status}.': '您的投诉“{category}”现在状态为：{status}。',
