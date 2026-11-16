@@ -4,10 +4,16 @@ import { createMockReq, createMockRes, createMockNext, asMockFn } from '../helpe
 vi.mock('../../src/lib/prisma', () => ({
   prisma: {
     deliveryJobOrder: { findFirst: vi.fn() },
-    deliveryJob: { findFirst: vi.fn() },
+    deliveryJob: { findFirst: vi.fn(), findUnique: vi.fn() },
+    deliveryAttempt: { findFirst: vi.fn() },
     $disconnect: vi.fn(async () => undefined),
     $connect: vi.fn(async () => undefined),
   },
+}));
+
+vi.mock('../../src/lib/deliverySchema', () => ({
+  ensureDeliveryJobsTables: vi.fn(async () => undefined),
+  ensureDeliveryJobAdminCancellationsSchema: vi.fn(async () => undefined),
 }));
 
 vi.mock('../../src/lib/driverAccess', () => ({
@@ -41,7 +47,12 @@ vi.mock('../../src/utils/logger', () => ({
 import { reportVehicleFailure } from '../../src/controllers/deliveryJobController';
 import { prisma } from '../../src/lib/prisma';
 import { jobHasPickedUp } from '../../src/lib/liveDriverTracking';
-import { recordVehicleFailureAndReleaseJob, REJECT_JOB_BEFORE_FAILURE_MESSAGE, persistJobActualRouteFromGps } from '../../src/lib/deliveryJobHelpers';
+import {
+  fetchJobVehicleFailure,
+  recordVehicleFailureAndReleaseJob,
+  REJECT_JOB_BEFORE_FAILURE_MESSAGE,
+  persistJobActualRouteFromGps,
+} from '../../src/lib/deliveryJobHelpers';
 import { broadcastVehicleFailureReported } from '../../src/lib/socket';
 import { AppError } from '../../src/middleware/errorHandler';
 
@@ -67,19 +78,35 @@ function inProgressLink() {
   };
 }
 
+function returningLink() {
+  return {
+    sequence: 2,
+    orderId: 'order-2',
+    job: { id: 'job-1', storeId: 'store-1', status: 'RETURNING', rideCode: 'RIDE-1', store: { id: 'store-1', name: 'Branch' } },
+    order: { id: 'order-2', status: 'OUT_FOR_DELIVERY' },
+  };
+}
+
+function isReturningJobLookup(args: unknown): boolean {
+  const status = (args as { where?: { status?: unknown } } | undefined)?.where?.status;
+  return status === 'RETURNING';
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(prisma.deliveryJobOrder.findFirst).mockResolvedValue(null);
   vi.mocked(prisma.deliveryJob.findFirst).mockResolvedValue(null);
+  vi.mocked(prisma.deliveryJob.findUnique).mockResolvedValue(null);
+  vi.mocked(prisma.deliveryAttempt.findFirst).mockResolvedValue(null);
   vi.mocked(jobHasPickedUp).mockResolvedValue(false);
 });
 
 describe('reportVehicleFailure — pre-pickup vs idle vs in-progress', () => {
   it('tells the rider to reject when they hold an assigned job that is not picked up', async () => {
-    vi.mocked(prisma.deliveryJob.findFirst).mockResolvedValue({
-      id: 'job-1',
-      status: 'ASSIGNED',
-    } as never);
+    vi.mocked(prisma.deliveryJob.findFirst).mockImplementation(async (args) => {
+      if (isReturningJobLookup(args)) return null;
+      return { id: 'job-1', status: 'ASSIGNED' } as never;
+    });
     const next = createMockNext();
 
     await reportVehicleFailure(req(), createMockRes(), next);
@@ -159,5 +186,113 @@ describe('reportVehicleFailure — pre-pickup vs idle vs in-progress', () => {
     expect(prisma.$connect).toHaveBeenCalledOnce();
     expect(recordVehicleFailureAndReleaseJob).toHaveBeenCalledOnce();
     expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('records a vehicle failure for a returning ride with leftover stops', async () => {
+    vi.mocked(prisma.deliveryJobOrder.findFirst).mockResolvedValue(returningLink() as never);
+    const res = createMockRes();
+
+    await reportVehicleFailure(req({ lat: 6.87, lng: 79.89, note: 'Engine stall' }), res, createMockNext());
+
+    expect(recordVehicleFailureAndReleaseJob).toHaveBeenCalledWith({
+      jobId: 'job-1',
+      driverId: DRIVER_ID,
+      storeId: 'store-1',
+      fromSequence: 2,
+      lat: 6.87,
+      lng: 79.89,
+      note: 'Engine stall',
+    });
+    expect(broadcastVehicleFailureReported).toHaveBeenCalledWith(
+      'store-1',
+      expect.objectContaining({ jobId: 'job-1', orderId: 'order-1' }),
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('closes a returning ride with no leftover stops without writing a failure attempt on delivered orders', async () => {
+    vi.mocked(prisma.deliveryJob.findFirst).mockImplementation(async (args) => {
+      if (isReturningJobLookup(args)) {
+        return {
+          id: 'job-1',
+          storeId: 'store-1',
+          rideCode: 'RIDE-1',
+          store: { id: 'store-1', name: 'Branch' },
+          jobOrders: [{ orderId: 'order-1' }],
+        } as never;
+      }
+      return null;
+    });
+    const res = createMockRes();
+
+    await reportVehicleFailure(req({ lat: 6.91, lng: 79.86, note: 'Puncture on return' }), res, createMockNext());
+
+    expect(recordVehicleFailureAndReleaseJob).toHaveBeenCalledWith({
+      jobId: 'job-1',
+      driverId: DRIVER_ID,
+      storeId: 'store-1',
+      fromSequence: undefined,
+      lat: 6.91,
+      lng: 79.86,
+      note: 'Puncture on return',
+    });
+    expect(persistJobActualRouteFromGps).toHaveBeenCalledWith('job-1');
+    expect(broadcastVehicleFailureReported).toHaveBeenCalledWith(
+      'store-1',
+      expect.objectContaining({ jobId: 'job-1', driverId: DRIVER_ID, orderId: 'order-1', lat: 6.91, lng: 79.86 }),
+    );
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: {
+        jobId: 'job-1',
+        orderId: 'order-1',
+        deliveryFailed: true,
+        rideEnteredReturning: false,
+        rideReleased: true,
+      },
+    });
+  });
+});
+
+describe('fetchJobVehicleFailure — GPS pin', () => {
+  it('uses the latest VEHICLE_FAILURE attempt coordinates', async () => {
+    vi.mocked(prisma.deliveryAttempt.findFirst).mockResolvedValue({
+      lat: 6.87,
+      lng: 79.89,
+      orderId: 'order-1',
+    } as never);
+
+    await expect(fetchJobVehicleFailure('job-1')).resolves.toEqual({
+      lat: 6.87,
+      lng: 79.89,
+      orderId: 'order-1',
+    });
+    expect(prisma.deliveryJob.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('falls back to job completedLat/Lng when there is no attempt pin', async () => {
+    vi.mocked(prisma.deliveryAttempt.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.deliveryJob.findUnique).mockResolvedValue({
+      status: 'VEHICLE_FAILURE',
+      completedLat: 6.9,
+      completedLng: 79.8,
+    } as never);
+
+    await expect(fetchJobVehicleFailure('job-1')).resolves.toEqual({
+      lat: 6.9,
+      lng: 79.8,
+      orderId: null,
+    });
+  });
+
+  it('does not use completedLat from a normally completed job', async () => {
+    vi.mocked(prisma.deliveryAttempt.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.deliveryJob.findUnique).mockResolvedValue({
+      status: 'COMPLETED',
+      completedLat: 6.9,
+      completedLng: 79.8,
+    } as never);
+
+    await expect(fetchJobVehicleFailure('job-1')).resolves.toBeNull();
   });
 });

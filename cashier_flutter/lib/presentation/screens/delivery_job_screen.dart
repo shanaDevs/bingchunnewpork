@@ -5,7 +5,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/app_container.dart';
 import '../../core/format.dart';
 import '../../domain/entities/delivery.dart';
-import '../../domain/logic/delivery_rules.dart';
 import '../../l10n/l10n.dart';
 import '../components/badges.dart';
 import '../components/delivery_map.dart';
@@ -30,15 +29,27 @@ List<MapPin> _routePins(GeoPoint start, List<RouteStop> stops, {GeoPoint? rider}
 
 /// Job details — port of the web AdminDeliveryJobDrawer (read-only).
 class DeliveryJobScreen extends StatelessWidget {
-  const DeliveryJobScreen({super.key, required this.jobId, required this.storeId});
+  const DeliveryJobScreen({
+    super.key,
+    required this.jobId,
+    required this.storeId,
+    this.forceReplay = false,
+  });
   final String jobId;
   final String storeId;
+  final bool forceReplay;
 
   @override
   Widget build(BuildContext context) {
     final c = context.read<AppContainer>();
     return ChangeNotifierProvider(
-      create: (_) => DeliveryJobController(c.deliveryRepository, c.socket, jobId, storeId),
+      create: (_) => DeliveryJobController(
+        c.deliveryRepository,
+        c.socket,
+        jobId,
+        storeId,
+        forceReplay: forceReplay,
+      ),
       child: const _JobView(),
     );
   }
@@ -101,11 +112,15 @@ class _JobView extends StatelessWidget {
                                       status: s.deliveryState == 'Delivered' ? 'DELIVERED' : s.status,
                                     ),
                               ],
-                          rider: liveRunStatuses.contains(job.status) ? ctrl.rider : null,
+                          rider: ctrl.isLive ? ctrl.rider : null,
                         ),
                         if (job.vehicleFailure != null) MapPin(at: job.vehicleFailure!, kind: MapPinKind.breakdown),
                       ],
-                      lines: [if (ctrl.route != null) MapLine(points: ctrl.route!.path, color: c.brand)],
+                      lines: [
+                        if (ctrl.route != null) MapLine(points: ctrl.route!.path, color: c.brand),
+                        if ((ctrl.driven?.path.length ?? 0) >= 2)
+                          MapLine(points: ctrl.driven!.path, color: PosColors.preparing),
+                      ],
                     ),
                   ),
                   if (ctrl.route != null) ...[

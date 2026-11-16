@@ -29,6 +29,8 @@ describe('listLiveDrivers', () => {
     vi.mocked(prisma.store.findUnique).mockResolvedValue({
       id: SCOPED_STORE,
       name: 'Bing Chun - Moratuwa',
+      lat: 6.773,
+      lng: 79.882,
     } as never);
   });
 
@@ -79,10 +81,29 @@ describe('listLiveDrivers', () => {
         dutyStatus: 'ON_DELIVERY',
         vehicleNumber: 'ABC-123',
         storeId: 'store-aluthgama',
-        store: { id: 'store-aluthgama', name: 'Bing Chun - Aluthgama' },
+        store: { id: 'store-aluthgama', name: 'Bing Chun - Aluthgama', lat: 6.43, lng: 80.0 },
         driverLocations: [],
         deliveryJobs: [
-          { id: 'job-1', status: 'IN_PROGRESS', title: 'Run · 2 orders' },
+          {
+            id: 'job-1',
+            status: 'IN_PROGRESS',
+            title: 'Run · 2 orders',
+            startedAt: new Date('2026-11-16T05:00:00.000Z'),
+            jobOrders: [
+              {
+                orderId: 'order-1',
+                sequence: 1,
+                order: {
+                  id: 'order-1',
+                  orderNumber: 'BC-1',
+                  status: 'OUT_FOR_DELIVERY',
+                  cancelReason: null,
+                  deliveryLat: 6.82,
+                  deliveryLng: 79.89,
+                },
+              },
+            ],
+          },
         ],
       },
     ] as never);
@@ -98,6 +119,25 @@ describe('listLiveDrivers', () => {
           driverId: 'driver-1',
           storeId: SCOPED_STORE,
           storeName: 'Bing Chun - Moratuwa',
+          currentJob: expect.objectContaining({
+            id: 'job-1',
+            status: 'IN_PROGRESS',
+            pickedUp: true,
+            orders: [
+              expect.objectContaining({
+                orderId: 'order-1',
+                sequence: 1,
+                deliveryState: 'Pending',
+              }),
+            ],
+            nextStop: expect.objectContaining({
+              kind: 'stop',
+              sequence: 1,
+              label: '#1',
+              lat: 6.82,
+              lng: 79.89,
+            }),
+          }),
         }),
       ],
     });

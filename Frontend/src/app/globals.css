@@ -6046,7 +6046,8 @@
     color: #fff;
   }
 
-  .leaflet-overlay-pane .live-driver-tail {
+  .leaflet-overlay-pane .live-driver-tail,
+  .leaflet-overlay-pane .live-driver-next {
     stroke-linecap: round;
     stroke-linejoin: round;
   }
@@ -6061,6 +6062,147 @@
     background: #f59e0b;
     box-shadow: 0 0 0 3px #fff, 0 0 0 6px #f59e0b;
     animation: none;
+  }
+
+  .live-rider-status-marker {
+    background: transparent;
+    border: none;
+  }
+
+  .live-rider-status-box {
+    pointer-events: none;
+    min-width: 8.75rem;
+    max-width: 11.5rem;
+    border-radius: 14px;
+    border: 1px solid #e2e8f0;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+    padding: 6px 8px 5px;
+  }
+
+  .live-rider-status-box__name {
+    margin: 0 0 4px;
+    max-width: 11rem;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #0f172a;
+  }
+
+  .live-rider-status-box__status,
+  .live-rider-status-box__next {
+    margin: 4px 0 0;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: #2563eb;
+  }
+
+  .live-rider-status-box__status {
+    color: #64748b;
+    font-weight: 600;
+  }
+
+  .live-rider-status-box__rail {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .live-rider-status-box__node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 1.6rem;
+  }
+
+  .live-rider-status-box__dot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #64748b;
+    font-size: 9px;
+    font-weight: 700;
+  }
+
+  .live-rider-status-box__dot.is-done,
+  .live-rider-status-box__dot.is-next {
+    border-color: #2563eb;
+    background: #2563eb;
+    color: #fff;
+  }
+
+  .live-rider-status-box__dot.is-failed {
+    border-color: #ef4444;
+    background: #fef2f2;
+    color: #ef4444;
+  }
+
+  .live-rider-status-box__line {
+    width: 16px;
+    height: 2px;
+    margin-top: 10px;
+    background: #cbd5e1;
+  }
+
+  .live-rider-status-box__line.is-done {
+    background: #2563eb;
+  }
+
+  .live-rider-status-box__cap {
+    margin-top: 3px;
+    max-width: 2.6rem;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 8px;
+    font-weight: 600;
+    color: #64748b;
+  }
+
+  .live-rider-next-marker {
+    background: transparent;
+    border: none;
+  }
+
+  .live-rider-next-marker__pin {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin: 0 auto;
+    border-radius: 999px;
+    border: 2px solid #fff;
+    background: #2563eb;
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.28);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .live-rider-next-marker--selected .live-rider-next-marker__pin {
+    background: #f59e0b;
+  }
+
+  .live-rider-next-marker__label {
+    display: block;
+    margin-top: 2px;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: #0f172a;
+    text-shadow: 0 0 4px #fff, 0 0 8px #fff;
   }
 
   .live-delivery-map-marker__dropoff {
@@ -6739,6 +6881,24 @@
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
+    border: 0;
+    background: transparent;
+    padding: 0.15rem 0.2rem;
+    margin: 0;
+    border-radius: 0.4rem;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    opacity: 0.42;
+  }
+
+  .route-map-legend__item.is-active {
+    opacity: 1;
+  }
+
+  .route-map-legend__item:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
   }
 
   .route-map-legend__swatch {

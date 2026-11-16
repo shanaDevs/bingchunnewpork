@@ -1,6 +1,7 @@
 'use client';
 
-import { adminApiFetch } from '@/lib/adminApi';
+import { adminAuthHeaders } from '@/lib/adminSession';
+import { getApiBaseUrl } from '@/lib/apiBase';
 
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -27,7 +28,10 @@ import { resolveProductImageUrl } from '@/lib/productImageUrl';
 import { useAdminJobLiveRoute } from '@/hooks/useAdminJobLiveRoute';
 import { useAdminJobStatus } from '@/hooks/useAdminJobStatus';
 import { adminBadgeClass, DELIVERY_JOB_STATUS_BADGE, DELIVERY_JOB_STATUS_LABEL } from '@/lib/adminBadges';
-import { jobSupportsActualRouteReplay } from '@/lib/deliveryStopProgress';
+import {
+  jobSupportsActualRouteReplay,
+  jobUsesLiveRouteTracking,
+} from '@/lib/deliveryStopProgress';
 
 const AdminDeliveryRouteMap = dynamic(() => import('@/components/admin/AdminDeliveryRouteMap'), {
   ssr: false,
@@ -56,18 +60,24 @@ type PathOverlayResponse = {
   source?: 'stored' | 'gps_fallback' | 'live';
 };
 
-const LIVE_JOB_STATUSES = new Set(['ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING']);
+async function adminFetch<T>(endpoint: string): Promise<T> {
+    const res = await fetch(`${getApiBaseUrl()}${endpoint}`, {
+    headers: adminAuthHeaders(),
+    credentials: 'include',
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.message || 'Request failed');
+  return json.data as T;
+}
 
 async function fetchJobRoute(jobId: string, storeId: string): Promise<JobRouteResponse> {
   const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  return adminApiFetch<JobRouteResponse>(
-    `/admin/delivery-jobs/${encodeURIComponent(jobId)}/route${qs}`,
-  );
+  return adminFetch<JobRouteResponse>(`/admin/delivery-jobs/${encodeURIComponent(jobId)}/route${qs}`);
 }
 
 async function fetchActualRoute(jobId: string, storeId: string): Promise<PathOverlayResponse> {
   const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-  return adminApiFetch<PathOverlayResponse>(
+  return adminFetch<PathOverlayResponse>(
     `/admin/delivery-jobs/${encodeURIComponent(jobId)}/actual-route${qs}`,
   );
 }
@@ -88,6 +98,13 @@ function StopOrderThumb({
   isStore?: boolean;
 }) {
   const resolved = resolveProductImageUrl(imageUrl);
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [resolved]);
+
+  const showImage = Boolean(resolved) && !imgFailed && !isStore;
 
   return (
     <div
@@ -97,9 +114,14 @@ function StopOrderThumb({
         <span className="route-stop-popover__branch-emoji" aria-hidden>
           {BRANCH_STOP_EMOJI}
         </span>
-      ) : resolved ? (
+      ) : showImage ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={resolved} alt="" className="route-stop-popover__img" />
+        <img
+          src={resolved}
+          alt=""
+          className="route-stop-popover__img"
+          onError={() => setImgFailed(true)}
+        />
       ) : (
         <span className="route-stop-popover__initial">{fallbackLabel}</span>
       )}
@@ -260,7 +282,10 @@ type Props = {
   jobId: string;
   storeId: string;
   initialStatus?: string;
+  displayStatus?: string | null;
+  forceReplay?: boolean;
   focusDriver?: boolean;
+  initialPathLayers?: { planned?: boolean; actual?: boolean };
   onBack: () => void;
   onFocusDriverHandled?: () => void;
 };
@@ -269,7 +294,10 @@ export default function AdminDeliveryRouteView({
   jobId,
   storeId,
   initialStatus,
+  displayStatus,
+  forceReplay = false,
   focusDriver = false,
+  initialPathLayers,
   onBack,
   onFocusDriverHandled,
 }: Props) {
@@ -294,8 +322,9 @@ export default function AdminDeliveryRouteView({
   });
 
   const jobStatus = jobStatusSync.status || route?.status || '';
-  const isLiveJob = LIVE_JOB_STATUSES.has(jobStatus);
-  const supportsActualRouteReplay = jobSupportsActualRouteReplay(jobStatus);
+  const replayOpts = { displayStatus, forceReplay };
+  const isLiveJob = jobUsesLiveRouteTracking(jobStatus, replayOpts);
+  const supportsActualRouteReplay = jobSupportsActualRouteReplay(jobStatus, replayOpts);
   const preStartBanner = preStartMessage(jobStatus);
 
   const liveRoute = useAdminJobLiveRoute({
@@ -476,6 +505,7 @@ export default function AdminDeliveryRouteView({
         vehicleFailurePosition={vehicleFailurePosition}
         pathOverlayLabel={pathOverlayLabel}
         showLegend={showPathOverlay && actualPath.length >= 2}
+        initialPathLayers={initialPathLayers}
         showReturnToStore
         completionRadiusM={BRANCH_RETURN_RADIUS_M}
         fullscreen={mapFullscreen}

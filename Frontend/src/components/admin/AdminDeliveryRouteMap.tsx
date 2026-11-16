@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Polyline, Marker, Circle, Tooltip, useMap } from 'react-leaflet';
 import AppMapTiles from '@/components/maps/AppMapTiles';
 import L from 'leaflet';
@@ -218,6 +218,11 @@ function RouteMapView({
   return null;
 }
 
+export type RoutePathLayers = {
+  planned: boolean;
+  actual: boolean;
+};
+
 type Props = {
   route: DeliveryRoutePayload;
   /** Real outlet for return marker and completion zone when start is a pickup override. */
@@ -234,6 +239,7 @@ type Props = {
   pathOverlayLabel?: 'Actual' | 'Live';
   showLegend?: boolean;
   fullscreen?: boolean;
+  initialPathLayers?: Partial<RoutePathLayers>;
 };
 
 export default function AdminDeliveryRouteMap({
@@ -251,6 +257,7 @@ export default function AdminDeliveryRouteMap({
   pathOverlayLabel = 'Actual',
   showLegend = false,
   fullscreen = false,
+  initialPathLayers,
 }: Props) {
   const returnStore = branchStore ?? route.store;
   const pathPoints: [number, number][] = useMemo(
@@ -264,11 +271,45 @@ export default function AdminDeliveryRouteMap({
         .map((p) => [p.lat, p.lng] as [number, number]),
     [actualPath],
   );
+  const hasPlannedPath = pathPoints.length >= 2;
+  const hasActualPath = actualPathPoints.length >= 2;
+  const [showPlanned, setShowPlanned] = useState(() => initialPathLayers?.planned !== false);
+  const [showActual, setShowActual] = useState(() => initialPathLayers?.actual !== false);
+  const [layerFitNonce, setLayerFitNonce] = useState(0);
+  const appliedActualOnly = useRef(false);
+
+  useEffect(() => {
+    if (appliedActualOnly.current) return;
+    if (initialPathLayers?.planned === false && hasActualPath) {
+      setShowPlanned(false);
+      setShowActual(true);
+      appliedActualOnly.current = true;
+    }
+  }, [hasActualPath, initialPathLayers?.planned]);
+
+  const plannedVisible = showPlanned && hasPlannedPath;
+  const actualVisible = showActual && hasActualPath;
+
+  function togglePlanned() {
+    if (!hasPlannedPath) return;
+    if (showPlanned && !(hasActualPath && showActual)) return;
+    setShowPlanned((current) => !current);
+    setLayerFitNonce((n) => n + 1);
+  }
+
+  function toggleActual() {
+    if (!hasActualPath) return;
+    if (showActual && !(hasPlannedPath && showPlanned)) return;
+    setShowActual((current) => !current);
+    setLayerFitNonce((n) => n + 1);
+  }
+
   const boundsPoints: [number, number][] = useMemo(() => {
     const points: [number, number][] = [
       [route.store.lat, route.store.lng],
       ...route.stops.map((s) => [s.lat, s.lng] as [number, number]),
-      ...actualPathPoints,
+      ...(plannedVisible ? pathPoints : []),
+      ...(actualVisible ? actualPathPoints : []),
     ];
     if (
       returnStore.lat !== route.store.lat ||
@@ -289,6 +330,9 @@ export default function AdminDeliveryRouteMap({
     returnStore.lat,
     returnStore.lng,
     route.stops,
+    plannedVisible,
+    pathPoints,
+    actualVisible,
     actualPathPoints,
     driverPosition,
     vehicleFailurePosition,
@@ -302,31 +346,41 @@ export default function AdminDeliveryRouteMap({
 
   return (
     <div className={`delivery-map-wrap h-full w-full relative ${className}`}>
-      {showLegend && (actualPathPoints.length >= 2 || pathPoints.length >= 2) && (
-        <div className="route-map-legend" aria-label="Route legend">
-          {pathPoints.length >= 2 && (
-            <span className="route-map-legend__item">
+      {(showLegend || (hasPlannedPath && hasActualPath)) && (hasPlannedPath || hasActualPath) && (
+        <div className="route-map-legend" role="group" aria-label="Route path layers">
+          {hasPlannedPath && (
+            <button
+              type="button"
+              className={`route-map-legend__item${plannedVisible ? ' is-active' : ''}`}
+              aria-pressed={plannedVisible}
+              onClick={togglePlanned}
+            >
               <span className="route-map-legend__swatch route-map-legend__swatch--planned" aria-hidden />
               Planned
-            </span>
+            </button>
           )}
-          {actualPathPoints.length >= 2 && (
-            <span className="route-map-legend__item">
+          {hasActualPath && (
+            <button
+              type="button"
+              className={`route-map-legend__item${actualVisible ? ' is-active' : ''}`}
+              aria-pressed={actualVisible}
+              onClick={toggleActual}
+            >
               <span className="route-map-legend__swatch route-map-legend__swatch--actual" aria-hidden />
               {pathOverlayLabel}
-            </span>
+            </button>
           )}
         </div>
       )}
       <MapContainer center={center} zoom={13} scrollWheelZoom className="h-full w-full">
         <AppMapTiles />
-        <MapResizeTrigger trigger={fitNonce} />
+        <MapResizeTrigger trigger={fitNonce + layerFitNonce} />
         <RouteMapView
           route={route}
           branchStore={branchStore}
           highlightedStopKey={highlightedStopKey}
           boundsPoints={boundsPoints}
-          fitNonce={fitNonce}
+          fitNonce={fitNonce + layerFitNonce}
           fullscreen={fullscreen}
           driverPosition={driverPosition}
           vehicleFailurePosition={vehicleFailurePosition}
@@ -348,7 +402,7 @@ export default function AdminDeliveryRouteMap({
             </Tooltip>
           </Circle>
         )}
-        {pathPoints.length >= 2 && (
+        {plannedVisible && (
           <Polyline
             positions={pathPoints}
             pathOptions={{
@@ -358,7 +412,7 @@ export default function AdminDeliveryRouteMap({
             }}
           />
         )}
-        {actualPathPoints.length >= 2 && (
+        {actualVisible && (
           <>
             <Polyline
               positions={actualPathPoints}

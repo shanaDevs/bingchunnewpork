@@ -44,6 +44,7 @@ import {
   visibleJobOrderLinksForDeliveryJob,
   jobPickedUpForList,
   mapListJobOrderStops,
+  deliveryStateFromOrderStatusForList,
 } from '../lib/deliveryJobHelpers';
 import { jobHasPickedUp } from '../lib/liveDriverTracking';
 import { optimizeDeliveryStops, type RouteStop } from '../lib/routeOptimizer';
@@ -585,10 +586,7 @@ export async function getAdminDeliveryJobActualRoute(req: Request, res: Response
     let path = parseActualRouteJson(job.actualRoute);
     let source: 'stored' | 'gps_fallback' = path.length >= 2 ? 'stored' : 'gps_fallback';
 
-    if (
-      path.length < 2 &&
-      (job.status === 'COMPLETED' || job.status === 'VEHICLE_FAILURE')
-    ) {
+    if (path.length < 2) {
       const startedAt = job.startedAt ?? job.assignedAt ?? job.createdAt;
       const completedAt = job.completedAt ?? new Date();
       const locations = await fetchJobGpsLocations(jobId, startedAt, completedAt, job.driverId);
@@ -1410,6 +1408,102 @@ export async function listPendingDeliveryOrders(req: Request, res: Response, nex
 
 const LIVE_MAP_JOB_STATUSES = ['ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING'] as const;
 
+const LIVE_JOB_STATUS_RANK: Record<string, number> = {
+  IN_PROGRESS: 0,
+  RETURNING: 1,
+  ASSIGNED: 2,
+  QUEUED: 3,
+};
+
+function pickCurrentLiveJob<T extends { status: string }>(jobs: T[]): T | null {
+  if (jobs.length === 0) return null;
+  return [...jobs].sort(
+    (a, b) => (LIVE_JOB_STATUS_RANK[a.status] ?? 9) - (LIVE_JOB_STATUS_RANK[b.status] ?? 9),
+  )[0] ?? null;
+}
+
+type LiveJobOrderLink = {
+  orderId: string;
+  sequence: number;
+  order: {
+    id: string;
+    orderNumber: string;
+    status: string;
+    cancelReason?: string | null;
+    deliveryLat?: number | null;
+    deliveryLng?: number | null;
+  };
+};
+
+type LiveNextStop = {
+  kind: 'branch' | 'stop' | 'return';
+  sequence: number | null;
+  label: string;
+  lat: number;
+  lng: number;
+};
+
+function storePoint(
+  store: { lat?: number | null; lng?: number | null } | null | undefined,
+): { lat: number; lng: number } | null {
+  if (store?.lat == null || store?.lng == null) return null;
+  return { lat: store.lat, lng: store.lng };
+}
+
+function resolveLiveNextStop(
+  job: {
+    status: string;
+    startedAt: Date | null;
+    jobOrders: LiveJobOrderLink[];
+  },
+  branch: { lat: number; lng: number } | null,
+): LiveNextStop | null {
+  const pickedUp = jobPickedUpForList(job.startedAt, job.status);
+  const headingToBranch = job.status === 'RETURNING' || (!pickedUp && job.status !== 'IN_PROGRESS');
+  if (headingToBranch && branch) {
+    const returning = job.status === 'RETURNING' || pickedUp;
+    return {
+      kind: returning ? 'return' : 'branch',
+      sequence: null,
+      label: returning ? 'Return' : 'Pickup',
+      lat: branch.lat,
+      lng: branch.lng,
+    };
+  }
+
+  const visible = visibleJobOrderLinksForDeliveryJob(job.status, job.jobOrders);
+  const pending = visible.find((link) => {
+    const state = deliveryStateFromOrderStatusForList(link.order.status, link.order.cancelReason);
+    return (
+      state === 'Pending' &&
+      link.order.status !== 'CANCELLED' &&
+      link.order.deliveryLat != null &&
+      link.order.deliveryLng != null
+    );
+  });
+  if (pending?.order.deliveryLat != null && pending.order.deliveryLng != null) {
+    return {
+      kind: 'stop',
+      sequence: pending.sequence,
+      label: `#${pending.sequence}`,
+      lat: pending.order.deliveryLat,
+      lng: pending.order.deliveryLng,
+    };
+  }
+
+  if (branch) {
+    const returning = pickedUp || job.status === 'IN_PROGRESS' || job.status === 'RETURNING';
+    return {
+      kind: returning ? 'return' : 'branch',
+      sequence: null,
+      label: returning ? 'Return' : 'Pickup',
+      lat: branch.lat,
+      lng: branch.lng,
+    };
+  }
+  return null;
+}
+
 export async function listLiveDrivers(req: Request, res: Response, next: NextFunction) {
   try {
     const storeId = await adminStoreIdOptional(req, req.query.storeId as string | undefined);
@@ -1451,7 +1545,7 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
         dutyStatus: true,
         vehicleNumber: true,
         storeId: true,
-        store: { select: { id: true, name: true } },
+        store: { select: { id: true, name: true, lat: true, lng: true } },
         driverLocations: {
           orderBy: { recordedAt: 'desc' },
           take: 10,
@@ -1462,7 +1556,29 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
             status: { in: ['ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING'] },
             ...(storeId ? { storeId } : {}),
           },
-          select: { id: true, status: true, title: true },
+          select: {
+            id: true,
+            status: true,
+            title: true,
+            startedAt: true,
+            jobOrders: {
+              orderBy: { sequence: 'asc' },
+              select: {
+                orderId: true,
+                sequence: true,
+                order: {
+                  select: {
+                    id: true,
+                    orderNumber: true,
+                    status: true,
+                    cancelReason: true,
+                    deliveryLat: true,
+                    deliveryLng: true,
+                  },
+                },
+              },
+            },
+          },
           take: 5,
         },
       },
@@ -1472,7 +1588,7 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
       storeId != null
         ? await prisma.store.findUnique({
             where: { id: storeId },
-            select: { id: true, name: true },
+            select: { id: true, name: true, lat: true, lng: true },
           })
         : null;
 
@@ -1486,9 +1602,27 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
           recordedAt: point.recordedAt,
           heading: point.heading ?? null,
         }));
-        const activeJobs = d.deliveryJobs;
+        const activeJobs = d.deliveryJobs.map((job) => ({
+          id: job.id,
+          status: job.status,
+          title: job.title,
+        }));
+        const current = pickCurrentLiveJob(d.deliveryJobs);
         const displayStoreId = scopedStore?.id ?? d.storeId;
         const displayStoreName = scopedStore?.name ?? d.store?.name ?? null;
+        const branchPoint = storePoint(scopedStore) ?? storePoint(d.store);
+        const currentJob = current
+          ? {
+              id: current.id,
+              status: current.status,
+              title: current.title,
+              pickedUp: jobPickedUpForList(current.startedAt, current.status),
+              orders: mapListJobOrderStops(
+                visibleJobOrderLinksForDeliveryJob(current.status, current.jobOrders),
+              ),
+              nextStop: resolveLiveNextStop(current, branchPoint),
+            }
+          : null;
         return {
           driverId: d.id,
           name: d.name,
@@ -1500,8 +1634,9 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
           lng: loc?.lng ?? null,
           heading: loc?.heading ?? null,
           updatedAt: loc?.recordedAt ?? null,
-          jobId: loc?.jobId ?? activeJobs.find((j) => j.status === 'IN_PROGRESS')?.id ?? null,
+          jobId: loc?.jobId ?? currentJob?.id ?? null,
           activeJobs,
+          currentJob,
           recentPath,
         };
       }),

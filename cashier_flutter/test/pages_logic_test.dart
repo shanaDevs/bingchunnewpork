@@ -135,6 +135,29 @@ void main() {
       expect(job.effectiveStatus, 'ABANDONED');
     });
 
+    test('Actual GPS is offered for cancelled jobs, not missed', () {
+      final cancelled = deliveryJobFromJson({
+        'id': 'j',
+        'title': 'Run',
+        'status': 'CANCELLED',
+        'orderCount': 1,
+        'scheduledAt': '2026-10-30T08:00:00Z',
+        'driver': {'id': 'd1', 'name': 'R'},
+      });
+      expect(jobLikelyHasRiderGps(cancelled), isTrue);
+      expect(isLiveDeliveryRun(cancelled.status), isFalse);
+
+      final missed = deliveryJobFromJson({
+        'id': 'j',
+        'title': 'Run',
+        'status': 'SCHEDULED',
+        'displayStatus': 'MISSED',
+        'orderCount': 1,
+        'scheduledAt': '2026-10-30T08:00:00Z',
+      });
+      expect(jobLikelyHasRiderGps(missed), isFalse);
+    });
+
     test('pings extend the rider trail and keep it bounded', () {
       var d = const LiveDriver(driverId: 'd', name: 'R', dutyStatus: 'ON_DUTY');
       for (var i = 0; i < LiveDriver.maxTrail + 5; i++) {
