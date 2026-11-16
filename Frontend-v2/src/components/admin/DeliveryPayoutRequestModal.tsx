@@ -78,6 +78,13 @@ export type DeliveryPayoutPeriodOption = {
   capped: boolean;
 };
 
+export type DeliveryCurrentPayoutCycle = {
+  from: string;
+  cycleTo: string;
+  through: string;
+  days: number;
+};
+
 export type DeliveryPayoutPreview = {
   today: string;
   maxEndDate: string;
@@ -85,6 +92,7 @@ export type DeliveryPayoutPreview = {
   liveFrom?: string | null;
   liveTo?: string | null;
   liveAfterApproved?: boolean;
+  currentPayoutCycle?: DeliveryCurrentPayoutCycle | null;
   options: DeliveryPayoutPeriodOption[];
   periodDays: number | null;
   from: string | null;

@@ -45,10 +45,10 @@ import { openWithdrawalInvoice } from '@/lib/adminProtectedFile';
 import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
 import { centsToLkr } from '@/lib/walletUtils';
 import {
-  addDaysToDateStr,
   formatBiweeklyPeriodLabel,
   isValidPayoutRange,
   PAYOUT_PERIOD_PRESETS,
+  resolvePayoutPeriodIncompleteState,
   rollingPeriodLabel,
   todayDateStr,
   type PayoutPeriodPreset,
@@ -155,7 +155,7 @@ function resolveInitiatePayoutPayDisabledNote(params: {
 
 const INITIATE_PAYOUT_METHODS = SETTLEMENT_PAYMENT_METHOD_OPTIONS.filter(
   (option) => option.value !== 'ONLINE',
-);
+).map((option) => (option.value === 'CHECK' ? { ...option, label: 'Cheque' } : option));
 
 export default function AdminInitiatePayoutModal({
   open,
@@ -445,13 +445,13 @@ export default function AdminInitiatePayoutModal({
   const periodBreakdownLkr = periodNet ? withdrawalBreakdownToLkr(periodNet) : null;
   const rangeReady = isValidRange(dateFrom, dateTo);
   const periodInFuture = !!dateTo && dateTo > todayDateStr();
-  const selectedPeriodOption =
-    periodDays != null ? periodOptions.find((opt) => opt.days === periodDays) ?? null : null;
-  const periodIncomplete = selectedPeriodOption?.capped ?? false;
-  const periodCompleteEndDate =
-    selectedPeriodOption && periodIncomplete
-      ? addDaysToDateStr(selectedPeriodOption.from, selectedPeriodOption.days - 1)
-      : null;
+  const periodIncompleteState = resolvePayoutPeriodIncompleteState({
+    periodFrom: displayDateFrom,
+    periodTo: displayDateTo,
+    days: displayPeriodDays ?? periodDays,
+  });
+  const periodIncomplete = periodIncompleteState.incomplete;
+  const periodCompleteEndDate = periodIncompleteState.completeEndDate;
   const sharedPromo = extractSharedPromoLkrFromBreakdown(
     periodNet,
     periodNet?.netAmount ?? 0,
@@ -541,6 +541,8 @@ export default function AdminInitiatePayoutModal({
         }
       : null;
   const isCheck = paymentMethod === 'CHECK';
+  const isCash = paymentMethod === 'CASH';
+  const proofRequired = Boolean(paymentMethod) && !isCash;
   const checkValid = !isCheck || (checkNumber.trim().length > 0 && !!checkDate);
 
   const handlePaymentMethodChange = (value: PaymentMethod) => {
@@ -564,18 +566,12 @@ export default function AdminInitiatePayoutModal({
   };
 
   const submitPayout = async (verifiedPin: string) => {
-    if (!proofFile || !paymentMethod) return;
+    if (!paymentMethod) return;
+    if (proofRequired && !proofFile) return;
 
     setSubmitting(true);
     setError('');
     try {
-      // JSON + base64 proof — multipart/form-data to App Platform was returning edge 504
-      // before the API handler ran (confirmed with tiny PNG and PDF).
-      const bytes = new Uint8Array(await proofFile.arrayBuffer());
-      let binary = '';
-      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!);
-      const proofBase64 = btoa(binary);
-
       const payload: Record<string, string | number | boolean> = {
         amount: formatBranchWalletNetLkrForSubmit(periodNet, reportBranchWalletNetLkr),
         periodDays: periodDays ?? 15,
@@ -583,10 +579,17 @@ export default function AdminInitiatePayoutModal({
         to: dateTo,
         paymentMethod,
         password: verifiedPin,
-        proofBase64,
-        proofFileName: proofFile.name,
-        proofMimeType: proofFile.type || 'application/octet-stream',
       };
+      if (proofFile) {
+        // JSON + base64 proof — multipart/form-data to App Platform was returning edge 504
+        // before the API handler ran (confirmed with tiny PNG and PDF).
+        const bytes = new Uint8Array(await proofFile.arrayBuffer());
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!);
+        payload.proofBase64 = btoa(binary);
+        payload.proofFileName = proofFile.name;
+        payload.proofMimeType = proofFile.type || 'application/octet-stream';
+      }
       if (remarks.trim()) payload.remarks = remarks.trim();
       if (isCheck) {
         payload.checkNumber = checkNumber.trim();
@@ -652,7 +655,7 @@ export default function AdminInitiatePayoutModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!proofFile) {
+    if (proofRequired && !proofFile) {
       toast.error('Payment proof is required');
       return;
     }
@@ -665,7 +668,7 @@ export default function AdminInitiatePayoutModal({
       return;
     }
     if (!checkValid) {
-      toast.error('Enter check number and check date');
+      toast.error('Enter cheque number and cheque date');
       return;
     }
     if (!rangeReady) {
@@ -766,7 +769,7 @@ export default function AdminInitiatePayoutModal({
                 <div className="mb-4">
                   {periodIncomplete && periodCompleteEndDate && (
                     <p className="text-[13px] font-medium text-amber-500">
-                      The full {periodDays}-day period is not complete yet. Full period ends{' '}
+                      The full {displayPeriodDays ?? periodDays}-day period is not complete yet. Full period ends{' '}
                       {periodCompleteEndDate}. As Super Admin you may still initiate this payout.
                     </p>
                   )}
@@ -846,13 +849,22 @@ export default function AdminInitiatePayoutModal({
 
                   <div>
                     <label className="mb-1.5 block text-[12px] font-bold text-[#1e293b] dark:text-slate-100">
-                      Payment slip / receipt proof <span className="text-red-500">*</span>
+                      Payment slip / receipt proof{' '}
+                      {proofRequired ? (
+                        <span className="text-red-500">*</span>
+                      ) : (
+                        <span className="font-medium text-[#64748b] dark:text-slate-400">(optional)</span>
+                      )}
                     </label>
                     <div className="flex items-center justify-between rounded-lg border border-[#e2e8f0] dark:border-slate-700 bg-[#f8fafc] dark:bg-slate-800 p-2 pl-3">
                       <div className="flex items-center gap-2 overflow-hidden">
                         <ImageIcon size={18} className="shrink-0 text-[#3b82f6]" />
                         <span className="truncate text-[13px] font-medium text-[#1e293b] dark:text-slate-200">
-                          {proofFile ? proofFile.name : 'Upload proof slip'}
+                          {proofFile
+                            ? proofFile.name
+                            : isCash
+                              ? 'No proof uploaded (optional for cash)'
+                              : 'Upload proof slip'}
                         </span>
                         {proofFile && (
                           <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-600 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-400">
@@ -895,7 +907,7 @@ export default function AdminInitiatePayoutModal({
                       htmlFor="initiate-payout-check-number"
                       className="mb-1.5 block text-[12px] font-bold text-[#1e293b] dark:text-slate-100"
                     >
-                      Check number
+                      Cheque number
                     </label>
                     <input
                       id="initiate-payout-check-number"
@@ -914,7 +926,7 @@ export default function AdminInitiatePayoutModal({
                       htmlFor="initiate-payout-check-date"
                       className="mb-1.5 block text-[12px] font-bold text-[#1e293b] dark:text-slate-100"
                     >
-                      Check date
+                      Cheque date
                     </label>
                     <input
                       id="initiate-payout-check-date"
@@ -922,7 +934,7 @@ export default function AdminInitiatePayoutModal({
                       value={checkDate}
                       onChange={(e) => setCheckDate(e.target.value)}
                       disabled={submitting}
-                      max={todayDateStr()}
+                      min={todayDateStr()}
                       className="w-full rounded-lg border border-[#e2e8f0] dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-[14px] text-[#1e293b] dark:text-slate-100"
                       required
                     />

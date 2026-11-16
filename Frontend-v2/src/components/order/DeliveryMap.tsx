@@ -151,7 +151,7 @@ function MapViewport({ points }: { points: [number, number][] }) {
     }
 
     const bounds = L.latLngBounds(points);
-    map.fitBounds(bounds, { padding: [48, 48], paddingBottomRight: [48, 180], maxZoom: 15, animate: true });
+    map.fitBounds(bounds, { padding: [64, 48], maxZoom: 15, animate: true });
   }, [map, points]);
 
   return null;

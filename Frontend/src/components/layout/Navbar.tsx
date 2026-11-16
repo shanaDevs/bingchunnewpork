@@ -21,6 +21,7 @@ import CustomerNotificationBell from '@/components/notifications/CustomerNotific
 import SpinHeaderButton from '@/components/promo/SpinHeaderButton';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import OrderTypeBar from '@/components/order/OrderTypeBar';
+import LanguageSwitcher from '@/components/i18n/LanguageSwitcher';
 import { openOrderModal } from '@/components/order/SiteOrderPrompt';
 import { hasCompletedOrderSetup } from '@/lib/orderSetup';
 import { useCartHydrated } from '@/hooks/useCartHydrated';
@@ -205,7 +206,10 @@ export default function Navbar({ inPanel = false }: NavbarProps) {
               </button>
             )}
 
-            <div className="shrink-0">{mobileNotificationControl}</div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <LanguageSwitcher />
+              {mobileNotificationControl}
+            </div>
           </div>
 
           {/* Desktop header */}
@@ -217,6 +221,7 @@ export default function Navbar({ inPanel = false }: NavbarProps) {
             </div>
 
             <div className="flex items-center gap-1 md:gap-2 shrink-0 min-w-0 ml-auto">
+              <LanguageSwitcher className="shrink-0" />
               <ThemeToggle className="site-navbar__theme shrink-0" />
 
               {!isDeleted && showAsLoggedIn && <SpinHeaderButton compact />}

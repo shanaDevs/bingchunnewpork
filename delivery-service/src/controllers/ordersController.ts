@@ -4,7 +4,7 @@ import { prisma, type DeliveryAttemptOutcome } from '@bingchun/db';
 import { invalidateJobRoute } from '@bingchun/delivery-domain';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
-import { formatJobOrder, fetchDriverComplaintsByOrderIds, jobOrdersWithDetails, maybeEnterReturningPhase, heldJobStatuses, jobHasPickedUp, REJECT_JOB_BEFORE_FAILURE_MESSAGE } from '../lib/deliveryJobHelpers';
+import { formatJobOrder, fetchDriverComplaintsByOrderIds, fetchLatestFailedAttemptsForJob, jobOrdersWithDetails, maybeEnterReturningPhase, heldJobStatuses, jobHasPickedUp, REJECT_JOB_BEFORE_FAILURE_MESSAGE } from '../lib/deliveryJobHelpers';
 import { enqueueOrderStatusOutbox } from '../lib/outbox';
 import { ensureOtpForOrder, hasVerifiedOtp, verifyDeliveryOtp, createDeliveryOtp, isOtpRequiredForStore, assertOtpForDelivery } from '../lib/otp';
 import { getEventPublisher } from '../sockets/eventPublisher';
@@ -112,15 +112,14 @@ export async function getOrder(req: Request, res: Response, next: NextFunction) 
     if (!link) throw new AppError('Order not found', 404);
 
     const isMine = link.job.driverId === driverId;
-    const failed = await prisma.deliveryAttempt.findFirst({
-      where: { orderId, jobId: link.jobId, outcome: { not: 'DELIVERED' } },
-      select: { id: true },
-    });
+    const failedByOrder = await fetchLatestFailedAttemptsForJob(link.jobId, [orderId]);
+    const failed = failedByOrder.get(orderId);
     const otpRequired = await isStoreOtpRequired(link.job.storeId);
     const complaints = isMine
       ? ((await fetchDriverComplaintsByOrderIds(driverId, [orderId])).get(orderId) ?? [])
       : [];
 
+    const deliveryFailed = !!failed;
     return success(res, {
       ...formatJobOrder(link.order as any, link.sequence, {
         redactCustomer: !isMine,
@@ -129,7 +128,9 @@ export async function getOrder(req: Request, res: Response, next: NextFunction) 
       jobId: link.jobId,
       jobStatus: link.job.status,
       deliveryOtpRequired: otpRequired,
-      deliveryFailed: !!failed,
+      deliveryFailed,
+      failureOutcome: deliveryFailed ? (failed?.outcome ?? null) : null,
+      failureNote: deliveryFailed ? (failed?.note ?? null) : null,
       complaints,
     });
   } catch (err) {

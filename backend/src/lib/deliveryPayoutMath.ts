@@ -13,6 +13,38 @@ export type ResolvedDeliveryPayoutPeriod = {
   capped?: boolean;
 };
 
+/** In-progress delivery payout cycle (full 15-day close date + summary through today). */
+export type OpenDeliveryPayoutWindow = {
+  days: DeliveryPayoutPeriodDays;
+  from: string;
+  cycleTo: string;
+  through: string;
+  capped: true;
+};
+
+/**
+ * Walks successive N-day windows from the payout anchor until the open cycle (ideal end on or after today).
+ * Unlike `resolveDeliveryPayoutPeriodWindow`, this reaches the current in-progress window when older cycles are still unpaid.
+ */
+export function resolveOpenDeliveryPayoutWindow(params: {
+  periodStart: string;
+  days: DeliveryPayoutPeriodDays;
+  today: string;
+}): OpenDeliveryPayoutWindow | null {
+  const { days, today } = params;
+  let from = params.periodStart;
+  if (!DATE_RE.test(from) || from > today) return null;
+
+  for (let i = 0; i < 400; i++) {
+    const cycleTo = addDaysToDateStr(from, days - 1);
+    if (cycleTo >= today) {
+      return { days, from, cycleTo, through: today, capped: true };
+    }
+    from = addDaysToDateStr(cycleTo, 1);
+  }
+  return null;
+}
+
 export function isDeliveryPayoutPeriodDays(days: number): days is DeliveryPayoutPeriodDays {
   return (DELIVERY_PAYOUT_PERIOD_DAYS as readonly number[]).includes(days);
 }

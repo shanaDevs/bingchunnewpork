@@ -183,6 +183,15 @@ describe('SmsLenzSmsAdapter', () => {
     await expect(adapter.send({ to: '0771234567', message: 'Hi' })).rejects.toThrow('insufficient credits');
   });
 
+  it('marks HTTP 429 as too many requests', async () => {
+    const adapter = new SmsLenzSmsAdapter(
+      vi.fn().mockResolvedValue(jsonResponse({ success: false, message: 'rate limited' }, false, 429)),
+      testCreds,
+    );
+
+    await expect(adapter.send({ to: '0771234567', message: 'Hi' })).rejects.toThrow(/too many requests/i);
+  });
+
   it('throws for an invalid recipient', async () => {
     const adapter = new SmsLenzSmsAdapter(vi.fn());
     await expect(adapter.send({ to: 'abc', message: 'Hi' })).rejects.toThrow('Invalid SMS recipient');

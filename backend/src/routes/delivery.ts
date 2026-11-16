@@ -3,6 +3,7 @@ import { authenticate, requireDeliveryDriver } from '../middleware/auth';
 import * as deliveryController from '../controllers/deliveryController';
 import * as deliveryJobController from '../controllers/deliveryJobController';
 import * as driverSelfController from '../controllers/driverSelfController';
+import * as driverNotificationController from '../controllers/driverNotificationController';
 import * as deliveryLocationsController from '../controllers/deliveryLocationsController';
 import { deliveryProxy } from '../middleware/deliveryProxy';
 
@@ -14,6 +15,7 @@ const router = Router();
 router.use(deliveryProxy);
 
 router.get('/me', authenticate, requireDeliveryDriver, driverSelfController.getMe);
+router.get('/me/license-image', authenticate, requireDeliveryDriver, driverSelfController.getMyLicenseImage);
 router.patch('/me/duty', authenticate, requireDeliveryDriver, driverSelfController.updateDuty);
 router.post('/me/fcm-token', authenticate, requireDeliveryDriver, driverSelfController.updateFcmToken);
 router.delete('/me/fcm-token', authenticate, requireDeliveryDriver, driverSelfController.deleteFcmToken);
@@ -25,6 +27,19 @@ router.post('/me/complaints', authenticate, requireDeliveryDriver, driverSelfCon
 router.get('/me/complaints', authenticate, requireDeliveryDriver, driverSelfController.listMyComplaints);
 router.post('/me/branch-requests', authenticate, requireDeliveryDriver, driverSelfController.createBranchRequest);
 router.get('/me/branch-requests', authenticate, requireDeliveryDriver, driverSelfController.listMyBranchRequests);
+router.get('/me/notifications', authenticate, requireDeliveryDriver, driverNotificationController.listMyNotifications);
+router.patch(
+  '/me/notifications/:id/read',
+  authenticate,
+  requireDeliveryDriver,
+  driverNotificationController.markNotificationRead,
+);
+router.post(
+  '/me/notifications/read-all',
+  authenticate,
+  requireDeliveryDriver,
+  driverNotificationController.markAllNotificationsRead,
+);
 
 router.post('/locations/batch', authenticate, requireDeliveryDriver, deliveryLocationsController.batchLocations);
 

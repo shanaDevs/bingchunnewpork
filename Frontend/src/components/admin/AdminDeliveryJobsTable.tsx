@@ -35,6 +35,7 @@ import DeliveryJobTableTimeline, {
 } from '@/components/admin/DeliveryJobTableTimeline';
 import { canAdminCancelDeliveryJob } from '@/lib/adminDeliveryQueries';
 import AdminCancelDeliveryJobModal from '@/components/admin/AdminCancelDeliveryJobModal';
+import { jobLikelyHasRiderGps } from '@/lib/deliveryStopProgress';
 
 export type ReassignedRiderSummary = {
   id: string;
@@ -491,7 +492,13 @@ type Props = {
   onFiltersChange?: (filters: CompletedJobFilters) => void;
   stores?: { id: string; name: string }[];
   drivers?: { id: string; name: string; store?: { name: string } | null }[];
-  onViewRoute?: (job: { jobId: string; storeId: string; initialStatus?: string }) => void;
+  onViewRoute?: (job: {
+    jobId: string;
+    storeId: string;
+    initialStatus?: string;
+    forceReplay?: boolean;
+    displayStatus?: string | null;
+  }) => void;
   onViewActualRoute?: (job: { jobId: string; storeId: string }) => void;
   onRowClick?: (job: DeliveryJobListItem) => void;
   /** Super Admin / Delivery Partner may close stuck rides. */
@@ -801,6 +808,8 @@ export default function AdminDeliveryJobsTable({
                                   jobId: job.id,
                                   storeId: jobStoreId,
                                   initialStatus: job.status,
+                                  forceReplay: variant === 'incomplete',
+                                  displayStatus: job.displayStatus,
                                 });
                               }}
                               className="inline-flex items-center gap-1.5 text-orange-500 hover:text-orange-600 transition-colors font-medium text-[11px] uppercase tracking-wide"
@@ -808,6 +817,19 @@ export default function AdminDeliveryJobsTable({
                               <Route size={13} aria-hidden strokeWidth={2.5} />
                               View route
                             </button>
+                            {variant === 'incomplete' && jobLikelyHasRiderGps(job) ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onViewActualRoute?.({ jobId: job.id, storeId: jobStoreId });
+                                }}
+                                className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 transition-colors font-medium text-[11px] uppercase tracking-wide"
+                              >
+                                <MapPin size={13} aria-hidden strokeWidth={2.5} />
+                                Actual
+                              </button>
+                            ) : null}
                             {variant === 'active' ? <ReRingButton job={job} /> : null}
                           </div>
                         </TableCell>

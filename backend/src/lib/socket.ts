@@ -7,7 +7,7 @@ import { prisma } from './prisma';
 import { haversineKm } from '../utils/geo';
 import { isCorsAllowedOrigin } from './resolveFrontendUrl';
 import { getLiveTrackingForOrder } from './liveDriverTracking';
-import { resolveOrderAccess, orderIdentifierWhere } from './orderAccess';
+import { resolveCustomerOrderAccess, orderIdentifierWhere } from './orderAccess';
 import { isBranchScopedRole, assertDriverSession, SESSION_SUPERSEDED, type JwtPayload } from '../middleware/auth';
 import { getDriverAccessibleStoreIds } from './driverAccess';
 import { getRedisPubSub } from './redisClient';
@@ -235,14 +235,14 @@ async function authorizeTrackOrder(
 
   const order = await prisma.order.findFirst({
     where: orderIdentifierWhere(identifier),
-    select: { id: true, orderNumber: true, trackToken: true, userId: true },
+    select: { id: true, orderNumber: true, trackToken: true, userId: true, guestPhone: true },
   });
   if (!order) return null;
 
   const token = readHandshakeToken(socket);
   const jwtPayload = token ? verifyToken(token) : null;
 
-  const access = resolveOrderAccess({
+  const access = await resolveCustomerOrderAccess({
     order,
     identifier,
     trackToken,
@@ -545,6 +545,25 @@ export type DeliveryJobBroadcastPayload = {
   /** Admin re-ring only — clients jump the queue and ring immediately. */
   forceRing?: boolean;
 };
+
+export type BranchOperatingPayload = {
+  storeId: string;
+  branchClosedAt?: string | null;
+  openTime?: string;
+  closeTime?: string;
+  onlineOrderStartTime?: string | null;
+  onlineOrderStopTime?: string | null;
+  pickupCutoffMinutes?: number;
+};
+
+/** Public store hours change — guests on the website may not be in a room. */
+export function broadcastBranchOperating(payload: BranchOperatingPayload): void {
+  if (!io || !payload.storeId) return;
+  io.emit('branch:operating', payload);
+  logger.debug(
+    `Broadcast branch:operating ${payload.storeId} closedAt=${payload.branchClosedAt ?? 'unchanged'} stop=${payload.onlineOrderStopTime ?? 'unchanged'}`,
+  );
+}
 
 export function broadcastNewJob(storeId: string, job: DeliveryJobBroadcastPayload): void {
   if (!io) return;

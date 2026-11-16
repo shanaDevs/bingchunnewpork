@@ -23,6 +23,36 @@ export function addDaysToDateStr(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function laterYmd(a: string, b: string): string {
+  return a >= b ? a : b;
+}
+
+/**
+ * Whether the selected payout window is still open. Completeness must use this
+ * window's own dates — not a payout-period-info option matched only by `days`,
+ * which can be the next in-progress cycle while Payouts Due locks an elapsed one.
+ */
+export function resolvePayoutPeriodIncompleteState(params: {
+  periodFrom: string;
+  periodTo: string;
+  days?: number | null;
+  today?: string;
+}): { incomplete: boolean; completeEndDate: string | null } {
+  const { periodFrom, periodTo } = params;
+  if (!periodFrom || !periodTo) {
+    return { incomplete: false, completeEndDate: null };
+  }
+  const today = params.today ?? todayDateStr();
+  const days =
+    params.days != null && Number.isFinite(params.days) && params.days > 0
+      ? Math.round(params.days)
+      : null;
+  const idealEnd = days != null ? addDaysToDateStr(periodFrom, days - 1) : periodTo;
+  const completeEndDate = laterYmd(periodTo, idealEnd);
+  const incomplete = completeEndDate >= today;
+  return { incomplete, completeEndDate: incomplete ? completeEndDate : null };
+}
+
 function lastDayOfMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }

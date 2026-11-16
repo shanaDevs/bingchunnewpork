@@ -20,10 +20,10 @@ export function resolveProductImageUrl(imageUrl?: string | null): string | undef
   if (url.startsWith('/products/') && url.endsWith('.avif')) {
     url = `${url.slice(0, -5)}.png`;
   }
-  if (url.startsWith('/products/')) {
-    // Static product art lives in frontend public/ — keep same-origin so the
-    // browser does not resolve to localhost when NEXT_PUBLIC_API_URL is /api.
-    return url;
+  if (url.startsWith('/products/') || url.startsWith('/')) {
+    // Delivery portal has no public/products assets — load from the shop origin.
+    const site = (process.env.NEXT_PUBLIC_SITE_URL || '').replace(/\/$/, '');
+    return site ? `${site}${url}` : url;
   }
   return url;
 }

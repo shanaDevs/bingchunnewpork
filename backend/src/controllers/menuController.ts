@@ -5,7 +5,12 @@ import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
 import { type StoreProductRow } from '../lib/storeInventory';
 import { getBranchDeactivatedProductIds } from '../lib/branchDeactivation';
-import { branchStockFromRow, type BranchStockMeta, type MenuStockRow } from '../lib/menuBranchStock';
+import {
+  branchStockFromOptionalStockSummary,
+  branchStockFromStoreProductInput,
+  type BranchStockMeta,
+} from '../lib/menuBranchStock';
+import { loadBatchMetaByProduct } from '../lib/menuStockBatchMeta';
 import {
   getActiveReservedQuantity,
   getActiveReservedQuantityBatch,
@@ -122,75 +127,9 @@ type StoreProductSummary = {
   isOutOfStock?: boolean;
 };
 
-type BatchStockMeta = {
-  totalBatchCount: number;
-  weeklyReceivedQty: number;
-};
-
-function toMenuStockRow(
-  row: Pick<
-    StoreProductRow,
-    | 'stock'
-    | 'weeklyBaseQty'
-    | 'weeklyRemainingQty'
-    | 'weeklyTargetQty'
-    | 'isAvailable'
-    | 'lowStockThreshold'
-    | 'onlineOutOfStockThreshold'
-  >,
-  batchMeta?: BatchStockMeta,
-): MenuStockRow {
-  return {
-    stock: row.stock,
-    weeklyBaseQty: row.weeklyBaseQty,
-    weeklyRemainingQty: row.weeklyRemainingQty,
-    weeklyTargetQty: row.weeklyTargetQty ?? 0,
-    isAvailable: row.isAvailable,
-    lowStockThreshold: row.lowStockThreshold,
-    onlineOutOfStockThreshold: row.onlineOutOfStockThreshold,
-    totalBatchCount: batchMeta?.totalBatchCount ?? 0,
-    weeklyReceivedQty: batchMeta?.weeklyReceivedQty ?? 0,
-  };
-}
-
-async function loadBatchMetaByProduct(
-  storeId: string,
-  productIds: string[],
-): Promise<Map<string, BatchStockMeta>> {
-  const map = new Map<string, BatchStockMeta>();
-  if (productIds.length === 0) return map;
-
-  try {
-    const groups = await prisma.stockBatch.groupBy({
-      by: ['productId'],
-      where: { storeId, productId: { in: productIds } },
-      _count: { id: true },
-      _sum: { receivedQty: true },
-    });
-    for (const group of groups) {
-      map.set(group.productId, {
-        totalBatchCount: group._count.id,
-        weeklyReceivedQty: group._sum.receivedQty ?? 0,
-      });
-    }
-  } catch {
-    /* batch table may be unavailable in some environments */
-  }
-
-  return map;
-}
-
 function enrichStoreProducts(storeProducts: StoreProductSummary[]): StoreProductSummary[] {
   return storeProducts.map((sp) => {
-    const meta = branchStockFromRow(toMenuStockRow({
-      stock: sp.stock ?? sp.weeklyRemainingQty,
-      weeklyBaseQty: sp.weeklyBaseQty,
-      weeklyRemainingQty: sp.weeklyRemainingQty,
-      weeklyTargetQty: sp.weeklyTargetQty ?? 0,
-      isAvailable: sp.isAvailable,
-      lowStockThreshold: sp.lowStockThreshold,
-      onlineOutOfStockThreshold: sp.onlineOutOfStockThreshold,
-    }));
+    const meta = branchStockFromOptionalStockSummary(sp);
     return {
       ...sp,
       isAvailable: sp.isAvailable && meta.inStock,
@@ -343,8 +282,9 @@ async function loadMenuProducts(
         rowByProductStore,
         product.storeProducts,
       );
-      const branchStock = branchStockFromRow(
-        row ? toMenuStockRow(row, batchMetaByProduct.get(product.id)) : undefined,
+      const branchStock = branchStockFromStoreProductInput(
+        row,
+        batchMetaByProduct.get(product.id),
         reservedByProduct.get(product.id) ?? 0,
       );
       const atSelectedStore = row != null;
@@ -436,8 +376,9 @@ export async function getProduct(req: Request, res: Response, next: NextFunction
         reservedQty = 0;
       }
     }
-    const branchStock = branchStockFromRow(
-      inv ? toMenuStockRow(inv, (await loadBatchMetaByProduct(storeId, [product.id])).get(product.id)) : undefined,
+    const branchStock = branchStockFromStoreProductInput(
+      inv ?? undefined,
+      (await loadBatchMetaByProduct(storeId, [product.id])).get(product.id),
       reservedQty,
     );
     const atSelectedStore = inv != null;

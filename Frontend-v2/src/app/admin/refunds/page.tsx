@@ -32,7 +32,7 @@ import CancelReasonConfigPanel from '@/components/admin/CancelReasonConfigPanel'
 import OrderStatusRefundConfigPanel from '@/components/admin/OrderStatusRefundConfigPanel';
 import RefundProcessModal from '@/components/admin/RefundProcessModal';
 import RefundAnalyticsPanel from '@/components/admin/RefundAnalyticsPanel';
-import DashboardKpiCard from '@/components/admin/DashboardKpiCard';
+import SparklineKpiCard from '@/components/admin/SparklineKpiCard';
 import { RefundRequestTypeBadge, RefundStatusBadge } from '@/components/admin/RefundStatusBadge';
 import SearchableBranchSelect from '@/components/admin/SearchableBranchSelect';
 import { getAdminSession, isCashier, isSuperAdmin, type AdminSession } from '@/lib/adminAuth';
@@ -416,17 +416,16 @@ export default function AdminRefundsPage() {
         }}
       />
 
+      {mainTab !== 'analytics' && (
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div className="min-w-0">
           <h1 className="text-xl sm:text-2xl font-bold text-fg">Refunds</h1>
           <p className="text-muted text-sm mt-0.5">
-            {mainTab === 'analytics'
-              ? 'Refund trends, reasons, and product insights'
-              : pageView === 'reasons'
+            {pageView === 'reasons'
               ? 'Manage customer cancellation reasons'
               : pageView === 'status-refunds'
                 ? 'Configure fixed refund percentages by order status'
-              : `${totalItems} refund request${totalItems === 1 ? '' : 's'}${statusTab !== 'ALL' ? ` · ${STATUS_TABS.find((t) => t.id === statusTab)?.label}` : ''}`}
+                : `${totalItems} refund request${totalItems === 1 ? '' : 's'}${statusTab !== 'ALL' ? ` · ${STATUS_TABS.find((t) => t.id === statusTab)?.label}` : ''}`}
           </p>
         </div>
         <div className="flex gap-2 shrink-0">
@@ -484,6 +483,7 @@ export default function AdminRefundsPage() {
           )}
         </div>
       </div>
+      )}
 
       <div className="flex gap-2 mb-6" role="tablist" aria-label="Refund views">
         {MAIN_TABS.map((tab) => {
@@ -510,7 +510,10 @@ export default function AdminRefundsPage() {
       </div>
 
       {mainTab === 'analytics' ? (
-        <RefundAnalyticsPanel showBranchFilter={showStoreColumn} />
+        <RefundAnalyticsPanel
+          showBranchFilter={showStoreColumn}
+          onBackToProcess={() => setMainTab('process')}
+        />
       ) : superAdmin && pageView === 'reasons' ? (
         <CancelReasonConfigPanel />
       ) : superAdmin && pageView === 'status-refunds' ? (
@@ -519,32 +522,28 @@ export default function AdminRefundsPage() {
       <>
       <div className="mb-6">
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 xl:items-stretch">
-          <DashboardKpiCard
-            variant="sales"
+          <SparklineKpiCard
             label="Customer receive"
             value={summaryQuery.data ? formatMoney(summaryQuery.data.customerReceiveTotalLkr) : '—'}
             icon={User}
             tone="green"
             loading={summaryQuery.isLoading}
           />
-          <DashboardKpiCard
-            variant="sales"
+          <SparklineKpiCard
             label="Branch receive"
             value={summaryQuery.data ? formatMoney(summaryQuery.data.branchReceiveTotalLkr) : '—'}
             icon={Store}
             tone="blue"
             loading={summaryQuery.isLoading}
           />
-          <DashboardKpiCard
-            variant="sales"
+          <SparklineKpiCard
             label="Delivery receive"
             value={summaryQuery.data ? formatMoney(summaryQuery.data.deliveryReceiveTotalLkr) : '—'}
             icon={Truck}
             tone="orange"
             loading={summaryQuery.isLoading}
           />
-          <DashboardKpiCard
-            variant="sales"
+          <SparklineKpiCard
             label="Platform receive"
             value={summaryQuery.data ? formatMoney(summaryQuery.data.platformReceiveTotalLkr) : '—'}
             icon={Percent}

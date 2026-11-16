@@ -16,9 +16,8 @@ import {
   getBatchSummariesBatch,
   checkStockInvariant,
   repairStockFromBatches,
+  channelAvailabilityFromOnHand,
   getEffectiveThresholds,
-  isLowStockByOnlineQty,
-  isOnlineOutOfStockByOnlineQty,
   computeWeeklyReceivedQty,
   computeWeeklyReceivedQtyBatch,
   getProductPricingInRange,
@@ -557,8 +556,6 @@ type StockRowInventory = {
   updatedAt: Date;
 };
 
-type StockInvRow = StockRowInventory;
-
 function buildEnrichedStockRow(
   inv: StockRowInventory,
   reservedQty: number,
@@ -570,12 +567,12 @@ function buildEnrichedStockRow(
 ) {
   const thresholds = getEffectiveThresholds(inv);
   const onHand = inv.stock;
-  const counterAvailable = inv.isAvailable ? Math.max(0, onHand - reservedQty) : 0;
-  const onlineAvailable = inv.isAvailable
-    ? Math.max(0, counterAvailable - thresholds.onlineOutOfStockThreshold)
-    : 0;
-  const isOnlineOos = isOnlineOutOfStockByOnlineQty(onlineAvailable, thresholds);
-  const lowStock = isLowStockByOnlineQty(onlineAvailable, thresholds, isOnlineOos);
+  const {
+    counterAvailable,
+    onlineAvailable,
+    isOnlineOutOfStock: isOnlineOos,
+    isLowStock: lowStock,
+  } = channelAvailabilityFromOnHand(onHand, reservedQty, inv.isAvailable, thresholds);
 
   return {
     onHandQty: onHand,
@@ -627,7 +624,7 @@ export function enrichStockRowFromData(
 
 export async function enrichStockRowsForList(
   storeId: string,
-  inventory: Array<{ productId: string } & StockInvRow>,
+  inventory: Array<{ productId: string } & StockRowInventory>,
 ): Promise<Map<string, ReturnType<typeof buildEnrichedStockRow>>> {
   const productIds = inventory.map((row) => row.productId);
   const emptySummary = {
@@ -662,7 +659,7 @@ export async function enrichStockRowsForList(
 export async function enrichStockRow(
   storeId: string,
   productId: string,
-  inv: StockInvRow,
+  inv: StockRowInventory,
 ) {
   const [summary, weeklyReceivedQty, reserved] = await Promise.all([
     getBatchSummary(storeId, productId),

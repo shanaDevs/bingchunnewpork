@@ -84,7 +84,7 @@ export function formatPlus(cents: number): string {
 
 export function paymentMethodLabel(method: SettlementPaymentMethod): string {
   if (method === 'BANK_TRANSFER') return 'Bank Transfer';
-  if (method === 'CHECK') return 'Check';
+  if (method === 'CHECK') return 'Cheque';
   if (method === 'ONLINE') return 'Online';
   return 'Cash';
 }

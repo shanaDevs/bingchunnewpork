@@ -23,7 +23,7 @@ export function Wordmark({ className, compact = false, onClick }: WordmarkProps)
       href="/"
       onClick={onClick}
       className={cn(
-        "group inline-flex items-center gap-2.5 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-current",
+        "notranslate group inline-flex items-center gap-2.5 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-current",
         compact && "max-sm:gap-2 max-[400px]:gap-1.5",
         className,
       )}

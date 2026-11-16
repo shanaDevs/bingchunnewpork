@@ -1,14 +1,14 @@
 /**
- * Recompute delivery_jobs.total_delivery_fees for completed / vehicle-failure runs
- * where the column holds whole LKR instead of integer cents (bug before finalizeDeliveryJob fix).
+ * Recompute delivery_jobs.totalDeliveryFees for COMPLETED / VEHICLE_FAILURE runs
+ * using current rider credit rules (delivered stops, customer-side failures, mid-ride cancels).
  *
- *   npx ts-node backend/scripts/backfill-delivery-job-fees.ts
  *   npx ts-node backend/scripts/backfill-delivery-job-fees.ts --dry-run
+ *   npx ts-node backend/scripts/backfill-delivery-job-fees.ts
  */
 import { prisma, connectDb, disconnectDb } from '@bingchun/db';
 import {
   creditedDeliveredTotals,
-  groupFailedOrderIdsByJob,
+  groupLatestFailedAttemptsByJob,
 } from '@bingchun/delivery-domain';
 import { decimalFieldToLkrNumber, lkrToDecimal, parseDecimalFromDb } from '../src/lib/moneyDecimal';
 
@@ -42,17 +42,32 @@ async function main() {
             jobId: { in: jobs.map((j) => j.id) },
             outcome: { not: 'DELIVERED' },
           },
-          select: { jobId: true, orderId: true },
-          distinct: ['jobId', 'orderId'],
+          select: {
+            jobId: true,
+            orderId: true,
+            outcome: true,
+            note: true,
+            attemptNo: true,
+            createdAt: true,
+          },
+          orderBy: [{ attemptNo: 'desc' }, { createdAt: 'desc' }],
         });
-  const failedByJob = groupFailedOrderIdsByJob(failedAttempts);
+  const latestFailedByJob = groupLatestFailedAttemptsByJob(failedAttempts);
 
   let updated = 0;
   let skipped = 0;
 
   for (const job of jobs) {
-    const failed = failedByJob.get(job.id) ?? new Set<string>();
-    const { deliveredTotal } = creditedDeliveredTotals(job.jobOrders, failed);
+    const failedByOrder = latestFailedByJob.get(job.id) ?? new Map();
+    const creditedLinks = job.jobOrders.map((jo) => ({
+      orderId: jo.orderId,
+      order: {
+        status: jo.order.status,
+        deliveryFee: jo.order.deliveryFee,
+        cancelledAtStatus: jo.order.cancelledAtStatus ?? null,
+      },
+    }));
+    const { deliveredTotal } = creditedDeliveredTotals(creditedLinks, failedByOrder);
     const expected = lkrToDecimal(deliveredTotal);
     const stored = job.totalDeliveryFees;
     const storedLkr =

@@ -1,6 +1,7 @@
 'use client';
 
 import { AlertCircle, CheckCircle, XCircle } from 'lucide-react';
+import { formatStoredPayoutPeriodLabel } from '@/components/admin/payoutSecondCycleDisplayRange';
 import { formatMoney } from '@/lib/receipt';
 import { parseWithdrawalBreakdown } from '@/components/admin/settlementTypes';
 import WithdrawalBreakdownDisplay from '@/components/admin/WithdrawalBreakdownDisplay';
@@ -53,18 +54,7 @@ export default function WalletPendingWithdrawals({
               <p className="text-lg font-bold text-fg">{formatMoney(row.amount / 100)}</p>
               {row.periodFrom && row.periodTo && (
                 <p className="mt-1 text-xs text-muted">
-                  Period:{' '}
-                  {new Date(row.periodFrom).toLocaleDateString('en-LK', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric',
-                  })}{' '}
-                  –{' '}
-                  {new Date(row.periodTo).toLocaleDateString('en-LK', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric',
-                  })}
+                  Period: {formatStoredPayoutPeriodLabel(row)}
                 </p>
               )}
               {breakdown && <WithdrawalBreakdownDisplay breakdown={breakdown} variant="compact" />}

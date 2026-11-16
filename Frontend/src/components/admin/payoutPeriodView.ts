@@ -52,3 +52,23 @@ export function dueFocusToPeriodView(focus: DuePeriodFocus) {
     storeId: focus.storeId,
   });
 }
+
+/** Payouts Due “View” — period breakdown only (no branch payables shell). */
+export function dueRowToPeriodView(row: PayoutDueRow) {
+  const base = syntheticPeriodViewWithdrawal({
+    key: `due-${row.storeId}-${row.periodFrom}-${row.periodTo}`,
+    periodFrom: row.periodFrom,
+    periodTo: row.periodTo,
+    amountCents: row.netAmountCents,
+    storeId: row.storeId,
+    breakdown: row.breakdown,
+  });
+  return {
+    ...base,
+    periodDisplay: {
+      from: row.periodFrom.slice(0, 10),
+      to: row.periodTo.slice(0, 10),
+      days: row.days,
+    },
+  };
+}

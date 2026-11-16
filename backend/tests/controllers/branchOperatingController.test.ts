@@ -11,6 +11,10 @@ vi.mock('../../src/lib/storeOrderingSchema', () => ({
   updateStoreBranchClosedAt: vi.fn(),
 }));
 
+vi.mock('../../src/lib/socket', () => ({
+  broadcastBranchOperating: vi.fn(),
+}));
+
 import {
   closeBranch,
   getBranchOperatingStatus,
@@ -21,6 +25,7 @@ import {
   fetchStoreBranchOperatingRow,
   updateStoreBranchClosedAt,
 } from '../../src/lib/storeOrderingSchema';
+import { broadcastBranchOperating } from '../../src/lib/socket';
 
 describe('branchOperatingController', () => {
   const next = createMockNext();
@@ -68,6 +73,10 @@ describe('branchOperatingController', () => {
     await closeBranch(createMockReq({}), res, next);
 
     expect(updateStoreBranchClosedAt).toHaveBeenCalledWith('store-1', expect.any(Date));
+    expect(broadcastBranchOperating).toHaveBeenCalledWith({
+      storeId: 'store-1',
+      branchClosedAt: expect.any(String),
+    });
     expect(res.json).toHaveBeenCalledWith({
       success: true,
       data: { branchClosedAt: expect.any(String) },
@@ -86,6 +95,10 @@ describe('branchOperatingController', () => {
     await openBranch(createMockReq({}), res, next);
 
     expect(updateStoreBranchClosedAt).toHaveBeenCalledWith('store-1', null);
+    expect(broadcastBranchOperating).toHaveBeenCalledWith({
+      storeId: 'store-1',
+      branchClosedAt: null,
+    });
     expect(res.json).toHaveBeenCalledWith({
       success: true,
       data: { branchClosedAt: null },

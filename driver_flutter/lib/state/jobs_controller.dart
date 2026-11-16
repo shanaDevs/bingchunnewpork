@@ -224,7 +224,14 @@ class JobsController extends ChangeNotifier {
   /// expired one. Keeps the previous profile if the request fails.
   Future<void> refreshProfile() async {
     try {
-      profile = await _c.authRepository.getMe();
+      var p = await _c.authRepository.getMe();
+      final needsLicense =
+          p.hasLicenseImage && (p.licenseImageUrl == null || p.licenseImageUrl!.trim().isEmpty);
+      if (needsLicense) {
+        final url = await _c.authRepository.fetchLicenseImageUrl();
+        if (url != null) p = p.copyWith(licenseImageUrl: url);
+      }
+      profile = p;
       _emit();
     } catch (_) {}
   }

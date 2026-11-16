@@ -27,6 +27,7 @@ import { formatStoreCountLabel } from '@/lib/storeCount';
 import { getCurrentPositionWithFallback } from '@/lib/geolocation';
 import { isProductComingSoon, isProductLowStock } from '@/lib/productAvailability';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { useBranchOrderingHours } from '@/hooks/useBranchOrderingHours';
 
 interface HomeDesktopLayoutProps {
   popularProducts: Product[];
@@ -45,6 +46,8 @@ export default function HomeDesktopLayout({
 }: HomeDesktopLayoutProps) {
   const { isAuthenticated } = useAuthStore();
   const isDesktopViewport = useMediaQuery('(min-width: 768px)');
+  const branchOrdering = useBranchOrderingHours();
+  const orderingClosed = branchOrdering.hasBranch && !branchOrdering.isOpen;
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
@@ -146,6 +149,7 @@ export default function HomeDesktopLayout({
                           ? () => onWishlistToggle(p.id, wishlisted)
                           : undefined
                       }
+                      orderingClosed={orderingClosed}
                       onSelect={() => onProductSelect(p)}
                     />
                   );

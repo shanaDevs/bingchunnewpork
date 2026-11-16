@@ -12,6 +12,7 @@ import {
 import { formatSettlementPeriodLabel } from './invoice/format';
 import { buildPayoutStatementFromBreakdown } from './invoice/payoutStatement';
 import {
+  enrichWithdrawalInvoiceInputFromWithdrawal,
   parseCommissionSettlementInvoiceInput,
   parseWithdrawalInvoiceInput,
 } from './invoice/parsing';
@@ -37,6 +38,7 @@ export {
   commissionSettlementInvoiceApiPath,
   commissionSettlementInvoiceRef,
   formatSettlementPeriodLabel,
+  enrichWithdrawalInvoiceInputFromWithdrawal,
   parseCommissionSettlementInvoiceInput,
   parseInvoicePeriodBreakdown,
   parseWithdrawalInvoiceInput,

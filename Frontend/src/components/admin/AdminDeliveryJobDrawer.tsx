@@ -26,7 +26,10 @@ import { useAdminJobLiveRoute } from '@/hooks/useAdminJobLiveRoute';
 import DeliveryRouteTimeline, {
   deliveryRouteTimelineHeadingExtra,
 } from '@/components/admin/DeliveryRouteTimeline';
-import { jobSupportsActualRouteReplay } from '@/lib/deliveryStopProgress';
+import {
+  jobSupportsActualRouteReplay,
+  jobUsesLiveRouteTracking,
+} from '@/lib/deliveryStopProgress';
 import { displayRideId } from '@/lib/deliveryDisplay';
 import {
   Table,
@@ -152,11 +155,12 @@ type Props = {
     storeId: string;
     initialStatus?: string;
     focusDriver?: boolean;
+    forceReplay?: boolean;
   }) => void;
   onJobClosed?: () => void;
+  forceReplay?: boolean;
+  displayStatus?: string | null;
 };
-
-const LIVE_MAP_STATUSES = new Set(['ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING']);
 
 function RiderContact({ name, phone }: { name?: string | null; phone?: string | null }) {
   return (
@@ -287,6 +291,8 @@ export default function AdminDeliveryJobDrawer({
   hqCanCancelJobs = false,
   onViewRoute,
   onJobClosed,
+  forceReplay = false,
+  displayStatus,
 }: Props) {
   const [job, setJob] = useState<AdminDeliveryJobDetail | null>(null);
   const [closeRideOpen, setCloseRideOpen] = useState(false);
@@ -302,8 +308,11 @@ export default function AdminDeliveryJobDrawer({
   const [actualNotice, setActualNotice] = useState<string | null>(null);
 
   const resolvedStoreId = job?.store?.id ?? storeId;
-  const isLiveMapJob = Boolean(job && LIVE_MAP_STATUSES.has(job.status));
-  const supportsActualRouteReplay = Boolean(job && jobSupportsActualRouteReplay(job.status));
+  const replayOpts = { forceReplay, displayStatus };
+  const isLiveMapJob = Boolean(job && jobUsesLiveRouteTracking(job.status, replayOpts));
+  const supportsActualRouteReplay = Boolean(
+    job && jobSupportsActualRouteReplay(job.status, replayOpts),
+  );
   const liveRoute = useAdminJobLiveRoute({
     jobId,
     storeId: resolvedStoreId,
@@ -699,6 +708,7 @@ export default function AdminDeliveryJobDrawer({
                               storeId: resolvedStoreId,
                               initialStatus: job?.status,
                               focusDriver: isLiveMapJob && liveRoute.findDriverReady,
+                              forceReplay,
                             })
                           }
                           className="inline-flex items-center gap-1 rounded-lg border border-navy-border bg-navy-light/40 px-2.5 py-1.5 text-[11px] font-semibold text-brand transition-colors hover:bg-navy-light/60"
@@ -733,6 +743,7 @@ export default function AdminDeliveryJobDrawer({
                           vehicleFailurePosition={vehicleFailurePosition}
                           pathOverlayLabel={overlayLabel}
                           showLegend={showPathOverlay && overlayPath.length >= 2}
+                          initialPathLayers={{ planned: true, actual: true }}
                         />
                       </div>
                     ) : (

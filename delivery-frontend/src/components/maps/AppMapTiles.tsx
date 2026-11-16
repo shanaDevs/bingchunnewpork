@@ -160,7 +160,7 @@ async function loadGoogleMutantLayer(map: L.Map): Promise<L.Layer | null> {
   return googleMutant({ type: 'roadmap', maxZoom: 21 }).addTo(map);
 }
 
-/** Basemap for every Leaflet map. Uses server map tiles, then Maps JS API, then OSM. */
+/** Basemap for every Leaflet map. Prefer Maps JS API, then server tiles, then OSM. */
 export default function AppMapTiles() {
   const map = useMap();
 
@@ -175,17 +175,18 @@ export default function AppMapTiles() {
 
     void (async () => {
       try {
-        const serverTiles = await readServerMapTiles();
-        if (cancelled) return;
-        if (serverTiles) {
-          layer = addGoogleTileLayer(map, serverTiles);
-          return;
-        }
-
+        // Prefer GoogleMutant so HTTP-referrer keys still show Google maps.
         const mutantLayer = await loadGoogleMutantLayer(map);
         if (cancelled) return;
         if (mutantLayer) {
           layer = mutantLayer;
+          return;
+        }
+
+        const serverTiles = await readServerMapTiles();
+        if (cancelled) return;
+        if (serverTiles) {
+          layer = addGoogleTileLayer(map, serverTiles);
           return;
         }
 
