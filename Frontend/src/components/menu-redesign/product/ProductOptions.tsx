@@ -141,7 +141,7 @@ export function ToppingsField({ toppings, value, onToggle }: ToppingsFieldProps)
                 aria-hidden="true"
                 className={cn(
                   'grid size-4 shrink-0 place-items-center rounded ring-1 ring-inset transition-colors',
-                  checked ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white ring-brand-300',
+                  checked ? 'bg-brand-600 text-snow ring-brand-600' : 'bg-white ring-brand-300',
                 )}
               >
                 {checked && <Check className="size-3" strokeWidth={3.5} />}

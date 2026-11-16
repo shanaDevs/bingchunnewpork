@@ -107,12 +107,12 @@ export async function updateStoreBranchClosedAt(
 
 export async function fetchStoreOrderingHours(
   storeId: string,
-): Promise<(StoreOrderingHoursRow & { id: string; name: string }) | null> {
+): Promise<(StoreOrderingHoursRow & { id: string; name: string; branchClosedAt: Date | null }) | null> {
   return withOrderingHoursSchema(async () => {
     const rows = await prisma.$queryRawUnsafe<
-      Array<StoreOrderingHoursRow & { id: string; name: string }>
+      Array<StoreOrderingHoursRow & { id: string; name: string; branchClosedAt: Date | null }>
     >(
-      `SELECT "id", "name", "openTime", "closeTime", "onlineOrderStartTime", "onlineOrderStopTime", "pickupCutoffMinutes"
+      `SELECT "id", "name", "openTime", "closeTime", "onlineOrderStartTime", "onlineOrderStopTime", "pickupCutoffMinutes", "branchClosedAt"
      FROM "stores" WHERE "id" = $1 LIMIT 1`,
       storeId,
     );
@@ -149,7 +149,7 @@ export async function fetchOrderingHoursMap(
 export async function updateStoreOrderingHours(
   storeId: string,
   patch: StoreOrderingHoursPatch,
-): Promise<StoreOrderingHoursRow & { id: string; name: string }> {
+): Promise<StoreOrderingHoursRow & { id: string; name: string; branchClosedAt: Date | null }> {
   return withOrderingHoursSchema(async () => {
     const parts: string[] = [];
     const params: (string | number | null)[] = [];

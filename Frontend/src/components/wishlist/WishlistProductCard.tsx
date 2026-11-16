@@ -26,6 +26,7 @@ export default function WishlistProductCard({
   onAddToCart,
   onToggleWishlist,
   isWishlisted = false,
+  orderingClosed = false,
 }: WishlistProductCardProps) {
   const inStock = isProductInStock(product);
   const comingSoon = isProductComingSoon(product);
@@ -49,6 +50,7 @@ export default function WishlistProductCard({
       ratingCount={product.ratingCount}
       isWishlisted={isWishlisted}
       onWishlistToggle={onToggleWishlist}
+      orderingClosed={orderingClosed}
       onSelect={onAddToCart}
     />
   );

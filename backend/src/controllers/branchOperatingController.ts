@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
 import { requireBranchStoreId } from '../middleware/auth';
+import { broadcastBranchOperating } from '../lib/socket';
 import {
   fetchStoreBranchOperatingRow,
   updateStoreBranchClosedAt,
@@ -44,15 +45,16 @@ export async function closeBranch(req: Request, res: Response, next: NextFunctio
   return handleBranchOperatingRoute(req, res, next, async (storeId) => {
     const closedAt = new Date();
     const branchClosedAt = await updateStoreBranchClosedAt(storeId, closedAt);
-    return {
-      branchClosedAt: branchClosedAt?.toISOString() ?? null,
-    };
+    const iso = branchClosedAt?.toISOString() ?? null;
+    broadcastBranchOperating({ storeId, branchClosedAt: iso });
+    return { branchClosedAt: iso };
   });
 }
 
 export async function openBranch(req: Request, res: Response, next: NextFunction) {
   return handleBranchOperatingRoute(req, res, next, async (storeId) => {
     await updateStoreBranchClosedAt(storeId, null);
+    broadcastBranchOperating({ storeId, branchClosedAt: null });
     return { branchClosedAt: null };
   });
 }

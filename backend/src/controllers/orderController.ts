@@ -10,7 +10,7 @@ import {
   releaseOrderIdempotencySessionLock,
 } from '../lib/orderIdempotency';
 import { generateOrderNumber } from '../utils/orderNumber';
-import { generateTrackToken, resolveOrderAccess, toPublicOrderView, buildOrderTrackPath, readTrackToken, orderIdentifierWhere } from '../lib/orderAccess';
+import { generateTrackToken, resolveCustomerOrderAccess, toPublicOrderView, buildOrderTrackPath, readTrackToken, orderIdentifierWhere } from '../lib/orderAccess';
 import { claimProcessedBy, nestedOrderStatusEvent, orderStatusEventData, resolveOrderActor, stripStaffAttribution } from '../lib/orderActor';
 import { getPaymentAdapter } from '../integrations/paymentAdapter';
 import { assertPaymentMethodAllowed, getPaymentSettings } from '../lib/paymentSettings';
@@ -1552,12 +1552,13 @@ export async function getOrder(req: Request, res: Response, next: NextFunction) 
     });
     if (!order) throw new AppError('Order not found', 404);
 
-    const access = resolveOrderAccess({
+    const access = await resolveCustomerOrderAccess({
       order: {
         id: order.id,
         orderNumber: order.orderNumber,
         trackToken: order.trackToken,
         userId: order.userId,
+        guestPhone: order.guestPhone,
       },
       identifier,
       trackToken: readTrackToken(req),
@@ -1956,12 +1957,13 @@ export async function cancelOrderByCustomer(req: Request, res: Response, next: N
     });
     if (!existing) throw new AppError('Order not found', 404);
 
-    const access = resolveOrderAccess({
+    const access = await resolveCustomerOrderAccess({
       order: {
         id: existing.id,
         orderNumber: existing.orderNumber,
         trackToken: existing.trackToken,
         userId: existing.userId,
+        guestPhone: existing.guestPhone,
       },
       identifier,
       trackToken: readTrackToken(req),
@@ -3039,7 +3041,7 @@ export async function confirmPayherePopup(req: Request, res: Response, next: Nex
       },
     });
     if (!order) throw new AppError('Order not found', 404);
-    const access = resolveOrderAccess({
+    const access = await resolveCustomerOrderAccess({
       order,
       identifier,
       trackToken: readTrackToken(req),
@@ -3099,7 +3101,7 @@ export async function confirmPaymentReturn(req: Request, res: Response, next: Ne
     });
     if (!order) throw new AppError('Order not found', 404);
 
-    const access = resolveOrderAccess({
+    const access = await resolveCustomerOrderAccess({
       order,
       identifier,
       trackToken: readTrackToken(req),
@@ -3163,7 +3165,7 @@ export async function submitPlatformRating(req: Request, res: Response, next: Ne
     });
     if (!order) throw new AppError('Order not found', 404);
 
-    const access = resolveOrderAccess({
+    const access = await resolveCustomerOrderAccess({
       order,
       identifier,
       trackToken: readTrackToken(req),
@@ -3234,7 +3236,7 @@ export async function submitRiderRating(req: Request, res: Response, next: NextF
     });
     if (!order) throw new AppError('Order not found', 404);
 
-    const access = resolveOrderAccess({
+    const access = await resolveCustomerOrderAccess({
       order,
       identifier,
       trackToken: readTrackToken(req),

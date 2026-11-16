@@ -10,6 +10,7 @@ import {
   buildDefaultPermissionRows,
   getDefaultMenusForRole,
 } from '../constants/defaultPermissions';
+import { verifyAdminPin } from '../lib/verifyAdminPin';
 
 const adminUserSelect = {
   id: true,
@@ -541,12 +542,15 @@ const updatePermissionsSchema = z.object({
       canDelete: z.boolean(),
     })
   ),
+  password: z.string().min(1, 'PIN is required'),
 });
 
 export async function updatePermissions(req: Request, res: Response, next: NextFunction) {
   try {
     const id = req.params.id as string;
-    const { permissions } = updatePermissionsSchema.parse(req.body);
+    const { permissions, password } = updatePermissionsSchema.parse(req.body);
+
+    await verifyAdminPin(req.user?.sub, password);
 
     if (id === req.user?.sub) {
       throw new AppError('Cannot edit your own permissions', 403);

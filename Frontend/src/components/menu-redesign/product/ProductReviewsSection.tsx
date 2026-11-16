@@ -65,7 +65,7 @@ export function ProductReviewsSection({ product }: { product: Product }) {
           <button
             type="button"
             onClick={() => setWriting(true)}
-            className="inline-flex items-center gap-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
+            className="inline-flex items-center gap-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-snow hover:bg-brand-700"
           >
             <PenLine className="size-4" />
             Write a review
@@ -153,7 +153,7 @@ function ReviewForm({
         <button type="button" onClick={onCancel} className="rounded-full px-4 py-2 text-sm font-semibold text-brand-700 ring-1 ring-brand-200">
           Cancel
         </button>
-        <button type="submit" disabled={submitting} className="rounded-full bg-brand-600 px-5 py-2 text-sm font-semibold text-white">
+        <button type="submit" disabled={submitting} className="rounded-full bg-brand-600 px-5 py-2 text-sm font-semibold text-snow">
           Submit
         </button>
       </div>

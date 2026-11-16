@@ -13,6 +13,7 @@ import {
   SugarLevelField,
   ToppingsField,
 } from '@/components/menu-redesign/product/ProductOptions';
+import OnlineOrderingClosedBanner from '@/components/order/OnlineOrderingClosedBanner';
 import { openOrderModal } from '@/components/order/SiteOrderPrompt';
 import { useBranchOrderingHours } from '@/hooks/useBranchOrderingHours';
 import {
@@ -196,12 +197,15 @@ export function QuickAddDialog({ product, onClose }: QuickAddDialogProps) {
           </button>
         </header>
 
-        {(needsDrinkOptions || availableToppings.length > 0) && (
+        {(needsDrinkOptions || availableToppings.length > 0 || orderingClosed) && (
           <div className="min-h-0 space-y-5 overflow-y-auto px-5 py-4">
+            {orderingClosed && (
+              <OnlineOrderingClosedBanner message={branchOrdering.closedMessage} />
+            )}
             {needsDrinkOptions && (
               <>
-                <IceLevelField value={iceLevel} onChange={setIceLevel} disabled={!inStock} />
-                <SugarLevelField value={sugarLevel} onChange={setSugarLevel} disabled={!inStock} />
+                <IceLevelField value={iceLevel} onChange={setIceLevel} disabled={!inStock || orderingClosed} />
+                <SugarLevelField value={sugarLevel} onChange={setSugarLevel} disabled={!inStock || orderingClosed} />
               </>
             )}
             {availableToppings.length > 0 && (
@@ -216,13 +220,13 @@ export function QuickAddDialog({ product, onClose }: QuickAddDialogProps) {
             (needsDrinkOptions || availableToppings.length > 0) && 'border-t border-brand-100',
           )}
         >
-          <QuantityStepper value={quantity} onChange={setQuantity} max={maxQty} disabled={!inStock || maxQty <= 0} />
+          <QuantityStepper value={quantity} onChange={setQuantity} max={maxQty} disabled={!inStock || maxQty <= 0 || orderingClosed} />
           <button
             type="button"
             onClick={add}
-            disabled={!inStock || maxQty <= 0}
+            disabled={!inStock || maxQty <= 0 || orderingClosed}
             className={cn(
-              'flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-brand-600 px-4 text-sm font-semibold whitespace-nowrap text-white shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-700 disabled:opacity-50 sm:h-auto sm:py-3 sm:text-base',
+              'flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-brand-600 px-4 text-sm font-semibold whitespace-nowrap text-snow shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-700 disabled:opacity-50 sm:h-auto sm:py-3 sm:text-base',
               focusRing,
             )}
           >

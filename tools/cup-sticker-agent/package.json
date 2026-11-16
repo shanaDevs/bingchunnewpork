@@ -8,8 +8,8 @@
     "bingchun-cup-sticker-agent": "./server.mjs"
   },
   "scripts": {
-    "start": "node server.mjs",
-    "build:exe": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./build-exe.ps1",
+    "start": "node init && node server.mjs",
+    "build:exe": "node init && powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./build-exe.ps1",
     "test-print": "node -e \"fetch('http://127.0.0.1:9177/test',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(console.log).catch(e=>{console.error(e);process.exit(1)})\""
   },
   "pkg": {

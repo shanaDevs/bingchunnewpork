@@ -121,6 +121,15 @@ function jasonInvestmentCentsFromBreakdown(breakdown: unknown): number {
   );
 }
 
+function jasonInvestmentCentsAfterNetPlatformCredit(
+  jasonCents: number,
+  netPlatformAmountCents: number,
+): number {
+  const jason = Math.max(0, jasonCents);
+  if (netPlatformAmountCents >= 0) return jason;
+  return Math.max(0, jason + netPlatformAmountCents);
+}
+
 function lkrToExpenseCents(lkr: number): number {
   return Math.round(lkr * 100);
 }
@@ -162,6 +171,10 @@ export function aggregatePaidPayoutPeriodExpensesCents(
     const rowNetPlatform = lkrToExpenseCents(amounts.commissionLkr ?? 0);
     const rowBranchDisplay = lkrToExpenseCents(amounts.branchReceives);
     const rowJasonInvestment = jasonInvestmentCentsFromBreakdown(row.breakdown);
+    const rowJasonAdjusted = jasonInvestmentCentsAfterNetPlatformCredit(
+      rowJasonInvestment,
+      rowNetPlatform,
+    );
     const rowGateway = gatewayFeeCentsFromBreakdown(row.breakdown);
     const cycleStage = readPayoutCycleStageFromBreakdown(row.breakdown);
     const rowBranchExcludingJason = branchReceivableExcludingJasonFromRow({
@@ -176,7 +189,7 @@ export function aggregatePaidPayoutPeriodExpensesCents(
     netPlatformAmountCents += rowNetPlatform;
     branchReceivableCents += rowBranchDisplay;
     branchReceivableExcludingJason += rowBranchExcludingJason;
-    jasonInvestmentCents += rowJasonInvestment;
+    jasonInvestmentCents += rowJasonAdjusted;
     gatewayFeeCents += rowGateway;
     allTimeExpenseDeductionCents += paidPayoutAllTimeExpenseDeductionCents({
       cycleStage,

@@ -3,7 +3,7 @@
 import { type ReactNode } from 'react';
 import { Info } from 'lucide-react';
 import { formatMoneyAmount } from '@/lib/receipt';
-import { hasAnyPositiveLkr, hasPositiveLkr } from '@/components/admin/settlementTypes';
+import { hasAnyPositiveLkr, hasNegativeLkr, hasPositiveLkr } from '@/components/admin/settlementTypes';
 import {
   resolveFinalNetPayoutPayLkr,
   type PayoutReportValues,
@@ -398,6 +398,12 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
                 label="- Net Platform Amount"
                 value={signedAmount(values.netPlatformAmountLkr, '−')}
                 valueTone="red"
+              />
+            )}
+            {hasNegativeLkr(values.netPlatformAmountLkr) && (
+              <ReportRow
+                label="+ Net Platform Amount"
+                value={signedAmount(Math.abs(values.netPlatformAmountLkr), '+')}
               />
             )}
             {hasPositiveLkr(values.gatewayLkr) && (

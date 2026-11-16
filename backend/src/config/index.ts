@@ -69,6 +69,10 @@ export const config = {
     provider: process.env.SMS_PROVIDER || (process.env.SMSLENZ_API_KEY ? 'smslenz' : 'mock'),
     apiKey: process.env.SMSLENZ_API_KEY || process.env.SMS_API_KEY || '',
     senderId: process.env.SMSLENZ_SENDER_ID || process.env.SMS_SENDER_ID || 'BingChun',
+    /** Outbound pacing for SmsLenz (see smsAdapter outbound gate). */
+    outboundMaxConcurrent: parseInt(process.env.SMS_OUTBOUND_MAX_CONCURRENT || '2', 10),
+    outboundMinIntervalMs: parseInt(process.env.SMS_OUTBOUND_MIN_INTERVAL_MS || '200', 10),
+    outboundMaxRetries: parseInt(process.env.SMS_OUTBOUND_MAX_RETRIES || '5', 10),
     smslenz: {
       baseUrl: process.env.SMSLENZ_BASE_URL || 'https://smslenz.lk',
       userId: process.env.SMSLENZ_USER_ID || '',

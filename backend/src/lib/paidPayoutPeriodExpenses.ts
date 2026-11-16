@@ -43,6 +43,16 @@ export function jasonInvestmentCentsFromBreakdown(breakdown: unknown): number {
   return Math.max(0, parseSharedPromoFromBreakdown(breakdown).sharedPromoJasonContributionAmount);
 }
 
+/** Negative net platform (platform owes branch) reduces recorded Jason investment for expenses. */
+export function jasonInvestmentCentsAfterNetPlatformCredit(
+  jasonCents: number,
+  netPlatformAmountCents: number,
+): number {
+  const jason = Math.max(0, jasonCents);
+  if (netPlatformAmountCents >= 0) return jason;
+  return Math.max(0, jason + netPlatformAmountCents);
+}
+
 /**
  * Actual branch receivable for All-Time Available Balance — Jason's investment excluded.
  * SECOND period net already includes Jason; some stored snapshots also added Jason onto final pay.
@@ -93,6 +103,10 @@ export function aggregatePaidPayoutPeriodExpensesCents(
       row.amountCents,
     );
     const rowJason = jasonInvestmentCentsFromBreakdown(row.breakdown);
+    const rowJasonAdjusted = jasonInvestmentCentsAfterNetPlatformCredit(
+      rowJason,
+      rowNetPlatform,
+    );
     const rowBranchExcludingJason = branchReceivableExcludingJasonFromWithdrawal(
       row.breakdown,
       row.amountCents,
@@ -103,7 +117,7 @@ export function aggregatePaidPayoutPeriodExpensesCents(
     netPlatformAmountCents += rowNetPlatform;
     branchReceivableCents += rowBranch;
     branchReceivableExcludingJasonCents += rowBranchExcludingJason;
-    jasonInvestmentCents += rowJason;
+    jasonInvestmentCents += rowJasonAdjusted;
     gatewayFeeCents += rowGateway;
     allTimeExpenseDeductionCents += paidPayoutAllTimeExpenseDeductionCents({
       cycleStage,

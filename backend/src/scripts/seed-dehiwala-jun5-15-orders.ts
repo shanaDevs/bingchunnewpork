@@ -451,7 +451,7 @@ async function restockStore(store: StoreRow): Promise<void> {
   }
 
   const code = await ensureStoreCode(store);
-  const groupNumber = `R-${code}-${batchDateKey()}-001`;
+  const groupNumber = `R-${code}-${batchDateKey()}-${crypto.randomInt(100, 999)}`;
   const receivedAt = new Date();
   const costs = await prisma.product.findMany({
     where: { id: { in: missing.map((r) => r.productId) } },
