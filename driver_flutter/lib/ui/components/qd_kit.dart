@@ -119,7 +119,9 @@ class QdBellButton extends StatelessWidget {
         child: GestureDetector(
           onTap: () {
             HapticFeedback.selectionClick();
-            Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()));
+            // Forward the shell's JobsController: a notification can open BranchesScreen.
+            final page = withJobsController(context, const NotificationsScreen());
+            Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
           },
           child: Container(
             width: 40,

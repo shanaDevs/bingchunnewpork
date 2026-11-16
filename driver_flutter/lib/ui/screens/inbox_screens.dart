@@ -11,6 +11,7 @@ import '../../core/inbox.dart';
 import '../../core/request_updates.dart';
 import '../../data/models/delivery_job.dart';
 import '../../l10n/l10n.dart';
+import '../../state/jobs_controller.dart';
 import '../components/headers.dart';
 import '../components/profile_kit.dart';
 import '../components/qd_kit.dart';
@@ -18,6 +19,23 @@ import 'branches_screen.dart';
 import 'issue_status_screen.dart';
 import 'new_complaint_screen.dart';
 import '../theme/bc_theme.dart';
+
+/// Gives [page] the home shell's [JobsController]. Pushed routes sit above the shell's
+/// provider, so it has to be passed along; if none is reachable from [context]
+/// (e.g. opened from a route that didn't forward it), a fresh one is created.
+Widget withJobsController(BuildContext context, Widget page) {
+  JobsController? vm;
+  try {
+    vm = context.read<JobsController>();
+  } on ProviderNotFoundException {
+    vm = null;
+  }
+  if (vm != null) return ChangeNotifierProvider<JobsController>.value(value: vm, child: page);
+  return ChangeNotifierProvider<JobsController>(
+    create: (ctx) => JobsController(ctx.read<AppContainer>())..load(),
+    child: page,
+  );
+}
 
 String _ago(DateTime t) {
   final d = DateTime.now().difference(t);
@@ -49,7 +67,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     NotificationInbox.instance.markRead(item);
     final Widget? page = switch (item.type) {
       kComplaintUpdateType => const ComplaintsScreen(),
-      kBranchRequestUpdateType => const BranchesScreen(),
+      // BranchesScreen reads JobsController, which lives in the home shell.
+      kBranchRequestUpdateType => withJobsController(context, const BranchesScreen()),
       _ => null,
     };
     if (page != null) Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
