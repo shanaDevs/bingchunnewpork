@@ -1,6 +1,6 @@
 {
   "name": "@bingchun/cashier-desktop",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Bing Chun cashier desktop (Electron) \u2014 live orders + direct sticker print",
   "main": "src/main.js",
@@ -11,7 +11,9 @@
     "dev": "node init && electron . --dev",
     "pack": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir",
     "dist": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win nsis",
-    "dist:portable": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable"
+    "dist:portable": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable",
+    "dist:win7": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --ia32 --config electron-builder.win7.json",
+    "dist:all-win": "npm run dist && npm run dist:win7"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
@@ -41,7 +43,7 @@
           ]
         }
       ],
-      "artifactName": "BingChunCashier-Setup-${version}.${ext}"
+      "artifactName": "BingChunCashier-Setup-${version}-win10-x64.${ext}"
     },
     "nsis": {
       "oneClick": false,
