@@ -169,6 +169,31 @@ export async function listWalletSecurityAuditLogs(params: {
   return { rows, total };
 }
 
+export type WalletSecurityAuditRowWithStoreName = WalletSecurityAuditRow & {
+  storeName: string | null;
+};
+
+/** Resolves human-readable branch names for audit rows that have storeId. */
+export async function enrichWalletSecurityAuditRowsWithStoreNames(
+  rows: WalletSecurityAuditRow[],
+): Promise<WalletSecurityAuditRowWithStoreName[]> {
+  const storeIds = [
+    ...new Set(rows.map((r) => r.storeId).filter((id): id is string => Boolean(id))),
+  ];
+  if (storeIds.length === 0) {
+    return rows.map((r) => ({ ...r, storeName: null }));
+  }
+  const stores = await prisma.store.findMany({
+    where: { id: { in: storeIds } },
+    select: { id: true, name: true },
+  });
+  const nameById = new Map(stores.map((s) => [s.id, s.name]));
+  return rows.map((r) => ({
+    ...r,
+    storeName: r.storeId ? (nameById.get(r.storeId) ?? null) : null,
+  }));
+}
+
 export async function insertWalletSecurityAuditRow(
   row: Omit<WalletSecurityAuditRow, 'id' | 'createdAt'> & { id?: string },
 ): Promise<void> {

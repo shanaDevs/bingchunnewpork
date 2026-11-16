@@ -12,6 +12,7 @@ import {
   groupAllUnsettledWithdrawalsByStoreId,
   type WithdrawalForDartCodesSettlement,
 } from './settlementWithdrawalQuery';
+import { paybackEnabledFromBreakdown } from './breakdownPayback';
 
 export type EnrichedApprovedWithdrawal = WithdrawalForDartCodesSettlement & {
   storeId: string;
@@ -31,15 +32,6 @@ export function formatCalendarMonthLabel(calendarMonth: string): string {
   const [y, m] = calendarMonth.split('-');
   const d = new Date(Number(y), Number(m) - 1, 1);
   return d.toLocaleDateString('en-LK', { month: 'long', year: 'numeric' });
-}
-
-function paybackEnabledFromBreakdown(breakdown: unknown): boolean {
-  const b = breakdown as {
-    platformDiscountPaybackEnabled?: boolean;
-    platformPaybackTotal?: number;
-  } | null;
-  if (b?.platformDiscountPaybackEnabled != null) return b.platformDiscountPaybackEnabled;
-  return (b?.platformPaybackTotal ?? 0) > 0;
 }
 
 /** Platform share of SHARED promos from a locked withdrawal breakdown (LKR, 2 dp). */

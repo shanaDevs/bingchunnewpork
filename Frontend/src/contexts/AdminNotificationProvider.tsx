@@ -582,8 +582,10 @@ function BranchStockAlertToast({
             <p className="branch-order-toast__customer">{alert.productName}</p>
             <p className="branch-order-toast__meta branch-product-toast__meta">
               {isOut
-                ? `No longer available online at ${storeLabel}. Restock now to avoid missed orders.`
-                : `Only ${alert.onlineAvailableQty} units available online at ${storeLabel}. Consider restocking soon.`}
+                ? (alert.onHandQty ?? 0) > 0
+                  ? `No units left for online orders at ${storeLabel} (${alert.onHandQty} on hand). Restock to reopen online sales.`
+                  : `No longer available online at ${storeLabel}. Restock now to avoid missed orders.`
+                : `Only ${alert.onlineAvailableQty ?? 0} available online (${alert.onHandQty ?? '—'} on hand) at ${storeLabel}. Consider restocking soon.`}
             </p>
           </div>
         </div>

@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { format, parseISO } from 'date-fns';
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts';
 
 import {
   ChartContainer,
@@ -37,10 +37,16 @@ type Props = {
   data: RefundDailyTrendPoint[];
   loading?: boolean;
   compact?: boolean;
+  variant?: 'area' | 'line';
 };
 
-export default function RefundDailyTrendChart({ data, loading, compact = false }: Props) {
-  const chartHeight = compact ? 220 : 320;
+export default function RefundDailyTrendChart({
+  data,
+  loading,
+  compact = false,
+  variant = 'area',
+}: Props) {
+  const chartHeight = compact ? 220 : 260;
 
   const chartData = useMemo(
     () =>
@@ -82,6 +88,50 @@ export default function RefundDailyTrendChart({ data, loading, compact = false }
     );
   }
 
+  const axes = (
+    <>
+      <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/40" />
+      <XAxis
+        dataKey="date"
+        tickLine={false}
+        axisLine={false}
+        tickMargin={10}
+        height={32}
+        className="text-[11px]"
+      />
+      <YAxis
+        tickLine={false}
+        axisLine={false}
+        tickMargin={8}
+        width={36}
+        domain={[0, yAxisMax]}
+        allowDecimals={false}
+        className="text-[11px]"
+      />
+      <ChartTooltip
+        cursor={{ stroke: 'var(--color-count, #307ef2)', strokeWidth: 1, strokeDasharray: '4 4' }}
+        content={
+          <ChartTooltipContent
+            labelFormatter={(_, payload) => {
+              const fullDate = payload?.[0]?.payload?.fullDate;
+              return fullDate ? format(parseISO(fullDate), 'MMM d, yyyy') : '';
+            }}
+            formatter={(value, _name, item) => (
+              <div className="flex w-full flex-col items-end gap-0.5">
+                <span className="font-mono font-semibold text-foreground">
+                  {value} refund{Number(value) !== 1 ? 's' : ''}
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {formatMoney(Number(item.payload.amountLkr))}
+                </span>
+              </div>
+            )}
+          />
+        }
+      />
+    </>
+  );
+
   return (
     <div className="w-full min-w-0 rounded-lg" style={{ height: chartHeight }}>
       <ChartContainer
@@ -89,62 +139,38 @@ export default function RefundDailyTrendChart({ data, loading, compact = false }
         className="!aspect-auto flex h-full w-full min-w-0 max-w-none [&>.recharts-responsive-container]:!h-full [&>.recharts-responsive-container]:!w-full [&>.recharts-responsive-container]:min-h-0"
         initialDimension={{ width: 1200, height: chartHeight }}
       >
-        <AreaChart data={chartData} margin={{ top: 20, right: 12, left: 4, bottom: 0 }}>
-          <defs>
-            <linearGradient id="fillRefundCount" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--color-count, #307ef2)" stopOpacity={0.35} />
-              <stop offset="100%" stopColor="var(--color-count, #307ef2)" stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/40" />
-          <XAxis
-            dataKey="date"
-            tickLine={false}
-            axisLine={false}
-            tickMargin={10}
-            height={32}
-            className="text-[11px]"
-          />
-          <YAxis
-            tickLine={false}
-            axisLine={false}
-            tickMargin={8}
-            width={36}
-            domain={[0, yAxisMax]}
-            allowDecimals={false}
-            className="text-[11px]"
-          />
-          <ChartTooltip
-            cursor={{ stroke: 'var(--color-count, #307ef2)', strokeWidth: 1, strokeDasharray: '4 4' }}
-            content={
-              <ChartTooltipContent
-                labelFormatter={(_, payload) => {
-                  const fullDate = payload?.[0]?.payload?.fullDate;
-                  return fullDate ? format(parseISO(fullDate), 'MMM d, yyyy') : '';
-                }}
-                formatter={(value, _name, item) => (
-                  <div className="flex w-full flex-col items-end gap-0.5">
-                    <span className="font-mono font-semibold text-foreground">
-                      {value} refund{Number(value) !== 1 ? 's' : ''}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {formatMoney(Number(item.payload.amountLkr))}
-                    </span>
-                  </div>
-                )}
-              />
-            }
-          />
-          <Area
-            dataKey="count"
-            type="monotone"
-            fill="url(#fillRefundCount)"
-            stroke="var(--color-count, #307ef2)"
-            strokeWidth={2}
-            dot={{ fill: 'var(--color-count, #307ef2)', r: 3, strokeWidth: 0 }}
-            activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }}
-          />
-        </AreaChart>
+        {variant === 'line' ? (
+          <LineChart data={chartData} margin={{ top: 20, right: 12, left: 4, bottom: 0 }}>
+            {axes}
+            <Line
+              dataKey="count"
+              type="monotone"
+              stroke="var(--color-count, #307ef2)"
+              strokeWidth={2}
+              dot={{ fill: 'var(--color-count, #307ef2)', r: 3.5, strokeWidth: 0 }}
+              activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }}
+            />
+          </LineChart>
+        ) : (
+          <AreaChart data={chartData} margin={{ top: 20, right: 12, left: 4, bottom: 0 }}>
+            <defs>
+              <linearGradient id="fillRefundCount" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--color-count, #307ef2)" stopOpacity={0.35} />
+                <stop offset="100%" stopColor="var(--color-count, #307ef2)" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            {axes}
+            <Area
+              dataKey="count"
+              type="monotone"
+              fill="url(#fillRefundCount)"
+              stroke="var(--color-count, #307ef2)"
+              strokeWidth={2}
+              dot={{ fill: 'var(--color-count, #307ef2)', r: 3, strokeWidth: 0 }}
+              activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }}
+            />
+          </AreaChart>
+        )}
       </ChartContainer>
     </div>
   );

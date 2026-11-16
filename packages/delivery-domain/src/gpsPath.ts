@@ -130,14 +130,31 @@ function perpendicularDistanceKm(p: LatLngPoint, a: LatLngPoint, b: LatLngPoint)
   return Math.hypot(P.x - projX, P.y - projY);
 }
 
-/** An order counts for this rider on this job if they delivered it, or the
- *  customer cancelled after the run had already started (OUT_FOR_DELIVERY). */
+/** Failure outcomes where the rider still earns the stop fee (customer-side issues). */
+export const CUSTOMER_SIDE_FAILURE_OUTCOMES = new Set([
+  'CUSTOMER_UNREACHABLE',
+  'WRONG_ADDRESS',
+  'REFUSED',
+  'PAYMENT_FAILED',
+]);
+
+export function isCustomerSideFailureOutcome(outcome: string): boolean {
+  return CUSTOMER_SIDE_FAILURE_OUTCOMES.has(outcome);
+}
+
+/**
+ * Whether this stop's delivery fee credits the rider on this job.
+ * Customer-side failures credit even if the order is later DELIVERED on another job.
+ * Driver-side failures (OTHER, VEHICLE_FAILURE) never credit on this job.
+ */
 export function isCreditedDelivery(
   orderStatus: string,
-  failedOnThisJob: boolean,
+  failureOutcome?: string | null,
   cancelledAtStatus?: string | null,
 ): boolean {
-  if (failedOnThisJob) return false;
+  if (failureOutcome) {
+    return isCustomerSideFailureOutcome(failureOutcome);
+  }
   if (orderStatus === 'DELIVERED') return true;
   return orderStatus === 'CANCELLED' && cancelledAtStatus === 'OUT_FOR_DELIVERY';
 }
@@ -160,21 +177,122 @@ export function groupFailedOrderIdsByJob(
   return byJob;
 }
 
+export type FailedAttemptSummary = { outcome: string; note: string | null };
+
+export type HistoryAttemptRow = {
+  jobId: string;
+  orderId: string;
+  outcome: string;
+  note: string | null;
+  attemptNo: number;
+  createdAt: Date;
+};
+
+const DELIVERY_FAILURE_OUTCOME_LABELS: Record<string, string> = {
+  CUSTOMER_UNREACHABLE: 'Customer not available',
+  WRONG_ADDRESS: 'Wrong / incomplete address',
+  REFUSED: 'Customer refused delivery',
+  PAYMENT_FAILED: 'Payment issue',
+  OTHER: 'Driver error',
+  VEHICLE_FAILURE: 'Vehicle failure',
+};
+
+/** Human-readable failure line for rider history (outcome + optional note). */
+export function formatDeliveryFailureReason(outcome?: string | null, note?: string | null): string {
+  const outcomeLabel = outcome
+    ? (DELIVERY_FAILURE_OUTCOME_LABELS[outcome] ?? outcome.replace(/_/g, ' '))
+    : null;
+  const noteLabel = note?.trim()
+    ? (DELIVERY_FAILURE_OUTCOME_LABELS[note.trim()] ?? note.trim())
+    : null;
+  if (!outcomeLabel && !noteLabel) return 'Not provided';
+  if (outcomeLabel && noteLabel && outcomeLabel.toLowerCase() === noteLabel.toLowerCase()) {
+    return outcomeLabel;
+  }
+  return [outcomeLabel, noteLabel].filter(Boolean).join(' — ');
+}
+
+/** Latest non-delivered attempt per order on each job (same rule as fetchLatestFailedAttemptsForJob). */
+export function groupLatestFailedAttemptsByJob(
+  attempts: HistoryAttemptRow[],
+): Map<string, Map<string, FailedAttemptSummary>> {
+  const sorted = [...attempts].sort((a, b) => {
+    if (b.attemptNo !== a.attemptNo) return b.attemptNo - a.attemptNo;
+    return b.createdAt.getTime() - a.createdAt.getTime();
+  });
+  const byJob = new Map<string, Map<string, FailedAttemptSummary>>();
+  for (const row of sorted) {
+    let byOrder = byJob.get(row.jobId);
+    if (!byOrder) {
+      byOrder = new Map();
+      byJob.set(row.jobId, byOrder);
+    }
+    if (!byOrder.has(row.orderId)) {
+      byOrder.set(row.orderId, { outcome: row.outcome, note: row.note });
+    }
+  }
+  return byJob;
+}
+
+export type JobHistoryOrderLink = {
+  orderId: string;
+  order: { status: string; cancelledAtStatus?: string | null };
+};
+
+export type JobHistoryOrderRow = {
+  orderId: string;
+  status: string;
+  cancelledAtStatus: string | null;
+  deliveryFailed: boolean;
+  failureOutcome: string | null;
+  failureNote: string | null;
+  failureReason: string | null;
+};
+
+export function buildJobHistoryOrderRows(
+  jobOrders: JobHistoryOrderLink[],
+  failedByOrder: Map<string, FailedAttemptSummary> | undefined,
+): { orders: JobHistoryOrderRow[]; failedCount: number } {
+  let failedCount = 0;
+  const orders: JobHistoryOrderRow[] = jobOrders.map((jo) => {
+    const failed = failedByOrder?.get(jo.orderId);
+    const deliveryFailed = !!failed;
+    if (deliveryFailed) failedCount += 1;
+    return {
+      orderId: jo.orderId,
+      status: jo.order.status,
+      cancelledAtStatus: jo.order.cancelledAtStatus ?? null,
+      deliveryFailed,
+      failureOutcome: deliveryFailed ? (failed?.outcome ?? null) : null,
+      failureNote: deliveryFailed ? (failed?.note ?? null) : null,
+      failureReason: deliveryFailed ? formatDeliveryFailureReason(failed?.outcome, failed?.note) : null,
+    };
+  });
+  return { orders, failedCount };
+}
+
 /**
- * Rider earnings for a job: DELIVERED stops that this job did not already fail,
- * plus mid-ride customer cancels (cancelled while OUT_FOR_DELIVERY).
- * Leftover vehicle-failure links stay on the original job; when another rider
- * later delivers them, live order status is DELIVERED but they must not credit
- * the original rider.
+ * Rider earnings for a job: delivered stops, customer-side failed stops, and
+ * mid-ride customer cancels (cancelled while OUT_FOR_DELIVERY).
+ * Leftover vehicle- or driver-error failures must not credit even if another
+ * rider later delivers the order.
  */
 export function creditedDeliveredTotals(
   jobOrders: CreditedJobOrder[],
-  failedOrderIds: Set<string> = new Set(),
+  failedByOrder: Map<string, FailedAttemptSummary> = new Map(),
+): { deliveredCount: number; deliveredTotal: number } {
+  return creditedDeliveryFeesForJobOrders(jobOrders, failedByOrder);
+}
+
+export function creditedDeliveryFeesForJobOrders(
+  jobOrders: CreditedJobOrder[],
+  failedByOrder: Map<string, FailedAttemptSummary>,
 ): { deliveredCount: number; deliveredTotal: number } {
   let deliveredCount = 0;
   let deliveredTotal = 0;
   for (const jo of jobOrders) {
-    if (!isCreditedDelivery(jo.order.status, failedOrderIds.has(jo.orderId), jo.order.cancelledAtStatus)) {
+    const failureOutcome = failedByOrder.get(jo.orderId)?.outcome ?? null;
+    if (!isCreditedDelivery(jo.order.status, failureOutcome, jo.order.cancelledAtStatus)) {
       continue;
     }
     deliveredCount += 1;
@@ -183,17 +301,12 @@ export function creditedDeliveredTotals(
   return { deliveredCount, deliveredTotal };
 }
 
-/** Payout fees for a completed job: delivered orders and mid-ride cancels. */
+/** Payout fees for a completed job (same credit rules as creditedDeliveredTotals). */
 export function deliveredOrderDeliveryFees(
-  jobOrders: { order: { status: string; deliveryFee: number; cancelledAtStatus?: string | null } }[],
+  jobOrders: CreditedJobOrder[],
+  failedByOrder: Map<string, FailedAttemptSummary> = new Map(),
 ): number {
-  return jobOrders.reduce(
-    (sum, jo) =>
-      isCreditedDelivery(jo.order.status, false, jo.order.cancelledAtStatus)
-        ? sum + jo.order.deliveryFee
-        : sum,
-    0,
-  );
+  return creditedDeliveryFeesForJobOrders(jobOrders, failedByOrder).deliveredTotal;
 }
 
 /** Delete raw GPS rows older than the retention window. */
@@ -349,7 +462,36 @@ export async function finalizeDeliveryJob(jobId: string): Promise<void> {
   });
   if (!job) return;
 
-  const feesLkr = deliveredOrderDeliveryFees(job.jobOrders);
+  const orderIds = job.jobOrders.map((jo) => jo.orderId);
+  const failedAttempts =
+    orderIds.length === 0
+      ? []
+      : await prisma.deliveryAttempt.findMany({
+          where: {
+            jobId: job.id,
+            orderId: { in: orderIds },
+            outcome: { not: 'DELIVERED' },
+          },
+          select: {
+            jobId: true,
+            orderId: true,
+            outcome: true,
+            note: true,
+            attemptNo: true,
+            createdAt: true,
+          },
+          orderBy: [{ attemptNo: 'desc' }, { createdAt: 'desc' }],
+        });
+  const failedByOrder = groupLatestFailedAttemptsByJob(failedAttempts).get(job.id) ?? new Map();
+  const creditedLinks: CreditedJobOrder[] = job.jobOrders.map((jo) => ({
+    orderId: jo.orderId,
+    order: {
+      status: jo.order.status,
+      deliveryFee: jo.order.deliveryFee,
+      cancelledAtStatus: jo.order.cancelledAtStatus ?? null,
+    },
+  }));
+  const feesLkr = deliveredOrderDeliveryFees(creditedLinks, failedByOrder);
   const { actualDistanceKm, actualRoute } = await computeActualRouteForJob(jobId, job);
 
   await prisma.deliveryJob.update({

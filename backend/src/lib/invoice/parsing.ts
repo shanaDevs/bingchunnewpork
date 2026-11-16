@@ -15,6 +15,31 @@ function parseOptionalDate(value: unknown): Date | null | undefined {
   return undefined;
 }
 
+type WithdrawalPaymentSnapshot = {
+  paymentMethod?: string | null;
+  checkNumber?: string | null;
+  checkDate?: Date | null;
+};
+
+/** Merge live payment verification fields when stored invoiceData is still a pre-pay draft snapshot. */
+export function enrichWithdrawalInvoiceInputFromWithdrawal(
+  input: GenerateWithdrawalInvoiceInput,
+  withdrawal: WithdrawalPaymentSnapshot,
+): GenerateWithdrawalInvoiceInput {
+  const paymentMethod = (withdrawal.paymentMethod ??
+    input.paymentMethod ??
+    'BANK_TRANSFER') as GenerateWithdrawalInvoiceInput['paymentMethod'];
+  if (paymentMethod !== 'CHECK') {
+    return { ...input, paymentMethod };
+  }
+  return {
+    ...input,
+    paymentMethod: 'CHECK',
+    checkNumber: input.checkNumber?.trim() || withdrawal.checkNumber?.trim() || null,
+    checkDate: input.checkDate ?? withdrawal.checkDate ?? null,
+  };
+}
+
 /** Rehydrate stored JSON into withdrawal invoice input (dates restored). */
 export function parseWithdrawalInvoiceInput(data: unknown): GenerateWithdrawalInvoiceInput | null {
   if (!data || typeof data !== 'object') return null;

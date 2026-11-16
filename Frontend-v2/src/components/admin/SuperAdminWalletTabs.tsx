@@ -34,9 +34,8 @@ export type SuperAdminWalletTabsProps = SuperAdminSystemWalletTabProps & {
   periodTo?: string | null;
   periodLabel?: string | null;
   tabActions?: ReactNode;
-  duePayouts?: PayoutDueRow[];
-  duePayoutsLoading?: boolean;
-  duePayoutsLoadingMore?: boolean;
+  dueListEnabled?: boolean;
+  dueStoreId?: string | null;
   onViewDuePayout?: (row: PayoutDueRow) => void;
   onReviewDuePayout?: (row: PayoutDueRow) => void;
   onDueTabOpen?: () => void;
@@ -47,9 +46,8 @@ export default function SuperAdminWalletTabs({
   periodTo = null,
   periodLabel = null,
   tabActions,
-  duePayouts = [],
-  duePayoutsLoading = false,
-  duePayoutsLoadingMore = false,
+  dueListEnabled = true,
+  dueStoreId = null,
   onViewDuePayout,
   onReviewDuePayout,
   onDueTabOpen,
@@ -57,8 +55,8 @@ export default function SuperAdminWalletTabs({
 }: SuperAdminWalletTabsProps) {
   const { activeTab, visitedTabs, setActiveTab } = useAdminWalletTab(parseTab);
   const [deliveryDueCount, setDeliveryDueCount] = useState(0);
+  const [branchDueCount, setBranchDueCount] = useState(0);
 
-  const branchDueCount = duePayouts.length;
   const dueCount = branchDueCount + deliveryDueCount;
 
   useEffect(() => {
@@ -115,12 +113,12 @@ export default function SuperAdminWalletTabs({
 
       <TabsContent value="due" className="mt-0 outline-none">
         <PayoutsDueSubTabs
-          branchRows={duePayouts}
-          branchLoading={duePayoutsLoading}
-          branchLoadingMore={duePayoutsLoadingMore}
+          branchListEnabled={dueListEnabled && activeTab === 'due'}
+          dueStoreId={dueStoreId}
           onViewBranchDue={onViewDuePayout ?? (() => {})}
           onReviewBranchDue={onReviewDuePayout ?? (() => {})}
           onDeliveryDueCountChange={setDeliveryDueCount}
+          onBranchDueCountChange={setBranchDueCount}
         />
       </TabsContent>
 

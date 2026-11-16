@@ -10,7 +10,11 @@ import type { DateRange } from 'react-day-picker';
 import {
   Bike,
   Calendar,
+  CircleDollarSign,
+  Download,
+  FileText,
   History,
+  ImageIcon,
   Loader2,
   Percent,
   RefreshCw,
@@ -36,12 +40,34 @@ import { KPI_BOLD } from '@/lib/dashboardTheme';
 import DashboardKpiCard from '@/components/admin/DashboardKpiCard';
 import DateRangePicker from '@/components/admin/DateRangePicker';
 import DeliveryApprovePayoutModal from '@/components/admin/DeliveryApprovePayoutModal';
-import type { DeliveryPayoutHistoryRow } from '@/lib/deliveryPayoutTypes';
+import DeliveryPayoutPaymentCell from '@/components/admin/DeliveryPayoutPaymentCell';
+import DeliveryPayoutPayModal from '@/components/admin/DeliveryPayoutPayModal';
+import DeliveryPayoutsDuePanel from '@/components/admin/DeliveryPayoutsDuePanel';
+import { openPayoutProofById } from '@/lib/adminProtectedFile';
+import {
+  parseDeliveryPayoutBreakdown,
+  type DeliveryPayoutDueRow,
+  type DeliveryPayoutHistoryRow,
+} from '@/lib/deliveryPayoutTypes';
+import {
+  DELIVERY_PAYOUT_STATEMENT_ZIP_MAX,
+  deliveryPayoutStatementFilename,
+  downloadDeliveryPayoutStatement,
+  downloadDeliveryPayoutStatementZip,
+} from '@/lib/deliveryPayoutStatementDownload';
 import toast from 'react-hot-toast';
 import { confirmDialog } from '@/store/confirmStore';
 import AdminTablePagination from '@/components/admin/AdminTablePagination';
 import { ADMIN_TABLE_PAGE_SIZE, buildPageList } from '@/lib/pagination';
 import { cn } from '@/lib/utils';
+import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
+
+type DeliveryCurrentPayoutCycle = {
+  from: string;
+  cycleTo: string;
+  through: string;
+  days: number;
+};
 
 function toDateParam(d: Date) {
   return format(d, 'yyyy-MM-dd');
@@ -107,9 +133,9 @@ type PayoutListResponse = {
   pagination: { page: number; limit: number; total: number; pages: number };
 };
 
-type DeliveryWalletTab = 'wallet' | 'history';
+type DeliveryWalletTab = 'wallet' | 'history' | 'due';
 
-const TABS: Array<{
+const BASE_TABS: Array<{
   id: DeliveryWalletTab;
   label: string;
   icon: typeof Wallet;
@@ -117,6 +143,12 @@ const TABS: Array<{
   { id: 'wallet', label: 'Wallet', icon: Wallet },
   { id: 'history', label: 'Payout History', icon: History },
 ];
+
+const PAYOUTS_DUE_TAB: (typeof BASE_TABS)[number] = {
+  id: 'due',
+  label: 'Payouts due',
+  icon: CircleDollarSign,
+};
 
 function statusLabel(status: string) {
   switch (status) {
@@ -243,8 +275,28 @@ function formatDateOnly(ymd: string) {
   });
 }
 
-async function fetchDeliveryPayouts(unlockToken: string): Promise<PayoutListResponse> {
-  return deliveryWalletFetch('/admin/delivery-wallet/payouts?page=1&limit=20', unlockToken);
+const PAYOUT_HISTORY_PAGE_SIZE = 25;
+
+async function fetchDeliveryPayouts(
+  unlockToken: string,
+  page: number,
+  limit: number,
+): Promise<PayoutListResponse> {
+  return deliveryWalletFetch(
+    `/admin/delivery-wallet/payouts?page=${page}&limit=${limit}`,
+    unlockToken,
+  );
+}
+
+async function fetchAllDeliveryPayoutRows(unlockToken: string): Promise<DeliveryPayoutRow[]> {
+  const limit = 50;
+  const first = await fetchDeliveryPayouts(unlockToken, 1, limit);
+  const rows = [...first.items];
+  for (let p = 2; p <= first.pagination.pages; p += 1) {
+    const next = await fetchDeliveryPayouts(unlockToken, p, limit);
+    rows.push(...next.items);
+  }
+  return rows;
 }
 
 async function fetchPayoutPreviewInfo(unlockToken: string): Promise<{
@@ -253,8 +305,13 @@ async function fetchPayoutPreviewInfo(unlockToken: string): Promise<{
   liveFrom?: string | null;
   liveTo?: string | null;
   liveAfterApproved?: boolean;
+  currentPayoutCycle?: DeliveryCurrentPayoutCycle | null;
 }> {
   return deliveryWalletFetch('/admin/delivery-wallet/payout-preview', unlockToken);
+}
+
+async function fetchDeliveryPayoutsDue(unlockToken: string): Promise<DeliveryPayoutDueRow[]> {
+  return deliveryWalletFetch('/admin/delivery-wallet/payouts-due', unlockToken);
 }
 
 async function fetchDeliveryWallet(
@@ -296,9 +353,12 @@ function DeliveryWalletPageContent() {
   const [period, setPeriod] = useState<WalletPeriod>('live');
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [historyViewRow, setHistoryViewRow] = useState<DeliveryPayoutHistoryRow | null>(null);
+  const [viewDueTarget, setViewDueTarget] = useState<DeliveryPayoutDueRow | null>(null);
   const [branchSearchQuery, setBranchSearchQuery] = useState('');
   const [branchPage, setBranchPage] = useState(1);
-  const [branchPageSize, setBranchPageSize] = useState(ADMIN_TABLE_PAGE_SIZE);
+  const [branchPageSize, setBranchPageSize] = useState(25);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState(PAYOUT_HISTORY_PAGE_SIZE);
   const [pageReady, setPageReady] = useState(false);
   const [liveBounds, setLiveBounds] = useState<{ from: string; to: string } | null>(null);
   const [liveBoundsResolved, setLiveBoundsResolved] = useState(false);
@@ -316,6 +376,8 @@ function DeliveryWalletPageContent() {
   const [pinError, setPinError] = useState('');
   const [pinSubmitting, setPinSubmitting] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [downloadBusyId, setDownloadBusyId] = useState<string | null>(null);
+  const [downloadingAll, setDownloadingAll] = useState(false);
 
   useEffect(() => {
     setPageReady(true);
@@ -360,7 +422,12 @@ function DeliveryWalletPageContent() {
   useEffect(() => {
     if (!ready) return;
     const tab = searchParams.get('tab');
-    if (tab === 'history' || tab === 'wallet') {
+    if (tab === 'due' && !isSuperAdmin(getAdminSession())) {
+      router.replace('/wallet', { scroll: false });
+      setActiveTab('wallet');
+      return;
+    }
+    if (tab === 'history' || tab === 'wallet' || tab === 'due') {
       setActiveTab(tab);
       return;
     }
@@ -468,14 +535,31 @@ function DeliveryWalletPageContent() {
     isLoading: payoutsLoading,
     isFetching: payoutsFetching,
   } = useQuery({
-    queryKey: ['delivery-wallet-payouts'],
-    queryFn: () => fetchDeliveryPayouts(unlockToken),
+    queryKey: ['delivery-wallet-payouts', historyPage, historyPageSize],
+    queryFn: () => fetchDeliveryPayouts(unlockToken, historyPage, historyPageSize),
     enabled: pageReady && ready && unlocked && activeTab === 'history',
+    retry: false,
+  });
+
+  const {
+    data: deliveryDue = [],
+    isLoading: deliveryDueLoading,
+    isFetching: deliveryDueFetching,
+  } = useQuery({
+    queryKey: ['delivery-payouts-due', unlockToken],
+    queryFn: () => fetchDeliveryPayoutsDue(unlockToken),
+    enabled: pageReady && ready && unlocked && superAdmin && activeTab === 'due',
     retry: false,
   });
 
   const branches = displayData?.branches ?? [];
   const payoutRows = payouts?.items ?? [];
+  const payoutHistoryTotal = payouts?.pagination.total ?? 0;
+  const payoutHistoryTotalPages = payouts?.pagination.pages ?? 1;
+  const payoutHistorySafePage = Math.min(historyPage, payoutHistoryTotalPages);
+  const payoutHistoryRangeStart =
+    payoutHistoryTotal === 0 ? 0 : (payoutHistorySafePage - 1) * historyPageSize + 1;
+  const payoutHistoryRangeEnd = Math.min(payoutHistorySafePage * historyPageSize, payoutHistoryTotal);
 
   const filteredBranches = useMemo(() => {
     const q = branchSearchQuery.trim().toLowerCase();
@@ -500,6 +584,15 @@ function DeliveryWalletPageContent() {
   useEffect(() => {
     setBranchPage((page) => (page === 1 ? page : 1));
   }, [branchPageSize]);
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [historyPageSize]);
+
+  const walletTabs = useMemo(
+    () => (superAdmin ? [...BASE_TABS, PAYOUTS_DUE_TAB] : BASE_TABS),
+    [superAdmin],
+  );
 
   if (!ready) {
     return (
@@ -547,7 +640,11 @@ function DeliveryWalletPageContent() {
   }
 
   const refreshing =
-    activeTab === 'wallet' ? liveFetching || periodFetching : payoutsFetching;
+    activeTab === 'wallet'
+      ? liveFetching || periodFetching
+      : activeTab === 'due'
+        ? deliveryDueFetching
+        : payoutsFetching;
   const sessionId = getAdminSession()?.id;
 
   function handleRefresh() {
@@ -556,8 +653,69 @@ function DeliveryWalletPageContent() {
       void queryClient.invalidateQueries({ queryKey: ['delivery-payout-preview-info'] });
       return;
     }
+    if (activeTab === 'due') {
+      void queryClient.invalidateQueries({ queryKey: ['delivery-payouts-due'] });
+      void queryClient.invalidateQueries({ queryKey: ['delivery-payout-preview-info'] });
+      return;
+    }
     void queryClient.invalidateQueries({ queryKey: ['delivery-wallet-payouts'] });
     void queryClient.invalidateQueries({ queryKey: ['delivery-payout-preview-info'] });
+  }
+
+  function payoutStatementAvailable(row: DeliveryPayoutRow): boolean {
+    if (row.status === 'APPROVED') return true;
+    if (row.status === 'PENDING' && parseDeliveryPayoutBreakdown(row.breakdown)) return true;
+    return false;
+  }
+
+  async function downloadPayoutPdf(row: DeliveryPayoutRow) {
+    if (!payoutStatementAvailable(row)) return;
+    setDownloadBusyId(row.id);
+    try {
+      await downloadDeliveryPayoutStatement(
+        row.id,
+        unlockToken,
+        deliveryPayoutStatementFilename(row.periodFrom, row.periodTo),
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not download the payout statement');
+    } finally {
+      setDownloadBusyId(null);
+    }
+  }
+
+  async function openPayoutProof(row: DeliveryPayoutRow) {
+    try {
+      await openPayoutProofById('deliveryPayout', row.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not open payment proof');
+    }
+  }
+
+  async function downloadAllApprovedPayouts() {
+    setDownloadingAll(true);
+    try {
+      const allRows = await fetchAllDeliveryPayoutRows(unlockToken);
+      const approved = allRows.filter((row) => row.status === 'APPROVED');
+      if (approved.length === 0) {
+        toast.error('No paid payouts to download.');
+        return;
+      }
+      if (approved.length > DELIVERY_PAYOUT_STATEMENT_ZIP_MAX) {
+        toast.error(
+          `Download all is limited to ${DELIVERY_PAYOUT_STATEMENT_ZIP_MAX} payouts. Contact support if you need more.`,
+        );
+        return;
+      }
+      await downloadDeliveryPayoutStatementZip(
+        approved.map((row) => row.id),
+        unlockToken,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not download payout statements');
+    } finally {
+      setDownloadingAll(false);
+    }
   }
 
   async function cancelOwnPayout(row: DeliveryPayoutRow) {
@@ -637,6 +795,8 @@ function DeliveryWalletPageContent() {
           ? `${formatDateOnly(walletFrom)} – ${formatDateOnly(walletTo)}.`
           : null;
 
+  const currentCycle = payoutInfo?.currentPayoutCycle ?? null;
+
   return (
     <DeliveryWalletUnlockProvider token={unlockToken}>
     <div className="admin-dashboard mx-auto max-w-[1400px] space-y-6">
@@ -649,7 +809,9 @@ function DeliveryWalletPageContent() {
           <p className="text-sm text-muted">
             {activeTab === 'wallet'
               ? 'Delivery fees from all branches, minus platform fee then payment gateway fee.'
-              : 'Paid delivery payouts on a 15-day cycle (super admin). Pending rows can be cancelled; proof can be uploaded after pay.'}
+              : activeTab === 'due'
+                ? 'View completed 15-day periods due for payout. Pay from main admin Wallet → Payouts Due → Delivery.'
+                : 'Paid delivery payouts on a 15-day cycle (super admin). Pending rows can be cancelled; proof can be uploaded after pay.'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -666,7 +828,7 @@ function DeliveryWalletPageContent() {
       </div>
 
       <div className="flex gap-2" role="tablist" aria-label="Delivery wallet views">
-        {TABS.map((tab) => {
+        {walletTabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           return (
@@ -688,6 +850,21 @@ function DeliveryWalletPageContent() {
           );
         })}
       </div>
+
+      {currentCycle && (
+        <div
+          className="rounded-xl border border-[var(--color-navy-border,#334155)] bg-[var(--color-navy-card,#1e293b)] px-4 py-3 sm:px-5"
+          aria-live="polite"
+        >
+          <p className="text-sm text-white">
+            <span className="font-semibold">Current payout cycle: </span>
+            {formatBiweeklyPeriodLabel(currentCycle.from, currentCycle.through)}
+          </p>
+          <p className="mt-0.5 text-xs text-muted">
+            15-day cycle closes {formatDateOnly(currentCycle.cycleTo)}
+          </p>
+        </div>
+      )}
 
       {activeTab === 'wallet' && (
         <>
@@ -886,14 +1063,40 @@ function DeliveryWalletPageContent() {
         </>
       )}
 
+      {activeTab === 'due' && superAdmin && (
+        <DeliveryPayoutsDuePanel
+          rows={deliveryDue}
+          loading={deliveryDueLoading}
+          allowPay={false}
+          onView={(row) => setViewDueTarget(row)}
+        />
+      )}
+
       {activeTab === 'history' && (
         <div className="card overflow-hidden">
-          <div className="flex items-center gap-2 border-b border-navy-border px-4 py-3 sm:px-5">
-            <History size={18} className="text-brand" />
-            <div>
-              <h2 className="text-sm font-semibold text-white">Payout history</h2>
-              <p className="text-xs text-muted">Paid delivery payout periods</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-navy-border px-4 py-3 sm:px-5">
+            <div className="flex items-center gap-2">
+              <History size={18} className="text-brand" />
+              <div>
+                <h2 className="text-sm font-semibold text-white">Payout history</h2>
+                <p className="text-xs text-muted">Paid delivery payout periods</p>
+              </div>
             </div>
+            {payoutRows.length > 0 && (
+              <button
+                type="button"
+                disabled={downloadingAll || payoutsLoading}
+                onClick={() => void downloadAllApprovedPayouts()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-navy-border px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-navy-light disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {downloadingAll ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Download size={13} />
+                )}
+                Download all
+              </button>
+            )}
           </div>
           {payoutsLoading ? (
             <div className="flex items-center justify-center py-16 text-muted">
@@ -913,6 +1116,9 @@ function DeliveryWalletPageContent() {
                     <th className="px-4 py-3 font-medium">Net amount</th>
                     <th className="px-4 py-3 font-medium">Status</th>
                     <th className="px-4 py-3 font-medium">Paid</th>
+                    <th className="px-4 py-3 font-medium">Payment</th>
+                    <th className="px-4 py-3 font-medium">Proof</th>
+                    <th className="px-4 py-3 font-medium">Receipt</th>
                     <th className="px-4 py-3 font-medium">Remarks</th>
                     <th className="px-4 py-3 font-medium text-right">Action</th>
                   </tr>
@@ -930,6 +1136,42 @@ function DeliveryWalletPageContent() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-muted">{formatPeriodDate(row.createdAt)}</td>
+                      <td className="px-4 py-3">
+                        <DeliveryPayoutPaymentCell row={row} />
+                      </td>
+                      <td className="px-4 py-3">
+                        {row.status === 'APPROVED' && row.hasProof ? (
+                          <button
+                            type="button"
+                            onClick={() => void openPayoutProof(row)}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-brand hover:underline"
+                          >
+                            <ImageIcon size={13} />
+                            View
+                          </button>
+                        ) : (
+                          <span className="text-xs text-muted">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {payoutStatementAvailable(row) ? (
+                          <button
+                            type="button"
+                            disabled={downloadBusyId === row.id}
+                            onClick={() => void downloadPayoutPdf(row)}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-brand hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {downloadBusyId === row.id ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <FileText size={13} />
+                            )}
+                            View receipt
+                          </button>
+                        ) : (
+                          <span className="text-xs text-muted">—</span>
+                        )}
+                      </td>
                       <td className="max-w-[220px] px-4 py-3 text-muted">
                         {row.remarks?.trim() || '—'}
                       </td>
@@ -952,9 +1194,9 @@ function DeliveryWalletPageContent() {
                           <button
                             type="button"
                             onClick={() => setHistoryViewRow(row)}
-                            className="inline-flex items-center rounded-lg border border-brand px-3 py-1.5 text-xs font-semibold text-brand transition-colors hover:bg-brand/15"
+                            className="inline-flex items-center rounded-lg border border-navy-border px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-navy-light"
                           >
-                            View More
+                            Review
                           </button>
                         </div>
                       </td>
@@ -963,6 +1205,22 @@ function DeliveryWalletPageContent() {
                 </tbody>
               </table>
             </div>
+          )}
+          {payoutHistoryTotal > 0 && (
+            <AdminTablePagination
+              pageSize={historyPageSize}
+              onPageSizeChange={setHistoryPageSize}
+              rangeStart={payoutHistoryRangeStart}
+              rangeEnd={payoutHistoryRangeEnd}
+              totalItems={payoutHistoryTotal}
+              safePage={payoutHistorySafePage}
+              totalPages={payoutHistoryTotalPages}
+              pageList={buildPageList(payoutHistorySafePage, payoutHistoryTotalPages)}
+              onPageChange={setHistoryPage}
+              itemLabel="payouts"
+              ariaLabel="Payout history pagination"
+              className="border-t border-navy-border"
+            />
           )}
         </div>
       )}
@@ -973,9 +1231,23 @@ function DeliveryWalletPageContent() {
           payout={historyViewRow}
           readOnly
           onClose={() => setHistoryViewRow(null)}
+          onDownloadReceipt={
+            payoutStatementAvailable(historyViewRow as DeliveryPayoutRow)
+              ? () => downloadPayoutPdf(historyViewRow as DeliveryPayoutRow)
+              : undefined
+          }
+          receiptDownloading={downloadBusyId === historyViewRow.id}
         />
       )}
 
+      {viewDueTarget && (
+        <DeliveryPayoutPayModal
+          open
+          due={viewDueTarget}
+          readOnly
+          onClose={() => setViewDueTarget(null)}
+        />
+      )}
     </div>
     </DeliveryWalletUnlockProvider>
   );

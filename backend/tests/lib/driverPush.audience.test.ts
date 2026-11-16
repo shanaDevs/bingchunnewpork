@@ -21,6 +21,7 @@ vi.mock('../../src/utils/logger', () => ({
 }));
 
 import {
+  sendDriverAccountUpdateToDriver,
   sendOrderCancelledToDriver,
   sendPushToBranchDrivers,
 } from '../../src/lib/driverPush';
@@ -243,5 +244,37 @@ describe('sendOrderCancelledToDriver', () => {
       where: { id: 'device-a' },
       data: { fcmToken: null },
     });
+  });
+});
+
+describe('sendDriverAccountUpdateToDriver', () => {
+  const accountPayload = {
+    notificationId: 'notif-1',
+    kind: 'COMPLAINT' as const,
+    title: 'Complaint confirmed',
+    body: 'Your complaint on order #1042 was confirmed.',
+    complaintId: 'cp-1',
+  };
+
+  it('sends DRIVER_UPDATE data to every device', async () => {
+    vi.mocked(prisma.driverDevice.findMany).mockResolvedValue(devicesFor(['a']));
+
+    const result = await sendDriverAccountUpdateToDriver('driver-1', accountPayload);
+
+    expect(result).toEqual({ tokensSent: 1 });
+    expect(vi.mocked(sendDataMessage).mock.calls[0][1]).toEqual({
+      type: 'DRIVER_UPDATE',
+      notificationId: 'notif-1',
+      kind: 'COMPLAINT',
+      title: accountPayload.title,
+      body: accountPayload.body,
+      complaintId: 'cp-1',
+    });
+  });
+
+  it('no-ops when Firebase is not configured', async () => {
+    vi.mocked(isFcmConfigured).mockReturnValue(false);
+    expect(await sendDriverAccountUpdateToDriver('driver-1', accountPayload)).toEqual({ tokensSent: 0 });
+    expect(prisma.driverDevice.findMany).not.toHaveBeenCalled();
   });
 });

@@ -41,6 +41,11 @@ type Props = {
   compact?: boolean;
   /** Hide legend when a rank list is shown beside the chart */
   hideLegend?: boolean;
+  /** Show sum of slices in the hole instead of the hovered slice. */
+  centerMode?: 'active' | 'total';
+  centerLabel?: string;
+  /** Place legend to the right of the ring (analytics mock). */
+  legendSide?: boolean;
 };
 
 function truncateCenterLabel(label: string, max = 14): string {
@@ -55,6 +60,9 @@ export default function RefundDistributionDonutChart({
   unitLabel = 'refunds',
   compact = false,
   hideLegend = false,
+  centerMode = 'active',
+  centerLabel = 'Total',
+  legendSide = false,
 }: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -67,6 +75,10 @@ export default function RefundDistributionDonutChart({
 
   const safeActiveIndex = chartData.length > 0 ? Math.min(activeIndex, chartData.length - 1) : 0;
   const activeItem = chartData[safeActiveIndex];
+  const totalValue = chartData.reduce((sum, item) => sum + item.value, 0);
+  const centerValue = centerMode === 'total' ? totalValue : activeItem?.value;
+  const holeLabel =
+    centerMode === 'total' ? centerLabel : activeItem ? truncateCenterLabel(activeItem.label) : centerLabel;
 
   const chartSlices = useMemo(
     () =>
@@ -100,7 +112,11 @@ export default function RefundDistributionDonutChart({
   }
 
   return (
-    <div className={`flex max-w-full flex-col items-center ${compact ? 'gap-1' : ''}`}>
+    <div
+      className={`flex max-w-full items-center ${
+        legendSide ? 'flex-row gap-4' : `flex-col ${compact ? 'gap-1' : ''}`
+      }`}
+    >
       <ChartContainer
         config={chartConfig}
         className="mx-auto aspect-square shrink-0"
@@ -134,23 +150,22 @@ export default function RefundDistributionDonutChart({
             {chartSlices.map((entry) => (
               <Cell key={entry.key} fill={entry.fill} />
             ))}
-            {activeItem && (
-              <DonutChartCenterLabel
-                value={activeItem.value}
-                label={truncateCenterLabel(activeItem.label)}
-              />
+            {centerValue != null && (
+              <DonutChartCenterLabel value={centerValue} label={holeLabel} />
             )}
           </Pie>
         </PieChart>
       </ChartContainer>
       {!hideLegend && (
         <DonutChartLegend
-          stacked={compact}
+          stacked={compact && !legendSide}
+          side={legendSide}
           items={chartData.map((item) => ({
             key: item.key,
             label: item.label,
             color: item.fill,
             percent: item.percent,
+            count: item.value,
           }))}
         />
       )}

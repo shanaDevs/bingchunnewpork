@@ -422,6 +422,8 @@ const REQUESTS: Record<string, unknown> = {
   'POST /api/delivery/me/fcm-token': { token: 'fcm-device-token', platform: 'android' },
   'POST /api/delivery/me/complaints': { orderId: ID.order, message: 'Customer was not at the gate' },
   'POST /api/delivery/me/branch-requests': { toStoreId: ID.store, note: 'Can cover Nugegoda this evening' },
+  'PATCH /api/delivery/me/notifications/:id/read': {},
+  'POST /api/delivery/me/notifications/read-all': {},
   'POST /api/delivery/locations/batch': {
     jobId: ID.job,
     points: [{ lat: 6.8649, lng: 79.8997, accuracyM: 8, speedKph: 22, heading: 90, recordedAt: AT, jobId: ID.job }],
@@ -514,7 +516,10 @@ const REQUESTS: Record<string, unknown> = {
     storeId: ID.store,
   },
   'PATCH /api/admin/users/:id': { name: 'Kasun Silva', isActive: true },
-  'PUT /api/admin/users/:id/permissions': { permissions: [{ menu: 'ORDERS', actions: ['read', 'update'] }] },
+  'PUT /api/admin/users/:id/permissions': {
+    permissions: [{ menu: 'ORDERS', actions: ['read', 'update'] }],
+    password: 'Secret123',
+  },
   'PUT /api/admin/users/:id/stores': { storeIds: [ID.store] },
   'POST /api/admin/roles': { name: 'AUDITOR', permissions: [{ menu: 'REPORTS', actions: ['read'] }] },
   'PUT /api/admin/roles/:id': { name: 'AUDITOR' },

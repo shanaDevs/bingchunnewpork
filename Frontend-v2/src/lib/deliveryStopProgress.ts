@@ -16,9 +16,50 @@ export type ReturnNodeState = 'completed' | 'active' | 'pending';
 
 const POST_PICKUP_JOB_STATUSES = new Set(['IN_PROGRESS', 'RETURNING', 'COMPLETED']);
 
+const LIVE_DELIVERY_JOB_STATUSES = new Set(['ASSIGNED', 'QUEUED', 'IN_PROGRESS', 'RETURNING']);
+
+const GPS_LIKELY_LABELS = new Set([
+  'CANCELLED',
+  'VEHICLE_FAILURE',
+  'ABANDONED',
+  'PARTIALLY_COMPLETED',
+]);
+
+export type ActualRouteReplayOpts = {
+  displayStatus?: string | null;
+  forceReplay?: boolean;
+};
+
+/** Live GPS overlay — not used for past-due incomplete rows. */
+export function jobUsesLiveRouteTracking(
+  status: string,
+  opts?: ActualRouteReplayOpts,
+): boolean {
+  if (opts?.forceReplay) return false;
+  if (opts?.displayStatus) return false;
+  return LIVE_DELIVERY_JOB_STATUSES.has(status);
+}
+
 /** Admin map replay: stored or GPS-fallback actual path (not live tracking). */
-export function jobSupportsActualRouteReplay(status: string): boolean {
-  return status === 'COMPLETED' || status === 'VEHICLE_FAILURE';
+export function jobSupportsActualRouteReplay(
+  status: string,
+  opts?: ActualRouteReplayOpts,
+): boolean {
+  return !jobUsesLiveRouteTracking(status, opts);
+}
+
+/** Incomplete/cancelled jobs that likely recorded rider movement. */
+export function jobLikelyHasRiderGps(job: {
+  hasActualRoute?: boolean;
+  status: string;
+  displayStatus?: string | null;
+  driver?: unknown;
+}): boolean {
+  if (job.hasActualRoute) return true;
+  const label = job.displayStatus || job.status;
+  if (label === 'MISSED') return false;
+  if (job.driver) return true;
+  return GPS_LIKELY_LABELS.has(label);
 }
 
 /** Branch is completed after Confirm Pickup or once delivery has started. */

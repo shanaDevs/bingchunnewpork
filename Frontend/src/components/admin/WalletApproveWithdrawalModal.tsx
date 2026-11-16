@@ -46,7 +46,10 @@ import {
   toDateInputValue,
   valuesDifferByMoreThan,
 } from '@/lib/walletUtils';
-import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
+import {
+  formatStoredPayoutPeriodLabel,
+  resolvePayoutCycleDisplayRange,
+} from '@/components/admin/payoutSecondCycleDisplayRange';
 import { confirmDialog } from '@/store/confirmStore';
 import type { WithdrawalRow } from './WalletWithdrawalTable';
 
@@ -113,6 +116,22 @@ export default function WalletApproveWithdrawalModal({
   const periodTo = toDateInputValue(activeWithdrawal?.periodTo);
   const branchLabel = branchName ?? activeWithdrawal?.storeId ?? 'Branch';
   const breakdown = parseWithdrawalBreakdown(snapshotBreakdownSource);
+  const storedCycleStage = breakdown?.cycleStage ?? activeWithdrawal?.cycleStage ?? null;
+  const payoutDisplayRange =
+    periodFrom && periodTo
+      ? resolvePayoutCycleDisplayRange({
+          cycleStage: storedCycleStage,
+          cycleFrom: breakdown?.cycleFrom ?? null,
+          periodFrom,
+          periodTo,
+        })
+      : null;
+  const billingPeriodLabel = payoutDisplayRange
+    ? formatStoredPayoutPeriodLabel({
+        periodFrom: payoutDisplayRange.displayFrom,
+        periodTo: payoutDisplayRange.displayTo,
+      })
+    : null;
   const snapshotFees = extractWithdrawalSnapshotFees(snapshotBreakdownSource);
   const channelBreakdown = breakdown?.channelBreakdown ?? null;
   const channelTableData = channelBreakdown ?? (preview?.breakdown ?? null);
@@ -328,8 +347,8 @@ export default function WalletApproveWithdrawalModal({
         branchReceivesLkr: branchPayout.totalBranchPayoutLkr,
         platformCommissionLkr,
         periodNetLkr: branchPayout.periodWalletNetLkr,
-        dateFrom: periodFrom,
-        dateTo: periodTo,
+        dateFrom: payoutDisplayRange?.displayFrom ?? periodFrom,
+        dateTo: payoutDisplayRange?.displayTo ?? periodTo,
         showAdvance,
         advanceAmountLkr,
         branchPayout,
@@ -732,18 +751,18 @@ export default function WalletApproveWithdrawalModal({
                       <Wallet size={16} className="text-[#64748b] dark:text-slate-400" />
                       <span>Available wallet · </span>
                       <span className="font-bold text-[#1e293b] dark:text-slate-100">
-                        {walletSummaryLoading ? '…' : `LKR ${formatMoney(availableLkr)}`}
+                        {walletSummaryLoading ? '…' : formatMoney(availableLkr)}
                       </span>
                     </div>
 
-                    {(periodFrom || periodTo) && (
+                    {billingPeriodLabel && billingPeriodLabel !== '—' && (
                       <>
                         <span className="text-[#cbd5e1] dark:text-slate-700">|</span>
                         <div className="flex items-center gap-1.5">
                           <CalendarRange size={16} className="text-[#64748b] dark:text-slate-400" />
                           <span>Billing period · </span>
                           <span className="font-semibold text-[#1e293b] dark:text-slate-100">
-                            {formatBiweeklyPeriodLabel(periodFrom, periodTo)}
+                            {billingPeriodLabel}
                           </span>
                         </div>
                       </>

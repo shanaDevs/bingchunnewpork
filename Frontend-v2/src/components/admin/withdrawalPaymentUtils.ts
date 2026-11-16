@@ -26,3 +26,23 @@ export const WITHDRAWAL_METHOD_META: Record<
     iconClass: 'text-amber-600 dark:text-amber-400',
   },
 };
+
+export function formatWithdrawalCheckPaymentDetail(
+  checkNumber?: string | null,
+  checkDate?: string | null,
+): string | null {
+  const parts: string[] = [];
+  const num = checkNumber?.trim();
+  if (num) parts.push(`No. ${num}`);
+  if (checkDate) {
+    const d = new Date(`${checkDate.slice(0, 10)}T12:00:00`);
+    parts.push(
+      d.toLocaleDateString('en-LK', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      }),
+    );
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}

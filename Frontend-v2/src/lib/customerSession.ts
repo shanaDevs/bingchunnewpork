@@ -91,6 +91,8 @@ export function saveCustomerAuth(user: unknown, accessExpiresAt?: number | null)
 
 function accessNeedsRefresh(): boolean {
   const exp = getCustomerAccessExpiry();
+  // Missing expiry (legacy / non-expiring): skip proactive refresh; 401 retry
+  // still rotates via refreshCustomerAuth.
   if (!exp) return false;
   return exp - Date.now() < CUSTOMER_ACCESS_REFRESH_BUFFER_MS;
 }
@@ -122,13 +124,18 @@ export async function refreshCustomerAuth(): Promise<void> {
   const payload = json.data as { accessExpiresAt?: number } | undefined;
   if (payload?.accessExpiresAt) {
     localStorage.setItem(ACCESS_EXP_KEY, String(payload.accessExpiresAt));
+  } else {
+    localStorage.removeItem(ACCESS_EXP_KEY);
   }
 
   const { useAuthStore } = await import('@/store/authStore');
   useAuthStore.setState({ isAuthenticated: true });
 }
 
-/** Refresh access token when missing, expired, or about to expire. */
+/**
+ * Keep the customer session alive via refresh token (Facebook-style).
+ * Access may expire; refresh rotation renews it. Only logout when refresh fails.
+ */
 export async function ensureCustomerAccessToken(): Promise<boolean> {
   if (!getStoredUser()) {
     return true;

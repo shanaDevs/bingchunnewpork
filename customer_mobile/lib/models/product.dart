@@ -108,7 +108,7 @@ class Product {
   }) : imageUrl = ApiConfig.resolveAssetUrl(imageUrl);
 
   /// Max units a customer may order at the selected branch.
-  /// Backend already applies the online OOS buffer (qty &lt; 5 on-hand → 0 online).
+  /// [branchQuantity] is online-available (on-hand minus the branch OOS buffer).
   int get orderableQty {
     if (!isAvailable || isComingSoon || isOutOfStock) return 0;
     if (!hasStoreAvailability) return unboundedQty;
@@ -116,8 +116,7 @@ class Product {
     if (branchInStock == false) return 0;
     final qty = branchQuantity;
     if (qty == null) return unboundedQty;
-    // Less than 5 remaining → out of stock for online orders.
-    if (qty < outOfStockThreshold) return 0;
+    if (qty <= 0) return 0;
     return qty;
   }
 

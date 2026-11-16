@@ -16,6 +16,7 @@ import CupPourOverlay from '@/components/cart/CupPourOverlay';
 import LoyaltyPointsFloat from '@/components/cart/LoyaltyPointsFloat';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import CustomerSocketProvider from '@/components/notifications/CustomerSocketProvider';
+import BranchOperatingLiveSync from '@/hooks/useBranchOperatingLiveSync';
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -40,6 +41,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <CustomerSocketProvider>
+        <BranchOperatingLiveSync />
         <CustomerAuthSync />
         <CartAuthSync />
         <Suspense fallback={null}>

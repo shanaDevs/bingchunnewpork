@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { RefreshCw, X, Lock, CheckCircle2, Wand2, Minus, Plus, CircleDot, Calendar } from 'lucide-react';
 import ProductImage from '@/components/ui/ProductImage';
+import { adminApiFetch } from '@/lib/adminApi';
+import { getAdminSession, isSuperAdmin } from '@/lib/adminAuth';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import {
   formatDateWithWeekday,
@@ -44,15 +46,10 @@ function fetchAppSettings(): Promise<AppSettings> {
 }
 
 async function saveWeeklyResetDay(day: number): Promise<void> {
-    const res = await fetch(`${getApiBaseUrl()}/settings/app`, {
+  await adminApiFetch('/settings/app', {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ weeklyResetDay: day }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || 'Failed to save reset day');
 }
 
 type ResetRow = {
@@ -96,7 +93,9 @@ export default function ResetStockModal({
   onSuccess,
 }: ResetStockModalProps) {
   const qc = useQueryClient();
+  const canEditWeeklySchedule = isSuperAdmin(getAdminSession());
   const [pickDayMode, setPickDayMode] = useState(false);
+  const [scheduleDirty, setScheduleDirty] = useState(false);
   const [lockedResetDate, setLockedResetDate] = useState<string | null>(null);
   const [nextResetDay, setNextResetDay] = useState(() => getColomboDayOfWeek());
   const [note, setNote] = useState('');
@@ -173,8 +172,16 @@ export default function ResetStockModal({
         items,
       });
 
-      if (nextResetDay !== weeklyResetDay) {
-        await saveWeeklyResetDay(nextResetDay);
+      if (canEditWeeklySchedule && scheduleDirty && nextResetDay !== weeklyResetDay) {
+        try {
+          await saveWeeklyResetDay(nextResetDay);
+        } catch (error) {
+          toast.error(
+            error instanceof Error
+              ? `Stock was reset, but the weekly reset day could not be saved: ${error.message}`
+              : 'Stock was reset, but the weekly reset day could not be saved.',
+          );
+        }
       }
 
       return result;
@@ -212,6 +219,7 @@ export default function ResetStockModal({
 
   function useScheduledResetDay() {
     setPickDayMode(false);
+    setScheduleDirty(false);
     setNextResetDay(weeklyResetDay ?? getColomboDayOfWeek());
   }
 
@@ -241,12 +249,15 @@ export default function ResetStockModal({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {pickDayMode ? (
+            {canEditWeeklySchedule && pickDayMode ? (
               <>
                 <select
                   className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
                   value={nextResetDay}
-                  onChange={(e) => setNextResetDay(parseInt(e.target.value, 10))}
+                  onChange={(e) => {
+                    setNextResetDay(parseInt(e.target.value, 10));
+                    setScheduleDirty(true);
+                  }}
                   aria-label="Next reset day"
                 >
                   {WEEKLY_RESET_DAY_LABELS.map((label, day) => (
@@ -263,7 +274,7 @@ export default function ResetStockModal({
                   Cancel
                 </button>
               </>
-            ) : (
+            ) : canEditWeeklySchedule ? (
               <button
                 type="button"
                 onClick={enablePickResetDay}
@@ -272,7 +283,7 @@ export default function ResetStockModal({
                 <Calendar size={14} />
                 Change day
               </button>
-            )}
+            ) : null}
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
               <X size={20} />
             </button>

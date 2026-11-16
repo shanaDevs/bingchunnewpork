@@ -1,5 +1,6 @@
 'use client';
 import { adminApiFetch as adminFetch } from '@/lib/adminApi';
+import { getApiBaseUrl } from '@/lib/apiBase';
 import {
   AdminPermission,
   buildPermissionsMap,
@@ -9,6 +10,8 @@ import {
   PERMISSION_MODULES,
   serializePermissionsMap,
 } from '@/lib/adminPermissions';
+import { confirmDialog } from '@/store/confirmStore';
+import AdminPinGateModal from '@/components/admin/AdminPinGateModal';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Save, Check } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -51,6 +54,7 @@ export default function StaffPermissionsGrid({
   }, [initialPermissions, effectiveRole]);
 
   const [permissionsMap, setPermissionsMap] = useState<Record<string, AdminPermission>>({});
+  const [pinGateOpen, setPinGateOpen] = useState(false);
 
   useEffect(() => {
     if (baselineMap) {
@@ -59,11 +63,13 @@ export default function StaffPermissionsGrid({
   }, [baselineMap]);
 
   const saveMutation = useMutation({
-    mutationFn: (perms: AdminPermission[]) => adminFetch(`/admin/users/${id}/permissions`, {
-      method: 'PUT',
-      body: JSON.stringify({ permissions: perms }),
-    }),
+    mutationFn: ({ permissions, password }: { permissions: AdminPermission[]; password: string }) =>
+      adminFetch(`/admin/users/${id}/permissions`, {
+        method: 'PUT',
+        body: JSON.stringify({ permissions, password }),
+      }),
     onSuccess: () => {
+      setPinGateOpen(false);
       toast.success('Permissions saved successfully');
       queryClient.invalidateQueries({ queryKey: ['admin-permissions', id] });
     },
@@ -72,9 +78,19 @@ export default function StaffPermissionsGrid({
     },
   });
 
-  const handleSave = () => {
-    saveMutation.mutate(serializePermissionsMap(permissionsMap));
-  };
+  async function handleSave() {
+    if (saveMutation.isPending) return;
+    const confirmed = await confirmDialog({
+      title: 'Save permission changes?',
+      message:
+        'These changes take effect immediately and control what this staff member can see and do. Continue to verify your identity.',
+      confirmLabel: 'Continue',
+      cancelLabel: 'Cancel',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
+    setPinGateOpen(true);
+  }
 
   const handleToggle = (menu: string, action: 'canCreate' | 'canRead' | 'canUpdate' | 'canDelete') => {
     setPermissionsMap((prev) => {
@@ -115,7 +131,8 @@ export default function StaffPermissionsGrid({
           </p>
         </div>
         <button
-          onClick={handleSave}
+          type="button"
+          onClick={() => void handleSave()}
           disabled={saveMutation.isPending}
           className="btn-primary px-6 py-2 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-brand/20"
         >
@@ -188,6 +205,24 @@ export default function StaffPermissionsGrid({
           </div>
         ))}
       </div>
+
+      <AdminPinGateModal
+        open={pinGateOpen}
+        onClose={() => {
+          if (!saveMutation.isPending) setPinGateOpen(false);
+        }}
+        onVerified={(pin) => {
+          saveMutation.mutate({
+            permissions: serializePermissionsMap(permissionsMap),
+            password: pin,
+          });
+        }}
+        apiBase={getApiBaseUrl()}
+        busy={saveMutation.isPending}
+        titleId="staff-permissions-pin-title"
+        inputId="staff-permissions-pin"
+        description="Enter your admin password to verify your identity before saving these permission changes."
+      />
     </div>
   );
 }

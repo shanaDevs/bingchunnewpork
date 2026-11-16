@@ -36,6 +36,8 @@ vi.mock('@bingchun/delivery-domain', () => ({
 }));
 
 vi.mock('../../src/lib/spaces', () => ({
+  RIDER_LICENSE_PRESIGN_TIMEOUT_MS: 4000,
+  RIDER_LICENSE_IMAGE_ENDPOINT_TIMEOUT_MS: 5000,
   viewableLicenseImageUrlWithTimeout: vi.fn(async (url: string | null | undefined) => {
     if (!url) return null;
     if (url.includes('/drivers/license/')) return 'https://signed.example/license?X-Amz-Signature=abc';
@@ -74,8 +76,9 @@ describe('driverSelfController.getMe', () => {
       licenseNumber: 'B1234567',
       disabilities: null,
       profilePhotoUrl: 'https://cdn.example/photo.jpg',
-      licenseImageUrl: 'https://cdn.example/license.jpg',
-      dutyStatus: 'OFF_DUTY',
+        licenseImageUrl: 'https://cdn.example/license.jpg',
+        hasLicenseImage: true,
+        dutyStatus: 'OFF_DUTY',
       meritPoints: 100,
       consecutiveSuccessfulDeliveries: 5,
       storeId: 'store-1',
@@ -96,6 +99,7 @@ describe('driverSelfController.getMe', () => {
         nicNumber: '200012345678',
         consecutiveSuccessfulDeliveries: 5,
         licenseImageUrl: 'https://cdn.example/license.jpg',
+        hasLicenseImage: true,
       }),
     });
   });
@@ -136,5 +140,6 @@ describe('driverSelfController.getMe', () => {
     };
     expect(body.data.licenseImageUrl).toBe('https://signed.example/license?X-Amz-Signature=abc');
     expect(body.data.licenseImageUrl).not.toBe(stored);
+    expect(body.data.hasLicenseImage).toBe(true);
   });
 });

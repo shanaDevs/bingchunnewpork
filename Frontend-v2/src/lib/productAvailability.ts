@@ -14,6 +14,11 @@ export function getProductUnavailableLabel(product: Product): 'Coming Soon' | 'O
   return isProductComingSoon(product) ? 'Coming Soon' : 'Out of Stock';
 }
 
+/** Short badge copy on menu cards and product detail (redesign menu). */
+export function getMenuUnavailableBadgeLabel(product: Product): string {
+  return isProductComingSoon(product) ? 'Coming soon' : 'Sold out';
+}
+
 /** Tag badge shown to customers — overrides when unavailable at branch. */
 export function getProductDisplayTag(product: Product): string | undefined {
   if (!isProductInStock(product)) return getProductUnavailableLabel(product);
@@ -35,7 +40,7 @@ export function isProductLowStock(product: Product): boolean {
 
 /**
  * Max units a customer may order at the selected branch.
- * Blocks when: isAvailable is false, OOS flags, or remaining qty &lt; 5.
+ * `branchStock.quantity` is already online-available (on-hand minus the branch OOS buffer).
  */
 export function getProductOrderableQty(product: Product): number {
   if (product.isAvailable === false) return 0;
@@ -49,7 +54,7 @@ export function getProductOrderableQty(product: Product): number {
 
     const qty = availability.branchStock?.quantity;
     if (qty === undefined) return Number.MAX_SAFE_INTEGER;
-    if (qty < OUT_OF_STOCK_THRESHOLD) return 0;
+    if (qty <= 0) return 0;
     return Math.max(0, qty);
   }
 

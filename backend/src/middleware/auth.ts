@@ -274,6 +274,7 @@ export function signToken(
     ? { sub, type, tv: tokenVersion }
     : { sub, type, role, storeId };
   if (type === 'user') {
+    // Short-lived access; CustomerAuthSync + /auth/refresh keep the session alive.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (jwt.sign as any)(payload, config.jwtSecret, { expiresIn: config.jwtUserExpiresIn });
   }
@@ -304,6 +305,7 @@ export function signRefreshToken(
   );
 }
 
+/** Admin + cashier refresh — long-lived; access is short and rotated by the UI keep-alive. */
 export function signAdminRefreshToken(sub: string, tokenVersion = 0): string {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (jwt.sign as any)(

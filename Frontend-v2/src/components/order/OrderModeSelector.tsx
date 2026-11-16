@@ -43,7 +43,7 @@ function isDeliveryBranchOrderable(branch: DeliveryBranchOption): boolean {
 /**
  * saved – a branch was set up before: continue with it, or choose again (small panel).
  * type – step 1, Pickup or Delivery (small panel).
- * setup – step 2, the address or branch search, list and map (large panel).
+ * setup – step 2, confirm a place on the map, then pick a nearest branch (large panel).
  * conflict – the chosen branch can't supply some items in the cup: remove them and switch, or go back (small panel).
  */
 export type OrderFlowStep = 'saved' | 'type' | 'setup' | 'conflict';
@@ -128,6 +128,10 @@ const secondaryButton = cn(
   'inline-flex items-center justify-center gap-2 rounded-full bg-white px-6 py-3.5 font-semibold text-brand-700 ring-1 ring-brand-200 ring-inset transition-colors hover:bg-brand-50',
   focusRing,
 );
+const footerButton = cn(
+  'inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-brand-600 px-4 text-sm font-semibold whitespace-nowrap text-snow shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none sm:px-5',
+  focusRing,
+);
 
 /** A choice held back by the conflict step: the cup lines it would remove, and how to apply it. */
 type PendingSwitch = {
@@ -166,6 +170,8 @@ export function OrderModeSelector({
     if (startAtSetup && initialMode) return 'setup';
     return hasSavedSetup ? 'saved' : 'type';
   });
+  /** Map first; the nearest-branch list appears only after the place is confirmed. */
+  const [setupPhase, setSetupPhase] = useState<'place' | 'branches'>('place');
   const [mode, setMode] = useState<OrderMode>(() => {
     if (initialMode) return initialMode;
     if (orderMode === 'TAKEAWAY' || takeawayInfo) return 'TAKEAWAY';
@@ -208,6 +214,8 @@ export function OrderModeSelector({
   const [branchSearch, setBranchSearch] = useState('');
   const [pickupAreaLabel, setPickupAreaLabel] = useState<string | null>(null);
   const userPickedStore = useRef(false);
+  /** After "Confirm My Pickup", the saved branch must not come back selected on its own. */
+  const skipSavedPickupSelection = useRef(false);
   const validateSeq = useRef(0);
   const nearestDetectSeq = useRef(0);
   const pickupAutoDetectStarted = useRef(false);
@@ -277,6 +285,7 @@ export function OrderModeSelector({
   }, [deliveryInfo, addressSelection]);
 
   useEffect(() => {
+    if (skipSavedPickupSelection.current) return;
     if (mode !== 'TAKEAWAY' || !takeawayInfo?.storeId || allStores.length === 0) return;
     const saved = allStores.find((s) => s.id === takeawayInfo.storeId);
     if (saved) {
@@ -285,7 +294,7 @@ export function OrderModeSelector({
     }
   }, [mode, allStores, takeawayInfo]);
 
-  const validateDeliveryAt = useCallback(async (sel: AddressSelection, storeId?: string, silent = true) => {
+  const validateDeliveryAt = useCallback(async (sel: AddressSelection, silent = true) => {
     setValidating(true);
     const seq = ++validateSeq.current;
     try {
@@ -293,16 +302,9 @@ export function OrderModeSelector({
         lat: sel.lat,
         lng: sel.lng,
         address: sel.address,
-        ...(storeId ? { storeId } : {}),
       });
       if (seq !== validateSeq.current) return;
       setValidation(result);
-      if (result.eligible && result.store) {
-        setSelectedDeliveryStoreId(result.store.id);
-      } else if (!storeId && result.suggestedBranches?.length) {
-        const firstOrderable = result.suggestedBranches.find((b) => isDeliveryBranchOrderable(b));
-        setSelectedDeliveryStoreId(firstOrderable?.id ?? null);
-      }
       if (!silent && !result.eligible) {
         toast.error(result.message || 'Delivery not available to this address');
       }
@@ -320,7 +322,7 @@ export function OrderModeSelector({
   useEffect(() => {
     if (mode !== 'DELIVERY' || step !== 'setup' || !addressSelection?.address) return;
     const timer = setTimeout(() => {
-      void validateDeliveryAt(addressSelection, undefined, true);
+      void validateDeliveryAt(addressSelection, true);
     }, 500);
     return () => clearTimeout(timer);
   }, [addressSelection, mode, step, validateDeliveryAt]);
@@ -486,6 +488,7 @@ export function OrderModeSelector({
     playModeSelectSound(next);
     setMode(next);
     setStep('setup');
+    setSetupPhase('place');
     setValidation(null);
     setSelectedStore(null);
     setSelectedDeliveryStoreId(null);
@@ -494,11 +497,41 @@ export function OrderModeSelector({
     setPickupAreaLabel(null);
     pickupAutoDetectStarted.current = false;
     userPickedStore.current = false;
+    skipSavedPickupSelection.current = false;
   }
 
   function goBackToChoose() {
     setStep('type');
     setValidation(null);
+    setSetupPhase('place');
+  }
+
+  /** From the branch list, Back returns to the map. From the map, Back returns to Pickup or Delivery. */
+  function goBackFromSetup() {
+    if (setupPhase === 'branches') {
+      setSetupPhase('place');
+      return;
+    }
+    goBackToChoose();
+  }
+
+  /** The map step: the place is set, so open the nearest branches. The branch itself is chosen next. */
+  function confirmPlace() {
+    if (mode === 'DELIVERY') {
+      if (!addressSelection || !validation?.eligible || suggestedDeliveryBranches.length === 0) {
+        toast.error(validation?.message || 'Set a delivery location we can reach, then confirm.');
+        return;
+      }
+      setSelectedDeliveryStoreId(null);
+    } else if (pickupOptions.length === 0) {
+      toast.error('No branches found. Search by branch or area, or move the pin.');
+      return;
+    } else {
+      skipSavedPickupSelection.current = true;
+      setSelectedStore(null);
+    }
+    playConfirmClickSound();
+    setSetupPhase('branches');
   }
 
   function saveDeliveryFromValidation(result: DeliveryValidation, sel: AddressSelection) {
@@ -635,7 +668,7 @@ export function OrderModeSelector({
             {/* 40px tall below desktop, an easy tap target. */}
             <button
               type="button"
-              onClick={goBackToChoose}
+              onClick={goBackFromSetup}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-full py-1.5 pr-3.5 pl-2.5 text-sm font-semibold text-brand-700 ring-1 ring-brand-200 ring-inset transition-colors hover:bg-brand-50 max-lg:h-10 max-lg:pr-4 max-lg:pl-3',
                 focusRing,
@@ -743,65 +776,71 @@ export function OrderModeSelector({
 
         {step === 'setup' && (
           <>
-            {/* The panel itself never scrolls: only the branch list does. */}
+            {/* The panel itself never scrolls: the map fills it, and only the branch list scrolls. */}
             <div className="flex min-h-0 flex-1 flex-col px-5 pb-3 sm:px-8">
               {mode === 'DELIVERY' ? (
-                <AddressMapPicker
-                  value={addressSelection}
-                  layout="panel"
-                  autoDetectOnMount={!addressSelection}
-                  branchMarkers={deliveryBranchMarkers}
-                  selectedBranchId={selectedDeliveryStoreId}
-                  onBranchSelect={selectDeliveryBranchFromMap}
-                  showRoute
-                  routeAnimation="delivery"
-                  onLocationResolved={playLocationPinSound}
-                  onChange={(sel) => {
-                    setAddressSelection(sel);
-                    setValidation(null);
-                    setSelectedDeliveryStoreId(null);
-                  }}
-                  mapOverlay={
-                    deliveryOptions.length > 0 ? (
-                      <BranchCarousel
-                        options={deliveryOptions}
-                        selectedId={selectedDeliveryBranch?.id ?? null}
-                        onSelect={selectDeliveryById}
-                      />
-                    ) : null
-                  }
-                >
-                  {deliveryOptions.length > 0 ? (
-                    <BranchList options={deliveryOptions} selectedId={selectedDeliveryBranch?.id ?? null} onSelect={selectDeliveryById} />
-                  ) : validating || (addressSelection && !validation) ? (
-                    <StatusLine icon={Loader2} spin>
-                      Finding branches that deliver here…
-                    </StatusLine>
-                  ) : validation ? (
-                    <EmptyState image={MASCOT_IMAGES.emptyCartSad} title="We don't deliver there yet" role="status">
-                      {validation.message || 'Delivery is not available here. Try takeaway or move the pin.'}
-                      {validation.reason === 'out-of-range' && (
-                        <span className="mt-3 flex justify-center">
+                <div className="flex min-h-0 flex-1 flex-col gap-3">
+                  <AddressMapPicker
+                    value={addressSelection}
+                    layout="panel"
+                    mapFocus
+                    hideSearch={setupPhase === 'branches'}
+                    autoDetectOnMount={!addressSelection}
+                    branchMarkers={deliveryBranchMarkers}
+                    selectedBranchId={setupPhase === 'branches' ? selectedDeliveryStoreId : null}
+                    onBranchSelect={setupPhase === 'branches' ? selectDeliveryBranchFromMap : undefined}
+                    showRoute={setupPhase === 'branches' && Boolean(selectedDeliveryBranch && addressSelection)}
+                    routeAnimation="delivery"
+                    onLocationResolved={playLocationPinSound}
+                    onChange={(sel) => {
+                      setAddressSelection(sel);
+                      setValidation(null);
+                      setSelectedDeliveryStoreId(null);
+                    }}
+                  >
+                    {setupPhase === 'place' && addressSelection && validating && (
+                      <StatusLine icon={Loader2} spin>
+                        Checking which branches can deliver here…
+                      </StatusLine>
+                    )}
+                    {setupPhase === 'place' && validation && !validation.eligible && (
+                      <p className="mt-2 text-xs leading-5 text-red-700">
+                        {validation.message || "We don't deliver there yet. Move the pin, or switch to pickup."}{' '}
+                        {validation.reason === 'out-of-range' && (
                           <button
                             type="button"
                             onClick={() => void pickMode('TAKEAWAY')}
-                            className={cn(primaryButton, 'px-4 py-2 text-sm shadow-none')}
+                            className={cn('font-semibold text-brand-700 underline underline-offset-2', focusRing)}
                           >
-                            <Store className="size-4" aria-hidden />
                             Switch to Pickup
                           </button>
-                        </span>
-                      )}
-                    </EmptyState>
-                  ) : (
-                    <EmptyState image={MASCOT_IMAGES.delivery} title="Where should we deliver?">
-                      Search your street or area, or drag the pin, to see the branches that deliver there.
-                    </EmptyState>
+                        )}
+                      </p>
+                    )}
+                    {setupPhase === 'place' && validation?.eligible && suggestedDeliveryBranches.length === 0 && !validating && (
+                      <p className="mt-2 text-xs leading-5 text-slate-600">
+                        No branches can deliver to this spot. Move the pin and try again.
+                      </p>
+                    )}
+                  </AddressMapPicker>
+                  {setupPhase === 'branches' && (
+                    <NearestBranches
+                      options={deliveryOptions}
+                      selectedId={selectedDeliveryBranch?.id ?? null}
+                      onSelect={selectDeliveryById}
+                      pending={validating || Boolean(addressSelection && !validation)}
+                      empty={
+                        <p className="mt-2 text-xs leading-5 text-slate-600">
+                          {validation?.message || 'No branches can deliver to this spot. Move the pin and try again.'}
+                        </p>
+                      }
+                    />
                   )}
-                </AddressMapPicker>
+                </div>
               ) : (
-                <div className="flex min-h-0 flex-col gap-4 max-md:flex-1 md:mt-1 md:grid md:h-123 md:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] md:grid-rows-[minmax(0,1fr)] md:gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.4fr)] short:grid short:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] short:grid-rows-[minmax(0,1fr)]">
-                  <div className="flex min-h-0 flex-col max-md:shrink-0">
+                <div className="flex min-h-0 flex-1 flex-col gap-3">
+                  {setupPhase === 'place' && (
+                  <div className="shrink-0">
                     <label className="relative block shrink-0">
                       <span className="sr-only">Search pickup branches by name or city</span>
                       <Search className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-brand-500" aria-hidden />
@@ -825,23 +864,42 @@ export function OrderModeSelector({
                       )}
                     </label>
 
-                    {/* How the customer's location is used; "nearest first" only describes the list while nothing is searched. */}
                     {detectingLocation || (storesLoading && pickupCoords) ? (
                       <StatusLine icon={LocateFixed} tone="pending">
                         Finding branches near you…
                       </StatusLine>
+                    ) : branchSearchQuery && pickupOptions.length === 0 && !storesLoading ? (
+                      <StatusLine icon={Search}>
+                        Nothing matches “{branchSearchQuery}”.{' '}
+                        <button
+                          type="button"
+                          onClick={() => setBranchSearch('')}
+                          className={cn('font-semibold text-brand-600 underline underline-offset-2', focusRing)}
+                        >
+                          Show all branches
+                        </button>
+                      </StatusLine>
                     ) : branchSearchQuery ? null : pickupLocationOff && pickupAreaLabel !== 'pinned location' ? (
                       <StatusLine icon={LocateOff}>
-                        Location is off, so showing branches near Colombo. Search by branch or area, or allow location in
-                        your browser.
+                        Location is off, so the map starts near Colombo. Search by branch or area, or allow location in your
+                        browser.
                       </StatusLine>
                     ) : pickupCoords ? (
                       <StatusLine icon={pickupAreaLabel === 'pinned location' ? MapPin : LocateFixed} tone="found">
-                        <span className="font-semibold text-emerald-700">Nearest branches first</span>,{' '}
-                        {pickupAreaLabel === 'pinned location' ? 'from the pin on the map' : 'based on your location'}
+                        {setupPhase === 'place' ? (
+                          <>
+                            <span className="font-semibold text-emerald-700">Location set</span>. Confirm to see the nearest
+                            branches.
+                          </>
+                        ) : (
+                          <>
+                            <span className="font-semibold text-emerald-700">Nearest branches first</span>,{' '}
+                            {pickupAreaLabel === 'pinned location' ? 'from the pin on the map' : 'based on your location'}
+                          </>
+                        )}
                       </StatusLine>
                     ) : (
-                      <StatusLine icon={LocateOff}>Search by branch or area, or use your location.</StatusLine>
+                      <StatusLine icon={LocateOff}>Search by branch or area, drag the pin, or use your location.</StatusLine>
                     )}
                     {!detectingLocation && (
                       <button
@@ -860,33 +918,10 @@ export function OrderModeSelector({
                         Use my current location
                       </button>
                     )}
-
-                    {pickupOptions.length > 0 ? (
-                      <BranchList options={pickupOptions} selectedId={selectedStore?.id ?? null} onSelect={selectPickupById} />
-                    ) : storesLoading ? (
-                      <StatusLine icon={Loader2} spin>
-                        Loading branches…
-                      </StatusLine>
-                    ) : branchSearchQuery ? (
-                      <EmptyState image={MASCOT_IMAGES.search} title="No branches found">
-                        Nothing matches “{branchSearchQuery}”.{' '}
-                        <button
-                          type="button"
-                          onClick={() => setBranchSearch('')}
-                          className={cn('font-semibold text-brand-600 underline underline-offset-2', focusRing)}
-                        >
-                          Show all branches
-                        </button>
-                      </EmptyState>
-                    ) : (
-                      <EmptyState image={MASCOT_IMAGES.search} title="No branches available">
-                        Please try again in a little while.
-                      </EmptyState>
-                    )}
                   </div>
+                  )}
 
-                  {/* Upright phones: at least a usable map, even under a tall message. */}
-                  <div className="relative grid min-h-0 grid-rows-[minmax(0,1fr)] max-md:min-h-48 max-md:flex-1 short:min-h-0!">
+                  <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                     <PickupMap
                       lat={pickupCoords?.lat ?? DEFAULT_LOCATION.lat}
                       lng={pickupCoords?.lng ?? DEFAULT_LOCATION.lng}
@@ -894,65 +929,120 @@ export function OrderModeSelector({
                         setPickupCoords({ lat: la, lng: ln });
                         setPickupAreaLabel('pinned location');
                         setPickupLocationOff(false);
+                        setSelectedStore(null);
                       }}
                       branchMarkers={pickupBranchMarkers}
-                      selectedBranchId={selectedStore?.id ?? null}
-                      onBranchSelect={selectPickupById}
-                      showRoute={Boolean(selectedStore && pickupCoords)}
+                      selectedBranchId={setupPhase === 'branches' ? (selectedStore?.id ?? null) : null}
+                      onBranchSelect={setupPhase === 'branches' ? selectPickupById : undefined}
+                      showRoute={setupPhase === 'branches' && Boolean(selectedStore && pickupCoords)}
                       routeAnimation="pickup"
                       look="redesign"
                       customerPin="you"
-                      className="h-full min-h-0"
+                      className="min-h-0 flex-1"
                     />
-                    {pickupOptions.length > 0 && (
-                      <BranchCarousel options={pickupOptions} selectedId={selectedStore?.id ?? null} onSelect={selectPickupById} />
-                    )}
                   </div>
+                  {setupPhase === 'branches' && (
+                    <NearestBranches
+                      options={pickupOptions}
+                      selectedId={selectedStore?.id ?? null}
+                      onSelect={selectPickupById}
+                      pending={detectingLocation || (storesLoading && pickupOptions.length === 0)}
+                      empty={
+                        <p className="mt-2 text-xs leading-5 text-slate-600">
+                          {branchSearchQuery ? (
+                            <>
+                              Nothing matches “{branchSearchQuery}”.{' '}
+                              <button
+                                type="button"
+                                onClick={() => setBranchSearch('')}
+                                className={cn('font-semibold text-brand-600 underline underline-offset-2', focusRing)}
+                              >
+                                Show all branches
+                              </button>
+                            </>
+                          ) : (
+                            'No branches available right now.'
+                          )}
+                        </p>
+                      }
+                    />
+                  )}
                 </div>
               )}
             </div>
 
-            {/* Kept slim (one row, a 40px button) so the list and map get the height. */}
             <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-brand-100 bg-white px-5 py-2.5 sm:px-8">
               <p className="min-w-0 text-xs leading-snug text-slate-600 sm:text-sm" aria-live="polite">
-                {mode === 'DELIVERY' ? (
+                {setupPhase === 'place' ? (
+                  mode === 'DELIVERY' ? (
+                    addressSelection ? (
+                      <>
+                        Delivery to{' '}
+                        <strong className="font-semibold text-brand-900">{shortAddress(addressSelection.address)}</strong>
+                      </>
+                    ) : (
+                      'Set your delivery location to continue.'
+                    )
+                  ) : (
+                    'Search, or drag the pin, then confirm to see nearby branches.'
+                  )
+                ) : mode === 'DELIVERY' ? (
                   selectedDeliveryBranch && addressSelection ? (
                     <SelectionSummary mode="DELIVERY">
                       Delivery to <strong className="font-semibold text-brand-900">{shortAddress(addressSelection.address)}</strong> from{' '}
                       <strong className="font-semibold text-brand-900">{selectedDeliveryBranch.name}</strong>
                     </SelectionSummary>
-                  ) : !addressSelection ? (
-                    'Set your delivery location to continue.'
                   ) : (
-                    'Select a branch to continue.'
+                    'Select a nearest branch to continue.'
                   )
                 ) : selectedStore ? (
                   <SelectionSummary mode="TAKEAWAY">
                     Pickup from <strong className="font-semibold text-brand-900">{selectedStore.name}</strong>
                   </SelectionSummary>
                 ) : (
-                  'Select a branch to continue.'
+                  'Select a nearest branch to continue.'
                 )}
               </p>
-              <button
-                type="button"
-                disabled={footerBusy || (mode === 'DELIVERY' ? !selectedDeliveryBranch || !addressSelection : !selectedStore)}
-                onClick={() => {
-                  if (mode === 'DELIVERY') {
-                    if (selectedDeliveryBranch) void confirmDeliveryBranch(selectedDeliveryBranch);
-                  } else if (selectedStore) {
-                    void confirmTakeawayStore(selectedStore);
+              {setupPhase === 'place' ? (
+                <button
+                  type="button"
+                  disabled={
+                    mode === 'DELIVERY'
+                      ? validating || !addressSelection || !validation?.eligible || suggestedDeliveryBranches.length === 0
+                      : detectingLocation || storesLoading || pickupOptions.length === 0
                   }
-                }}
-                className={cn(
-                  'inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-brand-600 px-5 text-sm font-semibold text-snow shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none sm:px-6 sm:text-base',
-                  focusRing,
-                )}
-              >
-                {footerBusy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-                View Menu
-                {!footerBusy && <ArrowRight className="size-4" aria-hidden />}
-              </button>
+                  onClick={confirmPlace}
+                  className={footerButton}
+                >
+                  {(mode === 'DELIVERY' ? validating : detectingLocation || storesLoading) ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                  ) : null}
+                  {mode === 'DELIVERY' ? 'Confirm My Delivery' : 'Confirm My Pickup'}
+                  {!(mode === 'DELIVERY' ? validating : detectingLocation || storesLoading) && (
+                    <ArrowRight className="size-4" aria-hidden />
+                  )}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={
+                    footerBusy ||
+                    (mode === 'DELIVERY' ? !selectedDeliveryBranch || !addressSelection : !selectedStore)
+                  }
+                  onClick={() => {
+                    if (mode === 'DELIVERY') {
+                      if (selectedDeliveryBranch) void confirmDeliveryBranch(selectedDeliveryBranch);
+                    } else if (selectedStore) {
+                      void confirmTakeawayStore(selectedStore);
+                    }
+                  }}
+                  className={footerButton}
+                >
+                  {footerBusy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                  View Menu
+                  {!footerBusy && <ArrowRight className="size-4" aria-hidden />}
+                </button>
+              )}
             </footer>
           </>
         )}
@@ -1126,7 +1216,7 @@ function BranchOption({
   );
 }
 
-/** The branch list beside the search (hidden on upright phones, which get BranchCarousel instead). */
+/** The branch list under the map, after the place is confirmed. */
 function BranchList({
   options,
   selectedId,
@@ -1145,9 +1235,8 @@ function BranchList({
   return (
     <ul
       ref={listRef}
-      aria-label="Branches"
-      // The one scrolling area in the setup step, with its scrollbar hidden (wheel, touch and keys still scroll it).
-      className="-mx-1 mt-3 flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto overscroll-contain px-1 py-1 [scrollbar-width:none] max-md:hidden short:flex! [&::-webkit-scrollbar]:hidden"
+      aria-label="Nearest branches"
+      className="-mx-1 mt-2 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {options.map((option) => (
         <li key={option.id} data-branch={option.id}>
@@ -1158,71 +1247,32 @@ function BranchList({
   );
 }
 
-/**
- * Upright phones: the listed branches as a row of cards along the bottom of the map, swiped sideways and
- * snapping to the centre; tapping one selects it. The row brings the selected card into view (e.g. after a
- * pin is tapped) and starts over from the first card when the list changes.
- */
-function BranchCarousel({
+function NearestBranches({
   options,
   selectedId,
   onSelect,
+  pending,
+  empty,
 }: {
   options: BranchOptionView[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-}) {
-  const listRef = useRef<HTMLUListElement>(null);
-  const shown = useRef(false);
-  const listKey = options.map((option) => option.id).join(',');
-
-  useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const card = selectedId ? list.querySelector<HTMLElement>(`[data-branch="${selectedId}"]`) : null;
-    const max = list.scrollWidth - list.clientWidth;
-    const left = card ? Math.min(Math.max(card.offsetLeft + card.offsetWidth / 2 - list.clientWidth / 2, 0), max) : 0;
-    const smooth = shown.current && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    shown.current = true;
-    if (Math.abs(left - list.scrollLeft) < 1) return;
-    list.scrollTo({ left, behavior: smooth ? 'smooth' : 'auto' });
-  }, [selectedId, listKey]);
-
-  return (
-    <div className="absolute inset-x-0 bottom-0 z-10 md:hidden short:hidden">
-      <ul
-        ref={listRef}
-        aria-label="Branches"
-        // relative: the cards' offsetLeft is measured from the row. Scrollbar hidden; swipes and arrow keys still scroll it.
-        className="relative flex snap-x snap-mandatory gap-2.5 overflow-x-auto overscroll-x-contain p-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {options.map((option) => (
-          <li key={option.id} data-branch={option.id} className="w-[85%] max-w-80 shrink-0 snap-center">
-            <BranchOption option={option} group="branch-card" card selected={option.id === selectedId} onSelect={onSelect} />
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function EmptyState({
-  image,
-  title,
-  children,
-  role,
-}: {
-  image: string;
-  title: string;
-  children: ReactNode;
-  role?: 'status';
+  pending?: boolean;
+  empty?: ReactNode;
 }) {
   return (
-    <div role={role} className="mt-3 flex flex-1 flex-col items-center justify-center rounded-[1.5rem] bg-brand-50/60 px-6 py-6 text-center">
-      <Image src={image} alt="" width={500} height={500} sizes="112px" unoptimized className="size-24 object-contain sm:size-28" />
-      <p className="mt-2 font-semibold text-brand-900">{title}</p>
-      <div className="mt-1 max-w-xs text-sm text-slate-600">{children}</div>
-    </div>
+    <section aria-label="Nearest branches" className="flex h-[clamp(8.5rem,38%,17rem)] shrink-0 flex-col">
+      <p className="shrink-0 text-xs font-semibold tracking-[0.16em] text-brand-600 uppercase">Nearest branches</p>
+      {options.length > 0 ? (
+        <BranchList options={options} selectedId={selectedId} onSelect={onSelect} />
+      ) : pending ? (
+        <StatusLine icon={Loader2} spin>
+          Finding the nearest branches…
+        </StatusLine>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">{empty}</div>
+      )}
+    </section>
   );
 }
 

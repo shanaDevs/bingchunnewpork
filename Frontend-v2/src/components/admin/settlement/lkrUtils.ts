@@ -4,6 +4,10 @@ export function hasPositiveLkr(value: number | null | undefined): boolean {
   return (value ?? 0) > LKR_EPSILON;
 }
 
+export function hasNegativeLkr(value: number | null | undefined): boolean {
+  return (value ?? 0) < -LKR_EPSILON;
+}
+
 export function hasAnyPositiveLkr(
   ...values: Array<number | null | undefined>
 ): boolean {

@@ -126,6 +126,26 @@ describe('security input validation (QA 3.7)', () => {
         storeId: STORE_UUID,
       });
     });
+
+    it('accepts a legacy slug storeId for branch-filtered analysis', async () => {
+      const storeId = 'store-bing-chun---moratuwa';
+      vi.mocked(resolveScopedStoreId).mockImplementation(async (_req, id) => id);
+      const req = createMockReq({
+        query: { month: '2026-11', storeId },
+        user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
+      });
+      const res = createMockRes();
+
+      await getWalletAnalysisHandler(req, res);
+
+      expect(getWalletAnalysis).toHaveBeenCalledWith({
+        monthKey: '2026-11',
+        storeId,
+      });
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ success: true }),
+      );
+    });
   });
 
   describe('wallet withdrawals list query', () => {

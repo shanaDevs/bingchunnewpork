@@ -106,6 +106,16 @@ export async function listDuePayoutStoreIds(
   return resolved.filter((period) => !period.capped);
 }
 
+/** True when a payout window intersects [rangeFrom, rangeTo] (inclusive YYYY-MM-DD). */
+export function payoutWindowOverlapsRange(
+  windowFrom: string,
+  windowTo: string,
+  rangeFrom: string,
+  rangeTo: string,
+): boolean {
+  return windowFrom <= rangeTo && windowTo >= rangeFrom;
+}
+
 /**
  * Pure elapsed 15/30/40-day windows from a known period start.
  * Optional overlap filter skips windows outside the wallet date range (avoids
@@ -130,7 +140,7 @@ export function buildElapsedPayoutWindowsFromStart(
     if (overlap && from > overlap.to) break;
 
     const overlaps =
-      !overlap || (from <= overlap.to && idealTo >= overlap.from);
+      !overlap || payoutWindowOverlapsRange(from, idealTo, overlap.from, overlap.to);
     if (overlaps) {
       windows.push({ days, from, to: idealTo, capped: false });
     }
