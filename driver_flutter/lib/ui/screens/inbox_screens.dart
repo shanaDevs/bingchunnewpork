@@ -137,8 +137,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       ),
               ),
               Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(10, 12, 10, 32),
+                child: CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+                  slivers: [
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(10, 12, 10, visible.isEmpty ? 0 : 32),
+                      sliver: SliverList.list(
                   children: [
                     Row(
                       children: [
@@ -151,22 +155,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         ),
                       ],
                     ),
-                    if (visible.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 48),
-                        child: _unreadOnly
-                            ? _Empty(
-                                icon: Icons.mark_email_read_outlined,
-                                title: tr('You are all caught up'),
-                                message: tr('No unread notifications.'),
-                              )
-                            : _Empty(
-                                icon: Icons.notifications_none_rounded,
-                                title: tr('No notifications yet'),
-                                message: tr('New job alerts and updates will show up here.'),
-                              ),
-                      )
-                    else
+                    if (visible.isNotEmpty)
                       for (final g in groups) ...[
                         Padding(
                           padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
@@ -190,6 +179,30 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           ),
                         ),
                       ],
+                  ],
+                      ),
+                    ),
+                    if (visible.isEmpty)
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Center(
+                          child: _unreadOnly
+                              ? BcEmptyState(
+                                  icon: Icons.mark_email_read_outlined,
+                                  badgeIcon: Icons.check_rounded,
+                                  tone: BcEmptyTone.success,
+                                  title: tr('You are all caught up'),
+                                  message: tr('No unread notifications.'),
+                                  secondaryLabel: tr('Show all'),
+                                  onSecondary: () => setState(() => _unreadOnly = false),
+                                )
+                              : BcEmptyState(
+                                  icon: Icons.notifications_none_rounded,
+                                  title: tr('No notifications yet'),
+                                  message: tr('New job alerts and updates will show up here.'),
+                                ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -324,38 +337,6 @@ class _NotificationRow extends StatelessWidget {
   }
 }
 
-class _Empty extends StatelessWidget {
-  const _Empty({required this.icon, required this.title, required this.message});
-  final IconData icon;
-  final String title;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 84,
-              height: 84,
-              decoration: BoxDecoration(color: c.primarySoft, shape: BoxShape.circle),
-              child: Icon(icon, size: 38, color: c.primaryStrong),
-            ),
-            const SizedBox(height: 12),
-            Text(title, style: BcType.section.copyWith(color: c.foreground)),
-            const SizedBox(height: 6),
-            Text(message, textAlign: TextAlign.center, style: BcType.caption.copyWith(color: c.mutedForeground)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// QuickDrop "Complaints": the rider's complaints (`GET /delivery/me/complaints`).
 class ComplaintsScreen extends StatefulWidget {
   const ComplaintsScreen({super.key});
@@ -395,10 +376,16 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> {
                 }
                 final list = snap.data ?? const [];
                 if (list.isEmpty) {
-                  return _Empty(
-                    icon: Icons.fact_check_outlined,
-                    title: tr('No complaints'),
-                    message: tr('Report a problem from an order and it will be tracked here.'),
+                  return Center(
+                    child: SingleChildScrollView(
+                      child: BcEmptyState(
+                        icon: Icons.fact_check_outlined,
+                        badgeIcon: Icons.check_rounded,
+                        tone: BcEmptyTone.success,
+                        title: tr('No complaints'),
+                        message: tr('Report a problem from an order and it will be tracked here.'),
+                      ),
+                    ),
                   );
                 }
                 return RefreshIndicator(

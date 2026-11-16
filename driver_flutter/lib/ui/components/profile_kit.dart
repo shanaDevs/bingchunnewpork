@@ -9,6 +9,8 @@ import '../../state/jobs_controller.dart';
 import '../theme/bc_theme.dart';
 import 'qd_kit.dart';
 
+export 'empty_state.dart';
+
 /// Shared building blocks for the Profile tab and its linked pages (QuickDrop
 /// `ListItem`, `Button`, `Avatar`, `Screen`).
 
@@ -22,6 +24,7 @@ class QdPage extends StatelessWidget {
     this.footer,
     this.onRefresh,
     this.actions = const [],
+    this.fill,
   });
 
   final String title;
@@ -31,14 +34,31 @@ class QdPage extends StatelessWidget {
   final Future<void> Function()? onRefresh;
   final List<Widget> actions;
 
+  /// Shown centred in the space left under [children] (e.g. a [BcEmptyState]).
+  final Widget? fill;
+
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final list = ListView(
-      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-      padding: const EdgeInsets.fromLTRB(10, 12, 10, 28),
-      children: children,
-    );
+    const physics = AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics());
+    final Widget list = fill == null
+        ? ListView(physics: physics, padding: const EdgeInsets.fromLTRB(10, 12, 10, 28), children: children)
+        : CustomScrollView(
+            physics: physics,
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(10, 12, 10, 0),
+                sliver: SliverList.list(children: children),
+              ),
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 28),
+                  child: Center(child: fill),
+                ),
+              ),
+            ],
+          );
     return Scaffold(
       backgroundColor: c.background,
       body: Column(
@@ -307,33 +327,6 @@ class QdFootnote extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(4, 10, 4, 0),
     child: Text(text, style: TextStyle(fontSize: 13, color: context.bc.mutedForeground, height: 1.4)),
   );
-}
-
-/// Centered empty state: soft circle icon, title, hint.
-class QdEmpty extends StatelessWidget {
-  const QdEmpty({super.key, required this.icon, required this.title, this.message});
-  final IconData icon;
-  final String title;
-  final String? message;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 12),
-      child: Column(
-        children: [
-          QdIconTile(icon, size: 64),
-          const SizedBox(height: 14),
-          Text(title, textAlign: TextAlign.center, style: BcType.section.copyWith(color: c.foreground)),
-          if (message != null) ...[
-            const SizedBox(height: 6),
-            Text(message!, textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: c.mutedForeground, height: 1.4)),
-          ],
-        ],
-      ),
-    );
-  }
 }
 
 String? nonBlank(String? s) => (s == null || s.trim().isEmpty) ? null : s;

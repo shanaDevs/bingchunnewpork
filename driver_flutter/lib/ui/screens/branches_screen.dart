@@ -168,7 +168,13 @@ class _BranchesScreenState extends State<BranchesScreen> with WidgetsBindingObse
           ),
           const SizedBox(height: 10),
         ],
-        if (branches.isEmpty) QdEmpty(icon: Icons.storefront_outlined, title: tr('No branches assigned yet')),
+        if (branches.isEmpty)
+          BcEmptyState(
+            compact: true,
+            icon: Icons.storefront_outlined,
+            title: tr('No branches assigned yet'),
+            message: tr('Request a branch below and an admin will review it.'),
+          ),
         const SizedBox(height: 10),
         PillButton(
           label: tr('Request branch change'),
@@ -200,7 +206,12 @@ class _BranchesScreenState extends State<BranchesScreen> with WidgetsBindingObse
             child: Center(child: CircularProgressIndicator(color: c.primary)),
           )
         else if (_requests.isEmpty)
-          Text(tr('No branch change requests yet.'), style: TextStyle(fontSize: 14, color: c.mutedForeground))
+          BcEmptyState(
+            compact: true,
+            tone: BcEmptyTone.neutral,
+            icon: Icons.swap_horiz_rounded,
+            title: tr('No branch change requests yet.'),
+          )
         else
           for (final r in _requests) ...[_RequestCard(r), const SizedBox(height: 10)],
       ],

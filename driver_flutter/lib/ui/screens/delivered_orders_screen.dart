@@ -170,10 +170,7 @@ class _Section extends StatelessWidget {
           ),
         ),
         if (items.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
-            child: Text(emptyText, style: TextStyle(fontSize: 14, color: c.mutedForeground)),
-          )
+          BcEmptyState(compact: true, tone: BcEmptyTone.neutral, icon: icon, title: emptyText)
         else
           for (final r in items)
             Padding(

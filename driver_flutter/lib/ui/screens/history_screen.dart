@@ -7,6 +7,7 @@ import '../../core/format.dart';
 import '../../data/models/delivery_job.dart';
 import '../../state/jobs_controller.dart';
 import '../components/bc_dialog.dart';
+import '../components/empty_state.dart';
 import '../components/headers.dart';
 import '../components/qd_kit.dart';
 import '../components/tab_scaffold.dart';
@@ -109,7 +110,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     void clearFilters() {
-      BcFeedback.tap();
       setState(() {
         _search.clear();
         _outcome = _OutcomeFilter.all;
@@ -119,6 +119,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     final c = context.bc;
     final children = <Widget>[];
+    Widget? fill;
 
     if (vm.historyLoading && vm.history.isEmpty) {
       children.add(const BcJobsSkeleton());
@@ -130,15 +131,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ),
       );
     } else if (vm.history.isEmpty) {
-      children.add(
-        _EmptyBlock(
-          icon: Icons.assignment_outlined,
-          title: tr('No completed jobs yet'),
-          hint: tr('Jobs you finish will appear here.'),
-          circle: true,
-          actionLabel: widget.onViewJobs != null ? tr('View available jobs') : null,
-          onAction: widget.onViewJobs,
-        ),
+      fill = BcEmptyState(
+        icon: Icons.assignment_outlined,
+        badgeIcon: Icons.check_rounded,
+        title: tr('No completed jobs yet'),
+        message: tr('Jobs you finish will appear here.'),
+        actionLabel: widget.onViewJobs != null ? tr('View available jobs') : null,
+        actionIcon: Icons.local_shipping_outlined,
+        onAction: widget.onViewJobs,
+        secondaryLabel: tr('Refresh'),
+        onSecondary: refresh,
       );
     } else {
       children.addAll([
@@ -179,14 +181,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
         const SizedBox(height: 16),
       ]);
       if (listed.isEmpty) {
-        children.add(
-          _EmptyBlock(
-            icon: Icons.search_off_rounded,
-            title: tr('No jobs match your filters'),
-            hint: tr('Try a different search or clear the filters.'),
-            actionLabel: filtered ? tr('Clear filters') : null,
-            onAction: filtered ? clearFilters : null,
-          ),
+        fill = BcEmptyState(
+          icon: Icons.manage_search_rounded,
+          badgeIcon: Icons.close_rounded,
+          tone: BcEmptyTone.neutral,
+          title: tr('No jobs match your filters'),
+          message: tr('Try a different search or clear the filters.'),
+          actionLabel: filtered ? tr('Clear filters') : null,
+          actionIcon: Icons.filter_alt_off_outlined,
+          onAction: filtered ? clearFilters : null,
         );
       } else {
         for (var i = 0; i < groups.length; i++) {
@@ -236,7 +239,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       }
     }
 
-    return BcTabScaffold(title: tr('Jobs'), onRefresh: refresh, children: children);
+    return BcTabScaffold(title: tr('Jobs'), onRefresh: refresh, fill: fill, children: children);
   }
 }
 
@@ -342,72 +345,6 @@ class _FilterChip extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _EmptyBlock extends StatelessWidget {
-  const _EmptyBlock({
-    required this.icon,
-    required this.title,
-    required this.hint,
-    this.circle = false,
-    this.actionLabel,
-    this.onAction,
-  });
-  final IconData icon;
-  final String title;
-  final String hint;
-  final bool circle;
-  final String? actionLabel;
-  final VoidCallback? onAction;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 40),
-      child: Column(
-        children: [
-          if (circle)
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: c.primarySoft),
-              child: Icon(icon, size: 32, color: c.primary),
-            )
-          else
-            Icon(icon, size: 32, color: c.mutedForeground),
-          const SizedBox(height: 12),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: c.foreground),
-          ),
-          const SizedBox(height: 12),
-          Text(hint, textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: c.mutedForeground)),
-          if (actionLabel != null && onAction != null) ...[
-            const SizedBox(height: 12),
-            GestureDetector(
-              onTap: onAction,
-              child: Container(
-                height: 44,
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                decoration: BoxDecoration(
-                  color: c.surface,
-                  borderRadius: BorderRadius.circular(99),
-                  border: Border.all(color: c.border),
-                ),
-                child: Text(
-                  actionLabel!,
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.foreground),
-                ),
-              ),
-            ),
-          ],
-        ],
       ),
     );
   }

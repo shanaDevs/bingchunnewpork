@@ -100,17 +100,21 @@ class _BreakdownScreenState extends State<BreakdownScreen> {
           icon: Icons.build_outlined,
           onPressed: vm.isOnline ? () => _report(vm) : null,
         ),
+        fill: rides.isEmpty && !(vm.historyLoading && !vm.historyLoaded)
+            ? BcEmptyState(
+                icon: Icons.two_wheeler_rounded,
+                badgeIcon: Icons.check_rounded,
+                tone: BcEmptyTone.success,
+                title: tr('No breakdown reported'),
+                message: tr(
+                  'If your vehicle breaks down, report it so support can send another rider and knows where to find you.',
+                ),
+                footer: vm.isOnline ? null : QdFootnote(tr('Go on duty to report a vehicle failure.')),
+              )
+            : null,
         children: [
-          if (rides.isEmpty)
-            (vm.historyLoading && !vm.historyLoaded)
-                ? const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
-                : QdEmpty(
-                    icon: Icons.build_outlined,
-                    title: tr('No breakdown reported'),
-                    message: tr(
-                      'If your vehicle breaks down, report it so support can send another rider and knows where to find you.',
-                    ),
-                  )
+          if (rides.isEmpty && vm.historyLoading && !vm.historyLoaded)
+            const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
           else
             for (final r in rides)
               Padding(
@@ -121,7 +125,7 @@ class _BreakdownScreenState extends State<BreakdownScreen> {
                   onTap: () => _open(r, isBreakdownReportOpen(vm, r)),
                 ),
               ),
-          if (!vm.isOnline) QdFootnote(tr('Go on duty to report a vehicle failure.')),
+          if (!vm.isOnline && rides.isNotEmpty) QdFootnote(tr('Go on duty to report a vehicle failure.')),
         ],
       ),
     );

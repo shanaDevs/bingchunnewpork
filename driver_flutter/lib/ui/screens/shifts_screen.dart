@@ -89,14 +89,15 @@ class _ShiftJobsScreen extends StatelessWidget {
     final c = context.bc;
     return QdPage(
       title: title,
+      fill: jobs.isEmpty
+          ? BcEmptyState(
+              icon: Icons.inventory_2_outlined,
+              title: tr('No jobs in this shift'),
+              message: tr('Jobs you finish while on shift will be listed here.'),
+            )
+          : null,
       children: [
-        if (jobs.isEmpty)
-          QdEmpty(
-            icon: Icons.inventory_2_outlined,
-            title: tr('No jobs in this shift'),
-            message: tr('Jobs you finish while on shift will be listed here.'),
-          )
-        else
+        if (jobs.isNotEmpty)
           for (final j in jobs)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -227,6 +228,7 @@ class _ShiftsScreenState extends State<ShiftsScreen> {
       future: _future,
       builder: (context, snap) {
         final List<Widget> body;
+        Widget? fill;
         if (snap.connectionState != ConnectionState.done) {
           body = [
             Padding(
@@ -236,32 +238,31 @@ class _ShiftsScreenState extends State<ShiftsScreen> {
           ];
         } else if (snap.hasError) {
           final e = snap.error;
-          body = [
-            QdEmpty(
-              icon: Icons.error_outline_rounded,
-              title: tr('Could not load shift history'),
-              message: e is StateError ? e.message : null,
-            ),
-            QdPillButton(
-              label: tr('Retry'),
-              style: QdPillStyle.soft,
-              onPressed: _reload,
-            ),
-          ];
+          body = const [];
+          fill = BcEmptyState(
+            icon: Icons.cloud_off_rounded,
+            badgeIcon: Icons.priority_high_rounded,
+            tone: BcEmptyTone.warning,
+            title: tr('Could not load shift history'),
+            message: e is StateError ? e.message : null,
+            actionLabel: tr('Retry'),
+            actionIcon: Icons.refresh_rounded,
+            onAction: _reload,
+          );
         } else {
           final all = snap.data ?? const <DriverShiftEntry>[];
           final active = all.where((s) => s.endedAt == null).toList();
           final past = all.where((s) => s.endedAt != null).toList();
           if (all.isEmpty) {
-            body = [
-              QdEmpty(
-                icon: Icons.event_busy_outlined,
-                title: tr('No shifts yet'),
-                message: tr(
-                  'Go online from Home to start a shift. Shifts are recorded automatically.',
-                ),
+            body = const [];
+            fill = BcEmptyState(
+              icon: Icons.event_note_outlined,
+              badgeIcon: Icons.schedule_rounded,
+              title: tr('No shifts yet'),
+              message: tr(
+                'Go online from Home to start a shift. Shifts are recorded automatically.',
               ),
-            ];
+            );
           } else {
             body = [
               if (active.isNotEmpty) ...[
@@ -400,6 +401,7 @@ class _ShiftsScreenState extends State<ShiftsScreen> {
         return QdPage(
           title: tr('Shift History'),
           onRefresh: _reload,
+          fill: fill,
           children: body,
         );
       },

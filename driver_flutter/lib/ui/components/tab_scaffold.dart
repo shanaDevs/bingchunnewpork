@@ -20,6 +20,7 @@ class BcTabScaffold extends StatelessWidget {
     this.titleBar = false,
     required this.children,
     this.onRefresh,
+    this.fill,
   });
 
   final String title;
@@ -34,6 +35,9 @@ class BcTabScaffold extends StatelessWidget {
   final bool titleBar;
   final List<Widget> children;
   final Future<void> Function()? onRefresh;
+
+  /// Shown centred in the space left under [children] (e.g. a [BcEmptyState]).
+  final Widget? fill;
 
   @override
   Widget build(BuildContext context) {
@@ -53,9 +57,17 @@ class BcTabScaffold extends StatelessWidget {
           ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(10, 12, 10, 24),
+          padding: EdgeInsets.fromLTRB(10, 12, 10, fill == null ? 24 : 0),
           sliver: SliverList.list(children: children),
         ),
+        if (fill != null)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 48),
+              child: Center(child: fill),
+            ),
+          ),
       ],
     );
     return AnnotatedRegion<SystemUiOverlayStyle>(

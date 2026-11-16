@@ -134,9 +134,11 @@ class _NewComplaintScreenState extends State<NewComplaintScreen> {
             }
             final list = snap.data ?? const <_OrderChoice>[];
             if (list.isEmpty) {
-              return QdEmpty(
+              return BcEmptyState(
+                compact: true,
                 icon: Icons.receipt_long_outlined,
-                title: tr('No recent orders to report on. Report from the order screen during a delivery.'),
+                title: tr('No recent orders'),
+                message: tr('No recent orders to report on. Report from the order screen during a delivery.'),
               );
             }
             return Column(

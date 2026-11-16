@@ -291,15 +291,11 @@ class _BranchRequestScreenState extends State<BranchRequestScreen> {
               ),
               const SizedBox(height: 10),
               if (open.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 8,
-                    horizontal: 2,
-                  ),
-                  child: Text(
-                    tr('No branches match that search.'),
-                    style: TextStyle(fontSize: 14, color: c.mutedForeground),
-                  ),
+                BcEmptyState(
+                  compact: true,
+                  tone: BcEmptyTone.neutral,
+                  icon: Icons.search_off_rounded,
+                  title: tr('No branches match that search.'),
                 )
               else
                 _ChoiceGroup(
