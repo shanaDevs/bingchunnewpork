@@ -94,34 +94,30 @@ class _JobView extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: PosSpacing.md),
-                  SizedBox(
+                  _PathLayerMap(
                     height: 260,
-                    child: DeliveryMap(
-                      pins: [
-                        ..._routePins(
-                          job.pickupLocation ?? job.storeLocation,
-                          ctrl.route?.stops ??
-                              [
-                                for (final s in job.stops)
-                                  if (s.location != null)
-                                    RouteStop(
-                                      orderNumber: s.orderNumber,
-                                      customerName: s.customerName,
-                                      location: s.location!,
-                                      sequence: s.sequence,
-                                      status: s.deliveryState == 'Delivered' ? 'DELIVERED' : s.status,
-                                    ),
-                              ],
-                          rider: ctrl.isLive ? ctrl.rider : null,
-                        ),
-                        if (job.vehicleFailure != null) MapPin(at: job.vehicleFailure!, kind: MapPinKind.breakdown),
-                      ],
-                      lines: [
-                        if (ctrl.route != null) MapLine(points: ctrl.route!.path, color: c.brand),
-                        if ((ctrl.driven?.path.length ?? 0) >= 2)
-                          MapLine(points: ctrl.driven!.path, color: PosColors.preparing),
-                      ],
-                    ),
+                    pins: [
+                      ..._routePins(
+                        job.pickupLocation ?? job.storeLocation,
+                        ctrl.route?.stops ??
+                            [
+                              for (final s in job.stops)
+                                if (s.location != null)
+                                  RouteStop(
+                                    orderNumber: s.orderNumber,
+                                    customerName: s.customerName,
+                                    location: s.location!,
+                                    sequence: s.sequence,
+                                    status: s.deliveryState == 'Delivered' ? 'DELIVERED' : s.status,
+                                  ),
+                            ],
+                        rider: ctrl.isLive ? ctrl.rider : null,
+                      ),
+                      if (job.vehicleFailure != null) MapPin(at: job.vehicleFailure!, kind: MapPinKind.breakdown),
+                    ],
+                    plannedPath: ctrl.route?.path,
+                    actualPath: ctrl.driven?.path,
+                    actualLabel: ctrl.isLive ? tr('Live') : tr('Actual'),
                   ),
                   if (ctrl.route != null) ...[
                     const SizedBox(height: PosSpacing.sm),
@@ -327,6 +323,128 @@ class _StopCard extends StatelessWidget {
   }
 }
 
+class _PathLayerMap extends StatefulWidget {
+  const _PathLayerMap({
+    required this.pins,
+    this.plannedPath,
+    this.actualPath,
+    this.actualLabel,
+    this.height,
+    this.expand = false,
+    this.initialShowPlanned = true,
+    this.initialShowActual = true,
+  });
+
+  final List<MapPin> pins;
+  final List<GeoPoint>? plannedPath;
+  final List<GeoPoint>? actualPath;
+  final String? actualLabel;
+  final double? height;
+  final bool expand;
+  final bool initialShowPlanned;
+  final bool initialShowActual;
+
+  @override
+  State<_PathLayerMap> createState() => _PathLayerMapState();
+}
+
+class _PathLayerMapState extends State<_PathLayerMap> {
+  late bool showPlanned =
+      widget.initialShowPlanned || (widget.actualPath?.length ?? 0) < 2;
+  late bool showActual = widget.initialShowActual;
+  late bool _appliedActualOnly =
+      widget.initialShowPlanned == false && (widget.actualPath?.length ?? 0) >= 2;
+
+  bool get _hasPlanned => (widget.plannedPath?.length ?? 0) >= 2;
+  bool get _hasActual => (widget.actualPath?.length ?? 0) >= 2;
+
+  @override
+  void didUpdateWidget(covariant _PathLayerMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_appliedActualOnly && widget.initialShowPlanned == false && _hasActual) {
+      showPlanned = false;
+      showActual = true;
+      _appliedActualOnly = true;
+    } else if (!_hasActual && _hasPlanned && !showPlanned) {
+      showPlanned = true;
+    }
+  }
+
+  void _togglePlanned() {
+    if (!_hasPlanned) return;
+    if (showPlanned && !(_hasActual && showActual)) return;
+    setState(() => showPlanned = !showPlanned);
+  }
+
+  void _toggleActual() {
+    if (!_hasActual) return;
+    if (showActual && !(_hasPlanned && showPlanned)) return;
+    setState(() => showActual = !showActual);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.pos;
+    final plannedVisible = showPlanned && _hasPlanned;
+    final actualVisible = showActual && _hasActual;
+    final map = DeliveryMap(
+      pins: widget.pins,
+      lines: [
+        if (plannedVisible) MapLine(points: widget.plannedPath!, color: c.brand),
+        if (actualVisible) MapLine(points: widget.actualPath!, color: PosColors.preparing),
+      ],
+    );
+
+    final chips = (_hasPlanned || _hasActual)
+        ? Padding(
+            padding: const EdgeInsets.only(bottom: PosSpacing.sm),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                if (_hasPlanned)
+                  FilterChip(
+                    label: Text(tr('Planned')),
+                    selected: plannedVisible,
+                    onSelected: (_) => _togglePlanned(),
+                    visualDensity: VisualDensity.compact,
+                    selectedColor: c.brand.withValues(alpha: 0.18),
+                    checkmarkColor: c.brand,
+                  ),
+                if (_hasActual)
+                  FilterChip(
+                    label: Text(widget.actualLabel ?? tr('Actual')),
+                    selected: actualVisible,
+                    onSelected: (_) => _toggleActual(),
+                    visualDensity: VisualDensity.compact,
+                    selectedColor: PosColors.preparing.withValues(alpha: 0.22),
+                    checkmarkColor: PosColors.preparing,
+                  ),
+              ],
+            ),
+          )
+        : const SizedBox.shrink();
+
+    if (widget.expand) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          chips,
+          Expanded(child: map),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        chips,
+        SizedBox(height: widget.height ?? 260, child: map),
+      ],
+    );
+  }
+}
+
 /// Planned route (road path + ordered stops) or the GPS trail actually driven.
 class DeliveryRouteScreen extends StatelessWidget {
   const DeliveryRouteScreen({
@@ -368,69 +486,65 @@ class _RouteView extends StatelessWidget {
       body = LoadingView(message: tr('Loading route…'));
     } else if (ctrl.error != null) {
       body = ErrorView(message: ctrl.error!, onRetry: ctrl.load);
-    } else if (planned != null) {
-      body = Column(
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(PosSpacing.md),
-              child: DeliveryMap(
-                pins: _routePins(planned.start, planned.stops),
-                lines: [MapLine(points: planned.path, color: c.brand)],
-              ),
-            ),
-          ),
-          _RouteSummary(
-            facts: [
-              (tr('Distance'), '${planned.totalDistanceKm.toStringAsFixed(1)} km'),
-              (tr('Estimated time'), tr('{n} min', {'n': planned.estimatedMinutes})),
-              (tr('Stops'), '${planned.stops.length}'),
-            ],
-            stops: [
-              for (final s in planned.stops)
-                (
-                  '${s.sequence}',
-                  '#${s.orderNumber} · ${s.customerName}',
-                  [
-                    if (s.distanceFromPreviousKm != null) '${s.distanceFromPreviousKm!.toStringAsFixed(1)} km',
-                    if (s.etaMinutesFromPrevious != null) tr('{n} min', {'n': s.etaMinutesFromPrevious}),
-                  ].join(' · '),
-                ),
-            ],
-          ),
-        ],
-      );
-    } else if (driven != null) {
-      body = Column(
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(PosSpacing.md),
-              child: driven.path.length < 2
-                  ? EmptyView(message: tr('No GPS trail was recorded for this run.'), icon: Icons.location_off_outlined)
-                  : DeliveryMap(
-                      pins: [
-                        MapPin(at: driven.start, kind: MapPinKind.branch),
-                        for (final (i, s) in driven.stops.indexed)
-                          MapPin(at: s.location, kind: MapPinKind.delivered, label: '${i + 1}'),
-                      ],
-                      lines: [MapLine(points: driven.path, color: PosColors.preparing)],
-                    ),
-            ),
-          ),
-          _RouteSummary(
-            facts: [
+    } else if (planned != null || driven != null) {
+      final hasGps = (driven?.path.length ?? 0) >= 2;
+      final pins = planned != null
+          ? _routePins(planned.start, planned.stops)
+          : [
+              MapPin(at: driven!.start, kind: MapPinKind.branch),
+              for (final (i, s) in driven.stops.indexed)
+                MapPin(at: s.location, kind: MapPinKind.delivered, label: '${i + 1}'),
+            ];
+      final facts = driven != null && (ctrl.actual || hasGps)
+          ? [
               (
                 tr('Planned'),
-                driven.estimatedDistanceKm == null ? '—' : '${driven.estimatedDistanceKm!.toStringAsFixed(1)} km',
+                driven.estimatedDistanceKm == null && planned == null
+                    ? '—'
+                    : '${(driven.estimatedDistanceKm ?? planned?.totalDistanceKm)?.toStringAsFixed(1) ?? '—'} km',
               ),
               (
                 tr('Driven'),
                 driven.actualDistanceKm == null ? '—' : '${driven.actualDistanceKm!.toStringAsFixed(1)} km',
               ),
               (tr('Time'), driven.actualMinutes == null ? '—' : tr('{n} min', {'n': driven.actualMinutes})),
+            ]
+          : [
+              (tr('Distance'), '${planned!.totalDistanceKm.toStringAsFixed(1)} km'),
+              (tr('Estimated time'), tr('{n} min', {'n': planned.estimatedMinutes})),
+              (tr('Stops'), '${planned.stops.length}'),
+            ];
+      body = Column(
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(PosSpacing.md),
+              child: ctrl.actual && !hasGps && planned == null
+                  ? EmptyView(message: tr('No GPS trail was recorded for this run.'), icon: Icons.location_off_outlined)
+                  : _PathLayerMap(
+                      expand: true,
+                      pins: pins,
+                      plannedPath: planned?.path,
+                      actualPath: driven?.path,
+                      initialShowPlanned: !ctrl.actual,
+                      initialShowActual: true,
+                    ),
+            ),
+          ),
+          _RouteSummary(
+            facts: facts,
+            stops: [
+              if (planned != null)
+                for (final s in planned.stops)
+                  (
+                    '${s.sequence}',
+                    '#${s.orderNumber} · ${s.customerName}',
+                    [
+                      if (s.distanceFromPreviousKm != null) '${s.distanceFromPreviousKm!.toStringAsFixed(1)} km',
+                      if (s.etaMinutesFromPrevious != null) tr('{n} min', {'n': s.etaMinutesFromPrevious}),
+                    ].join(' · '),
+                  ),
             ],
-            stops: const [],
           ),
         ],
       );
