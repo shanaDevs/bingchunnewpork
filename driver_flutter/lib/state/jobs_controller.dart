@@ -132,6 +132,10 @@ class JobsController extends ChangeNotifier {
   bool historyLoaded = false;
   DeliveryJobDetail? activeJobDetail;
 
+  /// Detail for every held run (a rider can hold a returning ride and a new pickup at once),
+  /// so each Home card shows its own phase. Keyed by job id.
+  Map<String, DeliveryJobDetail> activeDetails = const {};
+
   final _newJobEvents = StreamController<void>.broadcast();
 
   /// Fires when a new job lands while the app is open, for in-app sound + banner.
@@ -180,17 +184,25 @@ class JobsController extends ChangeNotifier {
         p = profile;
       }
       final list = await _c.jobsRepository.listJobs();
-      final active = list.where((j) => _heldStatuses.contains(j.status)).firstOrNull;
-      DeliveryJobDetail? detail;
-      if (active != null) {
-        try {
-          detail = await _c.jobsRepository.getJob(active.id);
-        } catch (_) {
-          detail = activeJobDetail;
-        }
-      }
+      final held = list.where((j) => _heldStatuses.contains(j.status)).toList();
+      final fetched = await Future.wait(
+        held.map((j) async {
+          try {
+            return await _c.jobsRepository.getJob(j.id);
+          } catch (_) {
+            // Keep the last known detail rather than dropping the card back to a guess.
+            return activeDetails[j.id] ?? (activeJobDetail?.id == j.id ? activeJobDetail : null);
+          }
+        }),
+      );
+      final details = <String, DeliveryJobDetail>{
+        for (final d in fetched.nonNulls) d.id: d,
+      };
+      final active = held.firstOrNull;
+      final detail = active == null ? null : details[active.id];
       loading = false;
       jobs = list;
+      activeDetails = details;
       activeJobDetail = detail;
       ActiveJobCache.put(detail);
       profile = p;

@@ -191,9 +191,7 @@ class _JobsTabState extends State<JobsTab> {
     if (_wasOnline && !vm.isOnline) _loadLastShift(vm);
     _wasOnline = vm.isOnline;
 
-    final branches = <StoreRef>[
-      ...?vm.profile?.accessibleStores,
-    ];
+    final branches = <StoreRef>[...?vm.profile?.accessibleStores];
     if (branches.isEmpty && vm.profile?.store != null) branches.add(vm.profile!.store!);
     final homeStoreId = vm.profile?.store?.id ?? vm.profile?.storeId;
 
@@ -241,13 +239,27 @@ class _JobsTabState extends State<JobsTab> {
               // Rebuilds when the rider cancels the breakdown so the button flips back.
               child: ListenableBuilder(
                 listenable: LocalProfile.instance,
-                builder: (context, _) => ActiveJobCard(
-                  job: job,
-                  detail: vm.activeJobDetail?.id == job.id ? vm.activeJobDetail : null,
-                  onOpen: () => widget.onOpenJob(job),
-                  onViewDetails: () => AppRoutes.openJobDetail(context, job.id),
-                  onReportIssue: () => _openReportSheet(vm),
-                ),
+                builder: (context, _) {
+                  final detail =
+                      vm.activeDetails[job.id] ?? (vm.activeJobDetail?.id == job.id ? vm.activeJobDetail : null);
+                  final nextOrderId = detail == null
+                      ? null
+                      : ([...detail.orders]..sort((a, b) => a.sequence.compareTo(b.sequence)))
+                            .where((o) => o.isPending)
+                            .firstOrNull
+                            ?.orderId;
+                  return ActiveJobCard(
+                    job: job,
+                    detail: detail,
+                    onOpen: () => widget.onOpenJob(job),
+                    // Straight into the leg: the map shows the route, not another "Navigate" step.
+                    onNavigate: nextOrderId == null
+                        ? null
+                        : () => AppRoutes.openDashboard(context, job.id, legOrderId: nextOrderId),
+                    onViewDetails: () => AppRoutes.openJobDetail(context, job.id),
+                    onReportIssue: () => _openReportSheet(vm),
+                  );
+                },
               ),
             ),
           if (active.isEmpty && scheduled.isEmpty) NoOtherJobsCard(isOnline: vm.isOnline),
@@ -287,10 +299,7 @@ class _JobsTabState extends State<JobsTab> {
                 widget.onOpenProfile?.call();
               },
             ),
-            if (!vm.isOnline) ...[
-              const SizedBox(height: 12),
-              LastShiftCard(shift: _lastShift),
-            ],
+            if (!vm.isOnline) ...[const SizedBox(height: 12), LastShiftCard(shift: _lastShift)],
           ],
         ],
       ],

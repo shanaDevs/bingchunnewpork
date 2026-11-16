@@ -84,6 +84,10 @@ class _DashboardBodyState extends State<_DashboardBody> with WidgetsBindingObser
   /// The order the rider has set off for; any other pending order shows as "Up next".
   late String? _legOrderId = widget.legOrderId;
 
+  /// Opened from a "Navigate to order N" tap on a picked-up run that isn't started yet:
+  /// start it once on arrival instead of asking for the same tap again.
+  bool _autoStartDone = false;
+
   @override
   void initState() {
     super.initState();
@@ -121,7 +125,17 @@ class _DashboardBodyState extends State<_DashboardBody> with WidgetsBindingObser
     if (!await ensureLocationPermission()) return;
     BcFeedback.success();
     await _vm.pickup(widget.jobId);
+    _showActionError();
     await _remindPreviousRide();
+  }
+
+  /// Start / pickup failures only set [DashboardController.error]; the map screen has no
+  /// error slot, so surface it here or the tap looks like it did nothing.
+  void _showActionError() {
+    final err = _vm.error;
+    if (err == null || !mounted) return;
+    BcFeedback.error();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
   }
 
   /// Shows the "complete your previous ride" popup when the last action was refused for it.
@@ -132,11 +146,14 @@ class _DashboardBodyState extends State<_DashboardBody> with WidgetsBindingObser
     await showPreviousRideReminder(context, previous);
   }
 
-  Future<void> _start() async {
-    if (!await ensureLocationPermission()) return;
+  /// Starts the run; true once the job is actually IN_PROGRESS.
+  Future<bool> _start() async {
+    if (!await ensureLocationPermission()) return false;
     BcFeedback.success();
     await _vm.start(widget.jobId);
+    if (_vm.job?.status != 'IN_PROGRESS') _showActionError();
     await _remindPreviousRide();
+    return _vm.job?.status == 'IN_PROGRESS';
   }
 
   Future<void> _complete() async {
@@ -253,14 +270,20 @@ class _DashboardBodyState extends State<_DashboardBody> with WidgetsBindingObser
         } else if (job.canStart && next != null) {
           // Picked up: the first order is "Up next"; tapping starts the run and sets off.
           final n = stops.indexOf(next) + 1;
+          if (!_autoStartDone && widget.legOrderId == next.orderId) {
+            _autoStartDone = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) async {
+              if (!mounted) return;
+              if (await _start() && mounted) setState(() => _legOrderId = next.orderId);
+            });
+          }
           target = _stopTarget(next, job, n, upNext: true);
           action = NavButtonAction(
             label: tr('Navigate to order {n}', {'n': n}),
             icon: Icons.navigation_outlined,
             loading: vm.acting,
             onTap: () async {
-              await _start();
-              if (mounted) setState(() => _legOrderId = next.orderId);
+              if (await _start() && mounted) setState(() => _legOrderId = next.orderId);
             },
           );
         } else if (job.status == 'IN_PROGRESS' && next != null) {

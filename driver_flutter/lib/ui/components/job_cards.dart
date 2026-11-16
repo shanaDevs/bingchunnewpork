@@ -297,12 +297,16 @@ class SegmentedProgress extends StatelessWidget {
   }
 }
 
+/// Leg of an active run, as shown on its Home card.
+enum _RidePhase { pickup, delivering, returning }
+
 class ActiveJobCard extends StatelessWidget {
   const ActiveJobCard({
     super.key,
     required this.job,
     required this.detail,
     required this.onOpen,
+    this.onNavigate,
     this.onViewDetails,
     this.onReportIssue,
   });
@@ -312,6 +316,10 @@ class ActiveJobCard extends StatelessWidget {
 
   /// Opens the live run (dashboard) — "Continue" and the next-stop panel.
   final VoidCallback onOpen;
+
+  /// "Navigate to order N" and the next-delivery panel: opens the run already heading to
+  /// that order, so the map doesn't ask for the same tap again. Falls back to [onOpen].
+  final VoidCallback? onNavigate;
 
   /// Opens the Job Details page — "Details", "View all" and the order rows.
   /// Falls back to [onOpen] when not set.
@@ -337,15 +345,39 @@ class ActiveJobCard extends StatelessWidget {
     final customerAddress = firstNonBlank([activeOrder?.shortAddress, preview?.shortAddress], tr('Delivery address'));
 
 
-    final pickedUp = detail?.pickedUp ?? job.status == 'IN_PROGRESS';
+    // Which leg of the run this card is on. A rider can hold a finished ride (heading back
+    // to the branch) and a freshly accepted one at the same time, so each card must say
+    // which it is without opening it. Uses the job status too when the detail isn't loaded.
+    final status = detail?.status ?? job.status;
     final orderTotal = orders.isEmpty ? job.orderCount : orders.length;
+    final allDone = detail != null && orders.isNotEmpty && orders.every((o) => !o.isPending);
+    final phase = (status == 'RETURNING' || allDone)
+        ? _RidePhase.returning
+        : (detail?.pickedUp ?? status == 'IN_PROGRESS')
+        ? _RidePhase.delivering
+        : _RidePhase.pickup;
+    final returning = phase == _RidePhase.returning;
+    final beforePickup = phase == _RidePhase.pickup;
+    final pickedUp = !beforePickup;
     final deliveredCount = detail?.deliveredCount ?? 0;
     final totalStops = orderTotal + 1;
-    final completedStops = (pickedUp ? 1 : 0) + deliveredCount;
-    final allDone = detail != null && orders.isNotEmpty && orders.every((o) => !o.isPending);
-    final stepLabel = !pickedUp ? tr('Pickup') : (allDone ? tr('Complete') : tr('Delivery'));
-    final beforePickup = !pickedUp;
-    final nextOrderIndex = orders.indexWhere((o) => o.isPending);
+    final completedStops = returning ? totalStops : (pickedUp ? 1 : 0) + deliveredCount;
+    final stepLabel = switch (phase) {
+      _RidePhase.pickup => tr('Pickup'),
+      _RidePhase.delivering => tr('Delivery'),
+      _RidePhase.returning => tr('All delivered'),
+    };
+    final (phaseLabel, phaseIcon, phaseSoft, phaseInk) = switch (phase) {
+      _RidePhase.pickup => (tr('New ride – Pickup required'), Icons.storefront_rounded, c.warningSoft, c.warningStrong),
+      _RidePhase.delivering => (tr('Delivery in progress'), Icons.local_shipping_rounded, c.primarySoft, c.primaryStrong),
+      _RidePhase.returning => (
+        tr('Delivery completed – Return to branch'),
+        Icons.assignment_turned_in_rounded,
+        c.successSoft,
+        c.successStrong,
+      ),
+    };
+    final nextOrderIndex = ([...orders]..sort((a, b) => a.sequence.compareTo(b.sequence))).indexWhere((o) => o.isPending);
     final earn = detail?.totalDeliveryFees ?? job.totalDeliveryFees;
 
     final viewDetails = onViewDetails ?? onOpen;
@@ -359,6 +391,25 @@ class ActiveJobCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 0. Phase band: tells a returning ride apart from a new pickup at a glance.
+            Container(
+              color: phaseSoft,
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              child: Row(
+                children: [
+                  Icon(phaseIcon, size: 20, color: phaseInk),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      phaseLabel,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: phaseInk),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             // 1. Job summary + progress; tap opens the full job.
             GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -380,7 +431,7 @@ class ActiveJobCard extends StatelessWidget {
                             children: [
                               Text(
                                 tr('Active job').toUpperCase(),
-                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1, color: c.primary),
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1, color: phaseInk),
                               ),
                               const SizedBox(height: 4),
                               Text(
@@ -436,7 +487,7 @@ class ActiveJobCard extends StatelessWidget {
                         ),
                         Text(
                           stepLabel,
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: allDone ? c.successStrong : c.primary),
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: phaseInk),
                         ),
                       ],
                     ),
@@ -447,33 +498,21 @@ class ActiveJobCard extends StatelessWidget {
             // 2. Next stop highlight.
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-              child: allDone
-                  ? Container(
-                      padding: const EdgeInsets.all(11),
-                      decoration: BoxDecoration(color: c.successSoft, borderRadius: BorderRadius.circular(BcRadius.md)),
-                      child: Row(
-                        children: [
-                          Icon(Icons.check_rounded, size: 24, color: c.successStrong),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              tr('All stops done. Complete the job.'),
-                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: c.foreground),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : NextStopPanel(
-                      icon: beforePickup ? Icons.storefront_outlined : Icons.place_outlined,
-                      eyebrow: beforePickup ? tr('Next stop') : tr('Next delivery'),
-                      title: beforePickup ? storeTitle : customerName,
-                      subtitle: beforePickup ? storeAddress : customerAddress,
-                      onTap: () {
-                        BcFeedback.tap();
-                        onOpen();
-                      },
-                    ),
+              // Pickup and return both head to the branch; the eyebrow says why.
+              child: NextStopPanel(
+                icon: returning
+                    ? Icons.keyboard_return_rounded
+                    : (beforePickup ? Icons.storefront_outlined : Icons.place_outlined),
+                eyebrow: returning
+                    ? tr('Return to branch')
+                    : (beforePickup ? tr('Next stop · Pickup') : tr('Next delivery')),
+                title: beforePickup || returning ? storeTitle : customerName,
+                subtitle: beforePickup || returning ? storeAddress : customerAddress,
+                onTap: () {
+                  BcFeedback.tap();
+                  (phase == _RidePhase.delivering ? (onNavigate ?? onOpen) : onOpen)();
+                },
+              ),
             ),
             // 3. Orders preview.
             if (shown.isNotEmpty) ...[
@@ -519,10 +558,10 @@ class ActiveJobCard extends StatelessWidget {
                 children: [
                   // Opens the in-app active run (map + route); its directions icon hands off to Google Maps.
                   // One primary action that follows the job's current step.
-                  if (allDone)
+                  if (returning)
                     PillButton(
-                      label: tr('Complete job'),
-                      trailingIcon: Icons.arrow_forward_rounded,
+                      label: tr('Return to branch'),
+                      icon: Icons.keyboard_return_rounded,
                       onTap: onOpen,
                     )
                   else
@@ -533,7 +572,7 @@ class ActiveJobCard extends StatelessWidget {
                               ? tr('Navigate to order {n}', {'n': nextOrderIndex + 1})
                               : tr('Navigate')),
                       icon: Icons.navigation_outlined,
-                      onTap: onOpen,
+                      onTap: beforePickup ? onOpen : (onNavigate ?? onOpen),
                     ),
                   if (onReportIssue != null) ...[
                     const SizedBox(height: 12),
