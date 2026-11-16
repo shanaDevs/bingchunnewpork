@@ -11,6 +11,7 @@ import {
   optimizeDeliveryStops,
   invalidateJobRoute,
   isRejectAllowed,
+  persistJobActualRouteFromGps,
   type RouteStop,
   type DeliveryDomainStateValue,
   patchDriverOpsProfile,
@@ -936,6 +937,7 @@ const vehicleFailureSchema = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
   note: z.string().max(500).nullish(),
+  jobId: z.string().min(1).optional(),
 });
 
 type VehicleFailureResult = {
@@ -946,9 +948,161 @@ type VehicleFailureResult = {
   rideReleased: true;
 };
 
+type RemainingVehicleFailureStop = {
+  orderId: string;
+  order: { id: string; status: string };
+};
+
 async function reconnectPrisma(): Promise<void> {
   await prisma.$disconnect().catch(() => undefined);
   await prisma.$connect();
+}
+
+async function recentVehicleFailureResult(
+  driverId: string,
+  accessibleStoreIds: string[],
+): Promise<VehicleFailureResult | null> {
+  const since = new Date(Date.now() - 60_000);
+  const closed = await prisma.deliveryJob.findFirst({
+    where: {
+      driverId,
+      storeId: { in: accessibleStoreIds },
+      status: 'VEHICLE_FAILURE',
+      completedAt: { gte: since },
+    },
+    orderBy: { completedAt: 'desc' },
+    select: { id: true },
+  });
+  if (!closed) return null;
+  const recorded = await prisma.deliveryAttempt.findFirst({
+    where: { jobId: closed.id, outcome: 'VEHICLE_FAILURE' },
+    orderBy: { createdAt: 'desc' },
+    select: { orderId: true },
+  });
+  const lastOrder = recorded
+    ? null
+    : await prisma.deliveryJobOrder.findFirst({
+        where: { jobId: closed.id },
+        orderBy: { sequence: 'desc' },
+        select: { orderId: true },
+      });
+  return {
+    jobId: closed.id,
+    orderId: recorded?.orderId ?? lastOrder?.orderId ?? '',
+    deliveryFailed: true,
+    rideEnteredReturning: false,
+    rideReleased: true,
+  };
+}
+
+async function closeRideAsVehicleFailure(opts: {
+  jobId: string;
+  driverId: string;
+  storeId: string;
+  storeName: string | null;
+  rideCode: string | null;
+  lat: number;
+  lng: number;
+  note?: string;
+  remaining: RemainingVehicleFailureStop[];
+  fallbackOrderId: string;
+}): Promise<VehicleFailureResult> {
+  const failureNote = opts.note ?? 'Vehicle failure';
+  const orderIds: string[] = [];
+  for (const stop of opts.remaining) {
+    const prior = await prisma.deliveryAttempt.count({
+      where: { orderId: stop.orderId, jobId: opts.jobId },
+    });
+    await prisma.deliveryAttempt.create({
+      data: {
+        orderId: stop.orderId,
+        jobId: opts.jobId,
+        driverId: opts.driverId,
+        attemptNo: prior + 1,
+        outcome: 'VEHICLE_FAILURE',
+        note: failureNote,
+        lat: opts.lat,
+        lng: opts.lng,
+      },
+    });
+    await prisma.orderStatusEvent.create({
+      data: {
+        orderId: stop.orderId,
+        status: stop.order.status,
+        note: opts.note ? `Vehicle failure: ${opts.note}` : 'Vehicle failure reported by driver',
+      },
+    });
+    orderIds.push(stop.orderId);
+  }
+
+  const allLinks = await prisma.deliveryJobOrder.findMany({
+    where: { jobId: opts.jobId },
+    select: { orderId: true, order: { select: { status: true, deliveryFee: true, cancelledAtStatus: true } } },
+  });
+  const failedByOrder = await fetchLatestFailedAttemptsForJob(
+    opts.jobId,
+    allLinks.map((l) => l.orderId),
+  );
+  const { deliveredTotal } = creditedDeliveredTotals(allLinks, failedByOrder);
+
+  await prisma.deliveryJob.update({
+    where: { id: opts.jobId },
+    data: {
+      status: 'VEHICLE_FAILURE',
+      completedAt: new Date(),
+      completedLat: opts.lat,
+      completedLng: opts.lng,
+      totalDeliveryFees: lkrWholeToJobFeeDecimal(deliveredTotal),
+    },
+  });
+  await persistJobActualRouteFromGps(opts.jobId).catch((err) => {
+    logger.error('persistJobActualRouteFromGps failed after vehicle failure', {
+      jobId: opts.jobId,
+      err,
+    });
+  });
+  await promoteNextQueuedJob(opts.driverId).catch(() => {});
+
+  const remainingHeld = await prisma.deliveryJob.count({
+    where: { driverId: opts.driverId, status: { in: await heldJobStatuses() } },
+  });
+  if (remainingHeld === 0) {
+    await patchDriverOpsProfile(opts.driverId, { dutyStatus: 'ONLINE' }).catch(() => {});
+  }
+
+  invalidateJobRoute(opts.jobId);
+  const orderId = orderIds[0] ?? opts.fallbackOrderId;
+  const failurePayload = {
+    jobId: opts.jobId,
+    driverId: opts.driverId,
+    orderId,
+    lat: opts.lat,
+    lng: opts.lng,
+    storeId: opts.storeId,
+    rideCode: opts.rideCode,
+    storeName: opts.storeName,
+  };
+
+  getEventPublisher()
+    .publish(`store:${opts.storeId}`, 'vehicleFailureReported', failurePayload)
+    .catch(() => {});
+  getEventPublisher()
+    .publish('delivery-ops', 'vehicleFailureReported', failurePayload)
+    .catch(() => {});
+  getEventPublisher()
+    .publish(`store:${opts.storeId}`, 'deliveryJobUpdated', {
+      jobId: opts.jobId,
+      status: 'VEHICLE_FAILURE',
+    })
+    .catch(() => {});
+
+  return {
+    jobId: opts.jobId,
+    orderId,
+    deliveryFailed: true,
+    rideEnteredReturning: false,
+    rideReleased: true,
+  };
 }
 
 /**
@@ -956,6 +1110,7 @@ async function reconnectPrisma(): Promise<void> {
  * VEHICLE_FAILURE delivery attempt on the current active stop so the admin
  * can reassign the run to another driver. The driver's GPS coordinates are
  * captured so dispatch knows exactly where to send the replacement rider.
+ * RETURNING with no leftover stops still closes the ride (no attempt on delivered orders).
  */
 async function executeVehicleFailureReport(req: Request, replay: boolean): Promise<VehicleFailureResult> {
     // Guard before any writes — delivery-service has no runtime schema-patch helper of
@@ -969,7 +1124,7 @@ async function executeVehicleFailureReport(req: Request, replay: boolean): Promi
 
     const driverId = req.user!.sub;
     const accessibleStoreIds = await requireAccessibleStores(driverId, req.user!.storeId);
-    const { lat, lng, note } = vehicleFailureSchema.parse(req.body);
+    const { lat, lng, note, jobId } = vehicleFailureSchema.parse(req.body);
 
     const link = await prisma.deliveryJobOrder.findFirst({
       where: {
@@ -977,147 +1132,76 @@ async function executeVehicleFailureReport(req: Request, replay: boolean): Promi
           driverId,
           status: { in: ['IN_PROGRESS', 'RETURNING'] },
           storeId: { in: accessibleStoreIds },
+          ...(jobId ? { id: jobId } : {}),
         },
         order: { status: { in: ['READY', 'OUT_FOR_DELIVERY'] } },
       },
       orderBy: { sequence: 'asc' },
       include: { order: true, job: { include: { store: { select: { id: true, name: true } } } } },
     });
-    if (!link) {
-      if (replay) {
-        const since = new Date(Date.now() - 60_000);
-        const closed = await prisma.deliveryJob.findFirst({
-          where: {
-            driverId,
-            storeId: { in: accessibleStoreIds },
-            status: 'VEHICLE_FAILURE',
-            completedAt: { gte: since },
-          },
-          orderBy: { completedAt: 'desc' },
-          select: { id: true },
-        });
-        const recorded = closed
-          ? await prisma.deliveryAttempt.findFirst({
-              where: { jobId: closed.id, outcome: 'VEHICLE_FAILURE' },
-              orderBy: { createdAt: 'desc' },
-              select: { orderId: true },
-            })
-          : null;
-        if (closed && recorded) {
-          return {
-            jobId: closed.id,
-            orderId: recorded.orderId,
-            deliveryFailed: true,
-            rideEnteredReturning: false,
-            rideReleased: true,
-          };
-        }
-      }
-      if (await driverHasUnpickedHeldJob(driverId, accessibleStoreIds)) {
-        throw new AppError(REJECT_JOB_BEFORE_FAILURE_MESSAGE, 400);
-      }
-      throw new AppError('No active delivery to report a vehicle failure for', 400);
-    }
-
-    const remaining = await prisma.deliveryJobOrder.findMany({
-      where: {
-        jobId: link.jobId,
-        sequence: { gte: link.sequence },
-        order: { status: { in: ['READY', 'OUT_FOR_DELIVERY'] } },
-      },
-      orderBy: { sequence: 'asc' },
-      include: { order: { select: { id: true, status: true } } },
-    });
-
-    const failureNote = note ?? 'Vehicle failure';
-    const orderIds: string[] = [];
-    for (const stop of remaining) {
-      const prior = await prisma.deliveryAttempt.count({
-        where: { orderId: stop.orderId, jobId: link.jobId },
-      });
-      await prisma.deliveryAttempt.create({
-        data: {
-          orderId: stop.orderId,
+    if (link) {
+      const remaining = await prisma.deliveryJobOrder.findMany({
+        where: {
           jobId: link.jobId,
-          driverId,
-          attemptNo: prior + 1,
-          outcome: 'VEHICLE_FAILURE',
-          note: failureNote,
-          lat,
-          lng,
+          sequence: { gte: link.sequence },
+          order: { status: { in: ['READY', 'OUT_FOR_DELIVERY'] } },
         },
+        orderBy: { sequence: 'asc' },
+        include: { order: { select: { id: true, status: true } } },
       });
-      await prisma.orderStatusEvent.create({
-        data: {
-          orderId: stop.orderId,
-          status: stop.order.status,
-          note: note ? `Vehicle failure: ${note}` : 'Vehicle failure reported by driver',
-        },
+      return closeRideAsVehicleFailure({
+        jobId: link.job.id,
+        driverId,
+        storeId: link.job.store.id,
+        storeName: link.job.store.name ?? null,
+        rideCode: link.job.rideCode ?? null,
+        lat,
+        lng,
+        note: note ?? undefined,
+        remaining,
+        fallbackOrderId: link.orderId,
       });
-      orderIds.push(stop.orderId);
     }
 
-    const allLinks = await prisma.deliveryJobOrder.findMany({
-      where: { jobId: link.jobId },
-      select: { orderId: true, order: { select: { status: true, deliveryFee: true, cancelledAtStatus: true } } },
-    });
-    const failedByOrder = await fetchLatestFailedAttemptsForJob(
-      link.jobId,
-      allLinks.map((l) => l.orderId),
-    );
-    const { deliveredTotal } = creditedDeliveredTotals(allLinks, failedByOrder);
-
-    await prisma.deliveryJob.update({
-      where: { id: link.jobId },
-      data: {
-        status: 'VEHICLE_FAILURE',
-        completedAt: new Date(),
-        totalDeliveryFees: lkrWholeToJobFeeDecimal(deliveredTotal),
+    const returningJob = await prisma.deliveryJob.findFirst({
+      where: {
+        driverId,
+        storeId: { in: accessibleStoreIds },
+        status: 'RETURNING',
+        ...(jobId ? { id: jobId } : {}),
+      },
+      orderBy: { startedAt: 'desc' },
+      select: {
+        id: true,
+        storeId: true,
+        rideCode: true,
+        store: { select: { id: true, name: true } },
+        jobOrders: { orderBy: { sequence: 'desc' }, take: 1, select: { orderId: true } },
       },
     });
-    await promoteNextQueuedJob(driverId).catch(() => {});
-
-    const remainingHeld = await prisma.deliveryJob.count({
-      where: { driverId, status: { in: await heldJobStatuses() } },
-    });
-    if (remainingHeld === 0) {
-      await patchDriverOpsProfile(driverId, { dutyStatus: 'ONLINE' }).catch(() => {});
+    if (returningJob) {
+      return closeRideAsVehicleFailure({
+        jobId: returningJob.id,
+        driverId,
+        storeId: returningJob.storeId,
+        storeName: returningJob.store.name ?? null,
+        rideCode: returningJob.rideCode ?? null,
+        lat,
+        lng,
+        note: note ?? undefined,
+        remaining: [],
+        fallbackOrderId: returningJob.jobOrders[0]?.orderId ?? '',
+      });
     }
 
-    const storeId = link.job.store.id;
-    invalidateJobRoute(link.job.id);
-    const orderId = orderIds[0] ?? link.orderId;
-    const failurePayload = {
-      jobId: link.job.id,
-      driverId,
-      orderId,
-      lat,
-      lng,
-      storeId,
-      rideCode: link.job.rideCode ?? null,
-      storeName: link.job.store.name ?? null,
-    };
-
-    getEventPublisher()
-      .publish(`store:${storeId}`, 'vehicleFailureReported', failurePayload)
-      .catch(() => {});
-    getEventPublisher()
-      .publish('delivery-ops', 'vehicleFailureReported', failurePayload)
-      .catch(() => {});
-    getEventPublisher()
-      .publish(`store:${storeId}`, 'deliveryJobUpdated', {
-        jobId: link.job.id,
-        status: 'VEHICLE_FAILURE',
-      })
-      .catch(() => {});
-
-    return {
-      jobId: link.job.id,
-      orderId,
-      deliveryFailed: true,
-      rideEnteredReturning: false,
-      rideReleased: true,
-    };
+    if (replay) {
+      const already = await recentVehicleFailureResult(driverId, accessibleStoreIds);
+      if (already) return already;
+    }
+    if (await driverHasUnpickedHeldJob(driverId, accessibleStoreIds)) {
+      throw new AppError(REJECT_JOB_BEFORE_FAILURE_MESSAGE, 400);
+    }
+    throw new AppError('No active delivery to report a vehicle failure for', 400);
 }
 
 export async function reportVehicleFailure(req: Request, res: Response, next: NextFunction) {

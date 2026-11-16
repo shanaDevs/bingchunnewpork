@@ -121,7 +121,13 @@ class DeliveryController extends ChangeNotifier {
 
 /// Job drawer: run summary, stops and the planned route (live jobs re-poll).
 class DeliveryJobController extends ChangeNotifier {
-  DeliveryJobController(this._repo, this._socket, this.jobId, this.storeId) {
+  DeliveryJobController(
+    this._repo,
+    this._socket,
+    this.jobId,
+    this.storeId, {
+    this.forceReplay = false,
+  }) {
     load();
     _sub = _socket.jobUpdates.listen((_) => load(silent: true));
     _pingSub = _socket.driverPings.listen(_onPing);
@@ -131,16 +137,20 @@ class DeliveryJobController extends ChangeNotifier {
   final AdminSocket _socket;
   final String jobId;
   final String storeId;
+  final bool forceReplay;
   late final StreamSubscription<void> _sub;
   late final StreamSubscription<DriverPing> _pingSub;
 
   DeliveryJobDetail? job;
   DeliveryRoute? route;
+  ActualRoute? driven;
   String? error;
   bool loading = true;
 
   /// Latest rider position for this run (live map).
   GeoPoint? rider;
+
+  bool get isLive => job != null && !forceReplay && isLiveDeliveryRun(job!.status);
 
   Future<void> load({bool silent = false}) async {
     if (!silent) {
@@ -154,6 +164,15 @@ class DeliveryJobController extends ChangeNotifier {
         route = await _repo.route(jobId, storeId);
       } catch (_) {
         // Map falls back to the stop pins.
+      }
+      if (!isLive) {
+        try {
+          driven = await _repo.actualRoute(jobId, storeId);
+        } catch (_) {
+          driven = null;
+        }
+      } else {
+        driven = null;
       }
       error = null;
     } catch (e) {
@@ -198,10 +217,26 @@ class RouteViewController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      if (actual) {
-        driven = await _repo.actualRoute(jobId, storeId);
-      } else {
-        planned = await _repo.route(jobId, storeId);
+      Object? plannedError;
+      Object? actualError;
+      await Future.wait<void>([
+        () async {
+          try {
+            planned = await _repo.route(jobId, storeId);
+          } catch (e) {
+            plannedError = e;
+          }
+        }(),
+        () async {
+          try {
+            driven = await _repo.actualRoute(jobId, storeId);
+          } catch (e) {
+            actualError = e;
+          }
+        }(),
+      ]);
+      if (planned == null && driven == null) {
+        error = (actual ? actualError : plannedError)?.toString() ?? 'Route unavailable';
       }
     } catch (e) {
       error = e.toString();

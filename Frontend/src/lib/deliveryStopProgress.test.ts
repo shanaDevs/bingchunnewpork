@@ -5,6 +5,9 @@ import {
   deriveStepStates,
   deriveTargetRiderNodeIndex,
   deriveUpcomingNodeIndex,
+  jobLikelyHasRiderGps,
+  jobSupportsActualRouteReplay,
+  jobUsesLiveRouteTracking,
   lastCompletedStopSequence,
   segmentColorBetweenNodes,
   segmentColorToStop,
@@ -311,5 +314,33 @@ describe('full delivery sequence', () => {
     expect(deriveTargetRiderNodeIndex(jobStatus, stopStates, orders)).toBe(4);
     expect(deriveUpcomingNodeIndex(jobStatus, stopStates, orders)).toBeNull();
     expect(segmentColorBetweenNodes('completed')).toBe('bg-brand');
+  });
+});
+
+describe('jobSupportsActualRouteReplay', () => {
+  it('uses live tracking only for active held jobs without a displayStatus', () => {
+    expect(jobUsesLiveRouteTracking('IN_PROGRESS')).toBe(true);
+    expect(jobUsesLiveRouteTracking('IN_PROGRESS', { displayStatus: 'PARTIALLY_COMPLETED' })).toBe(
+      false,
+    );
+    expect(jobUsesLiveRouteTracking('IN_PROGRESS', { forceReplay: true })).toBe(false);
+    expect(jobSupportsActualRouteReplay('CANCELLED')).toBe(true);
+    expect(jobSupportsActualRouteReplay('COMPLETED')).toBe(true);
+    expect(jobSupportsActualRouteReplay('ASSIGNED')).toBe(false);
+  });
+
+  it('shows Actual for cancelled/partial jobs that had a rider, not Missed', () => {
+    expect(jobLikelyHasRiderGps({ status: 'CANCELLED' })).toBe(true);
+    expect(jobLikelyHasRiderGps({ status: 'IN_PROGRESS', displayStatus: 'PARTIALLY_COMPLETED' })).toBe(
+      true,
+    );
+    expect(jobLikelyHasRiderGps({ status: 'SCHEDULED', displayStatus: 'MISSED' })).toBe(false);
+    expect(
+      jobLikelyHasRiderGps({
+        status: 'ASSIGNED',
+        displayStatus: 'ABANDONED',
+        driver: { id: 'd1' },
+      }),
+    ).toBe(true);
   });
 });

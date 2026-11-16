@@ -28,7 +28,12 @@ import { getAdminSession, isAllBranchView, isCashier } from '@/lib/adminAuth';
 import { adminBadgeClass, DELIVERY_JOB_STATUS_BADGE, DELIVERY_JOB_STATUS_LABEL } from '@/lib/adminBadges';
 import { formatDeliveryJobTitle } from '@/lib/deliveryRoute';
 import { buildPageList } from '@/lib/pagination';
-import type { LiveDriverMarker, LivePathPoint, LiveStoreMarker } from '@/components/admin/AdminLiveDriversMap';
+import type {
+  LiveDriverCurrentJob,
+  LiveDriverMarker,
+  LivePathPoint,
+  LiveStoreMarker,
+} from '@/components/admin/AdminLiveDriversMap';
 
 const AdminLiveDriversMap = dynamic(() => import('@/components/admin/AdminLiveDriversMap'), {
   ssr: false,
@@ -70,6 +75,7 @@ type LiveDriverRow = {
   heading?: number | null;
   updatedAt: string | null;
   jobId: string | null;
+  currentJob?: LiveDriverCurrentJob | null;
   recentPath?: LivePathRecord[];
 };
 
@@ -341,8 +347,10 @@ export default function AdminLiveDeliveryPage() {
       markers.push({
         jobId: job.id,
         driverId,
-        driverName: job.driver?.name ?? 'Driver',
+        driverName: job.driver?.name ?? liveRow?.name ?? 'Driver',
         storeName: job.storeName,
+        dutyStatus: liveRow?.dutyStatus,
+        currentJob: liveRow?.currentJob ?? null,
         lat,
         lng,
         heading: socketPos?.heading ?? liveRow?.heading ?? lastTrail?.heading ?? null,

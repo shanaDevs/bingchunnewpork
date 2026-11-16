@@ -3,7 +3,12 @@ import { DeliveryJobStatus, type Order, type OrderItem, type User, type Address,
 import { AppError } from '../middleware/errorHandler';
 import { normalizeProductImageUrl } from './productImages';
 import { prisma } from './prisma';
-import { creditedDeliveredTotals, groupLatestFailedAttemptsByJob } from '@bingchun/delivery-domain';
+import {
+  creditedDeliveredTotals,
+  groupLatestFailedAttemptsByJob,
+  persistJobActualRouteFromGps,
+} from '@bingchun/delivery-domain';
+import { logger } from '../utils/logger';
 import type { RouteStop } from './routeOptimizer';
 import { optimizeDeliveryStops, totalRouteDistanceKm, totalRouteEtaMinutes } from './routeOptimizer';
 import { haversineKm } from '../utils/geo';
@@ -270,7 +275,8 @@ export async function promoteNextQueuedJob(driverId: string | null | undefined):
 export type JobVehicleFailurePin = {
   lat: number;
   lng: number;
-  orderId: string;
+  /** Null when the pin is stored on the job (RETURNING with no leftover stops). */
+  orderId: string | null;
 };
 
 export type JobRouteOriginStore = {
@@ -331,8 +337,21 @@ export async function fetchJobVehicleFailure(jobId: string): Promise<JobVehicleF
     orderBy: { createdAt: 'desc' },
     select: { lat: true, lng: true, orderId: true },
   });
-  if (attempt?.lat == null || attempt.lng == null) return null;
-  return { lat: attempt.lat, lng: attempt.lng, orderId: attempt.orderId };
+  if (attempt?.lat != null && attempt.lng != null) {
+    return { lat: attempt.lat, lng: attempt.lng, orderId: attempt.orderId };
+  }
+  const job = await prisma.deliveryJob.findUnique({
+    where: { id: jobId },
+    select: { status: true, completedLat: true, completedLng: true },
+  });
+  if (
+    job?.status === 'VEHICLE_FAILURE' &&
+    job.completedLat != null &&
+    job.completedLng != null
+  ) {
+    return { lat: job.completedLat, lng: job.completedLng, orderId: null };
+  }
+  return null;
 }
 
 /**
@@ -344,7 +363,7 @@ export async function recordVehicleFailureAndReleaseJob(opts: {
   jobId: string;
   driverId: string;
   storeId: string;
-  fromSequence: number;
+  fromSequence?: number;
   lat: number;
   lng: number;
   note?: string;
@@ -359,7 +378,7 @@ export async function recordVehicleFailureAndReleaseJob(opts: {
   const remaining = await prisma.deliveryJobOrder.findMany({
     where: {
       jobId: opts.jobId,
-      sequence: { gte: opts.fromSequence },
+      sequence: { gte: opts.fromSequence ?? 0 },
       order: { status: { in: ['READY', 'OUT_FOR_DELIVERY'] } },
     },
     orderBy: { sequence: 'asc' },
@@ -409,6 +428,8 @@ export async function recordVehicleFailureAndReleaseJob(opts: {
     data: {
       status: 'VEHICLE_FAILURE',
       completedAt: new Date(),
+      completedLat: opts.lat,
+      completedLng: opts.lng,
       totalDeliveryFees: lkrToDecimal(deliveredTotal),
     },
   });
@@ -663,6 +684,13 @@ export async function executeAdminCancelDeliveryJob(opts: {
 
   invalidateJobRoute(opts.jobId);
   broadcastDeliveryJobUpdated(opts.storeId, { jobId: opts.jobId, status: 'CANCELLED' });
+
+  await persistJobActualRouteFromGps(opts.jobId).catch((err) => {
+    logger.error('persistJobActualRouteFromGps failed after admin cancel', {
+      jobId: opts.jobId,
+      err,
+    });
+  });
 
   return { jobId: opts.jobId, status: 'CANCELLED', releasedDriverId: driverId, reoffered: false };
 }
