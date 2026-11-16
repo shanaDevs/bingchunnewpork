@@ -73,14 +73,23 @@ class JobsRepository {
   Future<void> resendOrderOtp(String orderId) =>
       _api.callNullable(() => _api.core.post<dynamic>('delivery/orders/$orderId/otp/resend', data: const {}), (_) {});
 
-  Future<JobOrder> updateOrderStatus(String orderId, String status, {String? note, String? otp, String? outcome}) =>
-      _api.call(
-        () => _api.core.put<dynamic>(
-          'delivery/orders/$orderId/status',
-          data: compact({'status': status, 'note': note, 'otp': otp, 'outcome': outcome}),
-        ),
-        (d) => JobOrder.fromJson(asJson(d)),
-      );
+  /// [lat]/[lng] are the rider's position when marking DELIVERED — saved as the actual
+  /// drop-off point (the server falls back to the latest GPS ping when omitted).
+  Future<JobOrder> updateOrderStatus(
+    String orderId,
+    String status, {
+    String? note,
+    String? otp,
+    String? outcome,
+    double? lat,
+    double? lng,
+  }) => _api.call(
+    () => _api.core.put<dynamic>(
+      'delivery/orders/$orderId/status',
+      data: compact({'status': status, 'note': note, 'otp': otp, 'outcome': outcome, 'lat': lat, 'lng': lng}),
+    ),
+    (d) => JobOrder.fromJson(asJson(d)),
+  );
 
   Future<void> createComplaint(String orderId, String category, String description) => _api.callNullable(
     () => _api.core.post<dynamic>(
@@ -94,11 +103,16 @@ class JobsRepository {
       _api.call(() => _api.core.get<dynamic>('delivery/me/complaints'), (d) => _list(d, DriverComplaint.fromJson));
 
   /// Reports the driver's vehicle has broken down mid-ride so admin can send a replacement rider.
-  Future<void> reportVehicleFailure(double lat, double lng, {String? note}) => _api.callNullable(
-    () =>
-        _api.core.post<dynamic>('delivery/jobs/vehicle-failure', data: compact({'lat': lat, 'lng': lng, 'note': note})),
-    (_) {},
-  );
+  /// [jobId] pins the report to that ride (IN_PROGRESS, or RETURNING even with no stops left);
+  /// without it the server picks the rider's running ride.
+  Future<VehicleFailureResult?> reportVehicleFailure(double lat, double lng, {String? note, String? jobId}) =>
+      _api.callNullable(
+        () => _api.core.post<dynamic>(
+          'delivery/jobs/vehicle-failure',
+          data: compact({'lat': lat, 'lng': lng, 'note': note, 'jobId': jobId}),
+        ),
+        (d) => VehicleFailureResult.fromJson(asJson(d)),
+      );
 
   Future<void> postLocationBatch(String? jobId, List<Json> points) => _api.callNullable(
     () => _api.core.post<dynamic>('delivery/locations/batch', data: compact({'jobId': jobId, 'points': points})),

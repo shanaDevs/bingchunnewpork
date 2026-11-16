@@ -108,6 +108,12 @@ class JobHistoryItem {
   /// Why the rider cancelled — set only on runs they accepted then rejected.
   final String? cancelReason;
 
+  /// Stops that ended in a failed attempt on this run (customer-side or breakdown).
+  final int failedCount;
+
+  /// Per-stop rows: current order status plus the latest failed attempt on this run.
+  final List<JobHistoryOrder> orders;
+
   const JobHistoryItem({
     required this.id,
     required this.title,
@@ -123,6 +129,8 @@ class JobHistoryItem {
     this.complaintCount = 0,
     this.rideCode,
     this.cancelReason,
+    this.failedCount = 0,
+    this.orders = const [],
   });
 
   factory JobHistoryItem.fromJson(Json j) => JobHistoryItem(
@@ -140,13 +148,90 @@ class JobHistoryItem {
     complaintCount: intOf(j, 'complaintCount'),
     rideCode: strOrNull(j, 'rideCode'),
     cancelReason: strOrNull(j, 'cancelReason'),
+    failedCount: intOf(j, 'failedCount'),
+    orders: listOf(j, 'orders', JobHistoryOrder.fromJson),
   );
+
+  bool get isVehicleFailure => displayStatus == 'VEHICLE_FAILURE' || status == 'VEHICLE_FAILURE';
+
+  /// Stops this rider handed over because of the breakdown (left undelivered on the run).
+  List<JobHistoryOrder> get handedOverOrders => orders.where((o) => o.isVehicleFailure).toList();
+
+  /// The note the rider sent with the breakdown report ("Type: description"), as stored on
+  /// the server. Null when the run had no stops left to hand over (RETURNING) or the server
+  /// only recorded its default text.
+  String? get vehicleFailureNote {
+    for (final o in orders) {
+      final n = o.failureNote?.trim();
+      if (o.isVehicleFailure && n != null && n.isNotEmpty && n != 'Vehicle failure') return n;
+    }
+    return null;
+  }
 
   /// Closed by an admin (the server reports "ADMIN_CLOSED", or a CANCELLED run in history).
   bool get isAdminClosed => displayStatus == 'ADMIN_CLOSED' || status == 'ADMIN_CLOSED' || status == 'CANCELLED';
 
   bool get isIncomplete =>
       displayStatus == 'ABANDONED' || displayStatus == 'PARTIALLY_COMPLETED' || displayStatus == 'VEHICLE_FAILURE';
+}
+
+/// One stop on a past run (`GET delivery/jobs/history` → `orders[]`).
+class JobHistoryOrder {
+  final String orderId;
+
+  /// The order's current status — after a breakdown handover this follows the new rider.
+  final String status;
+  final bool deliveryFailed;
+
+  /// Latest failed attempt on this run, e.g. "VEHICLE_FAILURE" or "CUSTOMER_UNAVAILABLE".
+  final String? failureOutcome;
+  final String? failureNote;
+  final String? failureReason;
+
+  const JobHistoryOrder({
+    required this.orderId,
+    required this.status,
+    this.deliveryFailed = false,
+    this.failureOutcome,
+    this.failureNote,
+    this.failureReason,
+  });
+
+  factory JobHistoryOrder.fromJson(Json j) => JobHistoryOrder(
+    orderId: str(j, 'orderId'),
+    status: str(j, 'status'),
+    deliveryFailed: boolOf(j, 'deliveryFailed'),
+    failureOutcome: strOrNull(j, 'failureOutcome'),
+    failureNote: strOrNull(j, 'failureNote'),
+    failureReason: strOrNull(j, 'failureReason'),
+  );
+
+  bool get isVehicleFailure => failureOutcome == 'VEHICLE_FAILURE';
+
+  bool get isDelivered => status == 'DELIVERED';
+
+  /// No further delivery will happen on this order (delivered, cancelled or refunded).
+  bool get isSettled => const {'DELIVERED', 'CANCELLED', 'REFUNDED', 'RETURNED'}.contains(status);
+
+  /// Picked up by the replacement rider and on its way.
+  bool get isOutForDelivery => status == 'OUT_FOR_DELIVERY';
+}
+
+/// Response of `POST delivery/jobs/vehicle-failure`.
+class VehicleFailureResult {
+  final String jobId;
+
+  /// First stop that was handed over; empty when the run had none left (RETURNING).
+  final String orderId;
+  final bool rideReleased;
+
+  const VehicleFailureResult({required this.jobId, required this.orderId, this.rideReleased = true});
+
+  factory VehicleFailureResult.fromJson(Json j) => VehicleFailureResult(
+    jobId: str(j, 'jobId'),
+    orderId: str(j, 'orderId'),
+    rideReleased: boolOf(j, 'rideReleased', true),
+  );
 }
 
 /// Driver-raised complaint on an order stop.

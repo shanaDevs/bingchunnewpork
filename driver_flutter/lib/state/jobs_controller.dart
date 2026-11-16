@@ -29,11 +29,16 @@ const rejectJobBeforeFailureMessage = 'reject job if you want to remove the acce
 /// accepts IN_PROGRESS / RETURNING rides). [active] is the rider's active job, if any.
 String? breakdownBlockedMessage(DeliveryJobDetail? active) {
   if (active == null) return null; // let the server decide (job may be held elsewhere)
-  if (active.status == 'IN_PROGRESS' || active.status == 'RETURNING') {
-    // The server needs at least one stop still to deliver; with none left there is nothing
-    // to hand over (the rider only has to return to the branch).
+  // RETURNING: the server closes the ride even when every stop is done (the rider just
+  // can't get back to the branch), so it is always reportable.
+  if (active.status == 'RETURNING') return null;
+  if (active.status == 'IN_PROGRESS') {
+    // Mid-run the server needs at least one stop still to deliver; with none left the ride
+    // moves to RETURNING on its own.
     if (active.orders.isNotEmpty && active.orders.every((o) => !o.isPending)) {
-      return tr('All stops on this ride are already finished, so there is nothing left to hand over. Return to the branch to complete it.');
+      return tr(
+        'All stops on this ride are already finished, so there is nothing left to hand over. Return to the branch to complete it.',
+      );
     }
     return null;
   }
@@ -275,14 +280,11 @@ class JobsController extends ChangeNotifier {
     if (notRunning != null) throw StateError(notRunning);
     final fix = await _c.locationTracker.getCurrentLocation();
     if (fix == null) throw StateError(tr('Could not get your location. Enable GPS and try again.'));
-    final activeJobId =
-        active?.id ??
-        jobs
-            .where((j) => j.status == 'IN_PROGRESS' || j.status == 'ASSIGNED' || j.status == 'RETURNING')
-            .firstOrNull
-            ?.id;
-    await _c.jobsRepository.reportVehicleFailure(fix.lat, fix.lng, note: note);
-    await LocalProfile.instance.recordBreakdown(note: note, jobId: activeJobId);
+    final runningJobId =
+        active?.id ?? jobs.where((j) => j.status == 'IN_PROGRESS' || j.status == 'RETURNING').firstOrNull?.id;
+    final result = await _c.jobsRepository.reportVehicleFailure(fix.lat, fix.lng, note: note, jobId: runningJobId);
+    final activeJobId = (result?.jobId.isNotEmpty ?? false) ? result!.jobId : runningJobId;
+    await LocalProfile.instance.recordBreakdown(note: note, jobId: activeJobId, lat: fix.lat, lng: fix.lng);
     if (activeJobId != null) {
       jobs = jobs.where((j) => j.id != activeJobId).toList();
       _emit();

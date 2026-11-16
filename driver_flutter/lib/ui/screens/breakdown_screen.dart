@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/feedback.dart';
@@ -16,8 +17,9 @@ import 'report_breakdown_screen.dart';
 /// its Breakdown & Handover screen.
 ///
 /// There is no dedicated status API. The list is derived from `GET delivery/jobs/history`
-/// (rides ending as VEHICLE_FAILURE: time, ride code, branch, order count). The reason and
-/// description are kept on this phone when the report is sent.
+/// (rides ending as VEHICLE_FAILURE: time, ride code, branch, orders). The reason and
+/// description come from the server (`orders[].failureNote`), with the copy kept on this
+/// phone as a fallback; handover progress follows the handed-over orders' current status.
 class BreakdownScreen extends StatefulWidget {
   const BreakdownScreen({super.key});
 
@@ -25,7 +27,7 @@ class BreakdownScreen extends StatefulWidget {
   State<BreakdownScreen> createState() => _BreakdownScreenState();
 }
 
-bool _isBreakdown(JobHistoryItem r) => r.displayStatus == 'VEHICLE_FAILURE' || r.status == 'VEHICLE_FAILURE';
+bool _isBreakdown(JobHistoryItem r) => r.isVehicleFailure;
 
 DateTime? _reportedAt(JobHistoryItem? r) => r == null ? null : DateTime.tryParse(r.completedAt ?? r.scheduledAt);
 
@@ -47,9 +49,12 @@ JobHistoryItem? latestBreakdownRide(JobsController vm) {
   return rides.isEmpty ? null : rides.first;
 }
 
-/// The saved "Type: description" for a report: stored per ride, or (for the last report
-/// sent before per-ride storage existed) matched by time.
+/// The "Type: description" for a report: the note stored on the server, else the copy saved
+/// on this phone per ride, or (for the last report sent before per-ride storage existed)
+/// matched by time.
 String? _noteFor(JobHistoryItem r) {
+  final server = r.vehicleFailureNote;
+  if (server != null) return server;
   final lp = LocalProfile.instance;
   final saved = lp.breakdownNotes[r.id];
   if (saved != null) return saved;
@@ -57,6 +62,48 @@ String? _noteFor(JobHistoryItem r) {
   final localAt = lp.lastBreakdownAt;
   if (at != null && localAt != null && localAt.difference(at).abs().inMinutes <= 10) return lp.lastBreakdownNote;
   return null;
+}
+
+/// Where a breakdown is in the handover, matching the tracker steps
+/// (Reported -> Finding rider -> Handover -> Done). [_stageDone] marks every step complete.
+const _stageFinding = 1;
+const _stageHandover = 2;
+const _stageDone = 4;
+
+/// What happened to the stops left on a broken-down ride.
+///
+/// [total]: stops handed over. [settled]/[delivered]: how many of those are now
+/// delivered/cancelled (by the replacement rider). [tracked] is false when the server sent no
+/// per-stop rows (`orders[]` in history — older backends): then only [total] is known, from
+/// the ride's counts, and progress can't be shown.
+typedef _Handover = ({int total, int settled, int delivered, bool tracked});
+
+_Handover _handoverFor(JobHistoryItem r) {
+  if (r.orders.isEmpty) {
+    final left = r.orderCount - r.deliveredCount;
+    return (total: left < 0 ? 0 : left, settled: 0, delivered: 0, tracked: false);
+  }
+  var handed = r.handedOverOrders;
+  // Rows without a VEHICLE_FAILURE attempt (e.g. seeded rides): every stop not finished
+  // before the breakdown is still waiting for another rider.
+  if (handed.isEmpty) handed = r.orders.where((o) => !o.isSettled).toList();
+  return (
+    total: handed.length,
+    settled: handed.where((o) => o.isSettled).length,
+    delivered: handed.where((o) => o.isDelivered).length,
+    tracked: true,
+  );
+}
+
+/// Tracker step from [_handoverFor]: nothing settled yet -> support is finding a rider; some
+/// delivered/cancelled -> handover under way; all settled, or nothing was left -> done.
+/// Without per-stop data it stays on "Finding rider" — never shown as done on a guess.
+int _stageFor(JobHistoryItem r) {
+  final h = _handoverFor(r);
+  if (h.total == 0) return _stageDone;
+  if (!h.tracked) return _stageFinding;
+  if (h.settled == h.total) return _stageDone;
+  return h.settled > 0 ? _stageHandover : _stageFinding;
 }
 
 /// Splits a note (`type: description`) into its reason and description.
@@ -176,9 +223,7 @@ class _BreakdownRow extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              active
-                  ? QdBadge(tr('Reported'), tone: QdTone.warning, dot: true)
-                  : QdBadge(tr('Closed'), tone: QdTone.neutral),
+              _StageBadge(stage: _stageFor(report), open: active),
               const SizedBox(height: 8),
               Icon(Icons.chevron_right_rounded, color: c.mutedForeground),
             ],
@@ -189,9 +234,8 @@ class _BreakdownRow extends StatelessWidget {
   }
 }
 
-/// Breakdown & Handover (QuickDrop breakdown/index.tsx) for one report. The server does not
-/// expose the support-side progress (rider found / handover), so the tracker stays on
-/// "Reported".
+/// Breakdown & Handover (QuickDrop breakdown/index.tsx) for one report. The tracker follows
+/// the handed-over orders (see [_stageFor]); the spot is the position saved with the report.
 class BreakdownDetailScreen extends StatelessWidget {
   const BreakdownDetailScreen({super.key, required this.report, required this.open});
 
@@ -210,12 +254,18 @@ class BreakdownDetailScreen extends StatelessWidget {
         final code = report.rideCode;
         final rideText = code != null && code.isNotEmpty ? code : report.title;
         final when = Format.jobDateTime(report.completedAt ?? report.scheduledAt);
+        final stage = _stageFor(report);
+        final handover = _handoverFor(report);
+        final handedCount = handover.total;
+        final settled = handover.settled;
+        final spot = LocalProfile.instance.breakdownSpots[report.id];
         return QdPage(
           title: tr('Breakdown & Handover'),
           children: [
             _StatusCard(
               title: parts.type ?? tr('Vehicle breakdown'),
               subtitle: '${tr('Reported')} $when · $rideText',
+              stage: stage,
               message: open
                   ? tr("You won't receive new jobs until you're back on the road.")
                   : tr("You're back on the road."),
@@ -237,7 +287,9 @@ class BreakdownDetailScreen extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          '${tr('Near')} ${report.storeName}',
+                          spot != null
+                              ? '${spot.lat.toStringAsFixed(5)}, ${spot.lng.toStringAsFixed(5)} · ${report.storeName}'
+                              : '${tr('Near')} ${report.storeName}',
                           style: TextStyle(fontSize: 13, color: c.mutedForeground),
                         ),
                       ),
@@ -246,10 +298,70 @@ class BreakdownDetailScreen extends StatelessWidget {
                 ],
               ),
             ),
+            if (spot != null) ...[
+              QdSectionTitle(tr('Breakdown location')),
+              QdCard(
+                padding: const EdgeInsets.all(10),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(BcRadius.md),
+                  child: SizedBox(
+                    height: 160,
+                    child: GoogleMap(
+                      initialCameraPosition: CameraPosition(target: LatLng(spot.lat, spot.lng), zoom: 15),
+                      markers: {Marker(markerId: const MarkerId('breakdown'), position: LatLng(spot.lat, spot.lng))},
+                      liteModeEnabled: true,
+                      zoomControlsEnabled: false,
+                      myLocationButtonEnabled: false,
+                      mapToolbarEnabled: false,
+                      compassEnabled: false,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            QdSectionTitle(tr('Orders')),
+            QdCard(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  _CountRow(label: tr('Orders on this ride'), value: '${report.orderCount}'),
+                  _CountRow(label: tr('Delivered before the breakdown'), value: '${report.deliveredCount}'),
+                  _CountRow(label: tr('Handed over to another rider'), value: '$handedCount'),
+                  if (handedCount > 0 && handover.tracked)
+                    _CountRow(label: tr('Delivered by the new rider'), value: '${handover.delivered} / $handedCount'),
+                ],
+              ),
+            ),
             QdSectionTitle(tr('Updates')),
             QdCard(
               padding: const EdgeInsets.all(16),
-              child: _TimelineEntry(author: tr('You'), at: when, message: tr('Breakdown reported to support.')),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _TimelineEntry(author: tr('You'), at: when, message: tr('Breakdown reported to support.')),
+                  const SizedBox(height: 14),
+                  if (handedCount == 0)
+                    _TimelineEntry(
+                      author: tr('Support'),
+                      message: tr('No orders were left to hand over. The ride was closed.'),
+                    )
+                  else ...[
+                    _TimelineEntry(
+                      author: tr('Support'),
+                      message: tr('{n} orders released for another rider to deliver.', {'n': handedCount}),
+                    ),
+                    if (settled > 0) ...[
+                      const SizedBox(height: 14),
+                      _TimelineEntry(
+                        author: tr('Support'),
+                        message: stage == _stageDone
+                            ? tr('Handover complete. All released orders are settled.')
+                            : tr('{done} of {total} released orders settled.', {'done': settled, 'total': handedCount}),
+                      ),
+                    ],
+                  ],
+                ],
+              ),
             ),
           ],
         );
@@ -379,11 +491,14 @@ const _steps = ['Reported', 'Finding rider', 'Handover', 'Done'];
 
 /// Gradient header card: type, report time + ride, 4-step tracker and a notice.
 class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.title, required this.subtitle, required this.message});
+  const _StatusCard({required this.title, required this.subtitle, required this.message, required this.stage});
 
   final String title;
   final String subtitle;
   final String message;
+
+  /// Current tracker step (see [_stageFor]).
+  final int stage;
 
   @override
   Widget build(BuildContext context) {
@@ -421,7 +536,7 @@ class _StatusCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 18),
-          _Stepper(current: 0, c: c),
+          _Stepper(current: stage, c: c),
           const SizedBox(height: 14),
           Divider(height: 1, color: Colors.white.withValues(alpha: 0.2)),
           const SizedBox(height: 12),
@@ -516,10 +631,12 @@ class _Dot extends StatelessWidget {
 }
 
 class _TimelineEntry extends StatelessWidget {
-  const _TimelineEntry({required this.author, required this.at, required this.message});
+  const _TimelineEntry({required this.author, this.at, required this.message});
 
   final String author;
-  final String at;
+
+  /// When it happened; null for steps the server gives no time for.
+  final String? at;
   final String message;
 
   @override
@@ -538,13 +655,52 @@ class _TimelineEntry extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('$author · $at', style: TextStyle(fontSize: 12, color: c.mutedForeground)),
+              Text(at == null ? author : '$author · $at', style: TextStyle(fontSize: 12, color: c.mutedForeground)),
               const SizedBox(height: 2),
               Text(message, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.foreground)),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Badge on a breakdown row: where the handover stands.
+class _StageBadge extends StatelessWidget {
+  const _StageBadge({required this.stage, required this.open});
+
+  final int stage;
+
+  /// The rider's latest breakdown and they are not back on a run yet.
+  final bool open;
+
+  @override
+  Widget build(BuildContext context) {
+    if (stage == _stageDone) return QdBadge(open ? tr('Handed over') : tr('Closed'), tone: QdTone.neutral);
+    if (stage == _stageHandover) return QdBadge(tr('Handover'), tone: QdTone.warning, dot: true);
+    return QdBadge(tr('Finding rider'), tone: QdTone.warning, dot: true);
+  }
+}
+
+/// Label / value line in the Orders card.
+class _CountRow extends StatelessWidget {
+  const _CountRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: TextStyle(fontSize: 14, color: c.mutedForeground))),
+          Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.foreground)),
+        ],
+      ),
     );
   }
 }

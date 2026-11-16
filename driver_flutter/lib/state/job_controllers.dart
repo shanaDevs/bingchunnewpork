@@ -9,6 +9,7 @@ import '../core/offer_outcomes.dart';
 import '../data/models/delivery_job.dart';
 import '../data/models/delivery_route.dart';
 import '../data/network/api_exception.dart';
+import '../tracking/location_tracker.dart';
 import 'jobs_controller.dart';
 import '../l10n/l10n.dart';
 
@@ -222,8 +223,8 @@ class DashboardController extends ChangeNotifier {
     if (notRunning != null) throw StateError(notRunning);
     final fix = await _c.locationTracker.getCurrentLocation();
     if (fix == null) throw StateError(tr('Could not get your location. Enable GPS and try again.'));
-    await _c.jobsRepository.reportVehicleFailure(fix.lat, fix.lng, note: note);
-    await LocalProfile.instance.recordBreakdown(note: note, jobId: jobId);
+    await _c.jobsRepository.reportVehicleFailure(fix.lat, fix.lng, note: note, jobId: jobId);
+    await LocalProfile.instance.recordBreakdown(note: note, jobId: jobId, lat: fix.lat, lng: fix.lng);
     await _c.alertService.stopTracking();
     JobRefreshBus.refresh(jobId);
     JobRefreshBus.dropRide(jobId);
@@ -446,7 +447,23 @@ class OrderActionController extends ChangeNotifier {
     otpRequired = false;
     _emit();
     try {
-      final o = await _c.jobsRepository.updateOrderStatus(orderId, status, note: note, otp: otp, outcome: outcome);
+      // Delivered: send where the rider actually is as the drop-off point. Best effort — the
+      // live run fix is instant; without one the server uses the latest GPS ping.
+      DriverFix? dropoff;
+      if (status == 'DELIVERED') {
+        try {
+          dropoff = _c.locationTracker.lastFix ?? await _c.locationTracker.getCurrentLocation();
+        } catch (_) {}
+      }
+      final o = await _c.jobsRepository.updateOrderStatus(
+        orderId,
+        status,
+        note: note,
+        otp: otp,
+        outcome: outcome,
+        lat: dropoff?.lat,
+        lng: dropoff?.lng,
+      );
       acting = false;
       lastUpdated = o;
       order = o;
