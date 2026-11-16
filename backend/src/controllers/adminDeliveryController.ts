@@ -48,6 +48,7 @@ import {
 } from '../lib/deliveryJobHelpers';
 import { jobHasPickedUp } from '../lib/liveDriverTracking';
 import { optimizeDeliveryStops, type RouteStop } from '../lib/routeOptimizer';
+import { dropoffApiFields, mapPinPoint, resolveLiveLastDropoff } from '@bingchun/delivery-domain';
 import {
   assertDriverPinAvailable,
   driverInternalEmail,
@@ -533,6 +534,7 @@ export async function getAdminDeliveryJobRoute(req: Request, res: Response, next
         ...orderStopImageMeta(order.items),
         lat,
         lng,
+        ...dropoffApiFields(order),
       });
     }
 
@@ -573,6 +575,9 @@ export async function getAdminDeliveryJobActualRoute(req: Request, res: Response
                 orderNumber: true,
                 deliveryLat: true,
                 deliveryLng: true,
+                actualDropoffLat: true,
+                actualDropoffLng: true,
+                actualDropoffAt: true,
                 address: { select: { lat: true, lng: true } },
               },
             },
@@ -598,10 +603,9 @@ export async function getAdminDeliveryJobActualRoute(req: Request, res: Response
 
     const stops = job.jobOrders
       .map((jo) => {
-        const lat = jo.order.deliveryLat ?? jo.order.address?.lat;
-        const lng = jo.order.deliveryLng ?? jo.order.address?.lng;
-        if (lat == null || lng == null) return null;
-        return { orderNumber: jo.order.orderNumber, lat, lng };
+        const pin = mapPinPoint(jo.order);
+        if (!pin) return null;
+        return { orderNumber: jo.order.orderNumber, lat: pin.lat, lng: pin.lng, ...dropoffApiFields(jo.order) };
       })
       .filter((s): s is { orderNumber: string; lat: number; lng: number } => s != null);
 
@@ -647,6 +651,9 @@ export async function getAdminDeliveryJobLiveRoute(req: Request, res: Response, 
                 orderNumber: true,
                 deliveryLat: true,
                 deliveryLng: true,
+                actualDropoffLat: true,
+                actualDropoffLng: true,
+                actualDropoffAt: true,
                 address: { select: { lat: true, lng: true } },
               },
             },
@@ -673,10 +680,9 @@ export async function getAdminDeliveryJobLiveRoute(req: Request, res: Response, 
 
     const stops = job.jobOrders
       .map((jo) => {
-        const lat = jo.order.deliveryLat ?? jo.order.address?.lat;
-        const lng = jo.order.deliveryLng ?? jo.order.address?.lng;
-        if (lat == null || lng == null) return null;
-        return { orderNumber: jo.order.orderNumber, lat, lng };
+        const pin = mapPinPoint(jo.order);
+        if (!pin) return null;
+        return { orderNumber: jo.order.orderNumber, lat: pin.lat, lng: pin.lng, ...dropoffApiFields(jo.order) };
       })
       .filter((s): s is { orderNumber: string; lat: number; lng: number } => s != null);
 
@@ -1432,6 +1438,9 @@ type LiveJobOrderLink = {
     cancelReason?: string | null;
     deliveryLat?: number | null;
     deliveryLng?: number | null;
+    actualDropoffLat?: number | null;
+    actualDropoffLng?: number | null;
+    actualDropoffAt?: Date | string | null;
   };
 };
 
@@ -1574,6 +1583,9 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
                     cancelReason: true,
                     deliveryLat: true,
                     deliveryLng: true,
+                    actualDropoffLat: true,
+                    actualDropoffLng: true,
+                    actualDropoffAt: true,
                   },
                 },
               },
@@ -1621,6 +1633,7 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
                 visibleJobOrderLinksForDeliveryJob(current.status, current.jobOrders),
               ),
               nextStop: resolveLiveNextStop(current, branchPoint),
+              lastDropoff: resolveLiveLastDropoff(current.jobOrders),
             }
           : null;
         return {

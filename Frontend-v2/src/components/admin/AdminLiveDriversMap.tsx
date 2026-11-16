@@ -48,12 +48,23 @@ export type LiveNextStop = {
   lng: number;
 };
 
+export type LiveLastDropoff = {
+  kind: 'dropoff';
+  sequence?: number | null;
+  label: string;
+  lat: number;
+  lng: number;
+  orderNumber?: string;
+  actual?: boolean;
+};
+
 export type LiveDriverCurrentJob = {
   id: string;
   status: string;
   pickedUp?: boolean;
   orders: JobListOrderStop[];
   nextStop?: LiveNextStop | null;
+  lastDropoff?: LiveLastDropoff | null;
 };
 
 export type LiveDriverMarker = {
@@ -104,6 +115,12 @@ function nextStopCaption(driver: LiveDriverMarker): string | null {
   if (next.kind === 'stop') return `Next · ${next.label}`;
   if (next.kind === 'return') return 'Next · Return';
   return 'Next · Pickup';
+}
+
+function lastDropoffCaption(driver: LiveDriverMarker): string | null {
+  const drop = driver.currentJob?.lastDropoff;
+  if (!drop) return null;
+  return `Dropped · ${drop.label}`;
 }
 
 function nodeClass(state: string, upcoming: boolean) {
@@ -160,9 +177,12 @@ function statusBoxHtml(driver: LiveDriverMarker) {
       })
       .join('')}</div>`;
   }
+  const dropped = lastDropoffCaption(driver);
   const subtitle = next
     ? `<p class="live-rider-status-box__next">${escapeHtml(next)}</p>`
-    : `<p class="live-rider-status-box__status">${escapeHtml(riderStatusCaption(driver))}</p>`;
+    : dropped
+      ? `<p class="live-rider-status-box__next">${escapeHtml(dropped)}</p>`
+      : `<p class="live-rider-status-box__status">${escapeHtml(riderStatusCaption(driver))}</p>`;
   return `<div class="live-rider-status-box"><p class="live-rider-status-box__name">${name}</p>${rail}${subtitle}</div>`;
 }
 
@@ -172,6 +192,16 @@ function statusBoxDivIcon(driver: LiveDriverMarker) {
     html: statusBoxHtml(driver),
     iconSize: [188, 86],
     iconAnchor: [94, 114],
+  });
+}
+
+function lastDropoffDivIcon(stop: LiveLastDropoff, selected: boolean) {
+  const label = escapeHtml(stop.label);
+  return L.divIcon({
+    className: `live-rider-next-marker live-rider-dropoff-marker${selected ? ' live-rider-next-marker--selected' : ''}`,
+    html: `<div class="live-rider-next-marker__pin live-rider-dropoff-marker__pin">✓</div><span class="live-rider-next-marker__label">${label}</span>`,
+    iconSize: [44, 52],
+    iconAnchor: [22, 14],
   });
 }
 
@@ -305,6 +335,10 @@ export default function AdminLiveDriversMap({
         .map((d) => d.currentJob?.nextStop)
         .filter((stop): stop is LiveNextStop => Boolean(stop))
         .map((stop) => [stop.lat, stop.lng] as [number, number]),
+      ...drivers
+        .map((d) => d.currentJob?.lastDropoff)
+        .filter((stop): stop is LiveLastDropoff => Boolean(stop))
+        .map((stop) => [stop.lat, stop.lng] as [number, number]),
       ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
     ],
     [stores, drivers, destination],
@@ -344,10 +378,21 @@ export default function AdminLiveDriversMap({
               (selectedDriverId && driverId === selectedDriverId),
           );
           const nextStop = driver.currentJob?.nextStop ?? null;
+          const lastDropoff = driver.currentJob?.lastDropoff ?? null;
           const showNext =
             nextStop != null && farEnough({ lat: driver.lat, lng: driver.lng }, nextStop);
+          const showDropoff =
+            lastDropoff != null && farEnough({ lat: driver.lat, lng: driver.lng }, lastDropoff);
           return (
             <Fragment key={driverId}>
+              {showDropoff && lastDropoff ? (
+                <Marker
+                  position={[lastDropoff.lat, lastDropoff.lng]}
+                  icon={lastDropoffDivIcon(lastDropoff, selected)}
+                  zIndexOffset={selected ? 480 : 180}
+                  interactive={false}
+                />
+              ) : null}
               {showNext && nextStop ? (
                 <>
                   <Polyline
@@ -396,6 +441,7 @@ export default function AdminLiveDriversMap({
                   <strong>{driver.driverName}</strong>
                   {driver.storeName && <div>{driver.storeName}</div>}
                   {nextStop ? <div>Next: {nextStop.label}</div> : null}
+                  {lastDropoff ? <div>Dropped: {lastDropoff.label}</div> : null}
                   {driver.locationApproximate ? (
                     <div className="text-xs text-amber-600">No GPS yet — shown near branch</div>
                   ) : driver.updatedAt ? (

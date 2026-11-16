@@ -104,6 +104,9 @@ export function toPublicOrderView<T extends Record<string, unknown>>(order: T): 
     deliveryDistrict: _deliveryDistrict,
     deliveryLat: _deliveryLat,
     deliveryLng: _deliveryLng,
+    actualDropoffLat: _actualDropoffLat,
+    actualDropoffLng: _actualDropoffLng,
+    actualDropoffAt: _actualDropoffAt,
     paymentFailureReason: _paymentFailureReason,
     trackToken: _trackToken,
     user: _user,
@@ -120,6 +123,9 @@ export function toPublicOrderView<T extends Record<string, unknown>>(order: T): 
     deliveryDistrict?: unknown;
     deliveryLat?: unknown;
     deliveryLng?: unknown;
+    actualDropoffLat?: unknown;
+    actualDropoffLng?: unknown;
+    actualDropoffAt?: unknown;
     paymentFailureReason?: unknown;
     trackToken?: unknown;
     user?: unknown;

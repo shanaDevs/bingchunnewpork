@@ -8,6 +8,9 @@ export interface OrderStatusOutboxPayload {
   orderNumber?: string;
   userId?: string | null;
   orderMode?: string;
+  lat?: number | null;
+  lng?: number | null;
+  dropoffAt?: string | null;
 }
 
 /** ADR 0003 — delivery service never writes `orders`; it commits its own state and

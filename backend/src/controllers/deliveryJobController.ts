@@ -63,6 +63,12 @@ import {
   type RouteStop,
 } from '../lib/routeOptimizer';
 import { fetchRoadRoute, buildRouteWaypoints } from '../lib/roadRouting';
+import {
+  dropoffApiFields,
+  mapPinPoint,
+  recordDeliveredAttempt,
+  resolveRiderDropoffCoords,
+} from '@bingchun/delivery-domain';
 import { notifyCustomerOrderStatus } from '../lib/customerNotifications';
 import { paymentStatusOnOrderStatus } from '../lib/orderPayment';
 import {
@@ -1122,10 +1128,42 @@ export async function getJobRoute(req: Request, res: Response, next: NextFunctio
     // Customer identity is already redacted in routingRawStops when !isMine. Geometry stays real
     // either way so a driver can judge the run on the map before claiming it.
     const payload = await buildDeliveryRoutePayload(routeOrigin, routingStops, job.id);
+    const deliveredStops: RouteStop[] = [];
+    for (const jo of job.jobOrders) {
+      if (jo.order.status !== 'DELIVERED') continue;
+      const pin = mapPinPoint(jo.order);
+      if (!pin) continue;
+      deliveredStops.push({
+        orderId: jo.order.id,
+        orderNumber: jo.order.orderNumber,
+        customerName: isMine
+          ? resolveCustomerDisplayName({
+              guestName: jo.order.guestName,
+              userName: jo.order.user?.name,
+              phone: jo.order.guestPhone ?? jo.order.user?.phone,
+            })
+          : 'Customer',
+        customerPhone: isMine ? (jo.order.user?.phone ?? jo.order.guestPhone ?? '') : '',
+        addressLine: isMine ? (jo.order.deliveryAddressLine ?? jo.order.address?.addressLine ?? '') : '',
+        city: jo.order.deliveryCity ?? jo.order.address?.city ?? '',
+        district: jo.order.deliveryDistrict ?? jo.order.address?.district ?? '',
+        status: jo.order.status,
+        total: isMine ? jo.order.total : 0,
+        itemCount: jo.order.items.reduce((n, i) => n + i.quantity, 0),
+        ...orderStopImageMeta(jo.order.items),
+        lat: pin.lat,
+        lng: pin.lng,
+        ...dropoffApiFields(jo.order),
+        sequence: jo.sequence,
+        distanceFromPreviousKm: 0,
+        etaMinutesFromPrevious: 0,
+      });
+    }
 
     return success(res, {
       jobId: job.id,
       ...payload,
+      stops: [...payload.stops, ...deliveredStops],
     });
   } catch (err) {
     next(err);
@@ -1136,6 +1174,8 @@ const driverStatusSchema = z.object({
   status: z.enum(['OUT_FOR_DELIVERY', 'DELIVERED', 'DELIVERY_FAILED']),
   note: z.string().optional(),
   otp: z.string().optional(),
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
 });
 
 /** Issue a fresh delivery code and send it to the customer (SMS + app notification). */
@@ -1166,7 +1206,7 @@ export async function updateJobOrderStatus(req: Request, res: Response, next: Ne
     const driverId = req.user!.sub;
     const accessibleStoreIds = await requireAccessibleStores(driverId, req.user!.storeId);
 
-    const { status, note, otp } = driverStatusSchema.parse(req.body);
+    const { status, note, otp, lat, lng } = driverStatusSchema.parse(req.body);
     const orderId = req.params.orderId as string;
 
     const link = await prisma.deliveryJobOrder.findFirst({
@@ -1239,8 +1279,16 @@ export async function updateJobOrderStatus(req: Request, res: Response, next: Ne
       (status === 'DELIVERED' && ['READY', 'OUT_FOR_DELIVERY'].includes(existing.status));
     if (!allowed) throw new AppError(`Cannot change status from ${existing.status} to ${status}`, 400);
 
+    let dropoff: { lat: number; lng: number } | null = null;
     if (status === 'DELIVERED') {
       await requireOtpIfNeeded(orderId, link.job.storeId, otp);
+      dropoff = await resolveRiderDropoffCoords({
+        lat,
+        lng,
+        driverId,
+        jobId: link.job.id,
+        orderId,
+      });
     }
 
     const paidOnFulfillment = paymentStatusOnOrderStatus(existing, status);
@@ -1250,6 +1298,13 @@ export async function updateJobOrderStatus(req: Request, res: Response, next: Ne
       data: {
         status: status as any,
         ...(paidOnFulfillment ? { paymentStatus: paidOnFulfillment } : {}),
+        ...(dropoff
+          ? ({
+              actualDropoffLat: dropoff.lat,
+              actualDropoffLng: dropoff.lng,
+              actualDropoffAt: new Date(),
+            } as Record<string, unknown>)
+          : {}),
         statusEvents: { create: { status: status as any, note: note ?? 'Updated by driver' } },
       },
       include: {
@@ -1264,6 +1319,14 @@ export async function updateJobOrderStatus(req: Request, res: Response, next: Ne
     invalidateJobRoute(link.job.id);
 
     if (status === 'DELIVERED') {
+      await recordDeliveredAttempt({
+        orderId,
+        jobId: link.job.id,
+        driverId,
+        note: note ?? 'Delivered',
+        lat: dropoff?.lat,
+        lng: dropoff?.lng,
+      }).catch(() => {});
       await recordSuccessfulDelivery(driverId, orderId).catch(() => {});
       await ensureJobDeliveryTerminalEvent({
         orderId,

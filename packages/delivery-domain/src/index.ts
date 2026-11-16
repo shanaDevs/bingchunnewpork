@@ -1,4 +1,5 @@
 export * from './geo';
+export * from './actualDropoff';
 export * from './gpsPath';
 export * from './routeOptimizer';
 export * from './osrmAllowlist';

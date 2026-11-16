@@ -856,6 +856,10 @@ model Order {
   deliveryDistrict    String?
   deliveryLat         Float?
   deliveryLng         Float?
+  /// Rider GPS at OTP / delivered confirm — not the customer checkout address.
+  actualDropoffLat    Float?
+  actualDropoffLng    Float?
+  actualDropoffAt     DateTime?
   platform            Int             @default(0)
   /// Sales channel (WEB / APP / POS / WHATSAPP / TELEGRAM). Prefer this over `platform` for filtering.
   channel             OrderChannel    @default(WEB)

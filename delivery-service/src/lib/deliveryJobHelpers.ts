@@ -3,6 +3,7 @@ import { prisma } from '@bingchun/db';
 import { DeliveryJobStatus } from '@prisma/client';
 import {
   creditedDeliveredTotals,
+  dropoffApiFields,
   haversineKm,
   optimizeDeliveryStops,
   totalRouteDistanceKm,
@@ -285,6 +286,7 @@ export function formatJobOrder(
     // Name/phone/addressLine above remain redacted until the job is theirs.
     lat,
     lng,
+    ...dropoffApiFields(order),
     items: order.items.map((i) => ({
       productName: i.productName,
       quantity: i.quantity,

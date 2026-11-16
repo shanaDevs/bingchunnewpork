@@ -5,6 +5,7 @@ import { normalizeProductImageUrl } from './productImages';
 import { prisma } from './prisma';
 import {
   creditedDeliveredTotals,
+  dropoffApiFields,
   groupLatestFailedAttemptsByJob,
   persistJobActualRouteFromGps,
 } from '@bingchun/delivery-domain';
@@ -888,6 +889,7 @@ export function orderToStop(
     ...orderStopImageMeta(order.items),
     lat,
     lng,
+    ...dropoffApiFields(order),
     sequence,
     distanceFromPreviousKm,
     etaMinutesFromPrevious,
@@ -946,6 +948,7 @@ export function formatJobOrder(
     // Name/phone/addressLine above remain redacted until the job is theirs.
     lat,
     lng,
+    ...dropoffApiFields(order),
     items: order.items.map((i) => ({
       productName: i.productName,
       quantity: i.quantity,

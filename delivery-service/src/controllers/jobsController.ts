@@ -12,6 +12,8 @@ import {
   invalidateJobRoute,
   isRejectAllowed,
   persistJobActualRouteFromGps,
+  dropoffApiFields,
+  mapPinPoint,
   type RouteStop,
   type DeliveryDomainStateValue,
   patchDriverOpsProfile,
@@ -397,10 +399,36 @@ export async function getJobRoute(req: Request, res: Response, next: NextFunctio
     // Customer identity is already redacted in routingRawStops when !isMine. Geometry stays real
     // either way so a driver can judge the run on the map before claiming it.
     const payload = await buildDeliveryRoutePayload(routeOrigin, routingStops, job.id);
+    const deliveredStops: RouteStop[] = [];
+    for (const jo of job.jobOrders) {
+      if (jo.order.status !== 'DELIVERED') continue;
+      const pin = mapPinPoint(jo.order);
+      if (!pin) continue;
+      deliveredStops.push({
+        orderId: jo.order.id,
+        orderNumber: jo.order.orderNumber,
+        customerName: isMine ? (jo.order.user?.name ?? jo.order.guestName ?? 'Guest') : 'Customer',
+        customerPhone: isMine ? (jo.order.user?.phone ?? jo.order.guestPhone ?? '') : '',
+        addressLine: isMine ? (jo.order.deliveryAddressLine ?? jo.order.address?.addressLine ?? '') : '',
+        city: jo.order.deliveryCity ?? jo.order.address?.city ?? '',
+        district: jo.order.deliveryDistrict ?? jo.order.address?.district ?? '',
+        status: jo.order.status,
+        total: 0,
+        itemCount: jo.order.items.reduce((n, i) => n + i.quantity, 0),
+        ...orderStopImageMeta(jo.order.items),
+        lat: pin.lat,
+        lng: pin.lng,
+        ...dropoffApiFields(jo.order),
+        sequence: jo.sequence,
+        distanceFromPreviousKm: 0,
+        etaMinutesFromPrevious: 0,
+      });
+    }
 
     return success(res, {
       jobId: job.id,
       ...payload,
+      stops: [...payload.stops, ...deliveredStops],
     });
   } catch (err) {
     next(err);
