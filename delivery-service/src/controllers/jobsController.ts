@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
-import { prisma } from '@bingchun/db';
+import { prisma, type OrderStatus } from '@bingchun/db';
 import {
   buildDeliveryRoutePayload,
   buildJobHistoryOrderRows,
@@ -950,7 +950,7 @@ type VehicleFailureResult = {
 
 type RemainingVehicleFailureStop = {
   orderId: string;
-  order: { id: string; status: string };
+  order: { id: string; status: OrderStatus };
 };
 
 async function reconnectPrisma(): Promise<void> {
