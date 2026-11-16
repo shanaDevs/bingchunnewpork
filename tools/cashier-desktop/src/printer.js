@@ -29,8 +29,14 @@ async function listPrinters() {
   const wc = all.find((c) => !c.isDestroyed()) || null;
   if (!wc) return [];
   try {
-    const printers = await wc.getPrintersAsync();
-    return printers.map((p) => ({
+    // Electron 16+ prefers getPrintersAsync; Electron 22 (Win7 ia32) still has sync getPrinters.
+    const printers =
+      typeof wc.getPrintersAsync === 'function'
+        ? await wc.getPrintersAsync()
+        : typeof wc.getPrinters === 'function'
+          ? wc.getPrinters()
+          : [];
+    return (printers || []).map((p) => ({
       name: p.name,
       displayName: p.displayName || p.name,
       isDefault: Boolean(p.isDefault),

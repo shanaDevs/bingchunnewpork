@@ -633,7 +633,7 @@ function BranchStockAlertToast({
                 ? (alert.onHandQty ?? 0) > 0
                   ? `No units left for online orders at ${storeLabel} (${alert.onHandQty} on hand). Restock to reopen online sales.`
                   : `No longer available online at ${storeLabel}. Restock now to avoid missed orders.`
-                : `Only ${alert.onlineAvailableQty ?? 0} available online (${alert.onHandQty ?? alert.weeklyRemainingQty ?? '—'} on hand) at ${storeLabel}. Consider restocking soon.`}
+                : `Only ${alert.onlineAvailableQty ?? 0} available online (${alert.onHandQty ?? '—'} on hand) at ${storeLabel}. Consider restocking soon.`}
             </p>
           </div>
         </div>
