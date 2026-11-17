@@ -1,0 +1,37 @@
+{
+  "appId": "com.bingchun.cashier",
+  "productName": "Bing Chun Cashier",
+  "copyright": "Copyright © Bing Chun",
+  "electronVersion": "22.3.27",
+  "directories": {
+    "output": "dist-win7",
+    "buildResources": "build"
+  },
+  "files": [
+    "src/**/*",
+    "package.json"
+  ],
+  "forceCodeSigning": false,
+  "win": {
+    "signAndEditExecutable": false,
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["ia32"]
+      }
+    ],
+    "artifactName": "BingChunCashier-Setup-${version}-win7-ia32.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": true,
+    "allowToChangeInstallationDirectory": true,
+    "allowElevation": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Bing Chun Cashier",
+    "include": "nsis/installer.nsh",
+    "runAfterFinish": true,
+    "deleteAppDataOnUninstall": false
+  }
+}
