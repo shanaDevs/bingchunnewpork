@@ -23,6 +23,7 @@ class StockItem {
     this.frozenBatchCount = 0,
     this.frozenQty = 0,
     this.isBranchDeactivated = false,
+    this.catalogAvailable = true,
     this.isNewProduct,
     this.productCreatedAt,
     this.lowStockThreshold = 25,
@@ -47,6 +48,7 @@ class StockItem {
   final int frozenBatchCount;
   final int frozenQty;
   final bool isBranchDeactivated;
+  final bool catalogAvailable;
   final bool isLowStock;
   final bool isOutOfStock;
   final bool? isNewProduct;

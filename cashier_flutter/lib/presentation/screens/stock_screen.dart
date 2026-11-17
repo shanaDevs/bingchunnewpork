@@ -154,6 +154,7 @@ const _indigo = Color(0xFF818CF8);
 
 (String, Color) _statusInfo(StockStatus s) => switch (s) {
   StockStatus.branchInactive => (tr('Branch inactive'), _slate),
+  StockStatus.franchiserInactive => (tr('Franchiser inactive'), _slate),
   StockStatus.comingSoon => (tr('Coming soon'), _indigo),
   StockStatus.outOfStock => (tr('Out of stock'), _red),
   StockStatus.lowStock => (tr('Low stock'), _amber),

@@ -17,6 +17,8 @@ export interface StockItem {
   tag?: string | null;
   category: { name: string; slug: string };
   isAvailable: boolean;
+  /** Global catalog availability (super admin menu); distinct from branch `isAvailable`. */
+  catalogAvailable?: boolean;
   weeklyBaseQty: number;
   weeklyRemainingQty: number;
   weeklyTargetQty: number;
@@ -298,6 +300,9 @@ export function qtyStatus(item: StockItem): { label: string; dot: string; text: 
   if (isBranchInactiveItem(item)) {
     return { label: 'Branch inactive', dot: 'bg-slate-400', text: 'text-slate-400' };
   }
+  if (isFranchiserInactiveItem(item)) {
+    return { label: 'Franchiser inactive', dot: 'bg-slate-400', text: 'text-slate-400' };
+  }
   if (isNewProductItem(item)) {
     return { label: 'Coming soon', dot: 'bg-indigo-400', text: 'text-indigo-300' };
   }
@@ -330,6 +335,17 @@ export function isNewProductItem(item: StockItem): boolean {
 
 export function isBranchInactiveItem(item: StockItem): boolean {
   return item.isBranchDeactivated === true || (item.frozenBatchCount ?? 0) > 0;
+}
+
+/** Deactivated in super-admin Menu Management — not branch power-off. */
+export function isFranchiserInactiveItem(item: StockItem): boolean {
+  if (item.catalogAvailable !== false) return false;
+  if (isBranchInactiveItem(item)) return false;
+  return !isNewProductItem(item);
+}
+
+export function isStockInactiveItem(item: StockItem): boolean {
+  return isBranchInactiveItem(item) || isFranchiserInactiveItem(item);
 }
 
 /** Low/out-of-stock online restock — emergency batch (online available below low-stock threshold). */
@@ -394,12 +410,12 @@ export function maxNormalReceiveQty(item: StockItem): number | null {
 }
 
 export function isOutOfStockTabItem(item: StockItem): boolean {
-  return !isBranchInactiveItem(item) && !isNewProductItem(item) && item.isOutOfStock;
+  return !isStockInactiveItem(item) && !isNewProductItem(item) && item.isOutOfStock;
 }
 
 export function matchesStockLevelTab(item: StockItem, tab: StockLevelTab): boolean {
-  if (tab === 'inactive') return isBranchInactiveItem(item);
-  if (isBranchInactiveItem(item)) return false;
+  if (tab === 'inactive') return isStockInactiveItem(item);
+  if (isStockInactiveItem(item)) return false;
   if (tab === 'new_products') return isNewProductItem(item);
   if (tab === 'in_stock') return !isNewProductItem(item) && !item.isLowStock && !item.isOutOfStock;
   if (tab === 'low_stock') return !isNewProductItem(item) && item.isLowStock && !item.isOutOfStock;

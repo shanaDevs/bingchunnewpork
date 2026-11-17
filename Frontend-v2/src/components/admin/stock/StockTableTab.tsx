@@ -27,7 +27,9 @@ import {
   hasWeeklyTargetConfigured,
   isBestsellerTag,
   isBranchInactiveItem,
+  isFranchiserInactiveItem,
   isNewProductItem,
+  isStockInactiveItem,
   isOutOfStockTabItem,
   matchesStockLevelTab,
   qtyStatus,
@@ -287,7 +289,7 @@ export default function StockTableTab({
     }
 
     const item = allItems[index];
-    const expectedTab: StockLevelTab = isBranchInactiveItem(item)
+    const expectedTab: StockLevelTab = isStockInactiveItem(item)
       ? 'inactive'
       : isNewProductItem(item)
       ? 'new_products'
@@ -327,15 +329,15 @@ export default function StockTableTab({
 
   const kpi = useMemo(
     () => ({
-      active: allItems.filter((i) => i.isAvailable && !i.isOutOfStock && !isBranchInactiveItem(i)).length,
-      inactive: allItems.filter((i) => isBranchInactiveItem(i)).length,
+      active: allItems.filter((i) => i.isAvailable && !i.isOutOfStock && !isStockInactiveItem(i)).length,
+      inactive: allItems.filter((i) => isStockInactiveItem(i)).length,
       lowStock: allItems.filter(
-        (i) => !isBranchInactiveItem(i) && !isNewProductItem(i) && i.isLowStock && !i.isOutOfStock,
+        (i) => !isStockInactiveItem(i) && !isNewProductItem(i) && i.isLowStock && !i.isOutOfStock,
       ).length,
       outOfStock: allItems.filter((i) => isOutOfStockTabItem(i)).length,
       all: allItems.length,
       inStock: allItems.filter(
-        (i) => !isBranchInactiveItem(i) && !isNewProductItem(i) && !i.isLowStock && !i.isOutOfStock,
+        (i) => !isStockInactiveItem(i) && !isNewProductItem(i) && !i.isLowStock && !i.isOutOfStock,
       ).length,
       newProducts: allItems.filter((i) => isNewProductItem(i)).length,
     }),
@@ -546,6 +548,8 @@ export default function StockTableTab({
                   paginatedItems.map((item) => {
                     const status = qtyStatus(item);
                     const branchInactive = isBranchInactiveItem(item);
+                    const franchiserInactive = isFranchiserInactiveItem(item);
+                    const stockInactive = isStockInactiveItem(item);
                     const displayOnHand = branchInactive ? (item.frozenQty ?? 0) : item.onHandQty;
                     const displayBatchCount = branchInactive
                       ? (item.frozenBatchCount ?? 0)
@@ -569,10 +573,10 @@ export default function StockTableTab({
                         }}
                         className={`cursor-pointer transition-colors hover:bg-navy-light/30 ${
                           isExpanded ? 'admin-table__row--expanded' : ''
-                        } ${item.isOutOfStock && !isNewProductItem(item) && !branchInactive ? 'bg-red-500/[0.06]' : ''} ${
+                        } ${item.isOutOfStock && !isNewProductItem(item) && !stockInactive ? 'bg-red-500/[0.06]' : ''} ${
                           isNewProductItem(item) ? 'bg-indigo-500/[0.06]' : ''
                         } ${
-                          branchInactive ? 'bg-slate-500/[0.06]' : ''
+                          stockInactive ? 'bg-slate-500/[0.06]' : ''
                         } ${
                           flashProductId === item.productId ? 'ring-2 ring-brand bg-brand/10 transition-colors' : ''
                         }`}
@@ -608,6 +612,11 @@ export default function StockTableTab({
                             {branchInactive && (
                               <span className={`${adminBadgeClass('neutral')} shrink-0 uppercase tracking-wide`}>
                                 Branch Inactive
+                              </span>
+                            )}
+                            {franchiserInactive && (
+                              <span className={`${adminBadgeClass('neutral')} shrink-0 uppercase tracking-wide`}>
+                                Franchiser Inactive
                               </span>
                             )}
                           </div>
@@ -671,7 +680,7 @@ export default function StockTableTab({
                                 <Power size={14} />
                               </button>
                             )}
-                            {!branchInactive && !hasWeeklyTargetConfigured(item) && canReceiveStock(item) && (
+                            {!stockInactive && !hasWeeklyTargetConfigured(item) && canReceiveStock(item) && (
                               <button
                                 type="button"
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-amber-500/40 text-amber-400 transition-colors hover:bg-amber-500/10"
@@ -682,20 +691,20 @@ export default function StockTableTab({
                                 <Target size={14} />
                               </button>
                             )}
-                            {canBranchAdminReceiveStock(item) && !branchInactive && (
+                            {canBranchAdminReceiveStock(item) && !stockInactive && (
                               <button
                                 type="button"
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-navy-border text-muted transition-colors hover:bg-navy-light hover:text-fg"
                                 aria-label={`Receive stock for ${item.name}`}
                                 title={
-                                  !item.isAvailable && !branchInactive
+                                  !item.isAvailable && !stockInactive
                                     ? 'Receive stock to activate'
                                     : 'Receive stock'
                                 }
                                 onClick={() => {
                                   openReceiveModal(
                                     item,
-                                    !item.isAvailable && !branchInactive ? 'activate' : 'default',
+                                    !item.isAvailable && !stockInactive ? 'activate' : 'default',
                                   );
                                 }}
                               >
@@ -892,7 +901,7 @@ export default function StockTableTab({
             if (saved.weeklyTargetQty > 0 && intent === 'receive') {
               openReceiveModal(
                 updatedItem,
-                !updatedItem.isAvailable && !isBranchInactiveItem(updatedItem) ? 'activate' : 'default',
+                !updatedItem.isAvailable && !isStockInactiveItem(updatedItem) ? 'activate' : 'default',
               );
             } else if (saved.weeklyTargetQty > 0 && intent === 'reactivate') {
               setReactivateItem(updatedItem);

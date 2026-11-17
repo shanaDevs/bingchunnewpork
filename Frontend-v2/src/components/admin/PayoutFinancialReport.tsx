@@ -402,7 +402,7 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
             )}
             {hasNegativeLkr(values.netPlatformAmountLkr) && (
               <ReportRow
-                label="+ Net Platform Amount"
+                label="+ Net Platform Amount (Jason contribution)"
                 value={signedAmount(Math.abs(values.netPlatformAmountLkr), '+')}
               />
             )}

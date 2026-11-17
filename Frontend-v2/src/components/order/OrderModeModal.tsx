@@ -40,6 +40,7 @@ export default function OrderModeModal({
   const pathname = usePathname();
   const [step, setStep] = useState<OrderFlowStep>(() => (startAtSetup && initialMode ? 'setup' : 'type'));
   const large = step === 'setup';
+  const pageLike = step === 'location';
 
   useEffect(() => {
     if (!isOpen) return;
@@ -63,10 +64,7 @@ export default function OrderModeModal({
   const [wasOpen, setWasOpen] = useState(isOpen);
   if (isOpen !== wasOpen) {
     setWasOpen(isOpen);
-    if (isOpen) {
-      setStep(startAtSetup && initialMode ? 'setup' : 'type');
-      setMode(initialMode);
-    }
+    if (isOpen) setStep(startAtSetup && initialMode ? 'setup' : 'type');
   }
 
   const handleComplete = useCallback(() => {
@@ -117,16 +115,16 @@ export default function OrderModeModal({
         className={cn(
           // overflow-clip, not hidden: a hidden-overflow box can still be scrolled by focus, which would push the
           // whole panel's content out of view. `home-redesign` brings the redesign's fonts and colours.
-          'home-redesign order-popup relative flex max-h-[calc(100dvh-0.75rem)] w-full flex-col overflow-clip rounded-t-[1.75rem] bg-white text-slate-900 shadow-2xl shadow-brand-950/30',
-          'md:max-h-[min(54rem,100%)] md:rounded-[2rem]',
-          // Phones: the setup step fills the sheet, so it doesn't jump in height as its content changes.
+          'home-redesign order-popup relative flex w-full flex-col overflow-clip rounded-t-[1.75rem] bg-white text-slate-900 shadow-2xl shadow-brand-950/30',
+          pageLike
+            ? 'h-dvh max-h-dvh max-md:rounded-none md:h-[min(44rem,calc(100dvh-3rem))] md:max-h-[min(44rem,calc(100dvh-3rem))] md:max-w-lg md:rounded-[2rem]'
+            : large
+              ? 'h-[calc(100dvh-0.75rem)] max-h-[calc(100dvh-0.75rem)] max-md:h-[calc(100dvh-0.75rem)] md:h-[min(52rem,calc(100dvh-3rem))] md:max-h-[min(54rem,100%)] md:max-w-6xl md:rounded-[2rem]'
+              : 'max-h-[calc(100dvh-0.75rem)] md:max-h-[min(54rem,100%)] md:max-w-xl md:rounded-[2rem]',
           'transition-[opacity,translate,scale] duration-300 ease-out starting:translate-y-4 starting:scale-[0.98] starting:opacity-0',
         )}
       >
-          'transition-[opacity,translate,scale] duration-300 ease-out starting:translate-y-4 starting:scale-[0.98] starting:opacity-0',
-        )}
-      >
-        {!required && (
+        {!required && !pageLike && (
           <button
             type="button"
             onClick={dismiss}

@@ -3023,6 +3023,17 @@
     box-shadow: 0 0 0 3px rgba(48, 126, 242, 0.2);
   }
 
+  button.filter-select,
+  [data-slot='popover-trigger'].filter-select {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    text-align: left;
+    font: inherit;
+    line-height: inherit;
+  }
+
   @media (min-width: 1280px) {
     .admin-orders-toolbar__search-group {
       width: 18rem;
@@ -7946,6 +7957,24 @@
     z-index: 40;
   }
 
+  /* Full-screen "Set on map" picker: keep Leaflet panes below the confirm bar. */
+  .set-on-map-modal .delivery-map-wrap {
+    position: relative;
+    z-index: 0;
+    isolation: isolate;
+    overflow: hidden;
+  }
+
+  .set-on-map-modal .leaflet-container {
+    z-index: 0 !important;
+  }
+
+  .set-on-map-modal .leaflet-pane,
+  .set-on-map-modal .leaflet-top,
+  .set-on-map-modal .leaflet-bottom {
+    z-index: 1 !important;
+  }
+
   .order-mode-modal__accent {
     height: 4px;
     background: linear-gradient(90deg, var(--color-brand), var(--color-brand-light), var(--color-accent));
@@ -10192,13 +10221,48 @@
     margin-top: 0.2rem;
   }
 
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable {
+    padding: 0.55rem 0.75rem 0.5rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__body {
+    margin-top: 0;
+  }
+
   .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__split {
-    margin-top: 0.5rem;
-    padding-top: 0.5rem;
+    margin-top: 0.35rem;
+    padding-top: 0.35rem;
   }
 
   .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__split-amount {
-    font-size: 1.15rem;
+    font-size: 1.05rem;
+    margin-top: 0.15rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables-summary--expenses {
+    padding: 0.55rem 0.75rem 0.5rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables-summary--expenses .branch-wallet-payables-summary__head {
+    align-self: flex-start;
+  }
+
+  .branch-wallet-page .branch-wallet-payables-summary--expenses .branch-wallet-payables-summary__total {
+    font-size: 1.35rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables-summary--expenses .branch-wallet-payables-summary__body {
+    justify-content: center;
+    gap: 0.35rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables-summary--expenses .branch-wallet-payables-summary__channels {
+    margin-top: 0;
+    padding-top: 0;
+  }
+
+  .branch-wallet-page .branch-wallet-payables-summary--expenses .branch-wallet-payables-revenue__channel {
+    padding: 0.35rem 0.45rem;
   }
 
   .branch-wallet-page .branch-wallet-payables .branch-wallet-balance__go {
@@ -10288,7 +10352,7 @@
 
   @media (min-width: 960px) {
     .branch-wallet-page .branch-wallet-payables__row--expenses {
-      grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
   }
 
@@ -10423,6 +10487,194 @@
     line-height: 1.15;
     font-variant-numeric: tabular-nums;
     color: #0f172a;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc {
+    margin-top: 0.65rem;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__calc {
+    margin-top: 0;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-row {
+    display: flex;
+    align-items: stretch;
+    gap: 0.4rem;
+    min-width: 0;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-stack {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 46%;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.3rem;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-stack .branch-wallet-receivable__calc-cell {
+    width: 100%;
+    flex: 0 0 auto;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-stack .branch-wallet-receivable__calc-op {
+    align-self: center;
+    margin: -0.05rem 0;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-op {
+    flex-shrink: 0;
+    align-self: center;
+    font-size: 1.15rem;
+    font-weight: 500;
+    line-height: 1;
+    color: #64748b;
+    padding: 0 0.1rem;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-op--equals {
+    font-size: 1.25rem;
+    padding: 0 0.15rem;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-cell {
+    display: flex;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 0.45rem;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    padding: 0.5rem 0.55rem;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-cell--blue {
+    border-color: #93c5fd;
+    background: color-mix(in srgb, #dbeafe 88%, #fff);
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-cell--red {
+    border-color: #fecaca;
+    background: color-mix(in srgb, #fef2f2 92%, #fff);
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-cell--green {
+    flex: 1 1 48%;
+    min-height: 100%;
+    align-items: center;
+    padding: 0.65rem 0.6rem;
+    border-color: #6ee7b7;
+    background: color-mix(in srgb, #ecfdf5 92%, #fff);
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__calc-cell {
+    padding: 0.4rem 0.45rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__calc-cell--green {
+    padding: 0.45rem 0.5rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__calc-stack {
+    gap: 0.2rem;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-icon {
+    display: flex;
+    height: 1.75rem;
+    width: 1.75rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: #fff;
+    border: 1px solid currentColor;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-cell--blue .branch-wallet-receivable__calc-icon {
+    color: #2563eb;
+    border-color: #93c5fd;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-cell--red .branch-wallet-receivable__calc-icon {
+    color: #dc2626;
+    border-color: #fecaca;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-cell--green .branch-wallet-receivable__calc-icon {
+    color: #059669;
+    border-color: #6ee7b7;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-copy {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-label {
+    margin: 0;
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #1e293b;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-cell--blue .branch-wallet-receivable__calc-label {
+    color: #1e3a8a;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-cell--red .branch-wallet-receivable__calc-label {
+    color: #991b1b;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-cell--green .branch-wallet-receivable__calc-label {
+    color: #047857;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-amount {
+    margin: 0.28rem 0 0;
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.08;
+    font-variant-numeric: tabular-nums;
+    color: #0f172a;
+    white-space: nowrap;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-amount--before {
+    font-size: 1.18rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-amount--fee {
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+
+  .branch-wallet-page .branch-wallet-receivable__calc-amount--net {
+    margin-top: 0.35rem;
+    font-size: 1.32rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: #047857;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__calc-amount--before {
+    font-size: 1.12rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__calc-amount--fee {
+    font-size: 1rem;
+  }
+
+  .branch-wallet-page .branch-wallet-payables .branch-wallet-receivable__calc-amount--net {
+    font-size: 1.22rem;
   }
 
   .branch-wallet-page .branch-wallet-page__tabs {
@@ -11933,31 +12185,45 @@
     display: grid;
     grid-template-columns:
       minmax(5rem, 0.85fr)
+      minmax(5.5rem, 0.85fr)
       minmax(7.5rem, 1fr)
       minmax(6.5rem, 0.9fr)
       minmax(11rem, 2fr)
       minmax(5rem, 0.75fr)
       minmax(5.5rem, 0.85fr)
-      minmax(6.5rem, 0.9fr)
-      minmax(6rem, 0.9fr)
-      minmax(5.5rem, auto);
+      minmax(6.5rem, 1.05fr)
+      minmax(5.5rem, max-content)
+      minmax(2.25rem, auto);
     align-items: center;
     gap: 0.75rem 1rem;
+  }
+
+  .all-orders-overview__processed-by {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .all-orders-overview__status-cell {
+    justify-self: start;
+    min-width: max-content;
   }
 
   .all-orders-overview--cancelled .all-orders-overview__grid-head,
   .all-orders-overview--cancelled .all-orders-overview__row {
     grid-template-columns:
       minmax(5rem, 0.85fr)
+      minmax(5.5rem, 0.85fr)
       minmax(7.5rem, 1fr)
       minmax(6.5rem, 0.9fr)
       minmax(11rem, 2fr)
       minmax(5rem, 0.75fr)
       minmax(5.5rem, 0.85fr)
-      minmax(6.5rem, 0.9fr)
+      minmax(6.5rem, 1.05fr)
       minmax(6.5rem, 1fr)
-      minmax(6rem, 0.9fr)
-      minmax(5.5rem, auto);
+      minmax(5.5rem, max-content)
+      minmax(2.25rem, auto);
   }
 
   .all-orders-overview__refund-link {

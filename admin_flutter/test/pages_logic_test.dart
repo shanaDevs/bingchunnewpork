@@ -19,6 +19,7 @@ StockItem _item({
   bool low = false,
   bool out = false,
   bool deactivated = false,
+  bool catalogOff = false,
   bool? isNew,
   int target = 150,
 }) => StockItem(
@@ -37,6 +38,7 @@ StockItem _item({
   isLowStock: low,
   isOutOfStock: out,
   isBranchDeactivated: deactivated,
+  catalogAvailable: !catalogOff,
   isNewProduct: isNew,
 );
 
@@ -124,6 +126,8 @@ void main() {
       expect(matchesLevel(_item(low: true), StockLevel.lowStock), isTrue);
       expect(matchesLevel(_item(out: true, onHand: 0), StockLevel.outOfStock), isTrue);
       expect(matchesLevel(_item(deactivated: true), StockLevel.inactive), isTrue);
+      expect(matchesLevel(_item(catalogOff: true, out: true), StockLevel.inactive), isTrue);
+      expect(matchesLevel(_item(catalogOff: true, out: true), StockLevel.outOfStock), isFalse);
       expect(matchesLevel(_item(deactivated: true), StockLevel.inStock), isFalse);
       expect(matchesLevel(_item(isNew: true, onHand: 0, target: 0), StockLevel.newProducts), isTrue);
     });

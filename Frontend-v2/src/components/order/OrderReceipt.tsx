@@ -9,6 +9,7 @@ import {
   customerPhone,
   formatMoney,
   formatReceiptDate,
+  itemOptionLine,
   PAYMENT_METHOD_LABELS,
   getPaymentStatusLabel,
 } from '@/lib/receipt';
@@ -138,6 +139,7 @@ export default function OrderReceipt({ order, className = '', adminView = false 
                   />
                   <div className="order-receipt__item-text">
                     <span className="order-receipt__item-name">{item.productName}</span>
+                    <span className="order-receipt__item-meta">{itemOptionLine(item)}</span>
                     {item.toppings?.length > 0 && (
                       <span className="order-receipt__item-meta">
                         + {item.toppings.map((t) => t.toppingName).join(', ')}

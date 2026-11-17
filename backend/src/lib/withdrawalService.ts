@@ -23,6 +23,7 @@ import {
   assertJasonBalanceCoversContribution,
   computeJasonNetBalance,
 } from './jasonBalance';
+import { jasonPayoutDeductionCentsFromBreakdown } from './jasonPayoutContribution';
 import type {
   Prisma,
   SettlementPaymentMethod,
@@ -526,8 +527,9 @@ export async function initiateAndApproveWithdrawal(
     breakdown.netAmount,
     sppcJasonCents,
   );
+  const jasonDeductionCents = jasonPayoutDeductionCentsFromBreakdown(breakdown);
   const jasonNet = await computeJasonNetBalance();
-  assertJasonBalanceCoversContribution(jasonNet, sppcJasonCents);
+  assertJasonBalanceCoversContribution(jasonNet, jasonDeductionCents);
 
   const withdrawalId = inReviewDraft?.id ?? crypto.randomUUID();
   const txnId = crypto.randomUUID();
@@ -742,8 +744,9 @@ export async function approveWithdrawal(
   }
 
   const { walletDebitCents, paymentCents, sppcJasonCents } = resolveApprovalPayoutAmounts(withdrawal);
+  const jasonDeductionCents = jasonPayoutDeductionCentsFromBreakdown(withdrawal.breakdown);
   const jasonNet = await computeJasonNetBalance();
-  assertJasonBalanceCoversContribution(jasonNet, sppcJasonCents);
+  assertJasonBalanceCoversContribution(jasonNet, jasonDeductionCents);
 
   void wallet;
   const txnId = crypto.randomUUID();

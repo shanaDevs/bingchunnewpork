@@ -27,7 +27,9 @@ type TypeFilter = 'ALL' | LedgerType;
 type LedgerEntry = {
   id: string;
   type: LedgerType;
-  amount: number;
+  /** API cent string (integer cents) — use `amountLkr` for display. */
+  amount: number | string;
+  amountLkr?: number;
   description: string;
   occurredAt: string;
   isActive: boolean;
@@ -35,9 +37,23 @@ type LedgerEntry = {
   createdAt: string;
   storeId?: string | null;
   storeWithdrawalId?: string | null;
-  balanceBefore?: number | null;
-  balanceAfter?: number | null;
+  balanceBefore?: number | string | null;
+  balanceAfter?: number | string | null;
+  balanceBeforeLkr?: number | null;
+  balanceAfterLkr?: number | null;
 };
+
+function jasonEntryAmountLkr(entry: Pick<LedgerEntry, 'amount' | 'amountLkr'>): number {
+  if (typeof entry.amountLkr === 'number' && Number.isFinite(entry.amountLkr)) return entry.amountLkr;
+  const cents = typeof entry.amount === 'string' ? Number(entry.amount) : entry.amount;
+  return cents / 100;
+}
+
+function jasonBalanceLkr(cents: number | string | null | undefined): number | null {
+  if (cents == null) return null;
+  const n = typeof cents === 'string' ? Number(cents) : cents;
+  return Number.isFinite(n) ? n / 100 : null;
+}
 
 type LedgerResponse = {
   entries: LedgerEntry[];
@@ -144,7 +160,7 @@ export default function JasonLedgerPage() {
     if (entry.isActive) {
       const confirmed = await confirmDialog({
         title: 'Mark this entry inactive?',
-        message: `The ${entry.type === 'INVESTMENT' ? 'investment' : 'expense'} of ${formatMoney(entry.amount)} will stay in the ledger but will not count toward totals.`,
+        message: `The ${entry.type === 'INVESTMENT' ? 'investment' : 'expense'} of ${formatMoney(jasonEntryAmountLkr(entry))} will stay in the ledger but will not count toward totals.`,
         confirmLabel: 'Mark inactive',
         cancelLabel: 'Cancel',
         variant: 'danger',
@@ -363,7 +379,7 @@ export default function JasonLedgerPage() {
                     </span>
                   </td>
                   <td className="admin-table__amount whitespace-nowrap px-4 py-3 text-right tabular-nums text-white">
-                    {formatMoneyAmount(entry.amount)}
+                    {formatMoneyAmount(jasonEntryAmountLkr(entry))}
                   </td>
                   <td className={`max-w-md px-4 py-3 ${entry.isActive ? 'text-white' : 'text-muted'}`}>
                     {entry.description}
@@ -382,7 +398,13 @@ export default function JasonLedgerPage() {
                       <td className="admin-table__amount whitespace-nowrap px-4 py-3 text-right text-xs tabular-nums text-muted">
                         {entry.balanceBefore != null && entry.balanceAfter != null ? (
                           <>
-                            {formatMoneyAmount(entry.balanceBefore)} → {formatMoneyAmount(entry.balanceAfter)}
+                            {formatMoneyAmount(
+                              entry.balanceBeforeLkr ?? jasonBalanceLkr(entry.balanceBefore) ?? 0,
+                            )}{' '}
+                            →{' '}
+                            {formatMoneyAmount(
+                              entry.balanceAfterLkr ?? jasonBalanceLkr(entry.balanceAfter) ?? 0,
+                            )}
                           </>
                         ) : (
                           '—'

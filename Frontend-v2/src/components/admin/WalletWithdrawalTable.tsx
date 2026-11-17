@@ -17,6 +17,10 @@ import {
 } from '@/components/admin/settlementTypes';
 import WithdrawalBreakdownDisplay from '@/components/admin/WithdrawalBreakdownDisplay';
 import WithdrawalPaymentCell from '@/components/admin/WithdrawalPaymentCell';
+import {
+  withdrawalStatusBadgeClass,
+  withdrawalStatusLabel,
+} from '@/components/admin/withdrawalStatusUi';
 
 export type WithdrawalRow = {
   id: string;
@@ -47,36 +51,6 @@ export function isWithdrawalInReview(row: Pick<WithdrawalRow, 'status'>): boolea
 /** Completed Payout Summary — hide branch drafts still awaiting platform review. */
 export function filterWithdrawalsForCompletedPayoutTab(rows: WithdrawalRow[]): WithdrawalRow[] {
   return rows.filter((row) => !isWithdrawalInReview(row));
-}
-
-function statusLabel(status: WithdrawalRow['status']) {
-  switch (status) {
-    case 'APPROVED':
-      return 'Paid';
-    case 'PENDING':
-      return 'Pending Approval';
-    case 'IN_REVIEW':
-      return 'In review';
-    case 'REJECTED':
-      return 'Rejected';
-    case 'CANCELLED':
-      return 'Cancelled';
-    default:
-      return status;
-  }
-}
-
-function statusBadgeClass(status: WithdrawalRow['status']) {
-  switch (status) {
-    case 'APPROVED':
-      return 'admin-status-badge--green';
-    case 'PENDING':
-      return 'admin-status-badge--amber';
-    case 'REJECTED':
-      return 'admin-status-badge--red';
-    default:
-      return 'admin-status-badge--neutral';
-  }
 }
 
 function formatDate(iso: string) {
@@ -302,9 +276,9 @@ export default function WalletWithdrawalTable({
                 )}
                 <td className="px-5 py-3">
                   <span
-                    className={`admin-status-badge admin-status-badge--md ${statusBadgeClass(row.status)}`}
+                    className={`admin-status-badge admin-status-badge--md ${withdrawalStatusBadgeClass(row.status)}`}
                   >
-                    {statusLabel(row.status)}
+                    {withdrawalStatusLabel(row.status)}
                   </span>
                 </td>
                 <td className="px-5 py-3">

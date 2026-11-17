@@ -10,6 +10,7 @@ import {
 } from '@/components/admin/payoutSecondCycleDisplayRange';
 import {
   PAYOUT_PERIOD_AMOUNT_COLUMNS,
+  type PayoutListTab,
   type PayoutPeriodRow,
 } from '@/components/admin/payoutPeriodTypes';
 import { previewPeriodTo, rowBreakdownForStage } from '@/components/admin/payoutPeriodRowModel';
@@ -47,16 +48,34 @@ export function formatPayoutPeriodCell(
   return formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo);
 }
 
-const PAYOUT_SUMMARY_META_COLUMNS = ['Status', 'Payment', 'Remarks', 'Reject Reason'] as const;
-const PAYOUT_SUMMARY_SKELETON_META_WIDTHS = ['w-16', 'w-24', 'w-20', 'w-24'] as const;
+export type PayoutSummaryMetaColumn = 'Status' | 'Payment' | 'Remarks' | 'Reject Reason';
 
-export const PAYOUT_SUMMARY_TABLE_MIN_WIDTH_CLASS = 'min-w-[1320px]';
+const PAYOUT_SUMMARY_META_SKELETON_WIDTH: Record<PayoutSummaryMetaColumn, string> = {
+  Status: 'w-16',
+  Payment: 'w-24',
+  Remarks: 'w-20',
+  'Reject Reason': 'w-24',
+};
 
-export function PayoutPeriodsTableSkeleton() {
+/** Branch admin Payout Summary — hide remarks/reject reason; hide status on completed tab. */
+export function branchPayoutSummaryMetaColumns(
+  listTab: PayoutListTab,
+): readonly PayoutSummaryMetaColumn[] {
+  return listTab === 'completed' ? ['Payment'] : ['Status', 'Payment'];
+}
+
+export function payoutSummaryTableMinWidthClass(listTab: PayoutListTab) {
+  return listTab === 'completed' ? 'min-w-[1080px]' : 'min-w-[1140px]';
+}
+
+export function PayoutPeriodsTableSkeleton({ listTab }: { listTab: PayoutListTab }) {
+  const metaColumns = branchPayoutSummaryMetaColumns(listTab);
   return (
     <div className="overflow-x-auto" aria-hidden>
-      <table className={`w-full ${PAYOUT_SUMMARY_TABLE_MIN_WIDTH_CLASS} text-left text-xs`}>
-        <PayoutPeriodTableHead />
+      <table
+        className={`w-full ${payoutSummaryTableMinWidthClass(listTab)} text-left text-xs`}
+      >
+        <PayoutPeriodTableHead metaColumns={metaColumns} />
         <tbody>
           {Array.from({ length: 5 }).map((_, row) => (
             <tr key={row} className="border-b border-[var(--color-navy-border)]/70 last:border-b-0">
@@ -71,9 +90,11 @@ export function PayoutPeriodsTableSkeleton() {
                   <Skeleton className="ml-auto h-3.5 w-20 bg-[var(--color-navy-light)]/70" />
                 </td>
               ))}
-              {PAYOUT_SUMMARY_SKELETON_META_WIDTHS.map((width, index) => (
-                <td key={PAYOUT_SUMMARY_META_COLUMNS[index]} className="px-3 py-3">
-                  <Skeleton className={`h-5 ${width} rounded-full bg-[var(--color-navy-light)]/70`} />
+              {metaColumns.map((label) => (
+                <td key={label} className="px-3 py-3">
+                  <Skeleton
+                    className={`h-5 ${PAYOUT_SUMMARY_META_SKELETON_WIDTH[label]} rounded-full bg-[var(--color-navy-light)]/70`}
+                  />
                 </td>
               ))}
               <td className="px-3 py-3 text-right">
@@ -125,7 +146,11 @@ export function PayoutPeriodAmountCells({
   );
 }
 
-export function PayoutPeriodTableHead() {
+export function PayoutPeriodTableHead({
+  metaColumns,
+}: {
+  metaColumns: readonly PayoutSummaryMetaColumn[];
+}) {
   return (
     <thead>
       <tr className="border-b border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/50 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
@@ -136,7 +161,7 @@ export function PayoutPeriodTableHead() {
             {label}
           </th>
         ))}
-        {PAYOUT_SUMMARY_META_COLUMNS.map((label) => (
+        {metaColumns.map((label) => (
           <th key={label} className="whitespace-nowrap px-3 py-2.5 font-semibold">
             {label}
           </th>
