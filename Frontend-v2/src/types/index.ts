@@ -313,6 +313,8 @@ export interface OrderItem {
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  sugarLevel?: 'FIFTY' | 'HUNDRED' | null;
+  iceLevel?: 'LESS_ICE' | 'NORMAL_ICE' | null;
   toppings: { toppingName: string; extraPrice: number }[];
 }
 

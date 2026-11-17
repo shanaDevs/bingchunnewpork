@@ -39,6 +39,7 @@ import {
 } from '@/components/admin/settlementTypes';
 import { resolvePayoutCycleDisplayRange } from '@/components/admin/payoutSecondCycleDisplayRange';
 import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
+import { withdrawalStatusLabel } from '@/components/admin/withdrawalStatusUi';
 import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
 import { centsToLkr, paybackEnabledFromBreakdown, toDateInputValue } from '@/lib/walletUtils';
 import {
@@ -70,21 +71,6 @@ type Props = {
   /** Override displayed date range / day count (e.g. full 30-day window for second-cycle payout view). */
   viewPeriodDisplay?: { from: string; to: string; days: number } | null;
 };
-
-function withdrawalStatusLabel(status: WithdrawalRow['status']) {
-  switch (status) {
-    case 'APPROVED':
-      return 'Paid';
-    case 'PENDING':
-      return 'Pending Approval';
-    case 'REJECTED':
-      return 'Rejected';
-    case 'CANCELLED':
-      return 'Cancelled';
-    default:
-      return status;
-  }
-}
 
 function isValidRange(from: string, to: string): boolean {
   return isValidPayoutRange(from, to);

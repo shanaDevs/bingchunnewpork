@@ -2,7 +2,8 @@ import type { StoreWithdrawal } from '@prisma/client';
 import { prisma } from './prisma';
 import { creditPlatformEarning } from './platformEarningsService';
 import { refreshWalletCaches } from './walletService';
-import { recordJasonSppcExpense } from './jasonBalance';
+import { recordJasonPayoutApprovalExpenses } from './jasonBalance';
+import { jasonNegativeNetPlatformCreditCents } from './jasonPayoutContribution';
 
 export async function runWithdrawalApprovalSideEffects(opts: {
   approvedWithdrawal: StoreWithdrawal;
@@ -13,25 +14,28 @@ export async function runWithdrawalApprovalSideEffects(opts: {
 }): Promise<void> {
   const { approvedWithdrawal, storeId, sppcJasonCents, reviewerId, breakdownFallback } = opts;
   const approvedAt = approvedWithdrawal.reviewedAt ?? new Date();
+  const breakdown = approvedWithdrawal.breakdown ?? breakdownFallback;
 
   await creditPlatformEarning({
     storeWithdrawalId: approvedWithdrawal.id,
     storeId: approvedWithdrawal.storeId,
-    breakdown: approvedWithdrawal.breakdown ?? breakdownFallback,
+    breakdown,
     periodFrom: approvedWithdrawal.periodFrom,
     periodTo: approvedWithdrawal.periodTo,
     approvedAt,
   });
 
-  if (sppcJasonCents > 0) {
+  const negativeNetPlatformCents = jasonNegativeNetPlatformCreditCents(breakdown);
+  if (sppcJasonCents > 0 || negativeNetPlatformCents > 0) {
     const storeRow = await prisma.store.findUnique({
       where: { id: storeId },
       select: { name: true },
     });
-    await recordJasonSppcExpense({
+    await recordJasonPayoutApprovalExpenses({
       storeId,
       storeWithdrawalId: approvedWithdrawal.id,
-      amountCents: sppcJasonCents,
+      sppcJasonCents,
+      negativeNetPlatformCents,
       reviewerId,
       approvedAt,
       branchName: storeRow?.name,

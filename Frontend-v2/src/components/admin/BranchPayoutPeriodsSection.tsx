@@ -239,7 +239,7 @@ export default function BranchPayoutPeriodsSection({
         </Tabs>
       </div>
 
-      {tableLoading && <PayoutPeriodsTableSkeleton />}
+      {tableLoading && <PayoutPeriodsTableSkeleton listTab={listTab} />}
 
       {showEmptyPeriods && (
         <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
@@ -268,6 +268,7 @@ export default function BranchPayoutPeriodsSection({
 
       {!tableLoading && summaryRecords.length > 0 && (
         <PayoutSummaryTable
+          listTab={listTab}
           records={summaryRecords}
           allPeriodRows={rows}
           previewByKey={previewByKey}

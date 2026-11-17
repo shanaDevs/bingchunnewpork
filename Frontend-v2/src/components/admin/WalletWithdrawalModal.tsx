@@ -34,6 +34,7 @@ import {
   withdrawalBreakdownToLkr,
 } from '@/components/admin/settlementTypes';
 import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
+import { withdrawalStatusLabel } from '@/components/admin/withdrawalStatusUi';
 import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
 import { centsToLkr, paybackEnabledFromBreakdown, toDateInputValue } from '@/lib/walletUtils';
 import {
@@ -63,21 +64,6 @@ type Props = {
   /** Synthetic 15-day period view: skip refetch by id and show Pending (not Pending Approval). */
   viewPeriodOnly?: boolean;
 };
-
-function withdrawalStatusLabel(status: WithdrawalRow['status']) {
-  switch (status) {
-    case 'APPROVED':
-      return 'Paid';
-    case 'PENDING':
-      return 'Pending Approval';
-    case 'REJECTED':
-      return 'Rejected';
-    case 'CANCELLED':
-      return 'Cancelled';
-    default:
-      return status;
-  }
-}
 
 function isValidRange(from: string, to: string): boolean {
   return isValidPayoutRange(from, to);

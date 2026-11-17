@@ -464,7 +464,7 @@ export function buildNetBranchPayoutRows(
   if (statement.netPlatformAmountCents !== 0 || opts?.cycleStage === 'FIRST') {
     const isCredit = statement.netPlatformAmountCents < 0;
     const netPlatformRowLabel = isCredit
-      ? '+ Net Platform Amount'
+      ? '+ Net Platform Amount (Jason contribution)'
       : '– Net Platform Amount';
     rows.push({
       label: netPlatformRowLabel,
@@ -575,10 +575,14 @@ export function buildPage2PayoutSections(
       ),
     });
   }
+  const netPlatformSectionLabel =
+    statement.netPlatformAmountCents < 0
+      ? 'Net Platform Amount (Jason contribution)'
+      : 'Net Platform Amount';
   netPlatformRows.push({
-    label: 'Net Platform Amount',
+    label: netPlatformSectionLabel,
     amount: formatFirstPayoutInvoiceAmount(
-      'Net Platform Amount',
+      netPlatformSectionLabel,
       statement.netPlatformAmountCents,
       stage,
       'lkr',

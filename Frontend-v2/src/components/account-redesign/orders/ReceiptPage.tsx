@@ -15,7 +15,7 @@ import { heroBackdropImage } from "@/components/home-redesign/sections/hero/hero
 import { api } from "@/lib/api";
 import { getOrderTrackUrl, receiptWasOpenedFromApp } from "@/lib/orderLinks";
 import { getStatusLabel } from "@/lib/orderStatus";
-import { customerLabel, customerPhone, formatMoney, formatReceiptDate, getPaymentStatusLabel, PAYMENT_METHOD_LABELS } from "@/lib/receipt";
+import { customerLabel, customerPhone, formatMoney, formatReceiptDate, getPaymentStatusLabel, itemOptionLine, PAYMENT_METHOD_LABELS } from "@/lib/receipt";
 import type { Order } from "@/types";
 import { focusRing, primaryButton } from "../accountUi";
 import { ItemPhoto } from "./orderParts";
@@ -203,6 +203,7 @@ export function ReceiptDocument({ order }: { order: Order }) {
                 </span>
                 <span className="min-w-0">
                   <span className="block text-sm font-semibold wrap-break-word text-brand-950 print:text-[11px] print:text-black">{item.productName}</span>
+                  <span className="block text-xs text-slate-500 print:text-black">{itemOptionLine(item)}</span>
                   {item.toppings?.length > 0 && <span className="block text-xs text-slate-500 print:text-black">+ {item.toppings.map((topping) => topping.toppingName).join(", ")}</span>}
                 </span>
               </span>

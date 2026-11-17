@@ -1,6 +1,8 @@
 'use client';
 
-import { hasPositiveLkr } from '@/components/admin/settlementTypes';
+import { hasNegativeLkr, hasPositiveLkr } from '@/components/admin/settlementTypes';
+import { jasonPayoutDeductionLkr } from '@/components/admin/jasonPayoutDeduction';
+import { formatMoneyAmount } from '@/lib/receipt';
 import type { PayoutReportValues } from '@/components/admin/resolvePayoutReportValues';
 import { plainAmount, signedAmount } from '@/components/admin/payoutFinancialReportFormatting';
 import {
@@ -283,6 +285,63 @@ export function RefundsInfoPopover({ values }: { values: PayoutReportValues }) {
               bold
             />
           </>
+        ) : null}
+      </div>
+    </SectionInfoPopover>
+  );
+}
+
+export type PayoutFinancialReportJasonContext = {
+  jasonDeductionLkr?: number;
+  jasonNetBalanceLkr?: number | null;
+  jasonBalanceLoading?: boolean;
+};
+
+export function NetPlatformJasonContributionRowInfoPopover({
+  values,
+  jasonContext,
+}: {
+  values: PayoutReportValues;
+  jasonContext?: PayoutFinancialReportJasonContext;
+}) {
+  if (!hasNegativeLkr(values.netPlatformAmountLkr)) return null;
+
+  const coverLkr = Math.abs(values.netPlatformAmountLkr);
+  const totalJasonDeductionLkr = jasonPayoutDeductionLkr({
+    jasonContributionLkr: values.jasonDiscountsLkr,
+    netPlatformAmountLkr: values.netPlatformAmountLkr,
+  });
+  const sharedPromoJasonLkr = Math.max(0, values.jasonDiscountsLkr ?? 0);
+
+  return (
+    <SectionInfoPopover ariaLabel="Jason contribution — negative net platform amount">
+      <InfoPopoverHeader
+        title="Jason contribution"
+        description="Platform discounts exceeded commission. Jason funds the shortfall."
+      />
+      <div className="space-y-2">
+        <ReportRow label="Net Platform Amount" value={plainAmount(values.netPlatformAmountLkr)} bold />
+        <ReportRow
+          label="Credited to branch (this row)"
+          value={signedAmount(coverLkr, '+')}
+        />
+        {hasPositiveLkr(sharedPromoJasonLkr) && (
+          <ReportRow label="Shared promo (Jason)" value={plainAmount(sharedPromoJasonLkr)} />
+        )}
+        <ReportRow
+          label="Total Jason deduction on payout"
+          value={plainAmount(totalJasonDeductionLkr)}
+          bold
+        />
+        {jasonContext?.jasonBalanceLoading ? (
+          <p className="text-[11px] font-medium text-[#64748b] dark:text-slate-400">
+            Current Jason balance: …
+          </p>
+        ) : jasonContext?.jasonNetBalanceLkr != null ? (
+          <ReportRow
+            label="Current Jason balance"
+            value={`LKR ${formatMoneyAmount(jasonContext.jasonNetBalanceLkr)}`}
+          />
         ) : null}
       </div>
     </SectionInfoPopover>

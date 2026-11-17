@@ -34,6 +34,7 @@ import WalletWithdrawalTable, {
   type WithdrawalPagination,
   type WithdrawalRow,
 } from '@/components/admin/WalletWithdrawalTable';
+import { withdrawalStatusLabel } from '@/components/admin/withdrawalStatusUi';
 import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
 import AdminInitiatePayoutModal from '@/components/admin/AdminInitiatePayoutModal';
 import BranchPayoutPeriodsSection from '@/components/admin/BranchPayoutPeriodsSection';
@@ -91,21 +92,6 @@ function getTodayStr() {
 
 function fmt(cents: number) {
   return `LKR ${(cents / 100).toLocaleString('en-LK', { minimumFractionDigits: 2 })}`;
-}
-
-function withdrawalStatusLabel(status: WithdrawalRow['status']) {
-  switch (status) {
-    case 'APPROVED':
-      return 'Paid';
-    case 'PENDING':
-      return 'Pending Approval';
-    case 'REJECTED':
-      return 'Rejected';
-    case 'CANCELLED':
-      return 'Cancelled';
-    default:
-      return status;
-  }
 }
 
 function withdrawalPeriodLabel(row: WithdrawalRow) {

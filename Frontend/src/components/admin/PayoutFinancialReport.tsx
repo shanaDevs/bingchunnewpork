@@ -11,9 +11,11 @@ import {
   CommissionInfoPopover,
   DiscountDetailsInfoPopover,
   NetPlatformAmountInfoPopover,
+  NetPlatformJasonContributionRowInfoPopover,
   OnlineWalletInfoPopover,
   RefundsInfoPopover,
   TotalSaleInfoPopover,
+  type PayoutFinancialReportJasonContext,
 } from '@/components/admin/payoutFinancialReportInfoPopovers';
 import {
   ReportRow,
@@ -35,9 +37,10 @@ import {
 type Props = {
   values: PayoutReportValues;
   className?: string;
+  jasonContext?: PayoutFinancialReportJasonContext;
 };
 
-export default function PayoutFinancialReport({ values, className = 'mb-4' }: Props) {
+export default function PayoutFinancialReport({ values, className = 'mb-4', jasonContext }: Props) {
   const isFirstCyclePayout = values.cycleStage === 'FIRST';
   const branchWalletBeforeGatewayLkr = resolveDisplayedBranchWalletBeforeGatewayLkr(values);
   const hasRefundSection =
@@ -259,8 +262,14 @@ export default function PayoutFinancialReport({ values, className = 'mb-4' }: Pr
             )}
             {hasNegativeLkr(values.netPlatformAmountLkr) && (
               <ReportRow
-                label="+ Net Platform Amount"
+                label="+ Net Platform Amount (Jason contribution)"
                 value={signedAmount(Math.abs(values.netPlatformAmountLkr), '+')}
+                labelInfo={
+                  <NetPlatformJasonContributionRowInfoPopover
+                    values={values}
+                    jasonContext={jasonContext}
+                  />
+                }
               />
             )}
             {!isFirstCyclePayout && bankPenaltyRow}
