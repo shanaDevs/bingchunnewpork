@@ -26,9 +26,11 @@ function loadSecrets() {
   return map;
 }
 
-const mapsKey = loadSecrets().GOOGLE_MAPS_API_KEY;
+const secrets = loadSecrets();
+const mapsKey = secrets.GOOGLE_MAPS_API_KEY;
+const mapsServerKey = secrets.GOOGLE_MAPS_SERVER_API_KEY || mapsKey;
 if (!mapsKey) {
-  console.error('GOOGLE_MAPS_API_KEY missing from secrets.env');
+  console.error('GOOGLE_MAPS_API_KEY missing from deploy/digitalocean/secrets.env');
   process.exit(1);
 }
 
@@ -58,17 +60,22 @@ async function api(method, urlPath, body) {
   return json;
 }
 
-function ensureMapsEnv(envs) {
+function upsertEnv(envs, key, value) {
   const list = Array.isArray(envs) ? [...envs] : [];
-  const idx = list.findIndex((e) => e && e.key === 'GOOGLE_MAPS_API_KEY');
-  const entry = {
-    key: 'GOOGLE_MAPS_API_KEY',
-    value: mapsKey,
-    scope: 'RUN_TIME',
-    type: 'SECRET',
-  };
+  const idx = list.findIndex((e) => e && e.key === key);
+  const entry = { key, value, scope: 'RUN_TIME', type: 'SECRET' };
   if (idx >= 0) list[idx] = entry;
   else list.push(entry);
+  return list;
+}
+
+function ensureMapsEnv(envs) {
+  let list = upsertEnv(envs, 'GOOGLE_MAPS_API_KEY', mapsKey);
+  if (mapsServerKey && mapsServerKey !== mapsKey) {
+    list = upsertEnv(list, 'GOOGLE_MAPS_SERVER_API_KEY', mapsServerKey);
+  } else {
+    list = upsertEnv(list, 'GOOGLE_MAPS_SERVER_API_KEY', mapsServerKey);
+  }
   return list;
 }
 

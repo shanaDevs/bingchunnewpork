@@ -93,6 +93,7 @@ import {
   reassignFailedDeliveryOrders,
   REDELIVERY_JOB_STATUSES,
 } from '../lib/deliveryFailureReassign';
+import { ensureVehicleBreakdownSchema } from '../lib/deliverySchema';
 
 type AdminRouteStopPin = {
   orderNumber: string;
@@ -2981,6 +2982,8 @@ function aggregateTopRiders(
 
 export async function getDeliveryDashboard(req: Request, res: Response, next: NextFunction) {
   try {
+    await ensureVehicleBreakdownSchema();
+
     const storeId = await adminStoreIdOptional(req, req.query.storeId as string | undefined);
     const dateFrom = parseDateQuery(req.query.dateFrom);
     const dateTo = parseDateQuery(req.query.dateTo, true);

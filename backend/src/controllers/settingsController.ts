@@ -43,7 +43,7 @@ import {
   setPickupMaxOrderAmount,
   invalidatePickupMaxOrderAmountCache,
 } from '../lib/appSchema';
-import { getGoogleMapsApiKey, setGoogleMapsApiKey } from '../lib/googleMapsKey';
+import { getGoogleMapsBrowserApiKey, setGoogleMapsApiKey } from '../lib/googleMapsKey';
 import { parseSpinCriteria, parseSpinDisplay } from '../lib/spinDisplay';
 import {
   getActiveCancelReasons,
@@ -277,7 +277,7 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
   let googleMapsApiKey = '';
   try {
     await ensureAppSchema();
-    googleMapsApiKey = await getGoogleMapsApiKey();
+    googleMapsApiKey = await getGoogleMapsBrowserApiKey();
     const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, gatewayFeeRate, deliveryPlatformFeeRate, branchCompletionRadiusM, commissionSlabs, pickupMaxOrderAmount] = await Promise.all([
       getConvenienceFeeRates(),
       prisma.appSetting.findUnique({ where: { id: 'default' } }),
@@ -335,7 +335,7 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       return success(res, { googleMapsApiKey });
     }
     try {
-      googleMapsApiKey = await getGoogleMapsApiKey();
+      googleMapsApiKey = await getGoogleMapsBrowserApiKey();
       if (googleMapsApiKey) return success(res, { googleMapsApiKey });
     } catch {
       // fall through
@@ -600,7 +600,7 @@ export async function updateAppSettings(req: Request, res: Response, next: NextF
     }
     const savedGoogleMapsApiKey = googleMapsApiKey !== undefined
       ? await setGoogleMapsApiKey(googleMapsApiKey)
-      : await getGoogleMapsApiKey();
+      : await getGoogleMapsBrowserApiKey();
 
     invalidatePickupOrderEditSettingsCache();
     invalidateGatewayFeeRateCache();

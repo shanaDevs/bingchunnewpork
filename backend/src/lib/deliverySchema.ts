@@ -186,7 +186,7 @@ export async function ensureVehicleBreakdownSchema(): Promise<void> {
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         CONSTRAINT "vehicle_breakdowns_pkey" PRIMARY KEY ("id"),
         CONSTRAINT "vehicle_breakdowns_driverId_fkey"
-          FOREIGN KEY ("driverId") REFERENCES "admin_users"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+          FOREIGN KEY ("driverId") REFERENCES public."admin_users"("id") ON DELETE CASCADE ON UPDATE CASCADE,
         CONSTRAINT "vehicle_breakdowns_jobId_fkey"
           FOREIGN KEY ("jobId") REFERENCES ${jobsRef}("id") ON DELETE CASCADE ON UPDATE CASCADE
       )

@@ -168,8 +168,11 @@ export default function AppMapTiles() {
     let cancelled = false;
     let layer: L.Layer | null = null;
 
-    const useOsm = () => {
+    const useOsm = (reason?: string) => {
       if (cancelled || layer) return;
+      if (reason) {
+        console.warn('[maps] Using OpenStreetMap basemap fallback:', reason);
+      }
       layer = L.tileLayer(OSM_URL, { attribution: OSM_ATTR, maxZoom: 19 }).addTo(map);
     };
 
@@ -190,10 +193,10 @@ export default function AppMapTiles() {
           return;
         }
 
-        useOsm();
+        useOsm('no browser key and server tiles unavailable');
       } catch (err) {
         console.error('Google map basemap failed', err);
-        useOsm();
+        useOsm(err instanceof Error ? err.message : 'google basemap error');
       }
     })();
 

@@ -44,7 +44,11 @@ Do **not** commit real `.env` secrets. Use templates and CapRover/GitLab variabl
 | `PAYHERE_MERCHANT_SECRET` | Optional / **Secret** | Fallback merchant secret |
 | `PAYHERE_MODE` | Optional | `sandbox` / live |
 | `PAYHERE_NOTIFY_IP_ALLOWLIST` | Optional | Comma-separated IPs/CIDRs for `POST /api/orders/payment-notify`; empty = signature-only (no IP gate) |
-| `GOOGLE_MAPS_API_KEY` | Optional / **Secret** | Server geocoding/places; `GET /settings/app` for web maps; `GET /stores/address/tiles` for Map Tiles session. Enable **Maps JavaScript API** + **Map Tiles API** in GCP. Browser key HTTP referrers: `http://localhost:3000/*`, `http://localhost:3100/*`, admin + delivery production origins. Else OSM/mock |
+| `GOOGLE_MAPS_API_KEY` | Optional / **Secret** | Default key for browser + server when split keys are not set. **Must be set on every API/worker component in production** (App Platform `RUN_TIME`). Live admin without this returns `"googleMapsApiKey":""` and OSM tiles — run `node deploy/digitalocean/set-google-maps-env.mjs` after filling `deploy/digitalocean/secrets.env`. |
+| `GOOGLE_MAPS_BROWSER_API_KEY` | Optional / **Secret** | Browser-only key exposed via `GET /settings/app` when `app_settings.googleMapsApiKey` is empty. Falls back to `GOOGLE_MAPS_API_KEY`. |
+| `GOOGLE_MAPS_SERVER_API_KEY` | Optional / **Secret** | Server geocoding, Directions, Map Tiles `createSession`. Use an **IP-restricted** or unrestricted key when the browser key is HTTP-referrer-only. Falls back to `GOOGLE_MAPS_API_KEY`, then DB settings key. |
+
+**Google Cloud (browser key HTTP referrers):** enable **Maps JavaScript API** + **Map Tiles API**. Allow at least: `http://localhost:3000/*`, `http://localhost:3100/*`, `https://bingchunsrilanka.com/*`, `https://admin.bingchunsrilanka.com/*`, `https://bingchun-admin-a4ndy.ondigitalocean.app/*`, `https://bingchun-delivery-6mgs2.ondigitalocean.app/*`. Admin → Settings can store a browser key in DB (overrides env for the browser). If Google paths fail, maps fall back to OpenStreetMap. |
 | `GOOGLE_CLIENT_ID` | Optional | Google login audience |
 | `GOOGLE_CLIENT_SECRET` | Optional | Present in config; **unused** in ID-token flow |
 | `FACEBOOK_APP_ID` | Optional | Facebook login |

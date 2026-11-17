@@ -123,9 +123,7 @@ const SHOP_CSP = [
 ].join('; ');
 
 const ADMIN_SCRIPT_SRC =
-  process.env.NODE_ENV === 'production'
-    ? `script-src 'self' 'unsafe-inline' blob: ${GOOGLE_MAPS_HOSTS}`
-    : `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${GOOGLE_MAPS_HOSTS}`;
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${GOOGLE_MAPS_HOSTS}`;
 
 const ADMIN_CSP_PARTS = [
   "default-src 'self'",
