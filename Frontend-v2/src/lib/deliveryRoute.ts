@@ -7,6 +7,11 @@ export type DeliveryRouteStop = {
   district?: string;
   lat: number;
   lng: number;
+  dropoffLat?: number | null;
+  dropoffLng?: number | null;
+  dropoffAt?: string | null;
+  plannedLat?: number | null;
+  plannedLng?: number | null;
   itemCount?: number;
   imageUrl?: string | null;
   extraItemCount?: number;
@@ -76,4 +81,40 @@ export function formatStopAddress(stop: {
 /** e.g. "Delivery Run #2 - Pitakotte" → "Delivery Run 2 - Pitakotte" */
 export function formatDeliveryJobTitle(title: string): string {
   return title.replace(/#/g, '');
+}
+
+const DROPOFF_DIVERGE_METERS = 40;
+
+function haversineMeters(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const R = 6371000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+/** Map pin for a stop — actual OTP GPS after delivery, otherwise the checkout address. */
+export function stopMapPosition(stop: DeliveryRouteStop): { lat: number; lng: number } {
+  if (stop.status === 'DELIVERED' && stop.dropoffLat != null && stop.dropoffLng != null) {
+    return { lat: stop.dropoffLat, lng: stop.dropoffLng };
+  }
+  return { lat: stop.lat, lng: stop.lng };
+}
+
+/** Checkout address pin when it is far from the rider's OTP GPS. */
+export function stopPlannedGhostPosition(stop: DeliveryRouteStop): { lat: number; lng: number } | null {
+  if (stop.status !== 'DELIVERED' || stop.dropoffLat == null || stop.dropoffLng == null) return null;
+  const planned = {
+    lat: stop.plannedLat ?? stop.lat,
+    lng: stop.plannedLng ?? stop.lng,
+  };
+  const actual = { lat: stop.dropoffLat, lng: stop.dropoffLng };
+  if (haversineMeters(planned, actual) < DROPOFF_DIVERGE_METERS) return null;
+  return planned;
 }

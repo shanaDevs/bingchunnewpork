@@ -137,6 +137,86 @@ describe('listLiveDrivers', () => {
               lat: 6.82,
               lng: 79.89,
             }),
+            lastDropoff: null,
+          }),
+        }),
+      ],
+    });
+  });
+
+  it('returns lastDropoff at actual GPS after a delivered stop', async () => {
+    vi.mocked(prisma.adminUser.findMany).mockResolvedValue([
+      {
+        id: 'driver-1',
+        name: 'Rider',
+        dutyStatus: 'ON_DELIVERY',
+        vehicleNumber: 'ABC-123',
+        storeId: SCOPED_STORE,
+        store: { id: SCOPED_STORE, name: 'Bing Chun - Moratuwa', lat: 6.773, lng: 79.882 },
+        driverLocations: [{ lat: 6.83, lng: 79.9, recordedAt: new Date(), jobId: 'job-1', heading: 90 }],
+        deliveryJobs: [
+          {
+            id: 'job-1',
+            status: 'IN_PROGRESS',
+            title: 'Run · 2 orders',
+            startedAt: new Date('2026-11-16T05:00:00.000Z'),
+            jobOrders: [
+              {
+                orderId: 'order-1',
+                sequence: 1,
+                order: {
+                  id: 'order-1',
+                  orderNumber: 'BC-1',
+                  status: 'DELIVERED',
+                  cancelReason: null,
+                  deliveryLat: 6.82,
+                  deliveryLng: 79.89,
+                  actualDropoffLat: 6.8215,
+                  actualDropoffLng: 79.891,
+                  actualDropoffAt: '2026-11-16T05:20:00.000Z',
+                },
+              },
+              {
+                orderId: 'order-2',
+                sequence: 2,
+                order: {
+                  id: 'order-2',
+                  orderNumber: 'BC-2',
+                  status: 'OUT_FOR_DELIVERY',
+                  cancelReason: null,
+                  deliveryLat: 6.83,
+                  deliveryLng: 79.9,
+                  actualDropoffLat: null,
+                  actualDropoffLng: null,
+                  actualDropoffAt: null,
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ] as never);
+
+    const req = createMockReq({ query: { storeId: SCOPED_STORE } });
+    const res = createMockRes();
+    await listLiveDrivers(req, res, next);
+
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: [
+        expect.objectContaining({
+          currentJob: expect.objectContaining({
+            lastDropoff: expect.objectContaining({
+              kind: 'dropoff',
+              orderId: 'order-1',
+              lat: 6.8215,
+              lng: 79.891,
+              actual: true,
+            }),
+            nextStop: expect.objectContaining({
+              kind: 'stop',
+              sequence: 2,
+            }),
           }),
         }),
       ],

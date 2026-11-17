@@ -42,6 +42,7 @@ const secretKeys = [
   'DELIVERY_OTP_PEPPER',
   'DRIVER_PIN_PEPPER',
   'GOOGLE_MAPS_API_KEY',
+  'GOOGLE_MAPS_SERVER_API_KEY',
 ];
 
 let yaml = fs.readFileSync(specPath, 'utf8');

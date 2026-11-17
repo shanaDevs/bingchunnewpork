@@ -174,8 +174,11 @@ export async function attachAppMapBasemap(
   let layer: L.Layer | null = null;
   const cancelled = () => options?.cancelled?.() === true;
 
-  const useOsm = () => {
+  const useOsm = (reason?: string) => {
     if (cancelled() || layer) return;
+    if (reason) {
+      console.warn('[maps] Using OpenStreetMap basemap fallback:', reason);
+    }
     layer = L.tileLayer(OSM_URL, { attribution: OSM_ATTR, maxZoom: 19 }).addTo(map);
   };
 
@@ -190,11 +193,11 @@ export async function attachAppMapBasemap(
       const serverTiles = await readServerMapTiles();
       if (cancelled()) return () => undefined;
       if (serverTiles) layer = addGoogleTileLayer(map, serverTiles);
-      else useOsm();
+      else useOsm('no browser key and server tiles unavailable');
     }
   } catch (err) {
     console.error('Google map basemap failed', err);
-    useOsm();
+    useOsm(err instanceof Error ? err.message : 'google basemap error');
   }
 
   return () => {

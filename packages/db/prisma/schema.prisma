@@ -856,6 +856,10 @@ model Order {
   deliveryDistrict    String?
   deliveryLat         Float?
   deliveryLng         Float?
+  /// Rider GPS at OTP / delivered confirm — not the customer checkout address.
+  actualDropoffLat    Float?
+  actualDropoffLng    Float?
+  actualDropoffAt     DateTime?
   platform            Int             @default(0)
   /// Sales channel (WEB / APP / POS / WHATSAPP / TELEGRAM). Prefer this over `platform` for filtering.
   channel             OrderChannel    @default(WEB)
@@ -1175,6 +1179,7 @@ model AdminUser {
   customerAuditLogs CustomerAuditLog[]
   processedOrders   Order[]            @relation("OrderProcessedBy")
   orderStatusEvents OrderStatusEvent[] @relation("OrderStatusEventActor")
+  vehicleBreakdowns VehicleBreakdown[]
 
   @@unique([storeId, pinLookup])
   @@index([pinLookup])
@@ -1245,6 +1250,7 @@ model DeliveryJob {
   jobOrders   DeliveryJobOrder[]
   rejections  DeliveryJobRejection[]
   adminCancellations DeliveryJobAdminCancellation[]
+  vehicleBreakdowns VehicleBreakdown[]
 
   @@index([storeId, status])
   @@index([driverId, status])
@@ -1253,6 +1259,32 @@ model DeliveryJob {
   @@schema("delivery")
 
   @@map("delivery_jobs")
+}
+
+/// Open until rider or admin marks vehicle fixed after a mid-route breakdown report.
+model VehicleBreakdown {
+  id           String    @id @default(uuid())
+  driverId     String
+  jobId        String
+  storeId      String
+  reportedAt   DateTime  @default(now())
+  reportedLat  Float
+  reportedLng  Float
+  note         String?   @db.Text
+  fixedAt      DateTime?
+  fixedById    String?
+  fixedByRole  String?
+  fixedComment String?   @db.Text
+  createdAt    DateTime  @default(now())
+
+  driver AdminUser   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  job    DeliveryJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([driverId, fixedAt])
+  @@index([storeId, reportedAt])
+  @@schema("delivery")
+
+  @@map("vehicle_breakdowns")
 }
 
 model DeliveryJobOrder {

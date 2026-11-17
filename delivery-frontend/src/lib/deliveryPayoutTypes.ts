@@ -59,6 +59,20 @@ export type DeliveryPayoutDueRow = {
   days: number;
   orderCount: number;
   grossDeliveryFee: number;
+  platformFeePercent: number;
+  platformFee: number;
+  gatewayFeePercent: number;
+  gatewayFee: number;
   netForDelivery: number;
   payable: boolean;
+};
+
+export type DeliveryCurrentPayoutCycle = {
+  from: string;
+  cycleTo: string;
+  through: string;
+  days: number;
+  orderCount?: number;
+  grossDeliveryFee?: number;
+  netForDelivery?: number;
 };

@@ -5,6 +5,7 @@ import { assertValidStatusTransition, type OrderStatus } from './orderStatus';
 import { paymentStatusOnOrderStatus } from './orderPayment';
 import { notifyCustomerOrderStatus, notifyDeliveryCode } from './customerNotifications';
 import { maybeAutoCompleteDeliveryJobsForOrder } from './deliveryJobHelpers';
+import { parseLatLngPair } from '@bingchun/delivery-domain';
 import { notifyDriverOrderCancelled } from './driverOrderAlerts';
 import { logger } from '../utils/logger';
 import { orderSmsPhone, sendDeliveryCodeSms, sendOrderReceiptSms } from '../integrations/smsAdapter';
@@ -16,6 +17,9 @@ export const deliveryOrderStatusPayloadSchema = z.object({
   orderNumber: z.string().optional(),
   userId: z.string().nullable().optional(),
   orderMode: z.string().optional(),
+  lat: z.number().min(-90).max(90).optional().nullable(),
+  lng: z.number().min(-180).max(180).optional().nullable(),
+  dropoffAt: z.string().optional().nullable(),
 });
 
 export type DeliveryOrderStatusPayload = z.infer<typeof deliveryOrderStatusPayloadSchema>;
@@ -52,12 +56,21 @@ export async function applyOrderStatusFromDelivery(
   }
 
   const paidOnFulfillment = paymentStatusOnOrderStatus(order, body.status);
+  const dropoff = body.status === 'DELIVERED' ? parseLatLngPair(body.lat, body.lng) : null;
+  const dropoffAt = body.dropoffAt ? new Date(body.dropoffAt) : new Date();
 
   const updated = await prisma.order.update({
     where: { id: order.id },
     data: {
       status: body.status as OrderStatus,
       ...(paidOnFulfillment ? { paymentStatus: paidOnFulfillment } : {}),
+        ...(dropoff
+        ? ({
+            actualDropoffLat: dropoff.lat,
+            actualDropoffLng: dropoff.lng,
+            actualDropoffAt: Number.isNaN(dropoffAt.getTime()) ? new Date() : dropoffAt,
+          } as Record<string, unknown>)
+        : {}),
       statusEvents: {
         create: { status: body.status as OrderStatus, note: body.note ?? 'Updated by delivery service' },
       },

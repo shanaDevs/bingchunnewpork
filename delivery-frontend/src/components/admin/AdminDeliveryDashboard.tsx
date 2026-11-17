@@ -133,6 +133,7 @@ type DashboardResponse = {
   attention?: {
     openComplaints: number;
     vehicleFailures: number;
+    openVehicleBreakdowns?: number;
     pendingBranchRequests: number;
   };
 };
@@ -649,6 +650,12 @@ export default function AdminDeliveryDashboard({
                   icon={Truck}
                   label="Vehicle failures"
                   value={attention?.vehicleFailures ?? 0}
+                  onClick={onOpenFailures}
+                />
+                <AttentionRow
+                  icon={Truck}
+                  label="Awaiting vehicle fix"
+                  value={attention?.openVehicleBreakdowns ?? 0}
                   onClick={onOpenFailures}
                 />
                 <AttentionRow

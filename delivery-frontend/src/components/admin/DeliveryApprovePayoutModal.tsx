@@ -3,18 +3,17 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { FileText, ImageIcon, Info, Loader2, ShieldCheck, Undo2, X, XCircle } from 'lucide-react';
+import { FileText, ImageIcon, Loader2, ShieldCheck, X, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { deliveryWalletFetch } from '@/lib/deliveryWalletApi';
 import { useDeliveryWalletUnlockToken } from '@/components/admin/DeliveryWalletUnlockContext';
-import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
+import { formatMoney } from '@/lib/receipt';
 import { confirmDialog } from '@/store/confirmStore';
 import {
   parseDeliveryPayoutBreakdown,
   type DeliveryPayoutHistoryRow,
 } from '@/lib/deliveryPayoutTypes';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import DeliveryFeesByBranchBreakdown from '@/components/admin/DeliveryFeesByBranchBreakdown';
+import DeliveryWalletPayoutCalculation from '@/components/admin/DeliveryWalletPayoutCalculation';
 import DeliveryPayoutPaymentCell from '@/components/admin/DeliveryPayoutPaymentCell';
 import { openPayoutProofById } from '@/lib/adminProtectedFile';
 
@@ -85,7 +84,6 @@ export default function DeliveryApprovePayoutModal({
 
   const breakdown = payout ? parseDeliveryPayoutBreakdown(payout.breakdown) : null;
   const snapshotAmount = payout?.amount ?? breakdown?.netForDelivery ?? 0;
-  const branches = breakdown?.branches ?? [];
 
   const handleApprove = async () => {
     if (!payout) return;
@@ -208,84 +206,10 @@ export default function DeliveryApprovePayoutModal({
                 </div>
 
                 {breakdown && (
-                  <div className="mt-4 rounded-xl border border-navy-border/80 bg-input-bg/25 px-4 py-3.5">
-                    <div className="min-w-0 flex-1 text-sm leading-relaxed text-muted">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-white">Payout calculation</p>
-                        <Popover>
-                          <PopoverTrigger
-                            type="button"
-                            className="inline-flex rounded-lg p-1 text-brand hover:bg-navy-light/60"
-                            aria-label="Show payout formula"
-                          >
-                            <Info size={16} />
-                          </PopoverTrigger>
-                          <PopoverContent
-                            className="z-[10050] max-w-sm font-mono text-xs"
-                            positionerClassName="z-[10050]"
-                            side="bottom"
-                            align="start"
-                            sideOffset={6}
-                          >
-                            Net for delivery = (Gross − {breakdown.platformFeePercent}% platform) −{' '}
-                            {breakdown.gatewayFeePercent}% gateway
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-                      <dl className="mt-3 space-y-2 border-t border-navy-border/60 pt-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <dt>Gross delivery fees</dt>
-                          <dd className="font-semibold tabular-nums text-white">
-                            {formatMoneyAmount(breakdown.grossDeliveryFee)}
-                          </dd>
-                        </div>
-                        <div className="flex items-center justify-between gap-3 text-xs">
-                          <dt className="pl-3">Active orders ({breakdown.orderCount})</dt>
-                          <dd className="tabular-nums">{formatMoneyAmount(breakdown.fromActiveOrders)}</dd>
-                        </div>
-                        <div className="flex items-center justify-between gap-3 text-xs">
-                          <dt className="inline-flex items-center gap-1.5 pl-3">
-                            <Undo2 size={12} />
-                            Late-cancel retained ({breakdown.lateCancelCount})
-                          </dt>
-                          <dd className="tabular-nums">{formatMoneyAmount(breakdown.fromLateCancels)}</dd>
-                        </div>
-                        <div className="flex items-center justify-between gap-3 border-t border-navy-border/40 pt-2">
-                          <dt>− Platform fee ({breakdown.platformFeePercent}%)</dt>
-                          <dd className="font-semibold tabular-nums text-red-700 dark:text-red-300">
-                            − {formatMoneyAmount(breakdown.platformFee)}
-                          </dd>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <dt>= After platform</dt>
-                          <dd className="font-medium tabular-nums text-white">
-                            {formatMoneyAmount(breakdown.afterPlatformFee)}
-                          </dd>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <dt>− Gateway fee ({breakdown.gatewayFeePercent}%)</dt>
-                          <dd className="font-semibold tabular-nums text-red-700 dark:text-red-300">
-                            − {formatMoneyAmount(breakdown.gatewayFee)}
-                          </dd>
-                        </div>
-                        <div className="flex items-center justify-between gap-3 border-t border-navy-border/60 pt-2">
-                          <dt className="font-medium text-white">= Net for delivery</dt>
-                          <dd className="text-base font-bold tabular-nums text-brand">
-                            {formatMoney(breakdown.netForDelivery)}
-                          </dd>
-                        </div>
-                      </dl>
-                    </div>
-                  </div>
-                )}
-
-                {breakdown && (
-                  <DeliveryFeesByBranchBreakdown
-                    key={payout.id}
-                    branches={branches}
-                    grossDeliveryFee={breakdown.grossDeliveryFee}
-                    platformFeePercent={breakdown.platformFeePercent}
-                    gatewayFeePercent={breakdown.gatewayFeePercent}
+                  <DeliveryWalletPayoutCalculation
+                    className="mt-4"
+                    summary={breakdown}
+                    branchListKey={payout.id}
                   />
                 )}
 

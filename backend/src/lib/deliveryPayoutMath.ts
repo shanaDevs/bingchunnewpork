@@ -1,6 +1,6 @@
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-export const DELIVERY_PAYOUT_PERIOD_DAYS = [15] as const;
+export const DELIVERY_PAYOUT_PERIOD_DAYS = [30] as const;
 export type DeliveryPayoutPeriodDays = (typeof DELIVERY_PAYOUT_PERIOD_DAYS)[number];
 
 /** Elapsed-window payout length (same as the only configured period option). */
@@ -13,7 +13,7 @@ export type ResolvedDeliveryPayoutPeriod = {
   capped?: boolean;
 };
 
-/** In-progress delivery payout cycle (full 15-day close date + summary through today). */
+/** In-progress delivery payout cycle (full 30-day close date + summary through today). */
 export type OpenDeliveryPayoutWindow = {
   days: DeliveryPayoutPeriodDays;
   from: string;

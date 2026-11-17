@@ -174,7 +174,7 @@ export async function sendOrderCancelledToDriver(
 
 export type DriverAccountUpdatePushPayload = {
   notificationId: string;
-  kind: 'COMPLAINT' | 'BRANCH_REQUEST';
+  kind: 'COMPLAINT' | 'BRANCH_REQUEST' | 'HANDOVER_RIDER_ASSIGNED';
   title: string;
   body: string;
   complaintId?: string;

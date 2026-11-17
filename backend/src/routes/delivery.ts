@@ -17,6 +17,7 @@ router.use(deliveryProxy);
 router.get('/me', authenticate, requireDeliveryDriver, driverSelfController.getMe);
 router.get('/me/license-image', authenticate, requireDeliveryDriver, driverSelfController.getMyLicenseImage);
 router.patch('/me/duty', authenticate, requireDeliveryDriver, driverSelfController.updateDuty);
+router.post('/me/vehicle-fixed', authenticate, requireDeliveryDriver, driverSelfController.markMyVehicleFixed);
 router.post('/me/fcm-token', authenticate, requireDeliveryDriver, driverSelfController.updateFcmToken);
 router.delete('/me/fcm-token', authenticate, requireDeliveryDriver, driverSelfController.deleteFcmToken);
 router.get('/me/merit-history', authenticate, requireDeliveryDriver, driverSelfController.getMeritHistory);
@@ -49,6 +50,13 @@ router.get('/jobs', authenticate, requireDeliveryDriver, deliveryJobController.l
 router.get('/jobs/active', authenticate, requireDeliveryDriver, deliveryJobController.getActiveJob);
 router.get('/jobs/history', authenticate, requireDeliveryDriver, deliveryJobController.getMyJobHistory);
 router.get('/jobs/:id/route', authenticate, requireDeliveryDriver, deliveryJobController.getJobRoute);
+router.get('/jobs/:id/handover', authenticate, requireDeliveryDriver, deliveryJobController.getJobHandover);
+router.post(
+  '/jobs/:id/handover/back-on-road',
+  authenticate,
+  requireDeliveryDriver,
+  deliveryJobController.confirmHandoverBackOnRoad,
+);
 router.get('/jobs/:id', authenticate, requireDeliveryDriver, deliveryJobController.getJob);
 router.post('/jobs/:id/assign', authenticate, requireDeliveryDriver, deliveryJobController.assignJob);
 router.post('/jobs/:id/claim', authenticate, requireDeliveryDriver, deliveryJobController.claimJob);

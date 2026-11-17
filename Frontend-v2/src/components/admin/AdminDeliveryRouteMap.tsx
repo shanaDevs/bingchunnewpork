@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Polyline, Marker, Circle, Tooltip, useMap } from 'react-leaflet';
 import AppMapTiles from '@/components/maps/AppMapTiles';
 import L from 'leaflet';
 import type { Marker as LeafletMarker } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { DeliveryRoutePayload, DeliveryRouteStop, DeliveryRouteStore } from '@/lib/deliveryRoute';
-import { formatRouteAddress, routeStartPrimaryDetail } from '@/lib/deliveryRoute';
+import { formatRouteAddress, routeStartPrimaryDetail, stopMapPosition, stopPlannedGhostPosition } from '@/lib/deliveryRoute';
 import {
   buildRouteMapPinHtml,
   customerInitial,
@@ -307,7 +307,14 @@ export default function AdminDeliveryRouteMap({
   const boundsPoints: [number, number][] = useMemo(() => {
     const points: [number, number][] = [
       [route.store.lat, route.store.lng],
-      ...route.stops.map((s) => [s.lat, s.lng] as [number, number]),
+      ...route.stops.map((s) => {
+        const pin = stopMapPosition(s);
+        return [pin.lat, pin.lng] as [number, number];
+      }),
+      ...route.stops
+        .map((s) => stopPlannedGhostPosition(s))
+        .filter((p): p is { lat: number; lng: number } => p != null)
+        .map((p) => [p.lat, p.lng] as [number, number]),
       ...(plannedVisible ? pathPoints : []),
       ...(actualVisible ? actualPathPoints : []),
     ];
@@ -469,14 +476,24 @@ export default function AdminDeliveryRouteMap({
         {route.stops.map((stop) => {
           const key = stopKey(stop.orderId, stop.orderNumber);
           const selected = highlightedStopKey === key;
+          const pin = stopMapPosition(stop);
+          const ghost = stopPlannedGhostPosition(stop);
           return (
-            <Marker
-              key={`${key}-${selected ? 'selected' : 'default'}`}
-              position={[stop.lat, stop.lng]}
-              icon={stopMarkerIcon(stop, selected)}
-              eventHandlers={onStopSelect ? { click: () => onStopSelect(key) } : undefined}
-              zIndexOffset={selected ? 1000 : 0}
-            />
+            <Fragment key={`${key}-${selected ? 'selected' : 'default'}`}>
+              <Marker
+                position={[pin.lat, pin.lng]}
+                icon={stopMarkerIcon(stop, selected)}
+                eventHandlers={onStopSelect ? { click: () => onStopSelect(key) } : undefined}
+                zIndexOffset={selected ? 1000 : 0}
+              />
+              {ghost ? (
+                <Marker position={[ghost.lat, ghost.lng]} zIndexOffset={0} interactive={false}>
+                  <Tooltip direction="top" offset={[0, -8]}>
+                    Address
+                  </Tooltip>
+                </Marker>
+              ) : null}
+            </Fragment>
           );
         })}
         {showReturnToStore && (
