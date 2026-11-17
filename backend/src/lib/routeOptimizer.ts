@@ -22,6 +22,11 @@ export interface RouteStop extends LatLng {
   sequence: number;
   distanceFromPreviousKm: number;
   etaMinutesFromPrevious: number;
+  dropoffLat?: number | null;
+  dropoffLng?: number | null;
+  dropoffAt?: Date | string | null;
+  plannedLat?: number | null;
+  plannedLng?: number | null;
 }
 
 export function haversineKm(a: LatLng, b: LatLng): number {

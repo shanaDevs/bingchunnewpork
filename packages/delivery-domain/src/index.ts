@@ -1,4 +1,5 @@
 export * from './geo';
+export * from './actualDropoff';
 export * from './gpsPath';
 export * from './routeOptimizer';
 export * from './osrmAllowlist';
@@ -13,3 +14,6 @@ export * from './riderEfficiency';
 export * from './riderStats';
 export * from './riderProfileSync';
 export * from './integrationEvents';
+export * from './vehicleBreakdown';
+export * from './reassignedRiders';
+export * from './jobHandover';

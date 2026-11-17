@@ -16,6 +16,7 @@ let deliveryJobsReady = false;
 let driverComplaintsReady = false;
 let driverLocationsReady = false;
 let adminJobCancellationsReady = false;
+let vehicleBreakdownsReady = false;
 
 async function ensureDeliveryJobsBaseTables(): Promise<void> {
   await ensureEnumTypeIfMissing('DeliveryJobStatus', [
@@ -157,7 +158,51 @@ export async function ensureDeliveryJobsTables(): Promise<void> {
 
   await createUniqueIndexIfMissing('delivery_jobs', 'delivery_jobs_rideCode_key', 'rideCode');
 
+  await ensureVehicleBreakdownSchema();
+
   deliveryJobsReady = true;
+}
+
+export async function ensureVehicleBreakdownSchema(): Promise<void> {
+  if (vehicleBreakdownsReady) return;
+
+  const jobsRef = await deliverySchemaTableSql('delivery_jobs');
+  if (!(await tableExists('vehicle_breakdowns'))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS ${await qualifiedPhysicalTable('vehicle_breakdowns')} (
+        "id" TEXT NOT NULL,
+        "driverId" TEXT NOT NULL,
+        "jobId" TEXT NOT NULL,
+        "storeId" TEXT NOT NULL,
+        "reportedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "reportedLat" DOUBLE PRECISION NOT NULL,
+        "reportedLng" DOUBLE PRECISION NOT NULL,
+        "note" TEXT,
+        "fixedAt" TIMESTAMP(3),
+        "fixedById" TEXT,
+        "fixedByRole" TEXT,
+        "fixedComment" TEXT,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "vehicle_breakdowns_pkey" PRIMARY KEY ("id"),
+        CONSTRAINT "vehicle_breakdowns_driverId_fkey"
+          FOREIGN KEY ("driverId") REFERENCES "admin_users"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "vehicle_breakdowns_jobId_fkey"
+          FOREIGN KEY ("jobId") REFERENCES ${jobsRef}("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )
+    `);
+    await createIndexIfMissing(
+      'vehicle_breakdowns',
+      'vehicle_breakdowns_driverId_fixedAt_idx',
+      'driverId, fixedAt',
+    );
+    await createIndexIfMissing(
+      'vehicle_breakdowns',
+      'vehicle_breakdowns_storeId_reportedAt_idx',
+      'storeId, reportedAt',
+    );
+  }
+
+  vehicleBreakdownsReady = true;
 }
 
 async function deliveryJobStatusTypeSqlRef(): Promise<string> {

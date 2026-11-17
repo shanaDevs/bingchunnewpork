@@ -15,8 +15,8 @@ import {
   type PayoutPeriodPreset,
 } from '@/lib/biweeklyPeriods';
 
-/** Delivery payouts use the same fixed 15-day cycle as branch payouts. */
-const DELIVERY_PAYOUT_PERIOD_DAYS: PayoutPeriodPreset = 15;
+/** Delivery payouts use a fixed 30-day cycle (branch payouts stay 15-day). */
+const DELIVERY_PAYOUT_PERIOD_DAYS: PayoutPeriodPreset = 30;
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import DeliveryFeesByBranchBreakdown from '@/components/admin/DeliveryFeesByBranchBreakdown';
 import AdminPinGateModal from '@/components/admin/AdminPinGateModal';
@@ -289,7 +289,7 @@ export default function DeliveryPayoutRequestModal({ open, onClose, onSubmitted 
                     Pay delivery payout
                   </h2>
                   <p className="mt-1 text-sm text-muted">
-                    Fixed 15-day cycle. Payment slip is optional and can be uploaded later. Amounts are
+                    Fixed 30-day cycle. Payment slip is optional and can be uploaded later. Amounts are
                     saved on submit and will not change later.
                   </p>
                   {periodInfo && !periodInfo.nextPeriodStart && periodOptions.length > 0 && (

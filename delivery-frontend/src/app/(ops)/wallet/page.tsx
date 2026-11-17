@@ -30,7 +30,6 @@ import {
   readDeliveryWalletUnlockToken,
   writeDeliveryWalletUnlockToken,
 } from '@/lib/deliveryWalletSession';
-import type { DeliveryWalletSummary } from '@/lib/deliveryPayoutTypes';
 import { DeliveryWalletUnlockProvider } from '@/components/admin/DeliveryWalletUnlockContext';
 import DeliveryWalletPinOverlay from '@/components/admin/DeliveryWalletPinOverlay';
 import { getAdminSession, isSuperAdmin } from '@/lib/adminAuth';
@@ -42,12 +41,15 @@ import DateRangePicker from '@/components/admin/DateRangePicker';
 import DeliveryApprovePayoutModal from '@/components/admin/DeliveryApprovePayoutModal';
 import DeliveryPayoutPaymentCell from '@/components/admin/DeliveryPayoutPaymentCell';
 import DeliveryPayoutPayModal from '@/components/admin/DeliveryPayoutPayModal';
+import CurrentDeliveryPayoutCycleCard from '@/components/admin/CurrentDeliveryPayoutCycleCard';
 import DeliveryPayoutsDuePanel from '@/components/admin/DeliveryPayoutsDuePanel';
 import { openPayoutProofById } from '@/lib/adminProtectedFile';
 import {
   parseDeliveryPayoutBreakdown,
+  type DeliveryCurrentPayoutCycle,
   type DeliveryPayoutDueRow,
   type DeliveryPayoutHistoryRow,
+  type DeliveryWalletSummary,
 } from '@/lib/deliveryPayoutTypes';
 import {
   DELIVERY_PAYOUT_STATEMENT_ZIP_MAX,
@@ -60,14 +62,6 @@ import { confirmDialog } from '@/store/confirmStore';
 import AdminTablePagination from '@/components/admin/AdminTablePagination';
 import { ADMIN_TABLE_PAGE_SIZE, buildPageList } from '@/lib/pagination';
 import { cn } from '@/lib/utils';
-import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
-
-type DeliveryCurrentPayoutCycle = {
-  from: string;
-  cycleTo: string;
-  through: string;
-  days: number;
-};
 
 function toDateParam(d: Date) {
   return format(d, 'yyyy-MM-dd');
@@ -810,8 +804,8 @@ function DeliveryWalletPageContent() {
             {activeTab === 'wallet'
               ? 'Delivery fees from all branches, minus platform fee then payment gateway fee.'
               : activeTab === 'due'
-                ? 'View completed 15-day periods due for payout. Pay from main admin Wallet → Payouts Due → Delivery.'
-                : 'Paid delivery payouts on a 15-day cycle (super admin). Pending rows can be cancelled; proof can be uploaded after pay.'}
+                ? 'View the current 30-day cycle (not payable until it closes) and completed periods due for payout. Pay from main admin Wallet → Payouts Due → Delivery.'
+                : 'Paid delivery payouts on a 30-day cycle (super admin). Pending rows can be cancelled; proof can be uploaded after pay.'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -851,20 +845,7 @@ function DeliveryWalletPageContent() {
         })}
       </div>
 
-      {currentCycle && (
-        <div
-          className="rounded-xl border border-[var(--color-navy-border,#334155)] bg-[var(--color-navy-card,#1e293b)] px-4 py-3 sm:px-5"
-          aria-live="polite"
-        >
-          <p className="text-sm text-white">
-            <span className="font-semibold">Current payout cycle: </span>
-            {formatBiweeklyPeriodLabel(currentCycle.from, currentCycle.through)}
-          </p>
-          <p className="mt-0.5 text-xs text-muted">
-            15-day cycle closes {formatDateOnly(currentCycle.cycleTo)}
-          </p>
-        </div>
-      )}
+      {currentCycle && <CurrentDeliveryPayoutCycleCard cycle={currentCycle} />}
 
       {activeTab === 'wallet' && (
         <>

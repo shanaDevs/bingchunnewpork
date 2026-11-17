@@ -42,6 +42,9 @@ import AdminReassignFailedOrderModal, {
   type AdminDeliveryFailure,
   forwardOrdersFromFailure,
 } from '@/components/admin/AdminReassignFailedOrderModal';
+import AdminMarkVehicleFixedModal, {
+  type AdminVehicleBreakdownRow,
+} from '@/components/admin/AdminMarkVehicleFixedModal';
 
 type OpsPage<T> = {
   rows: T[];
@@ -181,6 +184,7 @@ export default function AdminDriverOpsPanel({
   const qc = useQueryClient();
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
   const [selectedFailure, setSelectedFailure] = useState<AdminDeliveryFailure | null>(null);
+  const [selectedBreakdown, setSelectedBreakdown] = useState<AdminVehicleBreakdownRow | null>(null);
   const [selectedComplaintId, setSelectedComplaintId] = useState<string | null>(null);
   const [selectedBranchRequest, setSelectedBranchRequest] = useState<AdminDriverBranchRequest | null>(null);
   const [listPage, setListPage] = useState(1);
@@ -233,6 +237,19 @@ export default function AdminDriverOpsPanel({
       ),
     enabled: mode === 'failures',
     placeholderData: keepPreviousData,
+  });
+
+  const vehicleBreakdownsQuery = useQuery({
+    queryKey: ['admin-vehicle-breakdowns', storeId],
+    queryFn: async () => {
+      const qs = new URLSearchParams();
+      if (storeId) qs.set('storeId', storeId);
+      qs.set('openOnly', 'true');
+      const json = await adminFetch(`/admin/vehicle-breakdowns?${qs}`);
+      const rows = (json.data as { rows?: AdminVehicleBreakdownRow[] })?.rows ?? [];
+      return rows;
+    },
+    enabled: mode === 'failures',
   });
 
   const requestsQuery = useQuery({
@@ -663,8 +680,47 @@ export default function AdminDriverOpsPanel({
   if (mode === 'failures') {
     const failurePage = failuresQuery.data;
     const failures = failurePage?.rows ?? [];
+    const openBreakdowns = vehicleBreakdownsQuery.data ?? [];
     return (
       <>
+        {openBreakdowns.length > 0 ? (
+          <div className="card mb-4 overflow-x-auto">
+            <h3 className="px-4 pt-4 text-sm font-semibold text-fg">Riders awaiting vehicle fix</h3>
+            <p className="px-4 pb-2 text-xs text-muted">
+              These riders reported a breakdown and cannot claim new jobs until marked fixed.
+            </p>
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th className="px-4 py-2">Rider</th>
+                  <th className="px-4 py-2">Ride</th>
+                  <th className="px-4 py-2">Reported</th>
+                  <th className="px-4 py-2">Note</th>
+                  <th className="px-4 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {openBreakdowns.map((row) => (
+                  <tr key={row.id} className="border-t border-navy-border">
+                    <td className="px-4 py-2 text-white">{row.driver?.name ?? row.driverId}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">{displayRideId(row.job?.rideCode, row.jobId)}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">{formatDateTime(row.reportedAt)}</td>
+                    <td className="px-4 py-2 max-w-xs break-words text-muted">{row.note || '—'}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="btn-primary px-2 py-1 text-xs"
+                        onClick={() => setSelectedBreakdown(row)}
+                      >
+                        Mark vehicle fixed
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
         <div className="card overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
@@ -793,6 +849,16 @@ export default function AdminDriverOpsPanel({
             setSelectedFailure(null);
             qc.invalidateQueries({ queryKey: ['admin-delivery-failures'] });
             qc.invalidateQueries({ queryKey: ['admin-delivery-jobs'] });
+          }}
+        />
+        <AdminMarkVehicleFixedModal
+          row={selectedBreakdown}
+          storeId={storeId}
+          onClose={() => setSelectedBreakdown(null)}
+          onFixed={() => {
+            qc.invalidateQueries({ queryKey: ['admin-vehicle-breakdowns'] });
+            qc.invalidateQueries({ queryKey: ['admin-delivery-dashboard'] });
+            qc.invalidateQueries({ queryKey: ['admin-live-drivers'] });
           }}
         />
       </>

@@ -243,7 +243,8 @@ export async function updateAdminMessagingSettings(req: Request, res: Response, 
 export async function getAppSettings(_req: Request, res: Response, next: NextFunction) {
   try {
     await ensureAppSchema();
-    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, , , branchCompletionRadiusM] = await Promise.all([
+    googleMapsApiKey = await getGoogleMapsApiKey();
+    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, gatewayFeeRate, deliveryPlatformFeeRate, branchCompletionRadiusM, commissionSlabs, pickupMaxOrderAmount] = await Promise.all([
       getConvenienceFeeRates(),
       prisma.appSetting.findUnique({ where: { id: 'default' } }),
       getMaxCupsPerRider(),
@@ -263,6 +264,16 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       pickupConvenientFeePercent: Math.round(feeRates.pickup * 1000) / 10,
       deliveryConvenientFeeRate: feeRates.delivery,
       deliveryConvenientFeePercent: Math.round(feeRates.delivery * 1000) / 10,
+      gatewayFeeRate,
+      gatewayFeePercent: Math.round(gatewayFeeRate * 1000) / 10,
+      deliveryPlatformFeeRate,
+      deliveryPlatformFeePercent: Math.round(deliveryPlatformFeeRate * 1000) / 10,
+      commissionSlabs: commissionSlabs.map((slab) => ({
+        upTo: slab.upTo,
+        rate: slab.rate,
+        ratePercent: Math.round(slab.rate * 1000) / 10,
+        label: slab.label,
+      })),
       pickupAllowAddItemsPaidOnline: row?.pickupAllowAddItemsPaidOnline ?? true,
       pickupAllowEditCashUnpaid: row?.pickupAllowEditCashUnpaid ?? true,
       maxCupsPerRider,

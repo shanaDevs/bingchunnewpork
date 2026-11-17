@@ -111,15 +111,13 @@ export function computeRefundRecipientTotals(refund: {
   notReturningSubtotal?: number | null;
   nonRefundableDeliveryFee?: number | null;
   nonRefundableConvenienceFee?: number | null;
-  additionalGatewayFee?: number | null;
 }): RefundRecipientTotals {
   if (refund.status === 'REJECTED') {
     return {
       customerReceive: 0,
       branchReceive: refund.notReturningSubtotal ?? 0,
       deliveryReceive: refund.nonRefundableDeliveryFee ?? 0,
-      platformReceive:
-        (refund.nonRefundableConvenienceFee ?? 0) + (refund.additionalGatewayFee ?? 0),
+      platformReceive: refund.nonRefundableConvenienceFee ?? 0,
     };
   }
 
@@ -136,8 +134,7 @@ export function computeRefundRecipientTotals(refund: {
     customerReceive: refund.refundAmount ?? 0,
     branchReceive: refund.notReturningSubtotal ?? 0,
     deliveryReceive: refund.nonRefundableDeliveryFee ?? 0,
-    platformReceive:
-      (refund.nonRefundableConvenienceFee ?? 0) + (refund.additionalGatewayFee ?? 0),
+    platformReceive: refund.nonRefundableConvenienceFee ?? 0,
   };
 }
 

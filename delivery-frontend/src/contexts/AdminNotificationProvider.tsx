@@ -1212,6 +1212,8 @@ function AdminNotificationProviderInner({
 
       socket.on('vehicleFailureReported', (payload: VehicleFailureEvent) => {
         qc.invalidateQueries({ queryKey: ['admin-delivery-failures'] });
+        qc.invalidateQueries({ queryKey: ['admin-vehicle-breakdowns'] });
+        qc.invalidateQueries({ queryKey: ['admin-delivery-dashboard'] });
         if (!deliveryAdminRef.current) {
           toast.error('🚨 Vehicle failure reported — a rider is stranded and needs backup. Check Delivery Failures.', {
             duration: 12000,
@@ -1219,6 +1221,18 @@ function AdminNotificationProviderInner({
           return;
         }
         enqueueVehicleFailureRef.current(payload);
+      });
+
+      socket.on('vehicleBreakdownOpened', () => {
+        qc.invalidateQueries({ queryKey: ['admin-vehicle-breakdowns'] });
+        qc.invalidateQueries({ queryKey: ['admin-delivery-dashboard'] });
+        qc.invalidateQueries({ queryKey: ['admin-live-drivers'] });
+      });
+
+      socket.on('vehicleBreakdownCleared', () => {
+        qc.invalidateQueries({ queryKey: ['admin-vehicle-breakdowns'] });
+        qc.invalidateQueries({ queryKey: ['admin-delivery-dashboard'] });
+        qc.invalidateQueries({ queryKey: ['admin-live-drivers'] });
       });
 
       if (enableStockAlerts) {

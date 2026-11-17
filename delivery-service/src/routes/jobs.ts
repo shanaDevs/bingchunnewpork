@@ -8,6 +8,13 @@ router.get('/', authenticate, requireDeliveryDriver, jobsController.listJobs);
 router.get('/active', authenticate, requireDeliveryDriver, jobsController.getActiveJob);
 router.get('/history', authenticate, requireDeliveryDriver, jobsController.getMyJobHistory);
 router.get('/:id/route', authenticate, requireDeliveryDriver, jobsController.getJobRoute);
+router.get('/:id/handover', authenticate, requireDeliveryDriver, jobsController.getJobHandover);
+router.post(
+  '/:id/handover/back-on-road',
+  authenticate,
+  requireDeliveryDriver,
+  jobsController.confirmHandoverBackOnRoad,
+);
 router.get('/:id', authenticate, requireDeliveryDriver, jobsController.getJob);
 router.post('/:id/assign', authenticate, requireDeliveryDriver, jobsController.assignJob);
 router.post('/:id/claim', authenticate, requireDeliveryDriver, jobsController.claimJob);

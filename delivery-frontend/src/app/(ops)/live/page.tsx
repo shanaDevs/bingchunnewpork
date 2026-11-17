@@ -61,6 +61,8 @@ type LiveDriverRow = {
   jobId: string | null;
   activeJobs?: LiveDriverActiveJob[];
   recentPath?: LivePathRecord[];
+  vehicleBreakdownOpen?: boolean;
+  breakdownReportedAt?: string | null;
 };
 
 const DUTY_STATUS_LABEL: Record<string, string> = {
@@ -491,7 +493,12 @@ export default function AdminLiveDeliveryPage() {
                       onClick={() => selectDriver(driver.driverId)}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-fg truncate">{driver.name}</p>
+                        <p className="text-sm font-semibold text-fg truncate">
+                          {driver.name}
+                          {driver.vehicleBreakdownOpen ? (
+                            <span className={`ml-2 ${adminBadgeClass('orange')}`}>Breakdown</span>
+                          ) : null}
+                        </p>
                         <span
                           className={`shrink-0 h-2 w-2 rounded-full ${hasLivePosition ? 'bg-green-400' : 'bg-navy-border'}`}
                           title={hasLivePosition ? 'Live location available' : 'No live location yet'}
