@@ -787,7 +787,11 @@ class _HistoryRunBody extends StatelessWidget {
               : Column(
                   children: [
                     for (final o in failedOrders)
-                      _HistoryFailureRow(reason: tr('Delivery failed'), detail: '#${o.orderNumber} · ${o.customerName}'),
+                      _HistoryFailureRow(
+                        reason: tr(o.failureTitle),
+                        detail: '#${o.orderNumber} · ${o.customerName}',
+                        note: o.failureDetailNote,
+                      ),
                     for (final o in stops)
                       for (final cp in o.complaints)
                         _HistoryFailureRow(

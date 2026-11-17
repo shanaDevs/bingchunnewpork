@@ -357,6 +357,12 @@ class JobOrder {
   /// Reason the rider gave when marking this order as failed.
   final String? failureReason;
 
+  /// Latest failed attempt on this ride, e.g. "CUSTOMER_UNREACHABLE" or "VEHICLE_FAILURE".
+  final String? failureOutcome;
+
+  /// Note the rider wrote with that failed attempt ("Reason: description").
+  final String? failureNote;
+
   /// Store/global rule: driver must enter the customer code to mark delivered.
   final bool deliveryOtpRequired;
   final List<DriverComplaint> complaints;
@@ -382,6 +388,8 @@ class JobOrder {
     this.items = const [],
     this.deliveryFailed = false,
     this.failureReason,
+    this.failureOutcome,
+    this.failureNote,
     this.deliveryOtpRequired = false,
     this.complaints = const [],
   });
@@ -407,6 +415,8 @@ class JobOrder {
     items: listOf(j, 'items', JobOrderItem.fromJson),
     deliveryFailed: boolOf(j, 'deliveryFailed'),
     failureReason: strOrNull(j, 'failureReason'),
+    failureOutcome: strOrNull(j, 'failureOutcome'),
+    failureNote: strOrNull(j, 'failureNote'),
     deliveryOtpRequired: boolOf(j, 'deliveryOtpRequired'),
     complaints: listOf(j, 'complaints', DriverComplaint.fromJson),
   );
@@ -418,6 +428,26 @@ class JobOrder {
 
   bool get isDelivered => status == 'DELIVERED';
   bool get isFailed => deliveryFailed || status == 'DELIVERY_FAILED';
+
+  /// Untranslated heading for this stop's failure, e.g. "Customer not available".
+  /// A driver-side "OTHER" outcome stays generic — the rider's own reason is in the note.
+  String get failureTitle {
+    final label = deliveryFailureOutcomeLabels[failureOutcome];
+    if (label != null) return label;
+    final reason = failureReason?.trim();
+    return reason != null && reason.isNotEmpty ? reason : 'Delivery failed';
+  }
+
+  /// The rider's note for this failure, or null when the server only stored its default
+  /// text (the outcome code or its label).
+  String? get failureDetailNote {
+    final n = failureNote?.trim();
+    if (n == null || n.isEmpty) return null;
+    final lower = n.toLowerCase();
+    if (lower == failureOutcome?.toLowerCase() || lower == failureTitle.toLowerCase()) return null;
+    return n;
+  }
+
   bool get isCancelled => status == 'CANCELLED';
   bool get isPending => !isDelivered && status != 'CANCELLED' && !isFailed;
 
@@ -429,6 +459,7 @@ class JobOrder {
     if (RegExp(r'^(simulated order|seed-)', caseSensitive: false).hasMatch(n) || n.contains('scripts/')) return null;
     return n;
   }
+
   int get itemCount => items.fold(0, (sum, i) => sum + i.quantity);
 }
 
@@ -580,6 +611,17 @@ class DeliveryJobDetail {
   /// usual branch-radius geofence applies.
   bool pickupUnlockedAt(double? distanceM) => hasPickupOverride || withinBranchAt(distanceM);
 }
+
+/// Headings for a failed attempt's outcome (keys of the backend's DeliveryAttemptOutcome).
+/// "OTHER" is left out on purpose: the server files any reason it can't classify there,
+/// so it is shown as a plain "Delivery failed" with the rider's note.
+const deliveryFailureOutcomeLabels = <String, String>{
+  'CUSTOMER_UNREACHABLE': 'Customer not available',
+  'WRONG_ADDRESS': 'Wrong / incomplete address',
+  'REFUSED': 'Customer refused delivery',
+  'PAYMENT_FAILED': 'Payment issue',
+  'VEHICLE_FAILURE': 'Vehicle failure',
+};
 
 /// Structured failure reason sent with DELIVERY_FAILED alongside the free-text note.
 enum DeliveryOutcome {
