@@ -5,9 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, History, Layers, PackagePlus, RefreshCw, RotateCcw, Table2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getAdminSession, isBranchAdmin, isCashier, isSuperAdmin, type AdminSession } from '@/lib/adminAuth';
-import { adminApiFetch } from '@/lib/adminApi';
-import { hasMenuUpdateAccess, type AdminPermission } from '@/lib/adminPermissions';
+import { getAdminSession, isBranchAdmin, isSuperAdmin, type AdminSession } from '@/lib/adminAuth';
 import {
   adminStockFetch,
   exportStockCsv,
@@ -62,25 +60,6 @@ export default function AdminStockPage() {
 
   const isSuper = isSuperAdmin(admin);
 
-  const { data: permissionRows = [] } = useQuery<AdminPermission[]>({
-    queryKey: ['admin-me-permissions', admin?.id, 'stock'],
-    queryFn: () => adminApiFetch<AdminPermission[]>('/admin/me/permissions'),
-    enabled: Boolean(admin && !isSuper),
-    staleTime: 60_000,
-  });
-
-  const permissionsMap = useMemo(
-    () => Object.fromEntries(permissionRows.map((row) => [row.menu, row])) as Record<string, AdminPermission>,
-    [permissionRows],
-  );
-
-  const canEditStock = useMemo(() => {
-    if (!admin || isSuper) return false;
-    if (isBranchAdmin(admin)) return true;
-    if (isCashier(admin)) return hasMenuUpdateAccess(permissionsMap, 'STOCK');
-    return false;
-  }, [admin, isSuper, permissionsMap]);
-
   useEffect(() => {
     if (isSuper && mainTab === 'batches') setMainTab('table');
   }, [isSuper, mainTab]);
@@ -134,7 +113,7 @@ export default function AdminStockPage() {
 
   const allItems = data?.items ?? [];
   const storeLabel = data?.store.name.replace('Bing Chun - ', '') ?? admin?.storeName?.replace('Bing Chun - ', '') ?? 'Branch';
-  const canSyncBranch = canEditStock;
+  const canSyncBranch = isBranchAdmin(admin);
   const newProductCount = allItems.filter((item) => isNewProductItem(item)).length;
   // First-time onboard only: every product on the branch is still never-stocked.
   const isNewlyRegisteredBranchStock =
@@ -248,7 +227,6 @@ export default function AdminStockPage() {
       {mainTab === 'table' ? (
         <StockTableTab
           admin={admin}
-          canEditStock={canEditStock}
           data={data}
           isLoading={isLoading}
           error={error as Error | null}

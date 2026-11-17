@@ -613,9 +613,6 @@ export async function stockWeeklyReport(req: Request, res: Response, next: NextF
       ? await prisma.stockAuditLog.findMany({
           where: auditWhere,
           orderBy: { createdAt: 'desc' },
-          include: {
-            adminUser: { select: { id: true, name: true } },
-          },
         })
       : [];
 
@@ -659,21 +656,13 @@ export async function stockWeeklyReport(req: Request, res: Response, next: NextF
         weekResetAt: null,
         isLowStock: isLowStock(row.weeklyRemainingQty),
         isOutOfStock: isOutOfStockByQty(row.weeklyRemainingQty) || !row.isAvailable,
-        restockHistory: logs
-          .filter(
-            (l) =>
-              l.changeType === 'MANUAL_ADJUSTMENT'
-              || l.changeType === 'WEEKLY_RESET'
-              || l.changeType === 'BATCH_RECEIVED'
-              || l.changeType === 'BATCH_ADJUSTMENT',
-          )
-          .map((l) => ({
-            createdAt: l.createdAt,
-            qtyChange: l.qtyChange,
-            note: l.note,
-            adminUserId: l.adminUserId,
-            adminUserName: l.adminUserName ?? l.adminUser?.name ?? null,
-          })),
+        restockHistory: logs.filter(
+          (l) =>
+            l.changeType === 'MANUAL_ADJUSTMENT'
+            || l.changeType === 'WEEKLY_RESET'
+            || l.changeType === 'BATCH_RECEIVED'
+            || l.changeType === 'BATCH_ADJUSTMENT',
+        ),
         lowStockHits,
         depletionHits,
       };
@@ -791,7 +780,7 @@ export async function stockAuditLogs(req: Request, res: Response, next: NextFunc
         orderId: log.orderId,
         orderNumber: log.order?.orderNumber ?? null,
         adminUserId: log.adminUserId,
-        adminUserName: log.adminUserName ?? log.adminUser?.name ?? null,
+        adminUserName: log.adminUser?.name ?? null,
         note: log.note,
         createdAt: log.createdAt,
       })),

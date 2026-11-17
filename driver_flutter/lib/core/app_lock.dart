@@ -29,6 +29,11 @@ class AppLock extends ChangeNotifier {
   static const _kPinHash = 'bc_lock_pin_hash';
   static const _kPinSalt = 'bc_lock_pin_salt';
   static const _kFails = 'bc_lock_pin_fails';
+  static const _kTimeout = 'bc_lock_timeout';
+
+  /// Seconds in the background before the app locks again. [timeoutNever] = only on a cold start.
+  static const timeoutNever = -1;
+  static const timeoutOptions = [0, 60, 300, timeoutNever];
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   final LocalAuthentication _auth = LocalAuthentication();
@@ -40,6 +45,11 @@ class AppLock extends ChangeNotifier {
 
   /// Unlocked for this app run. Cold starts begin locked when a method is set.
   bool _unlocked = false;
+
+  /// Re-lock delay after the app goes to the background (see [timeoutOptions]).
+  int lockTimeout = 0;
+  DateTime? _backgroundedAt;
+  bool _systemPromptOpen = false;
 
   /// Android can't tell apps which biometric is enrolled (it reports only strong/weak
   /// classes) and its prompt accepts any of them, so fingerprint and face are offered
@@ -58,6 +68,8 @@ class AppLock extends ChangeNotifier {
       _pinHash = await _storage.read(key: _kPinHash);
       _pinSalt = await _storage.read(key: _kPinSalt);
       failedPinAttempts = int.tryParse(await _storage.read(key: _kFails) ?? '') ?? 0;
+      final t = int.tryParse(await _storage.read(key: _kTimeout) ?? '');
+      if (t != null && timeoutOptions.contains(t)) lockTimeout = t;
       // A PIN lock without a stored PIN can never be opened — treat it as off.
       if (method == AppLockMethod.pin && (_pinHash == null || _pinSalt == null)) method = AppLockMethod.none;
       // Older Android builds offered a separate face option — fold it into the one biometric option.
@@ -67,6 +79,29 @@ class AppLock extends ChangeNotifier {
       }
     } catch (_) {
       method = AppLockMethod.none;
+    }
+  }
+
+  Future<void> setLockTimeout(int seconds) async {
+    lockTimeout = seconds;
+    await _storage.write(key: _kTimeout, value: '$seconds');
+    notifyListeners();
+  }
+
+  /// App moved to the background (ignores the system biometric prompt, which also pauses us).
+  void onBackground() {
+    if (_systemPromptOpen) return;
+    _backgroundedAt ??= DateTime.now();
+  }
+
+  /// App came back: lock again when away longer than [lockTimeout].
+  void onForeground() {
+    final at = _backgroundedAt;
+    _backgroundedAt = null;
+    if (at == null || !enabled || !_unlocked || lockTimeout == timeoutNever) return;
+    if (DateTime.now().difference(at).inSeconds >= lockTimeout) {
+      _unlocked = false;
+      notifyListeners();
     }
   }
 
@@ -131,6 +166,7 @@ class AppLock extends ChangeNotifier {
 
   /// Shows the system biometric prompt. Returns null on success, else a message for the rider.
   Future<String?> authenticateBiometric(String reason) async {
+    _systemPromptOpen = true;
     try {
       final ok = await _auth.authenticate(localizedReason: reason, biometricOnly: true, persistAcrossBackgrounding: true);
       return ok ? null : tr('Verification was cancelled');
@@ -151,6 +187,9 @@ class AppLock extends ChangeNotifier {
       return e.message ?? tr('Could not verify. Please try again.');
     } catch (_) {
       return tr('Could not verify. Please try again.');
+    } finally {
+      _systemPromptOpen = false;
+      _backgroundedAt = null;
     }
   }
 

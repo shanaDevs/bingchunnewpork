@@ -136,8 +136,6 @@ export function createApiRouter(surface: ApiSurface = resolveApiSurface()): Rout
     mount(router, '/orders', orderRoutes, POS_ORDERS, requirePosChannel);
     mount(router, '/settings', settingsRoutes, SHOP_SETTINGS);
     mount(router, '/admin', adminRoutes, POS_ADMIN);
-    // Cashier PCs poll this for sticker presence / jobs (same as admin surface).
-    mount(router, '/cup-sticker-agent', cupStickerAgentRoutes);
     return router;
   }
 

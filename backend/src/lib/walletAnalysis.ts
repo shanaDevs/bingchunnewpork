@@ -1,10 +1,6 @@
 import { prisma } from './prisma';
 import { isOnlinePaymentMethod } from './orderPayment';
-import {
-  remainingOnlinePayablesFeeWhere,
-  orderCreatedAtFilter,
-} from './walletRevenue';
-import { toUtcDateStr } from './utcDateString';
+import { orderCreatedAtFilter } from './walletRevenue';
 import {
   chartBucketKey,
   resolveChartBucketDateRange,
@@ -21,12 +17,7 @@ import {
   loadRefundPenaltyTotalsByChartBuckets,
   loadRefundPenaltyTotalsByStore,
 } from './walletService';
-import {
-  analyticsCacheKey,
-  invalidateAnalyticsCacheByPrefix,
-  withAnalyticsCache,
-  getAnalyticsCacheTtlMs,
-} from './analyticsResponseCache';
+import { analyticsCacheKey, withAnalyticsCache, getAnalyticsCacheTtlMs } from './analyticsResponseCache';
 import { getGatewayFeeRate } from './appSchema';
 import { getDeliveryWalletNetByBucket, getDeliveryWalletSummary } from './deliveryWalletService';
 import { ensureJasonLedgerSchema } from './jasonLedgerSchema';
@@ -34,19 +25,6 @@ import { decimalFieldToCentsNumber } from './moneyDecimal';
 import { txnAmountCents } from './walletApiMoney';
 import { promiseAllLimited } from '../utils/promiseAllLimited';
 import { getPrismaFanOutLimit } from './prisma';
-
-async function loadStorePlatformPaybackEnabledMap(
-  storeIds: string[],
-): Promise<Map<string, boolean>> {
-  if (storeIds.length === 0) return new Map();
-  const storeRows = await prisma.store.findMany({
-    where: { id: { in: storeIds } },
-    select: { id: true, platformDiscountPaybackEnabled: true },
-  });
-  return new Map(
-    storeRows.map((row) => [row.id, row.platformDiscountPaybackEnabled ?? false]),
-  );
-}
 
 export type WalletAnalysisTrendPoint = {
   day: number;
@@ -75,9 +53,9 @@ export type WalletAnalysisHealthSlice = {
 };
 
 export type WalletAnalysisExcludedFees = {
-  /** Remaining online-payable delivery fees (excluded from Online Available Balance). */
+  /** All-time customer delivery fees (excluded from available balance). */
   deliveryFee: number;
-  /** Remaining online-payable convenience fees (excluded from Online Available Balance). */
+  /** All-time customer convenience fees (excluded from available balance). */
   convenienceFee: number;
 };
 
@@ -87,10 +65,10 @@ export type WalletAnalysisResult = {
   from: string;
   to: string;
   tank: { balance: number; capacity: number };
-  /** Cumulative pickup + delivery online from day one, LKR (not reduced by payouts). */
+  /** Pickup online + delivery online + all-time retained refunds (LKR). */
   onlineAvailableBalance: number;
   health: { percent: number; slices: WalletAnalysisHealthSlice[] };
-  /** Remaining (unsettled) online-payable fee totals for scoped branches (LKR). */
+  /** All-time fee totals for scoped branches (LKR). */
   excludedFees: WalletAnalysisExcludedFees;
   trend: WalletAnalysisTrendPoint[];
   branchContribution: WalletAnalysisBranchContribution[];
@@ -197,6 +175,29 @@ function branchDisplayName(name: string): string {
 
 function nonZeroFlows(rows: WalletAnalysisFlowPoint[]): WalletAnalysisFlowPoint[] {
   return rows.filter((r) => r.amount > 0);
+}
+
+async function sumAllTimeRefundsRetainedLkr(storeId: string | null): Promise<number> {
+  const agg = await prisma.refund.aggregate({
+    where: {
+      status: { in: ['COMPLETE', 'REJECTED'] },
+      ...(storeId ? { order: { is: { storeId } } } : {}),
+    },
+    _sum: { notReturningSubtotal: true },
+  });
+  return agg._sum.notReturningSubtotal ?? 0;
+}
+
+function sumOnlineChannelCentsFromPayables(
+  breakdowns: Awaited<ReturnType<typeof computeBranchPayablesBreakdown>>[],
+): number {
+  return breakdowns.reduce(
+    (sum, breakdown) =>
+      sum +
+      breakdown.channelRevenueCents.pickupOnlineIn +
+      breakdown.channelRevenueCents.deliveryOnlineIn,
+    0,
+  );
 }
 
 function roundLkr(amount: number): number {
@@ -359,7 +360,13 @@ async function loadOutgoingFlows(params: {
   let commissionFeeCents = 0;
   let gatewayFeeCents = 0;
   if (activeStoreIds.length > 0) {
-    const paybackByStore = await loadStorePlatformPaybackEnabledMap(activeStoreIds);
+    const storeRows = await prisma.store.findMany({
+      where: { id: { in: activeStoreIds } },
+      select: { id: true, platformDiscountPaybackEnabled: true },
+    });
+    const paybackByStore = new Map(
+      storeRows.map((row) => [row.id, row.platformDiscountPaybackEnabled ?? false]),
+    );
     const breakdowns = await promiseAllLimited(
       getPrismaFanOutLimit(),
       activeStoreIds.map(
@@ -535,7 +542,16 @@ async function computeOutgoingTotalsByChartBuckets(
     activeStoreIds.add(order.storeId);
   }
 
-  const paybackByStore = await loadStorePlatformPaybackEnabledMap([...activeStoreIds]);
+  const paybackByStore = new Map<string, boolean>();
+  if (activeStoreIds.size > 0) {
+    const storeRows = await prisma.store.findMany({
+      where: { id: { in: [...activeStoreIds] } },
+      select: { id: true, platformDiscountPaybackEnabled: true },
+    });
+    for (const row of storeRows) {
+      paybackByStore.set(row.id, row.platformDiscountPaybackEnabled ?? false);
+    }
+  }
 
   const rows = await promiseAllLimited(
     DASHBOARD_OUTGOING_BUCKET_FANOUT,
@@ -619,51 +635,6 @@ export async function getWalletAnalysis(params: {
   );
 }
 
-/** Call after branch payout approve/initiate so System Wallet “Online Available Balance” refreshes. */
-export function invalidateWalletAnalysisCache(): void {
-  invalidateAnalyticsCacheByPrefix(analyticsCacheKey(['wallet-analysis']));
-}
-
-/** Remaining online-payable fees after approved payout windows (wallet card only). */
-async function sumRemainingOnlinePayablesFees(
-  storeIds: string[],
-): Promise<WalletAnalysisExcludedFees> {
-  if (storeIds.length === 0) {
-    return { deliveryFee: 0, convenienceFee: 0 };
-  }
-
-  const windows = await prisma.storeWithdrawal.findMany({
-    where: {
-      storeId: { in: storeIds },
-      status: 'APPROVED',
-      periodFrom: { not: null },
-      periodTo: { not: null },
-    },
-    select: { storeId: true, periodFrom: true, periodTo: true },
-  });
-
-  const settledWindows = windows.flatMap((row) => {
-    if (!row.periodFrom || !row.periodTo) return [];
-    return [
-      {
-        storeId: row.storeId,
-        from: toUtcDateStr(row.periodFrom),
-        to: toUtcDateStr(row.periodTo),
-      },
-    ];
-  });
-
-  const agg = await prisma.order.aggregate({
-    where: remainingOnlinePayablesFeeWhere(storeIds, settledWindows),
-    _sum: { deliveryFee: true, convenientFee: true },
-  });
-
-  return {
-    deliveryFee: roundLkr(agg._sum.deliveryFee ?? 0),
-    convenienceFee: roundLkr(agg._sum.convenientFee ?? 0),
-  };
-}
-
 async function computeWalletAnalysis(params: {
   monthKey: string;
   storeId?: string | null;
@@ -678,25 +649,41 @@ async function computeWalletAnalysis(params: {
   });
   const storeIds = wallets.map((w) => w.storeId);
 
-  const [payablesBreakdowns, excludedFees] = await Promise.all([
+  const paidOrdersFeeWhere = {
+    storeId: { in: storeIds },
+    paymentStatus: 'PAID' as const,
+    status: { not: 'CANCELLED' as const },
+  };
+
+  const [payablesBreakdowns, allTimeFeeAgg, refundsRetainedLkr] = await Promise.all([
     storeIds.length > 0
       ? promiseAllLimited(
           getPrismaFanOutLimit(),
           storeIds.map((id) => () => computeBranchPayablesBreakdown(id)),
         )
       : Promise.resolve([]),
-    sumRemainingOnlinePayablesFees(storeIds),
+    storeIds.length > 0
+      ? prisma.order.aggregate({
+          where: paidOrdersFeeWhere,
+          _sum: { deliveryFee: true, convenientFee: true },
+        })
+      : Promise.resolve({ _sum: { deliveryFee: null, convenientFee: null } }),
+    sumAllTimeRefundsRetainedLkr(storeId),
   ]);
+
+  const onlineAvailableBalance = roundLkr(
+    centsToLkr(sumOnlineChannelCentsFromPayables(payablesBreakdowns)) + refundsRetainedLkr,
+  );
+
+  const excludedFees: WalletAnalysisExcludedFees = {
+    deliveryFee: roundLkr(allTimeFeeAgg._sum.deliveryFee ?? 0),
+    convenienceFee: roundLkr(allTimeFeeAgg._sum.convenientFee ?? 0),
+  };
 
   const balanceCents = payablesBreakdowns.reduce(
     (sum, breakdown) => sum + breakdown.allTimeAvailableBalanceCents,
     0,
   );
-  const allTimeOnlineWalletCents = payablesBreakdowns.reduce(
-    (sum, breakdown) => sum + breakdown.allTimeOnlineWalletCents,
-    0,
-  );
-  const onlineAvailableBalance = roundLkr(centsToLkr(allTimeOnlineWalletCents));
 
   if (storeIds.length === 0) {
     const emptyTrend = padDailyTrend(lastDay, new Map());

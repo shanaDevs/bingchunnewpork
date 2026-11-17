@@ -22,18 +22,3 @@ export function resolveReportDayRange(from?: string, to?: string, now = new Date
   assertMaxDateSpan(gte, lte);
   return { gte, lte, from: fromStr, to: toStr };
 }
-
-/** When both dates are omitted, returns null (no range filter). Otherwise enforces maxDays. */
-export function resolveOptionalReportDayRange(
-  from?: string,
-  to?: string,
-  maxDays = 366,
-) {
-  if (!from && !to) return null;
-  const fromStr = from ?? to!;
-  const toStr = to ?? from!;
-  const gte = startOfDayColombo(fromStr);
-  const lte = endOfDayColombo(toStr);
-  assertMaxDateSpan(gte, lte, maxDays);
-  return { gte, lte, from: fromStr, to: toStr };
-}

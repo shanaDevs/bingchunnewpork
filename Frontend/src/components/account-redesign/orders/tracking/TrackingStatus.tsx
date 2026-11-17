@@ -5,8 +5,7 @@ import { CircleCheck, Clock, CreditCard, LoaderCircle, Timer, TriangleAlert, X }
 import Image from "next/image";
 import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/components/home-redesign/lib/cn";
-import { cancellationReasonLabel, fetchActiveCancelReasons, OTHER_CANCEL_REASON_VALUE } from "@/lib/cancellationReasons";
-import { formatRefundAmount } from "@/lib/orderCancel";
+import { fetchActiveCancelReasons, OTHER_CANCEL_REASON_VALUE } from "@/lib/cancellationReasons";
 import { formatCountdown, getCancelCardTitle, getCashCancelNotice, getFullRefundCancelNotice, getPartialRefundCancelNotice, isOnlinePaidOrder, secondsUntil } from "@/lib/orderCancel";
 import { formatMoney, formatReceiptDate } from "@/lib/receipt";
 import type { Order } from "@/types";
@@ -77,21 +76,6 @@ export function StatusHero({ tracking, order }: { tracking: OrderTracking; order
             {tracking.cancelled ? (
               <>
                 {cancelledAt && <p className="font-numeric mt-2 text-xs text-slate-500">Cancelled {formatReceiptDate(cancelledAt)}</p>}
-                {order.refund?.cancellationReason && (
-                  <p className="mt-1.5 max-w-xl text-sm text-slate-700">
-                    <span className="font-semibold text-brand-950">Reason: </span>
-                    {cancellationReasonLabel(order.refund.cancellationReason)}
-                    {order.refund.cancellationReason === "OTHER" && order.refund.customReasonText ? ` — ${order.refund.customReasonText}` : ""}
-                  </p>
-                )}
-                {order.cancelledBy && (
-                  <p className="mt-1 text-sm text-slate-600">
-                    Cancelled by {order.cancelledBy === "customer" ? "you" : order.cancelledBy}
-                  </p>
-                )}
-                {order.refund?.refundAmount != null && order.refund.status === "COMPLETE" && (
-                  <p className="mt-1 text-sm text-slate-600">Refund: {formatRefundAmount(order.refund.refundAmount)}</p>
-                )}
                 {moneyNote && <p className="mt-1.5 max-w-xl text-sm text-slate-700">{moneyNote}</p>}
               </>
             ) : (
@@ -99,7 +83,7 @@ export function StatusHero({ tracking, order }: { tracking: OrderTracking; order
             )}
           </div>
         </div>
-        {live && !tracking.awaitingPayment && tracking.etaMinutes != null && tracking.etaMinutes > 0 && (
+        {live && !tracking.awaitingPayment && tracking.etaMinutes != null && (
           <p className="flex items-center justify-between gap-4 rounded-2xl bg-white/80 px-4 py-3 ring-1 ring-brand-100 ring-inset sm:block sm:shrink-0 sm:text-center">
             <span className="flex items-center gap-1 text-[0.6875rem] font-semibold tracking-[0.1em] text-slate-500 uppercase">
               <Clock className="size-3.5" aria-hidden="true" />

@@ -19,21 +19,13 @@ export async function resolveBranchStaff(storeId: string): Promise<{
       where: { storeId, isActive: true, role: { name: 'STORE_MANAGER' } },
       select: { id: true },
     }));
-  const branchStaff =
-    (await prisma.adminUser.findFirst({
-      where: { storeId, isActive: true, role: { name: 'CASHIER' } },
-      select: { id: true, role: { select: { name: true } } },
-    })) ??
-    (await prisma.adminUser.findFirst({
-      where: { storeId, isActive: true, role: { name: 'STORE_MANAGER' } },
-      select: { id: true, role: { select: { name: true } } },
-    }));
+  const cashier = await prisma.adminUser.findFirst({
+    where: { storeId, isActive: true, role: { name: 'CASHIER' } },
+    select: { id: true },
+  });
   if (!manager) throw new Error('No STORE_MANAGER for refund approval — run prisma:seed');
-  if (!branchStaff) throw new Error('No branch staff (CASHIER or STORE_MANAGER) — run prisma:seed');
-  const branchRole = (branchStaff.role.name === 'STORE_MANAGER' ? 'STORE_MANAGER' : 'CASHIER') as
-    | 'CASHIER'
-    | 'STORE_MANAGER';
-  return { managerId: manager.id, branchStaffId: branchStaff.id, branchRole };
+  if (!cashier) throw new Error('No CASHIER for branch — run prisma:seed');
+  return { managerId: manager.id, branchStaffId: cashier.id, branchRole: 'CASHIER' };
 }
 
 export function patchPrismaTransactionTimeout(): void {

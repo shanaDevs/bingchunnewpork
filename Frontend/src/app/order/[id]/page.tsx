@@ -37,7 +37,6 @@ import {
   hasPaidRedirectFlag,
   markPaidRedirect,
 } from '@/lib/orderCelebration';
-import { markSelfCancelledOrder } from '@/lib/orderCancel';
 import { useCartStore } from '@/store/cartStore';
 import { clearServerCart } from '@/lib/cartAuthSync';
 import { useAuthStore } from '@/store/authStore';
@@ -313,9 +312,10 @@ export default function OrderPage() {
       ) {
         return 8000;
       }
-      // Socket is primary; sparse HTTP backup catches missed proxy events.
+      // Keep polling during active delivery even when the socket is connected — events can be
+      // missed through proxies or brief reconnects.
       if (data?.orderMode === 'DELIVERY') {
-        return socketConnected ? 45_000 : 8_000;
+        return socketConnected ? 10_000 : 8_000;
       }
       if (socketConnected) return false;
       return data?.orderMode === 'TAKEAWAY' ? 15_000 : 30_000;
@@ -329,8 +329,6 @@ export default function OrderPage() {
         customReasonText: customText,
       }, true),
     onSuccess: () => {
-      const orderNumber = order?.orderNumber ?? (typeof id === 'string' ? id : '');
-      if (orderNumber) markSelfCancelledOrder(orderNumber);
       setLiveStatus('CANCELLED');
       patchOrderInQueryCache(queryClient, [id, order?.id, order?.orderNumber], {
         orderId: order?.id,

@@ -18,10 +18,10 @@ void showBcSnack(
   if (messenger == null) return;
   final c = context.bc;
   final (icon, tint) = switch (kind) {
-    BcSnackKind.error => (Icons.error_outline_rounded, const Color(0xFFF87171)),
-    BcSnackKind.warning => (Icons.wifi_off_rounded, const Color(0xFFFBBF24)),
-    BcSnackKind.success => (Icons.check_circle_rounded, const Color(0xFF34D399)),
-    BcSnackKind.info => (Icons.info_outline_rounded, const Color(0xFF7CB7FF)),
+    BcSnackKind.error => (Icons.error_outline_rounded, c.error),
+    BcSnackKind.warning => (Icons.wifi_off_rounded, c.warning),
+    BcSnackKind.success => (Icons.check_circle_rounded, c.success),
+    BcSnackKind.info => (Icons.info_outline_rounded, c.primary),
   };
   messenger
     ..hideCurrentSnackBar()
@@ -29,9 +29,11 @@ void showBcSnack(
       SnackBar(
         behavior: SnackBarBehavior.floating,
         duration: duration,
-        backgroundColor: c.isDark ? c.surfaceElevated : const Color(0xFF0B1F3F),
+        backgroundColor: c.inverse,
+        elevation: 4,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         action: actionLabel == null || onAction == null
             ? null
             : SnackBarAction(label: actionLabel, textColor: tint, onPressed: onAction),
@@ -40,7 +42,7 @@ void showBcSnack(
             Container(
               width: 32,
               height: 32,
-              decoration: BoxDecoration(color: tint.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(10)),
+              decoration: BoxDecoration(color: tint.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
               child: Icon(icon, color: tint, size: 18),
             ),
             const SizedBox(width: 12),
@@ -49,7 +51,7 @@ void showBcSnack(
                 message,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w500, height: 1.35),
+                style: TextStyle(color: c.inverseForeground, fontSize: 14, fontWeight: FontWeight.w500, height: 1.35),
               ),
             ),
           ],

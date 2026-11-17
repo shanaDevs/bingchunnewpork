@@ -145,68 +145,6 @@ export function buildCustomerCancelNote(
   return `Cancelled by customer. ${pctNote}${feeNote}`;
 }
 
-export function appendReasonToCancelNote(baseNote: string, reasonLabel?: string | null): string {
-  const label = reasonLabel?.trim();
-  if (!label) return baseNote;
-  if (/\bReason:\s*/i.test(baseNote)) return baseNote;
-  return `${baseNote.replace(/\s+$/, '')} | Reason: ${label}`;
-}
-
-const ADMIN_CANCEL_REASON_LABELS: Record<string, string> = {
-  OUT_OF_STOCK: 'Item Out of Stock / Unavailable',
-  CUSTOMER_REQUEST: 'Customer Requested Cancellation',
-  PAYMENT_OR_SYSTEM_ISSUE: 'Payment or System Issue / Duplicate Order',
-};
-
-const CUSTOMER_CANCEL_REASON_LABELS: Record<string, string> = {
-  CHANGED_MIND: 'Changed my mind',
-  ORDERED_BY_MISTAKE: 'Ordered by mistake',
-  TAKING_TOO_LONG: 'Taking too long',
-  FOUND_CHEAPER_ELSEWHERE: 'Found a better price elsewhere',
-  PAYMENT_ISSUES: 'Payment issues',
-  OTHER: 'Other (please specify)',
-};
-
-export function parseReasonFromCancelNote(note?: string | null): string | null {
-  const trimmed = note?.trim() ?? '';
-  if (!trimmed) return null;
-  const tagged = trimmed.match(/\|\s*Reason:\s*(.+)$/i) ?? trimmed.match(/(?:^|\.\s+)Reason:\s*(.+)$/i);
-  if (tagged?.[1]?.trim()) return tagged[1].trim();
-  if (/^cancelled by customer\b/i.test(trimmed) && /refund/i.test(trimmed)) return null;
-  return trimmed;
-}
-
-export function resolveStoredRejectReason(input: {
-  cancelReason?: string | null;
-  cancelledBy?: string | null;
-  cancellationNote?: string | null;
-  paymentStatus?: string | null;
-  status?: string | null;
-  refundCancellationReason?: string | null;
-  refundCustomReasonText?: string | null;
-}): string {
-  const fromNote = parseReasonFromCancelNote(input.cancellationNote);
-  if (fromNote) return fromNote;
-
-  const cancelledByCustomer = (input.cancelledBy ?? '').trim().toLowerCase() === 'customer';
-  const custom = input.refundCustomReasonText?.trim();
-  const fromRefund =
-    input.refundCancellationReason === 'OTHER' && custom
-      ? custom
-      : input.refundCancellationReason
-        ? CUSTOMER_CANCEL_REASON_LABELS[input.refundCancellationReason]
-          ?? input.refundCancellationReason.replace(/_/g, ' ')
-        : custom || null;
-
-  if (cancelledByCustomer && fromRefund) return fromRefund;
-  if (input.cancelReason) {
-    return ADMIN_CANCEL_REASON_LABELS[input.cancelReason] ?? input.cancelReason;
-  }
-  if (fromRefund) return fromRefund;
-  if (input.paymentStatus === 'REFUNDED') return 'Refunded';
-  return input.status === 'CANCELLED' ? 'Order cancelled' : '—';
-}
-
 export function withCustomerCancelRefundFields<
   T extends {
     total: number;

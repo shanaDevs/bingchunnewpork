@@ -110,21 +110,13 @@ export function SectionInfoPopover({
   );
 }
 
-export function InfoPopoverHeader({
-  title,
-  description,
-}: {
-  title: string;
-  description?: string;
-}) {
+export function InfoPopoverHeader({ title, description }: { title: string; description: string }) {
   return (
     <div>
       <p className="text-[13px] font-bold text-[#1e293b] dark:text-slate-100">{title}</p>
-      {description ? (
-        <p className="mt-1 text-[11px] font-medium leading-relaxed text-[#64748b] dark:text-slate-400">
-          {description}
-        </p>
-      ) : null}
+      <p className="mt-1 text-[11px] font-medium leading-relaxed text-[#64748b] dark:text-slate-400">
+        {description}
+      </p>
     </div>
   );
 }

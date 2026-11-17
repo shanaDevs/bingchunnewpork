@@ -6,16 +6,13 @@ import {
   computePlatformCommissionCents,
   getEffectiveRate,
   getSlabIndex,
-  DEFAULT_COMMISSION_SLABS,
-  type CommissionSlab,
+  COMMISSION_SLABS,
   orderCommissionChannel,
   orderPlatformPayback,
   sumCommissionableBase,
   accumulateSettlementBreakdown,
   emptySettlementBreakdown,
   sumOnlinePaymentsCollectedFromBreakdown,
-  sumFirstPayoutOnlineWalletBaseFromBreakdown,
-  computeBranchWalletBeforeGatewayCents,
   type ChannelSettlementRow,
   type CommissionChannel,
 } from './commission';
@@ -29,12 +26,7 @@ import { getPrismaFanOutLimit } from './prisma';
 import { ensureDeliveryPayoutSchema } from './deliveryPayoutSchema';
 import { getDeliveryPayoutsSqlRef } from './deliveryPg';
 import { ensurePlatformPaybackSchema } from './platformPaybackSchema';
-import { getConvenienceFeeRates, getCommissionSlabs, getGatewayFeeRate } from './appSchema';
-import {
-  resolvePayoutCycleContext,
-  type PayoutBreakdownOptions,
-  type PayoutCycleStage,
-} from './payoutCycle';
+import { getConvenienceFeeRates, getGatewayFeeRate } from './appSchema';
 import { resolveBranchCancellationGatewayFeeLkr } from './refundPaymentStructure';
 import {
   computeSharedPromoContribution,
@@ -43,7 +35,7 @@ import {
   resolveFinalPayoutAmountFromBreakdown,
 } from './sharedPromoContribution';
 import { attachPromoOwnershipTotals, loadPromoOwnershipTotalsForPeriod } from './promoOwnershipTotals';
-import { aggregatePaidPayoutPeriodExpensesCents } from './paidPayoutPeriodExpenses';
+import { resolveNetPlatformAmountCentsFromWithdrawalBreakdown } from './invoice/payoutStatement';
 import { Prisma } from '@prisma/client';
 import { centsToDecimal, parseDecimalFromDb } from './moneyDecimal';
 import {
@@ -95,12 +87,6 @@ export type WalletSummary = {
   totalWithdrawn: number;
   pendingWithdrawalTotal: number;
   availableBalance: number;
-  /** Pickup + delivery online net (after discounts), all-time, minus payables expenses and pending payouts. */
-  onlineWalletAvailableBalance: number;
-  /** Remaining online wallet after paid branch payouts (Jason excluded). */
-  allTimeAvailableBalanceCents: number;
-  /** Cumulative pickup + delivery online from day one (not reduced by payouts). */
-  allTimeOnlineWalletCents: number;
 };
 
 export type BranchWalletPayablesBreakdown = {
@@ -118,10 +104,7 @@ export type BranchWalletPayablesBreakdown = {
   /** Sum of branch payout amounts from paid 15-day cycles (cents). */
   branchReceivableCents: number;
   totalExpensesCents: number;
-  /** Remaining online wallet after paid branch payouts (Jason excluded). */
   allTimeAvailableBalanceCents: number;
-  /** Cumulative pickup + delivery online from day one (not reduced by payouts). */
-  allTimeOnlineWalletCents: number;
 };
 
 export type BranchWalletDashboard = {
@@ -228,45 +211,12 @@ async function fetchApprovedDeliveryPayoutBreakdowns(
   );
 }
 
-/** Cumulative pickup + delivery online wallet from day one — never reduced by branch payouts. */
-export function computeAllTimeOnlineWalletCents(
-  pickupOnlineIn: number,
-  deliveryOnlineIn: number,
-): number {
-  return Math.max(0, pickupOnlineIn + deliveryOnlineIn);
-}
-
-/**
- * Remaining online wallet after paid branch payouts (Jason's investment excluded).
- * Super Admin “Online Available Balance”.
- */
-export function computeAllTimeAvailableBalanceCents(
-  pickupOnlineIn: number,
-  deliveryOnlineIn: number,
-  branchReceivableExcludingJasonCents: number,
-): number {
-  return Math.max(
-    0,
-    computeAllTimeOnlineWalletCents(pickupOnlineIn, deliveryOnlineIn) -
-      branchReceivableExcludingJasonCents,
-  );
-}
-
-/** All-time available minus pending withdrawal holds (Initiate Payout / withdrawal caps). */
-export function withdrawableAllTimeBalanceCents(
-  allTimeAvailableBalanceCents: number,
-  pendingWithdrawalTotal: number,
-): number {
-  return Math.max(0, allTimeAvailableBalanceCents - pendingWithdrawalTotal);
-}
-
 function buildBranchPayablesBreakdown(
   payablesRevenue: Awaited<ReturnType<typeof fetchSummarizedPaidOrderRevenue>>,
   platformCommissionCents: number,
   toDeliveryLkr: number,
   gatewayFeeCents: number,
   branchReceivableCents: number,
-  branchReceivableExcludingJasonCents = branchReceivableCents,
 ): BranchWalletPayablesBreakdown {
   const channels = payablesRevenue.commissionChannelRevenue.channelRevenueCents;
   const totalRevenueCents =
@@ -277,10 +227,6 @@ function buildBranchPayablesBreakdown(
   const deliveryCommissionCents = Math.round(toDeliveryLkr * 100);
   const totalExpensesCents =
     platformCommissionCents + gatewayFeeCents + branchReceivableCents;
-  const allTimeOnlineWalletCents = computeAllTimeOnlineWalletCents(
-    channels.pickupOnlineIn,
-    channels.deliveryOnlineIn,
-  );
 
   return {
     channelRevenueCents: { ...channels },
@@ -290,16 +236,11 @@ function buildBranchPayablesBreakdown(
     gatewayFeeCents,
     branchReceivableCents,
     totalExpensesCents,
-    allTimeOnlineWalletCents,
-    allTimeAvailableBalanceCents: computeAllTimeAvailableBalanceCents(
-      channels.pickupOnlineIn,
-      channels.deliveryOnlineIn,
-      branchReceivableExcludingJasonCents,
-    ),
+    allTimeAvailableBalanceCents: totalRevenueCents - totalExpensesCents,
   };
 }
 
-/** All-time payables breakdown (cumulative online wallet + remaining after payouts). */
+/** All-time payables breakdown (matches branch wallet detail “All-Time Available Balance”). */
 export async function computeBranchPayablesBreakdown(
   storeId: string,
 ): Promise<BranchWalletPayablesBreakdown> {
@@ -322,35 +263,30 @@ export async function computeBranchPayablesBreakdown(
     0,
   );
 
-  const paidExpenses = aggregatePaidPayoutPeriodExpensesCents(
-    paidPayoutWithdrawals.map((row) => ({
-      amountCents: withdrawalAmountCents(row),
-      breakdown: row.breakdown,
-    })),
+  const paidPayoutGatewayFeeCents = paidPayoutWithdrawals.reduce(
+    (sum, row) => sum + gatewayFeeCentsFromWithdrawalBreakdown(row.breakdown),
+    0,
+  );
+
+  const paidBranchReceivableCents = paidPayoutWithdrawals.reduce(
+    (sum, row) =>
+      sum +
+      branchPayoutCentsFromWithdrawalBreakdown(row.breakdown, withdrawalAmountCents(row)),
+    0,
+  );
+
+  const paidNetPlatformAmountCents = paidPayoutWithdrawals.reduce(
+    (sum, row) => sum + resolveNetPlatformAmountCentsFromWithdrawalBreakdown(row.breakdown),
+    0,
   );
 
   return buildBranchPayablesBreakdown(
     payablesRevenue,
-    paidExpenses.netPlatformAmountCents,
+    paidNetPlatformAmountCents,
     payablesToDeliveryLkr,
-    paidExpenses.gatewayFeeCents,
-    paidExpenses.branchReceivableCents,
-    paidExpenses.branchReceivableExcludingJasonCents,
+    paidPayoutGatewayFeeCents,
+    paidBranchReceivableCents,
   );
-}
-
-/**
- * Remaining withdrawable online wallet: pickup + delivery online item net (no convenience/delivery fees),
- * after platform/gateway/paid branch payouts — offline channel revenue absorbs expenses first.
- */
-export function onlineWalletAvailableFromPayablesBreakdown(
-  breakdown: BranchWalletPayablesBreakdown,
-): number {
-  const ch = breakdown.channelRevenueCents;
-  const onlineGrossCents = ch.pickupOnlineIn + ch.deliveryOnlineIn;
-  const offlineGrossCents = ch.pickupCashIn + ch.pickupCardIn;
-  const expensesAfterOffline = Math.max(0, breakdown.totalExpensesCents - offlineGrossCents);
-  return Math.max(0, onlineGrossCents - expensesAfterOffline);
 }
 
 export async function getBranchWalletDashboard(
@@ -560,16 +496,6 @@ export type PeriodBreakdown = {
    * Reuse for payout validation / net-preview — do not re-scan orders.
    */
   channelBreakdown: Record<CommissionChannel, ChannelSettlementRow>;
-  /** Commission tier schedule used for this breakdown (DB-configured). */
-  commissionSlabs: readonly CommissionSlab[];
-  cycleStage?: PayoutCycleStage;
-  cycleFrom?: string;
-  cycleTo?: string;
-  payoutWindowFrom?: string;
-  payoutWindowTo?: string;
-  priorOnlineWalletAmountCents?: number;
-  remainingOnlineWalletCents?: number;
-  cyclePairId?: string;
 };
 
 const EMPTY_SHARED_PROMO_BREAKDOWN_FIELDS = {
@@ -1053,57 +979,14 @@ export type BreakdownOrderRow = {
 
 export const BREAKDOWN_ORDER_SELECT = NET_ORDER_SELECT;
 
-/** Recompute Payout 2 gateway fee from “branch wallet before gateway” (after shared-promo merge). */
-export function refreshSecondPayoutGatewayAndNet(breakdown: PeriodBreakdown): PeriodBreakdown {
-  if (breakdown.cycleStage !== 'SECOND') return breakdown;
-
-  const prior = breakdown.priorOnlineWalletAmountCents ?? 0;
-  const online = breakdown.onlinePaymentsCollected ?? 0;
-  const rate =
-    breakdown.gatewayRate ??
-    (typeof breakdown.gatewayRatePct === 'number' ? breakdown.gatewayRatePct / 100 : 0.019);
-
-  const gatewayBase = computeBranchWalletBeforeGatewayCents({
-    onlinePaymentsCollectedCents: online,
-    priorOnlineWalletAmountCents: prior,
-    netPlatformEarningCents: breakdown.netPlatformEarning ?? 0,
-    jasonContributionCents: breakdown.sharedPromoJasonContributionAmount ?? 0,
-  });
-  const gatewayFee = Math.round(gatewayBase * rate);
-  const remainingOnlineWalletCents = Math.max(0, online - prior);
-
-  let signedNet = gatewayBase - gatewayFee;
-  signedNet =
-    signedNet -
-    (breakdown.cancelledByBranchGatewayFee ?? 0) +
-    (breakdown.customerLateCancelNetAmount ?? 0) +
-    (breakdown.rejectedRefundNetAmount ?? 0);
-  const netAmount = Math.max(0, signedNet);
-
-  return {
-    ...breakdown,
-    gatewayBase,
-    gatewayFee,
-    remainingOnlineWalletCents,
-    netAmount,
-    periodDues: Math.max(0, -signedNet),
-    finalPayoutAmount: netAmount,
-  };
-}
-
 export async function computeBreakdownForPeriod(
   storeId: string,
   from?: string,
   to?: string,
-  opts?: PayoutBreakdownOptions,
 ): Promise<PeriodBreakdown> {
-  const cycleCtx = opts ?? (await resolvePayoutCycleContext(storeId));
-  const orderFrom =
-    cycleCtx.cycleStage === 'SECOND' && cycleCtx.cycleFrom ? cycleCtx.cycleFrom : from;
-
   const loadOrders = () =>
     prisma.order.findMany({
-      where: periodActivePaidOrdersWhere(storeId, orderFrom, to),
+      where: periodActivePaidOrdersWhere(storeId, from, to),
       select: NET_ORDER_SELECT,
     });
 
@@ -1117,38 +1000,7 @@ export async function computeBreakdownForPeriod(
     paidOrders = await loadOrders();
   }
 
-  const [commissionSlabs, gatewayFeeRate] = await Promise.all([
-    getCommissionSlabs(),
-    getGatewayFeeRate(),
-  ]);
-  const prefetch: BreakdownPrefetch = {
-    commissionSlabs,
-    gatewayFeeRate,
-    cycleStage: cycleCtx.cycleStage,
-    priorOnlineWalletAmountCents: cycleCtx.priorOnlineWalletAmountCents,
-  };
-  if (cycleCtx.cycleStage === 'FIRST') {
-    prefetch.refundPenalty = EMPTY_REFUND_PENALTY_PREFETCH;
-  }
-
-  const breakdown = await computeBreakdownForPeriodOrders(
-    storeId,
-    paidOrders,
-    orderFrom,
-    to,
-    prefetch,
-  );
-
-  return {
-    ...breakdown,
-    cycleStage: cycleCtx.cycleStage,
-    cycleFrom: cycleCtx.cycleFrom,
-    cycleTo: to,
-    payoutWindowFrom: from,
-    payoutWindowTo: to,
-    cyclePairId: cycleCtx.cyclePairId,
-    priorOnlineWalletAmountCents: cycleCtx.priorOnlineWalletAmountCents,
-  };
+  return computeBreakdownForPeriodOrders(storeId, paidOrders, from, to);
 }
 
 export type RefundPenaltyPrefetch = {
@@ -1185,9 +1037,6 @@ export type BreakdownPrefetch = {
   gatewayFeeRate?: number;
   storePaybackEnabled?: boolean;
   refundPenalty?: RefundPenaltyPrefetch;
-  commissionSlabs?: readonly CommissionSlab[];
-  cycleStage?: PayoutCycleStage;
-  priorOnlineWalletAmountCents?: number;
 };
 
 function refundProcessedAtRange(from?: string, to?: string) {
@@ -1530,13 +1379,7 @@ export async function computeBreakdownForPeriodOrders(
 
   const gatewayFeeRate = prefetch?.gatewayFeeRate ?? (await getGatewayFeeRate());
   const gatewayRatePct = Math.round(gatewayFeeRate * 1000) / 10;
-  const commissionSlabs = prefetch?.commissionSlabs ?? DEFAULT_COMMISSION_SLABS;
-  const cycleStage = prefetch?.cycleStage ?? 'FIRST';
-  const priorOnlineWalletAmountCents = prefetch?.priorOnlineWalletAmountCents ?? 0;
-  const skipRefundPenalties = cycleStage === 'FIRST';
-  const prefetchedPenalty = skipRefundPenalties
-    ? EMPTY_REFUND_PENALTY_PREFETCH
-    : prefetch?.refundPenalty;
+  const prefetchedPenalty = prefetch?.refundPenalty;
   const branchCancellationFees = prefetchedPenalty
     ? {
         cancelledByBranchGatewayFee: prefetchedPenalty.cancelledByBranchGatewayFee,
@@ -1563,17 +1406,15 @@ export async function computeBreakdownForPeriodOrders(
     : await computeRejectedRefundPayout(storeId, from, to, gatewayFeeRate);
 
   if (paidOrders.length === 0) {
-    const signedNet = skipRefundPenalties
-      ? 0
-      : -branchCancellationFees.cancelledByBranchGatewayFee +
-        customerLateCancelRecovery.customerLateCancelNetAmount +
-        rejectedRefundPayout.rejectedRefundNetAmount;
-    const slabIndex = getSlabIndex(0, commissionSlabs);
+    const signedNet =
+      -branchCancellationFees.cancelledByBranchGatewayFee +
+      customerLateCancelRecovery.customerLateCancelNetAmount +
+      rejectedRefundPayout.rejectedRefundNetAmount;
     return {
       grossAmount: 0,
       windowBase: 0,
-      commissionRate: commissionSlabs[slabIndex].rate,
-      tierLabel: commissionSlabs[slabIndex].label,
+      commissionRate: COMMISSION_SLABS[0].rate,
+      tierLabel: COMMISSION_SLABS[0].label,
       onlineWalletGross: 0,
       onlinePaymentsCollected: 0,
       deliveryFee: 0,
@@ -1604,14 +1445,13 @@ export async function computeBreakdownForPeriodOrders(
       rejectedRefundConvenienceFee: rejectedRefundPayout.rejectedRefundConvenienceFee,
       rejectedRefundDeliveryFee: rejectedRefundPayout.rejectedRefundDeliveryFee,
       channelBreakdown: emptySettlementBreakdown(gatewayFeeRate),
-      commissionSlabs,
       ...EMPTY_SHARED_PROMO_BREAKDOWN_FIELDS,
     };
   }
 
   const windowBase = sumCommissionableBase(paidOrders);
-  const commissionRate = getEffectiveRate(windowBase, commissionSlabs);
-  const tierLabel = commissionSlabs[getSlabIndex(windowBase, commissionSlabs)].label;
+  const commissionRate = getEffectiveRate(windowBase);
+  const tierLabel = COMMISSION_SLABS[getSlabIndex(windowBase)].label;
 
   let grossAmount = 0;
   let onlineWalletGross = 0;
@@ -1632,7 +1472,7 @@ export async function computeBreakdownForPeriodOrders(
     periodLoyaltyDiscountTotal += Math.round((order.loyaltyDiscount ?? 0) * 100);
 
     const base = commissionableSubtotal(order);
-    const commissionCents = computePlatformCommissionCents(base, windowBase, commissionSlabs);
+    const commissionCents = computePlatformCommissionCents(base, windowBase);
     const paybackLkr = storePaybackEnabled
       ? orderPlatformPayback(order, { storePaybackEnabled: true })
       : 0;
@@ -1656,49 +1496,25 @@ export async function computeBreakdownForPeriodOrders(
     }
   }
 
+  // Gateway fee on branch revenue only (excl. convenience and delivery — settled separately).
+  const gatewayBase = onlineWalletGross;
+  const gatewayFee = Math.round(gatewayBase * gatewayFeeRate);
+
   const convenienceFeeRates = await getConvenienceFeeRates();
   const channelBreakdown = accumulateSettlementBreakdown(
     paidOrders,
     windowBase,
     convenienceFeeRates,
     gatewayFeeRate,
-    commissionSlabs,
   );
   const onlinePaymentsCollected = Math.round(
     sumOnlinePaymentsCollectedFromBreakdown(channelBreakdown) * 100,
   );
-  const firstPayoutOnlineSubtotalCents = Math.round(
-    sumFirstPayoutOnlineWalletBaseFromBreakdown(channelBreakdown) * 100,
-  );
 
-  let netPlatformEarning = storePaybackEnabled
+  const netPlatformEarning = storePaybackEnabled
     ? commissionFee - platformPaybackTotal - periodLoyaltyDiscountTotal
     : commissionFee - periodLoyaltyDiscountTotal;
-
-  let gatewayBase = onlinePaymentsCollected;
-  let gatewayFee = Math.round(gatewayBase * gatewayFeeRate);
-  let remainingOnlineWalletCents = onlinePaymentsCollected;
-  let signedNet = onlinePaymentsCollected - netPlatformEarning - gatewayFee;
-
-  if (cycleStage === 'FIRST') {
-    netPlatformEarning = 0;
-    commissionFee = 0;
-    // Payout 1: gateway fee on pickup + delivery online revenue after discounts.
-    gatewayBase = firstPayoutOnlineSubtotalCents;
-    gatewayFee = Math.round(gatewayBase * gatewayFeeRate);
-    remainingOnlineWalletCents = onlinePaymentsCollected;
-    signedNet = gatewayBase - gatewayFee;
-  } else {
-    remainingOnlineWalletCents = Math.max(0, onlinePaymentsCollected - priorOnlineWalletAmountCents);
-    gatewayBase = computeBranchWalletBeforeGatewayCents({
-      onlinePaymentsCollectedCents: onlinePaymentsCollected,
-      priorOnlineWalletAmountCents,
-      netPlatformEarningCents: netPlatformEarning,
-    });
-    gatewayFee = Math.round(gatewayBase * gatewayFeeRate);
-    signedNet = gatewayBase - gatewayFee;
-  }
-
+  const signedNet = onlinePaymentsCollected - netPlatformEarning - gatewayFee;
   const signedNetAfterBranchCancellations =
     signedNet -
     branchCancellationFees.cancelledByBranchGatewayFee +
@@ -1711,15 +1527,12 @@ export async function computeBreakdownForPeriodOrders(
     (order) => orderCommissionChannel(order.orderMode, order.paymentMethod) != null,
   ).length;
 
-  const onlineWalletGrossForSnapshot =
-    cycleStage === 'FIRST' ? firstPayoutOnlineSubtotalCents : onlineWalletGross;
-
   return {
     grossAmount,
     windowBase: Math.round(windowBase * 100),
     commissionRate,
     tierLabel,
-    onlineWalletGross: onlineWalletGrossForSnapshot,
+    onlineWalletGross,
     onlinePaymentsCollected,
     deliveryFee,
     commissionFee,
@@ -1749,10 +1562,6 @@ export async function computeBreakdownForPeriodOrders(
     rejectedRefundConvenienceFee: rejectedRefundPayout.rejectedRefundConvenienceFee,
     rejectedRefundDeliveryFee: rejectedRefundPayout.rejectedRefundDeliveryFee,
     channelBreakdown,
-    commissionSlabs,
-    priorOnlineWalletAmountCents:
-      cycleStage === 'SECOND' ? priorOnlineWalletAmountCents : undefined,
-    remainingOnlineWalletCents,
     ...EMPTY_SHARED_PROMO_BREAKDOWN_FIELDS,
   };
 }
@@ -1838,18 +1647,13 @@ async function recalculateBalanceFromLedger(storeId: string): Promise<number> {
 
 export async function getWalletSummary(storeId: string): Promise<WalletSummary> {
   const wallet = await getOrCreateWallet(storeId);
-  const [pendingWithdrawalTotal, netTransferableEarnings, payablesBreakdown] = await Promise.all([
+  const [pendingWithdrawalTotal, netTransferableEarnings] = await Promise.all([
     getPendingWithdrawalTotal(storeId),
     computeNetTransferableEarnings(storeId),
-    computeBranchPayablesBreakdown(storeId),
   ]);
 
   const totalWithdrawn = walletTotalWithdrawnCents(wallet);
   const remainingNet = Math.max(0, netTransferableEarnings - totalWithdrawn);
-  const onlineWalletGrossCents = onlineWalletAvailableFromPayablesBreakdown(payablesBreakdown);
-
-  const allTimeAvailableBalanceCents = payablesBreakdown.allTimeAvailableBalanceCents;
-  const allTimeOnlineWalletCents = payablesBreakdown.allTimeOnlineWalletCents;
 
   return {
     storeId,
@@ -1860,9 +1664,6 @@ export async function getWalletSummary(storeId: string): Promise<WalletSummary> 
     totalWithdrawn,
     pendingWithdrawalTotal,
     availableBalance: Math.max(0, remainingNet - pendingWithdrawalTotal),
-    onlineWalletAvailableBalance: Math.max(0, onlineWalletGrossCents - pendingWithdrawalTotal),
-    allTimeAvailableBalanceCents,
-    allTimeOnlineWalletCents,
   };
 }
 
@@ -1904,7 +1705,8 @@ export function branchPayablesFromDashboardWalletKpi(
 }
 
 /**
- * Dashboard wallet KPI: remaining online wallet after paid branch payouts.
+ * Dashboard wallet KPI: net branch available balance excluding convenience and delivery fees.
+ * Matches System Wallet Overview branch cards (`allTimeAvailableBalanceCents`).
  */
 export async function computeDashboardWalletAvailableCents(
   storeId?: string,

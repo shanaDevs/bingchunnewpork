@@ -282,7 +282,7 @@ export type CommissionChannelRevenueSummary = {
 };
 
 /** Mirrors orderCommissionChannel without payment hints (groupBy has no gateway metadata). */
-export function commissionChannelForPaidOrderGroup(
+function commissionChannelForPaidOrderGroup(
   orderMode: string,
   paymentMethod: string,
 ): keyof CommissionChannelRevenueCents | null {
@@ -332,82 +332,6 @@ export function summarizeCommissionChannelRevenueFromGroups(
   }
 
   return { channelRevenueCents, netCents };
-}
-
-const ONLINE_PAYABLES_CHANNELS: ReadonlySet<keyof CommissionChannelRevenueCents> = new Set([
-  'pickupOnlineIn',
-  'deliveryOnlineIn',
-]);
-
-const ONLINE_PAYABLES_CARD_METHODS = ['CARD', 'PAYHERE', 'LOYALTY_POINTS'] as const;
-
-/**
- * Paid orders that feed branch online payables (same basis as Online Available Balance).
- * PAYHERE pickup + card/PayHere/loyalty delivery — excludes counter cash and in-store card pickup.
- */
-export function onlinePayablesPaidOrderWhere(
-  extra: Omit<Prisma.OrderWhereInput, 'OR' | 'paymentStatus' | 'status'> = {},
-): Prisma.OrderWhereInput {
-  return {
-    ...extra,
-    paymentStatus: 'PAID',
-    status: { not: 'CANCELLED' },
-    OR: [
-      { orderMode: 'TAKEAWAY', paymentMethod: 'PAYHERE' },
-      { orderMode: 'DELIVERY', paymentMethod: { in: [...ONLINE_PAYABLES_CARD_METHODS] } },
-    ],
-  };
-}
-
-export type OnlinePayablesSettledWindow = {
-  storeId: string;
-  from: string;
-  to: string;
-};
-
-/**
- * Online-payable orders that still sit in Online Available Balance.
- * Approved payout windows are excluded so remaining delivery/convenience fees
- * match remaining (not all-time) online wallet — display only, not used for payouts.
- */
-export function remainingOnlinePayablesFeeWhere(
-  storeIds: string[],
-  settledWindows: OnlinePayablesSettledWindow[] = [],
-): Prisma.OrderWhereInput {
-  const base = onlinePayablesPaidOrderWhere({ storeId: { in: storeIds } });
-  if (settledWindows.length === 0) return base;
-  return {
-    AND: [
-      base,
-      {
-        NOT: {
-          OR: settledWindows.map((window) => ({
-            storeId: window.storeId,
-            ...orderCreatedAtFilter(window.from, window.to),
-          })),
-        },
-      },
-    ],
-  };
-}
-
-/**
- * Branch-wallet payables credit for one paid order (same basis as Revenue Summary):
- * subtotal − promo discount. Online cents feed All-Time Available Balance.
- */
-export function paidOrderPayablesCreditCents(order: {
-  orderMode: string;
-  paymentMethod: string;
-  subtotal: number;
-  discount: number;
-}): { totalCents: number; onlineCents: number } {
-  const channel = commissionChannelForPaidOrderGroup(order.orderMode, order.paymentMethod);
-  if (!channel) return { totalCents: 0, onlineCents: 0 };
-  const totalCents = Math.round(Math.max(0, order.subtotal - order.discount) * 100);
-  return {
-    totalCents,
-    onlineCents: ONLINE_PAYABLES_CHANNELS.has(channel) ? totalCents : 0,
-  };
 }
 
 export type SummarizedPaidOrderRevenue = ReturnType<typeof summarizeOrderRevenueFromGroups> & {

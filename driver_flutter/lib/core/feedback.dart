@@ -44,6 +44,7 @@ class BcSound {
     final key = '$freqHz-$durationMs-$volume';
     final wav = _cache.putIfAbsent(key, () => _synth(freqHz, durationMs, volume));
     final player = AudioPlayer(playerId: 'tone-${DateTime.now().microsecondsSinceEpoch}');
+    player.positionUpdater = null;
     await player.setReleaseMode(ReleaseMode.release);
     await player.setAudioContext(
       AudioContext(

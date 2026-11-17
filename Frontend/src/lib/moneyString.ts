@@ -45,9 +45,6 @@ const WALLET_SUMMARY_CENT_FIELDS = [
   'totalWithdrawn',
   'pendingWithdrawalTotal',
   'availableBalance',
-  'onlineWalletAvailableBalance',
-  'allTimeAvailableBalanceCents',
-  'allTimeOnlineWalletCents',
 ] as const;
 
 function centsFieldToNumber(value: CentsField): number {
@@ -68,7 +65,6 @@ export function normalizeStoreWalletFromApi<T extends object>(row: T): T & {
   currentBalance?: number;
   availableBalance?: number;
   allTimeAvailableBalanceCents?: number;
-  allTimeOnlineWalletCents?: number;
   netTransferableEarnings?: number;
 } {
   const r = row as T & Record<string, CentsField>;
@@ -80,7 +76,6 @@ export function normalizeStoreWalletFromApi<T extends object>(row: T): T & {
     currentBalance: centsFieldToNumber(r.currentBalance ?? r.balance),
     availableBalance: centsFieldToNumber(r.availableBalance),
     allTimeAvailableBalanceCents: centsFieldToNumber(r.allTimeAvailableBalanceCents),
-    allTimeOnlineWalletCents: centsFieldToNumber(r.allTimeOnlineWalletCents),
     netTransferableEarnings: centsFieldToNumber(r.netTransferableEarnings),
   };
 }

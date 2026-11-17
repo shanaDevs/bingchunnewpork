@@ -254,7 +254,7 @@ class BcNotifications {
       styleInformation: BigTextStyleInformation(
         alert.notificationBody,
         contentTitle: alert.notificationTitle,
-        summaryText: tr('Bing Chun Delivery'),
+        summaryText: tr('Bring It Rider'),
       ),
       actions: [
         AndroidNotificationAction(

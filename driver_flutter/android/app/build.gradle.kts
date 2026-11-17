@@ -55,7 +55,7 @@ android {
     defaultConfig {
         // Must match the Firebase Android app in google-services.json (project bing-chun-driver).
         // The Kotlin `namespace` above stays lk.bingchun.* — only the install/package id changed.
-        applicationId = "com.bingchun.bing_chun_driver"
+        applicationId = "com.bringit.driver"
         minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

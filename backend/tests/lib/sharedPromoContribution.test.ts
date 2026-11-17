@@ -20,7 +20,6 @@ vi.mock('../../src/lib/prisma', () => ({
   },
 }));
 import type { PeriodBreakdown } from '../../src/lib/walletService';
-import { DEFAULT_COMMISSION_SLABS, emptySettlementBreakdown } from '../../src/lib/commission';
 
 function basePeriodBreakdown(overrides: Partial<PeriodBreakdown> = {}): PeriodBreakdown {
   return {
@@ -55,9 +54,6 @@ function basePeriodBreakdown(overrides: Partial<PeriodBreakdown> = {}): PeriodBr
     rejectedRefundNetAmount: 0,
     rejectedRefundConvenienceFee: 0,
     rejectedRefundDeliveryFee: 0,
-    channelBreakdown: emptySettlementBreakdown(),
-    commissionSlabs: DEFAULT_COMMISSION_SLABS,
-    gatewayRate: 0.019,
     ...EMPTY_SHARED_PROMO_CONTRIBUTION,
     finalPayoutAmount: 0,
     ...overrides,

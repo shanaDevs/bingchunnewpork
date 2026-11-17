@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { prisma } from './prisma';
 
 export type CupStickerPayload = {
   orderLabel: string;
@@ -23,47 +22,14 @@ export type CupStickerJob = {
 
 /** In-memory queue (admin API is single-instance). Jobs expire after TTL. */
 const JOB_TTL_MS = 10 * 60 * 1000;
-/** Agent polls ~1.5s; allow lag / brief network blips before UI shows offline. */
-const DEFAULT_PRESENCE_MAX_AGE_MS = 60_000;
 const jobs = new Map<string, CupStickerJob>();
 let lastAgentSeenAt = 0;
-let heartbeatTableReady: Promise<void> | null = null;
-
-async function ensureHeartbeatTable(): Promise<void> {
-  if (!heartbeatTableReady) {
-    heartbeatTableReady = (async () => {
-      await prisma.$executeRawUnsafe(`
-        CREATE TABLE IF NOT EXISTS "cup_sticker_agent_heartbeat" (
-          "id" INTEGER PRIMARY KEY DEFAULT 1,
-          "lastSeenAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `);
-    })().catch((err) => {
-      heartbeatTableReady = null;
-      throw err;
-    });
-  }
-  await heartbeatTableReady;
-}
 
 export function touchCupStickerAgent(): void {
   lastAgentSeenAt = Date.now();
-  // Persist so "Agent online" works across API instances / restarts.
-  void (async () => {
-    try {
-      await ensureHeartbeatTable();
-      await prisma.$executeRawUnsafe(`
-        INSERT INTO "cup_sticker_agent_heartbeat" ("id", "lastSeenAt")
-        VALUES (1, NOW())
-        ON CONFLICT ("id") DO UPDATE SET "lastSeenAt" = NOW()
-      `);
-    } catch {
-      /* table may be unavailable during migrate — memory still updated */
-    }
-  })();
 }
 
-export function getCupStickerAgentPresence(maxAgeMs = DEFAULT_PRESENCE_MAX_AGE_MS): {
+export function getCupStickerAgentPresence(maxAgeMs = 20_000): {
   online: boolean;
   lastSeenAt: number | null;
 } {
@@ -72,29 +38,6 @@ export function getCupStickerAgentPresence(maxAgeMs = DEFAULT_PRESENCE_MAX_AGE_M
     online: Date.now() - lastAgentSeenAt <= maxAgeMs,
     lastSeenAt: lastAgentSeenAt,
   };
-}
-
-/** Prefer DB heartbeat (shared), fall back to in-memory. */
-export async function getCupStickerAgentPresenceAsync(
-  maxAgeMs = DEFAULT_PRESENCE_MAX_AGE_MS,
-): Promise<{ online: boolean; lastSeenAt: number | null }> {
-  try {
-    await ensureHeartbeatTable();
-    const rows = await prisma.$queryRawUnsafe<Array<{ lastSeenAt: Date }>>(
-      `SELECT "lastSeenAt" FROM "cup_sticker_agent_heartbeat" WHERE "id" = 1 LIMIT 1`,
-    );
-    const at = rows[0]?.lastSeenAt ? new Date(rows[0].lastSeenAt).getTime() : 0;
-    if (at > 0) {
-      if (at > lastAgentSeenAt) lastAgentSeenAt = at;
-      return {
-        online: Date.now() - at <= maxAgeMs,
-        lastSeenAt: at,
-      };
-    }
-  } catch {
-    /* fall through */
-  }
-  return getCupStickerAgentPresence(maxAgeMs);
 }
 
 function prune() {

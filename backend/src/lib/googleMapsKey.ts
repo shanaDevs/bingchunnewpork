@@ -1,5 +1,4 @@
 import { prisma } from './prisma';
-import { ensureAppSchema } from './appSchema';
 import { tableHasColumn } from './schemaPatch';
 
 const COLUMN = 'googleMapsApiKey';
@@ -10,6 +9,18 @@ let cached: Cached | null = null;
 
 export function invalidateGoogleMapsApiKeyCache(): void {
   cached = null;
+}
+
+async function ensureGoogleMapsColumn(): Promise<boolean> {
+  if (await tableHasColumn('app_settings', COLUMN)) return true;
+  try {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "googleMapsApiKey" VARCHAR(256)`,
+    );
+  } catch {
+    return false;
+  }
+  return tableHasColumn('app_settings', COLUMN);
 }
 
 async function readStoredKey(): Promise<string> {
@@ -71,8 +82,7 @@ export async function getGoogleMapsApiKey(): Promise<string> {
 
 export async function setGoogleMapsApiKey(value: string | null): Promise<string> {
   const next = value?.trim() || '';
-  await ensureAppSchema();
-  if (!(await tableHasColumn('app_settings', COLUMN))) {
+  if (!(await ensureGoogleMapsColumn())) {
     throw new Error('Google Maps API key storage is not ready yet');
   }
   await prisma.$executeRawUnsafe(

@@ -1,6 +1,6 @@
 'use client';
 
-import { adminAuthHeaders, withAdminCredentials } from '@/lib/adminSession';
+import { adminAuthHeaders } from '@/lib/adminSession';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -25,6 +25,7 @@ import {
 import PayoutBreakdownPanel from '@/components/admin/PayoutBreakdownPanel';
 import {
   channelBreakdownHasSalesActivity,
+  computeAvailableToWithdrawFromChannelBreakdown,
   computePeriodPayoutSplitLkr,
   extractSharedPromoLkrFromBreakdown,
   hasPositiveLkr,
@@ -58,20 +59,8 @@ import {
   normalizePayoutPeriodDate,
   type BranchPayoutCompletedMeta,
 } from '@/lib/branchPayoutsDue';
-import { resolveInitiatePayoutAvailableBalance } from '@/components/admin/initiatePayoutAvailableBalance';
-import { resolvePayoutCycleDisplayRange } from '@/components/admin/payoutSecondCycleDisplayRange';
-import { normalizeWalletSummaryFromApi } from '@/lib/moneyString';
-import { jasonPayoutDeductionLkr } from '@/components/admin/jasonPayoutDeduction';
-import { hasNegativeLkr } from '@/components/admin/settlement/lkrUtils';
 
 type PaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CHECK' | '';
-
-type BranchWalletSummary = {
-  onlineWalletAvailableBalance?: number;
-  allTimeAvailableBalanceCents?: number;
-  pendingWithdrawalTotal?: number;
-  availableBalance?: number;
-};
 
 type Props = {
   open: boolean;
@@ -86,7 +75,6 @@ type Props = {
   presetPeriodFrom?: string | null;
   presetPeriodTo?: string | null;
   presetPeriodDays?: number | null;
-  presetWithdrawalId?: string | null;
 };
 
 function normalizePresetDate(value: string | null | undefined): string | null {
@@ -140,43 +128,25 @@ function resolveBranchWalletNetLkrForPayout(
 function formatBranchWalletNetLkrForSubmit(
   periodNet: WithdrawalBreakdown | null,
   branchWalletNetLkr: number,
-  jasonDiscountsLkr = 0,
 ): string {
-  const raw = resolveBranchWalletNetLkrForPayout(periodNet, branchWalletNetLkr);
-  return Math.max(0, raw - Math.max(0, jasonDiscountsLkr)).toFixed(2);
+  return resolveBranchWalletNetLkrForPayout(periodNet, branchWalletNetLkr).toFixed(2);
 }
 
-function availableCoversOnlineWalletDebit(
-  availableLkr: number,
-  onlineWalletDebitLkr: number,
-): boolean {
-  return availableLkr + PAYOUT_COMPARE_EPSILON >= onlineWalletDebitLkr;
+function availableCoversFinalPayout(availableLkr: number, finalPayLkr: number): boolean {
+  return availableLkr + PAYOUT_COMPARE_EPSILON >= finalPayLkr;
 }
 
 function resolveInitiatePayoutPayDisabledNote(params: {
   previewLoading: boolean;
   finalPayLkr: number;
   availableLkr: number;
-  onlineWalletDebitLkr: number;
   paymentMethod: PaymentMethod;
   reviewed: boolean;
-  jasonBalanceLoading?: boolean;
-  jasonDeductionLkr?: number;
-  jasonNetBalanceLkr?: number | null;
 }): string | null {
   if (params.previewLoading) return 'Loading payout calculation…';
   if (params.finalPayLkr <= 0) return 'Waiting for payout calculation for this period.';
-  if (!availableCoversOnlineWalletDebit(params.availableLkr, params.onlineWalletDebitLkr)) {
-    return `Available to withdraw (LKR ${formatMoneyAmount(params.availableLkr)}) must cover the online wallet payout (LKR ${formatMoneyAmount(params.onlineWalletDebitLkr)}).`;
-  }
-  const jasonDeduction = Math.max(0, params.jasonDeductionLkr ?? 0);
-  if (jasonDeduction > 0.001) {
-    if (params.jasonBalanceLoading) return 'Checking Jason investment balance…';
-    const jasonNet = params.jasonNetBalanceLkr;
-    if (jasonNet == null) return 'Could not verify Jason investment balance for this payout.';
-    if (jasonNet + PAYOUT_COMPARE_EPSILON < jasonDeduction) {
-      return `Insufficient Jason balance (LKR ${formatMoneyAmount(jasonNet)}) to cover payout contributions (LKR ${formatMoneyAmount(jasonDeduction)}).`;
-    }
+  if (!availableCoversFinalPayout(params.availableLkr, params.finalPayLkr)) {
+    return `Available to withdraw (LKR ${formatMoneyAmount(params.availableLkr)}) must cover net payout (LKR ${formatMoneyAmount(params.finalPayLkr)}).`;
   }
   if (!params.paymentMethod) return 'Select a payment method to continue.';
   if (!params.reviewed) return 'Check the box to confirm you have reviewed the payout calculation.';
@@ -199,7 +169,6 @@ export default function AdminInitiatePayoutModal({
   presetPeriodFrom = null,
   presetPeriodTo = null,
   presetPeriodDays = null,
-  presetWithdrawalId = null,
 }: Props) {
   const [portalReady, setPortalReady] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
@@ -210,8 +179,9 @@ export default function AdminInitiatePayoutModal({
   const [periodInfoLoading, setPeriodInfoLoading] = useState(false);
   const [periodNet, setPeriodNet] = useState<WithdrawalBreakdown | null>(null);
   const [channelPreview, setChannelPreview] = useState<SettlementPreview | null>(null);
-  const [walletSummary, setWalletSummary] = useState<BranchWalletSummary | null>(null);
-  const [walletSummaryLoading, setWalletSummaryLoading] = useState(false);
+  const [orderAvailableRemainingLkr, setOrderAvailableRemainingLkr] = useState<number | null>(
+    null,
+  );
   const [periodDays, setPeriodDays] = useState<number | null>(null);
   const [periodOptions, setPeriodOptions] = useState<RollingPeriodOption[]>([]);
   const [tierPreview, setTierPreview] = useState<{
@@ -230,8 +200,6 @@ export default function AdminInitiatePayoutModal({
   const [paybackEnabled, setPaybackEnabled] = useState(false);
   const [reviewed, setReviewed] = useState(false);
   const [pinGateOpen, setPinGateOpen] = useState(false);
-  const [jasonNetBalanceLkr, setJasonNetBalanceLkr] = useState<number | null>(null);
-  const [jasonBalanceLoading, setJasonBalanceLoading] = useState(false);
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onCloseRef = useRef(onClose);
 
@@ -274,8 +242,7 @@ export default function AdminInitiatePayoutModal({
       setPeriodInfoLoading(false);
       setPeriodNet(null);
       setChannelPreview(null);
-      setWalletSummary(null);
-      setWalletSummaryLoading(false);
+      setOrderAvailableRemainingLkr(null);
       setPeriodDays(null);
       setPeriodOptions([]);
       setTierPreview(null);
@@ -288,8 +255,6 @@ export default function AdminInitiatePayoutModal({
       setPaybackEnabled(false);
       setReviewed(false);
       setPinGateOpen(false);
-      setJasonNetBalanceLkr(null);
-      setJasonBalanceLoading(false);
     }
   }, [open]);
 
@@ -367,66 +332,6 @@ export default function AdminInitiatePayoutModal({
   }, [open, apiBase, storeId, presetPeriodFrom, presetPeriodTo, presetPeriodDays, duePeriodLocked]);
 
   useEffect(() => {
-    if (!open || !storeId) return;
-
-    let cancelled = false;
-    setWalletSummaryLoading(true);
-
-    fetch(
-      `${apiBase}/admin/wallet/summary?storeId=${encodeURIComponent(storeId)}`,
-      withAdminCredentials(),
-    )
-      .then(async (res) => {
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.message || 'Failed to load wallet summary');
-        if (!cancelled) {
-          setWalletSummary(normalizeWalletSummaryFromApi(json.data as BranchWalletSummary));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setWalletSummary(null);
-      })
-      .finally(() => {
-        if (!cancelled) setWalletSummaryLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, storeId, apiBase]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    let cancelled = false;
-    setJasonBalanceLoading(true);
-    fetch(`${apiBase}/admin/jason`, {
-      headers: adminAuthHeaders(),
-      credentials: 'include',
-    })
-      .then(async (res) => {
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.message || 'Failed to load Jason balance');
-        if (cancelled) return;
-        const net =
-          json.data?.summary && typeof json.data.summary.net === 'number'
-            ? json.data.summary.net
-            : null;
-        setJasonNetBalanceLkr(net);
-      })
-      .catch(() => {
-        if (!cancelled) setJasonNetBalanceLkr(null);
-      })
-      .finally(() => {
-        if (!cancelled) setJasonBalanceLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, apiBase]);
-
-  useEffect(() => {
     if (!open) return;
 
     if (previewTimer.current) {
@@ -437,6 +342,7 @@ export default function AdminInitiatePayoutModal({
     if (periodDays == null || !isValidRange(dateFrom, dateTo)) {
       setPeriodNet(null);
       setChannelPreview(null);
+      setOrderAvailableRemainingLkr(null);
       setTierPreview(null);
       return;
     }
@@ -502,9 +408,19 @@ export default function AdminInitiatePayoutModal({
         }
 
         setChannelPreview(nextChannelPreview);
+        if (typeof json.data?.orderAvailableRemainingLkr === 'number') {
+          setOrderAvailableRemainingLkr(json.data.orderAvailableRemainingLkr);
+        } else if (nextChannelPreview?.breakdown) {
+          setOrderAvailableRemainingLkr(
+            computeAvailableToWithdrawFromChannelBreakdown(nextChannelPreview.breakdown),
+          );
+        } else {
+          setOrderAvailableRemainingLkr(null);
+        }
       } catch (err) {
         setPeriodNet(null);
         setChannelPreview(null);
+        setOrderAvailableRemainingLkr(null);
         setTierPreview(null);
         setPaybackEnabled(false);
         setError(err instanceof Error ? err.message : 'Could not calculate net amount');
@@ -521,27 +437,13 @@ export default function AdminInitiatePayoutModal({
 
   if (!portalReady || !open) return null;
 
-  const withdrawablePoolCents = (() => {
-    if (walletSummary) {
-      const allTime = walletSummary.allTimeAvailableBalanceCents ?? 0;
-      const pending = walletSummary.pendingWithdrawalTotal ?? 0;
-      return Math.max(0, allTime - pending);
-    }
-    return availableBalance;
-  })();
-  const withdrawablePoolLkr = centsToLkr(withdrawablePoolCents);
+  const availableLkr =
+    orderAvailableRemainingLkr ??
+    (channelPreview?.breakdown != null
+      ? computeAvailableToWithdrawFromChannelBreakdown(channelPreview.breakdown)
+      : centsToLkr(availableBalance));
   const periodBreakdownLkr = periodNet ? withdrawalBreakdownToLkr(periodNet) : null;
   const rangeReady = isValidRange(dateFrom, dateTo);
-  const displayRange = resolvePayoutCycleDisplayRange({
-    cycleStage: periodBreakdownLkr?.cycleStage ?? periodNet?.cycleStage,
-    cycleFrom: periodBreakdownLkr?.cycleFrom ?? periodNet?.cycleFrom,
-    periodFrom: dateFrom,
-    periodTo: dateTo,
-    periodDays,
-  });
-  const displayDateFrom = displayRange.displayFrom;
-  const displayDateTo = displayRange.displayTo;
-  const displayPeriodDays = displayRange.displayDays;
   const periodInFuture = !!dateTo && dateTo > todayDateStr();
   const periodIncompleteState = resolvePayoutPeriodIncompleteState({
     periodFrom: displayDateFrom,
@@ -567,8 +469,7 @@ export default function AdminInitiatePayoutModal({
     rejectedRefundDeliveryFeeLkr: periodBreakdownLkr?.rejectedRefundDeliveryFee ?? 0,
   });
   const slabRatePct = resolveSlabRatePctFromPreview(channelPreview);
-  const periodLabel =
-    displayDateFrom && displayDateTo ? `${displayDateFrom} → ${displayDateTo}` : null;
+  const periodLabel = dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : null;
   const payoutSplit = periodBreakdownLkr
     ? computePeriodPayoutSplitLkr({
         netAmount: periodBreakdownLkr.netAmount,
@@ -579,15 +480,12 @@ export default function AdminInitiatePayoutModal({
     : null;
   const branchCommissionLkr =
     channelPreview?.totalCommission ?? periodBreakdownLkr?.commissionFee ?? 0;
-  const platformCommissionLkr =
-    periodBreakdownLkr?.cycleStage === 'FIRST'
-      ? 0
-      : resolvePlatformCommissionForPeriodLkr({
-          commissionLkr: branchCommissionLkr,
-          periodBreakdownLkr,
-          paybackEnabled,
-          sharedPromoPlatformLkr: sharedPromo.platformContributionLkr,
-        });
+  const platformCommissionLkr = resolvePlatformCommissionForPeriodLkr({
+    commissionLkr: branchCommissionLkr,
+    periodBreakdownLkr,
+    paybackEnabled,
+    sharedPromoPlatformLkr: sharedPromo.platformContributionLkr,
+  });
   const payoutBreakdownDisplayInput = periodBreakdownLkr
     ? buildPayoutBreakdownDisplayInput({
         preview: channelPreview,
@@ -612,45 +510,21 @@ export default function AdminInitiatePayoutModal({
     branchPayout?.periodWalletNetLkr ??
     (periodNet ? resolvePeriodNetLkrFromBreakdown(periodNet) : null) ??
     (periodNet ? periodNet.netAmount / 100 : null);
-  const netPayoutFinalPayLkr = branchPayout?.totalBranchPayoutLkr ?? 0;
-  const payTotalLkr = netPayoutFinalPayLkr;
+  const payTotalLkr = branchPayout?.totalBranchPayoutLkr ?? 0;
   const reportBranchWalletNetLkr = branchPayout?.periodWalletNetLkr ?? periodNetLkr ?? 0;
-  const jasonDiscountsLkr = Math.max(
-    payoutReportBundle?.reportValues.jasonDiscountsLkr ?? 0,
-    sharedPromo.jasonContributionLkr,
-  );
-  const jasonIncludedInPeriodNet =
-    (periodNet?.cycleStage ?? payoutReportBundle?.reportValues.cycleStage) === 'SECOND';
-  const jasonToExcludeFromOnlineDebit = jasonIncludedInPeriodNet ? jasonDiscountsLkr : 0;
-  const availableBalanceView = resolveInitiatePayoutAvailableBalance({
-    withdrawablePoolLkr,
-    netPayoutFinalPayLkr,
-    jasonDiscountsLkr,
-  });
-  const availableLkr = availableBalanceView.availableBeforePayoutLkr;
-  const availableAfterPayoutLkr = availableBalanceView.availableAfterPayoutLkr;
-  const onlineWalletDebitLkr = availableBalanceView.onlineWalletDebitLkr;
-  const netPlatformAmountLkr = payoutReportBundle?.reportValues.netPlatformAmountLkr ?? 0;
-  const jasonDeductionLkr = jasonPayoutDeductionLkr({
-    jasonContributionLkr: sharedPromo.jasonContributionLkr,
-    netPlatformAmountLkr,
-  });
-  const showNegativeNetPlatformJasonBanner = hasNegativeLkr(netPlatformAmountLkr);
-  const showJasonTopUp = hasPositiveLkr(sharedPromo.jasonContributionLkr);
-  const showPlatformContributionBanner = hasPositiveLkr(sharedPromo.platformContributionLkr);
-  const showJasonPayoutBanner = jasonDeductionLkr > 0.001;
+  const branchWalletNetLkr = resolveBranchWalletNetLkrForPayout(periodNet, reportBranchWalletNetLkr);
+  const availableAfterPayoutLkr =
+    branchWalletNetLkr > 0 ? Math.max(0, availableLkr - branchWalletNetLkr) : null;
   const payDisabledNote = resolveInitiatePayoutPayDisabledNote({
     previewLoading,
-    finalPayLkr: netPayoutFinalPayLkr,
+    finalPayLkr: branchWalletNetLkr,
     availableLkr,
-    onlineWalletDebitLkr,
     paymentMethod,
     reviewed,
-    jasonBalanceLoading,
-    jasonDeductionLkr,
-    jasonNetBalanceLkr,
   });
   const canSubmitPay = payDisabledNote == null && !submitting && rangeReady && periodDays != null;
+  const showJasonTopUp = hasPositiveLkr(sharedPromo.jasonContributionLkr);
+  const showPlatformContributionBanner = hasPositiveLkr(sharedPromo.platformContributionLkr);
   const payoutBreakdownPanelProps =
     payoutBreakdownDisplayInput && branchPayout
       ? {
@@ -659,18 +533,11 @@ export default function AdminInitiatePayoutModal({
           branchReceivesLkr: branchPayout.totalBranchPayoutLkr,
           platformCommissionLkr,
           periodNetLkr: branchPayout.periodWalletNetLkr,
-          dateFrom: displayDateFrom,
-          dateTo: displayDateTo,
+          dateFrom,
+          dateTo,
           showAdvance: false,
           advanceAmountLkr: 0,
           branchPayout,
-          jasonContext: showJasonPayoutBanner
-            ? {
-                jasonDeductionLkr,
-                jasonNetBalanceLkr,
-                jasonBalanceLoading,
-              }
-            : undefined,
         }
       : null;
   const isCheck = paymentMethod === 'CHECK';
@@ -706,11 +573,7 @@ export default function AdminInitiatePayoutModal({
     setError('');
     try {
       const payload: Record<string, string | number | boolean> = {
-        amount: formatBranchWalletNetLkrForSubmit(
-          periodNet,
-          reportBranchWalletNetLkr,
-          jasonToExcludeFromOnlineDebit,
-        ),
+        amount: formatBranchWalletNetLkrForSubmit(periodNet, reportBranchWalletNetLkr),
         periodDays: periodDays ?? 15,
         from: dateFrom,
         to: dateTo,
@@ -732,7 +595,6 @@ export default function AdminInitiatePayoutModal({
         payload.checkNumber = checkNumber.trim();
         payload.checkDate = checkDate;
       }
-      if (presetWithdrawalId) payload.withdrawalId = presetWithdrawalId;
 
       const res = await fetch(
         `${apiBase}/admin/wallet/${encodeURIComponent(storeId)}/initiate-payout`,
@@ -756,15 +618,8 @@ export default function AdminInitiatePayoutModal({
       }
       if (!res.ok) throw new Error(json.message || 'Payout failed');
 
-      const paidWithdrawalId =
-        json.data && typeof json.data === 'object' && 'id' in json.data
-          ? String((json.data as { id: string }).id)
-          : null;
-      const invoiceOpenTarget = paidWithdrawalId
-        ? `/api/admin/invoices/withdrawal/${encodeURIComponent(paidWithdrawalId)}`
-        : json.data?.invoiceUrl;
-      if (invoiceOpenTarget) {
-        void openWithdrawalInvoice(invoiceOpenTarget).catch(() => {
+      if (json.data?.invoiceUrl) {
+        void openWithdrawalInvoice(json.data.invoiceUrl).catch(() => {
           toast.error('Could not open invoice');
         });
       }
@@ -786,11 +641,11 @@ export default function AdminInitiatePayoutModal({
   const handlePinVerified = async (verifiedPin: string) => {
     const confirmed = await confirmDialog({
       title: 'Initiate payout?',
-      message: showJasonPayoutBanner
-        ? `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${displayDateFrom} → ${displayDateTo}? Jason's balance will be reduced by ${formatMoney(jasonDeductionLkr)} for this payout${showNegativeNetPlatformJasonBanner ? ' (includes negative net platform amount funded by Jason)' : ''}.`
+      message: showJasonTopUp
+        ? `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${dateFrom} → ${dateTo}? Jason's balance will be reduced by ${formatMoney(sharedPromo.jasonContributionLkr)} for the shared promotion contribution.`
         : showPlatformContributionBanner
-          ? `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${displayDateFrom} → ${displayDateTo}? Platform commission will be reduced by ${formatMoney(sharedPromo.platformContributionLkr)} for the shared promotion contribution.`
-          : `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${displayDateFrom} → ${displayDateTo}?`,
+          ? `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${dateFrom} → ${dateTo}? Platform commission will be reduced by ${formatMoney(sharedPromo.platformContributionLkr)} for the shared promotion contribution.`
+          : `Pay ${formatMoney(payTotalLkr)} to ${branchName} for period ${dateFrom} → ${dateTo}?`,
       confirmLabel: 'Yes, pay',
       cancelLabel: 'Cancel',
     });
@@ -808,8 +663,8 @@ export default function AdminInitiatePayoutModal({
       toast.error(payDisabledNote);
       return;
     }
-    if (!availableCoversOnlineWalletDebit(availableLkr, onlineWalletDebitLkr)) {
-      toast.error('Available to withdraw must cover the online wallet amount for this payout');
+    if (!availableCoversFinalPayout(availableLkr, branchWalletNetLkr)) {
+      toast.error('Available to withdraw must cover the branch net payout for this period');
       return;
     }
     if (!checkValid) {
@@ -855,11 +710,9 @@ export default function AdminInitiatePayoutModal({
               <p className="mt-1 text-[15px] font-medium text-[#64748b] dark:text-slate-400">
                 Paying {branchName} · Available to withdraw:{' '}
                 <span className="font-bold text-[#2563eb]">
-                  {walletSummaryLoading
-                    ? '…'
-                    : `LKR ${formatMoneyAmount(availableLkr)}`}
+                  LKR {formatMoneyAmount(availableLkr)}
                 </span>
-                {availableAfterPayoutLkr != null && netPayoutFinalPayLkr > 0 && (
+                {availableAfterPayoutLkr != null && branchWalletNetLkr > 0 && (
                   <>
                     {' '}
                     · After net payout:{' '}
@@ -874,7 +727,7 @@ export default function AdminInitiatePayoutModal({
                   <div className="flex items-center gap-2 rounded-full border border-[#cbd5e1] dark:border-slate-600 bg-[#f8fafc] dark:bg-slate-800 px-3 py-1.5">
                     <CalendarRange size={16} className="text-[#3b82f6]" />
                     <span>
-                      {formatBiweeklyPeriodLabel(displayDateFrom, displayDateTo)} · {displayPeriodDays} days
+                      {formatBiweeklyPeriodLabel(dateFrom, dateTo)} · {periodDays} days
                       {duePeriodLocked ? ' · from Payouts Due' : ''}
                     </span>
                   </div>
@@ -938,25 +791,6 @@ export default function AdminInitiatePayoutModal({
                 rangeReady &&
                 channelBreakdownHasSalesActivity(channelPreview.breakdown) && (
                 <ChannelSalesTable breakdown={channelPreview.breakdown} className="mb-4" />
-              )}
-
-              {showJasonPayoutBanner &&
-                !showNegativeNetPlatformJasonBanner &&
-                !previewLoading && (
-                <div className="mb-4 flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px] text-[#1e293b] dark:text-slate-100">
-                  <AlertCircle size={18} className="mt-0.5 shrink-0 text-amber-600" />
-                  <p>
-                    <span className="font-bold">Jason investment: </span>
-                    LKR {formatMoneyAmount(jasonDeductionLkr)} will be deducted from Jason&apos;s
-                    balance when you complete this payout.
-                    {jasonNetBalanceLkr != null && !jasonBalanceLoading && (
-                      <>
-                        {' '}
-                        Current Jason balance: LKR {formatMoneyAmount(jasonNetBalanceLkr)}.
-                      </>
-                    )}
-                  </p>
-                </div>
               )}
 
               {!previewLoading && payoutBreakdownPanelProps && payTotalLkr > 0 && (

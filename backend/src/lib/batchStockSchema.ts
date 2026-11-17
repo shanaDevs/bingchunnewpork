@@ -5,7 +5,6 @@ import {
   ensureEnumTypeIfMissing,
   ensureEnumValueIfMissing,
 } from './schemaPatch';
-import { ensureStockAuditAdminUserNameColumn } from './stockAuditSchema';
 import { logger } from '../utils/logger';
 
 let ensured = false;
@@ -29,7 +28,6 @@ export async function ensureBatchStockSchema(): Promise<void> {
     await addColumnIfMissing('orders', 'channel', "TEXT NOT NULL DEFAULT 'WEB'");
 
     await addColumnIfMissing('stock_audit_logs', 'batchId', 'VARCHAR(191) NULL');
-    await ensureStockAuditAdminUserNameColumn();
     await createIndexIfMissing('stock_audit_logs', 'stock_audit_logs_batchId_idx', '`batchId`');
     await createUniqueIndexIfMissing(
       'stock_batches',

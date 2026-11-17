@@ -65,7 +65,6 @@ export function isAllBranchView(admin: AdminSession | null): boolean {
 /** First page inside the main admin. Delivery admins open delivery operations. */
 export function adminHomeHref(admin: Pick<AdminSession, 'role'> | null): string {
   if (admin?.role === 'DELIVERY_ADMIN') return '/admin/delivery';
-  if (admin?.role === 'CASHIER') return '/admin/orders';
   return '/admin';
 }
 

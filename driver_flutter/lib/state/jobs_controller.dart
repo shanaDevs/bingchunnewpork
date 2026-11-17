@@ -4,6 +4,9 @@ import 'package:flutter/foundation.dart';
 
 import '../core/app_container.dart';
 import '../core/events.dart';
+import '../core/format.dart';
+import '../core/local_profile.dart';
+import '../core/offer_outcomes.dart';
 import '../data/json.dart';
 import '../data/models/delivery_job.dart';
 import '../data/models/driver.dart';
@@ -12,7 +15,57 @@ import '../tracking/location_tracker.dart';
 import '../l10n/l10n.dart';
 
 /// Pre-pickup vehicle/order failure is blocked — reject the claimed job instead.
+/// The last active-job detail Home loaded, so screens pushed above the shell (which can't
+/// see [JobsController]) can open with data instead of a blank spinner.
+class ActiveJobCache {
+  ActiveJobCache._();
+  static DeliveryJobDetail? _detail;
+  static void put(DeliveryJobDetail? detail) => _detail = detail;
+  static DeliveryJobDetail? peek(String jobId) => _detail?.id == jobId ? _detail : null;
+}
+
 const rejectJobBeforeFailureMessage = 'reject job if you want to remove the accepted job';
+
+/// Why a breakdown can't be reported yet, or null when the ride is running (server only
+/// accepts IN_PROGRESS / RETURNING rides). [active] is the rider's active job, if any.
+String? breakdownBlockedMessage(DeliveryJobDetail? active) {
+  if (active == null) return null; // let the server decide (job may be held elsewhere)
+  // RETURNING: the server closes the ride even when every stop is done (the rider just
+  // can't get back to the branch), so it is always reportable.
+  if (active.status == 'RETURNING') return null;
+  if (active.status == 'IN_PROGRESS') {
+    // Mid-run the server needs at least one stop still to deliver; with none left the ride
+    // moves to RETURNING on its own.
+    if (active.orders.isNotEmpty && active.orders.every((o) => !o.isPending)) {
+      return tr(
+        'All stops on this ride are already finished, so there is nothing left to hand over. Return to the branch to complete it.',
+      );
+    }
+    return null;
+  }
+  if (active.canReject) {
+    return tr(
+      "You haven't picked up this ride's orders yet, so there is nothing to hand over. Reject the job instead if you can't do it.",
+    );
+  }
+  return tr('Start the delivery run first. A breakdown can only be reported once the ride is in progress.');
+}
+
+/// Saves the customer name + area of the stops still to deliver on [job], so the Breakdown
+/// & Handover screen can list them (the handover API sends only order numbers).
+Future<void> saveBreakdownOrderSnapshot(String jobId, DeliveryJobDetail? job) async {
+  if (job == null || job.id != jobId) return;
+  String areaOf(JobOrder o) {
+    for (final s in [o.city, o.district]) {
+      if (s.trim().isNotEmpty) return s.trim();
+    }
+    return Format.shortAddress(o.addressLine);
+  }
+
+  await LocalProfile.instance.saveBreakdownOrders(jobId, {
+    for (final o in job.orders) o.orderId: (name: o.customerName.trim(), area: areaOf(o)),
+  });
+}
 
 const _heldStatuses = {'IN_PROGRESS', 'ASSIGNED', 'RETURNING', 'QUEUED'};
 const _blockingStatuses = {'IN_PROGRESS', 'ASSIGNED', 'QUEUED'};
@@ -28,10 +81,41 @@ Future<DriverFix> requireFix(AppContainer c) async {
 /// (ASSIGNED / IN_PROGRESS / QUEUED). The API would otherwise accept it as QUEUED.
 /// Checks the server so a ride claimed from another surface (alert card, notification) counts.
 Future<void> ensureNoUnfinishedRide(AppContainer c, {String? claimingJobId}) async {
+  // An open vehicle breakdown blocks every claim path (job list, alert card, notification).
+  // The server refuses too; a failed lookup leaves the decision to it.
+  DriverProfile? me;
+  try {
+    me = await c.authRepository.getMe();
+  } catch (_) {}
+  if (me != null && me.hasOpenBreakdown) throw StateError(vehicleBreakdownOpenMessage());
   final held = await c.jobsRepository.listJobs();
   if (held.any((j) => j.id != claimingJobId && _blockingStatuses.contains(j.status))) {
     throw StateError(tr('Finish your current delivery before claiming another job'));
   }
+}
+
+/// Thrown when the rider tries to pick up / start a ride while an earlier ride is still
+/// RETURNING (all orders handled, but "Complete Ride" never tapped).
+class PreviousRideIncompleteException implements Exception {
+  const PreviousRideIncompleteException(this.job);
+  final JobSummary job;
+
+  @override
+  String toString() => tr('Complete your previous ride first');
+}
+
+/// Reminder gate for pickup / start of [nextJobId]: throws [PreviousRideIncompleteException]
+/// while another of the rider's rides is still RETURNING. A failed lookup never blocks the
+/// rider — the server stays the final judge.
+Future<void> ensurePreviousRideCompleted(AppContainer c, String nextJobId) async {
+  List<JobSummary> held;
+  try {
+    held = await c.jobsRepository.listJobs();
+  } catch (_) {
+    return;
+  }
+  final previous = held.where((j) => j.id != nextJobId && j.status == 'RETURNING').firstOrNull;
+  if (previous != null) throw PreviousRideIncompleteException(previous);
 }
 
 /// New-job rings stay muted while any job is ASSIGNED/IN_PROGRESS/QUEUED.
@@ -51,6 +135,8 @@ class JobsController extends ChangeNotifier {
     _c.deliverySocket.on('newDeliveryJob', _onNewJob);
     _c.deliverySocket.on('jobAssignedToDriver', _onJobAssigned);
     _c.deliverySocket.on('deliveryJobClaimed', _onJobClaimed);
+    _c.deliverySocket.on('handoverRiderAssigned', _onHandoverRiderAssigned);
+    _c.deliverySocket.on('vehicleBreakdownCleared', _onVehicleBreakdownCleared);
     _refreshSub = JobRefreshBus.events.listen((_) => load());
   }
 
@@ -67,6 +153,10 @@ class JobsController extends ChangeNotifier {
   List<JobSummary> jobs = const [];
   DriverProfile? profile;
   String? error;
+
+  /// The last [load] failed outright. Only this (not a refused duty change or claim)
+  /// may turn Home into the full-screen error state.
+  bool loadFailed = false;
   String? banner;
 
   /// Non-fatal note that survives a background [load].
@@ -76,6 +166,10 @@ class JobsController extends ChangeNotifier {
   String? historyError;
   bool historyLoaded = false;
   DeliveryJobDetail? activeJobDetail;
+
+  /// Detail for every held run (a rider can hold a returning ride and a new pickup at once),
+  /// so each Home card shows its own phase. Keyed by job id.
+  Map<String, DeliveryJobDetail> activeDetails = const {};
 
   final _newJobEvents = StreamController<void>.broadcast();
 
@@ -95,6 +189,27 @@ class JobsController extends ChangeNotifier {
   }
 
   void _onJobAssigned(dynamic _) => load();
+
+  /// Socket payloads arrive as a map or a one-element list.
+  static Json? _payload(dynamic raw) {
+    final p = raw is List && raw.isNotEmpty ? raw.first : raw;
+    return p is Map ? asJson(p) : null;
+  }
+
+  /// Admin assigned a replacement rider to this rider's broken-down ride.
+  void _onHandoverRiderAssigned(dynamic raw) {
+    final jobId = str(_payload(raw) ?? const {}, 'originalJobId');
+    BreakdownBus.changed(jobId);
+    loadHistory(force: true);
+  }
+
+  /// The breakdown was cleared (by this rider elsewhere or by admin): they may work again.
+  void _onVehicleBreakdownCleared(dynamic raw) {
+    final p = _payload(raw) ?? const {};
+    if (str(p, 'driverId').isNotEmpty && str(p, 'driverId') != profile?.id) return;
+    BreakdownBus.changed(str(p, 'jobId'));
+    refreshProfile();
+  }
 
   void _onJobClaimed(dynamic raw) {
     try {
@@ -125,27 +240,52 @@ class JobsController extends ChangeNotifier {
         p = profile;
       }
       final list = await _c.jobsRepository.listJobs();
-      final active = list.where((j) => _heldStatuses.contains(j.status)).firstOrNull;
-      DeliveryJobDetail? detail;
-      if (active != null) {
-        try {
-          detail = await _c.jobsRepository.getJob(active.id);
-        } catch (_) {
-          detail = activeJobDetail;
-        }
+      final held = list.where((j) => _heldStatuses.contains(j.status)).toList();
+      final fetched = await Future.wait(
+        held.map((j) async {
+          try {
+            return await _c.jobsRepository.getJob(j.id);
+          } catch (_) {
+            // Keep the last known detail rather than dropping the card back to a guess.
+            return activeDetails[j.id] ?? (activeJobDetail?.id == j.id ? activeJobDetail : null);
+          }
+        }),
+      );
+      final details = <String, DeliveryJobDetail>{
+        for (final d in fetched.nonNulls) d.id: d,
+      };
+      // Keep customer names for every held ride: the handover screen needs them if the ride
+      // breaks down, and the handover API sends only order numbers.
+      for (final d in details.values) {
+        unawaited(saveBreakdownOrderSnapshot(d.id, d));
       }
+      final active = held.firstOrNull;
+      final detail = active == null ? null : details[active.id];
       loading = false;
+      loadFailed = false;
       jobs = list;
+      activeDetails = details;
       activeJobDetail = detail;
+      ActiveJobCache.put(detail);
       profile = p;
       banner = (p != null && !p.isOnline) ? tr('Go online to receive jobs') : null;
       _emit();
-      if (p != null && p.isOnline) {
+      if (p != null && p.hasOpenBreakdown) {
+        // An open breakdown blocks new work even if the server still says ONLINE
+        // (e.g. a breakdown opened before the duty change): stop ringing for new jobs
+        // and idle GPS, but keep the socket for handover updates.
+        if (_c.alertService.isRunning) {
+          await _c.alertService.stop();
+          await _c.locationTracker.stop();
+        }
+        _c.deliverySocket.connect();
+      } else if (p != null && p.isOnline) {
         _ensureSocketPool(p);
         _c.alertService.start();
       }
     } catch (e) {
       loading = false;
+      loadFailed = true;
       error = errorMessage(e, tr('Failed to load jobs'));
       _emit();
     }
@@ -202,35 +342,73 @@ class JobsController extends ChangeNotifier {
   Future<List<DriverShiftEntry>> getShiftHistory() => _c.authRepository.getShiftHistory();
 
   /// Throws on failure so the sheet can show the message.
-  Future<void> createBranchRequest(String type, String toStoreId, String? reason) async {
-    await _c.authRepository.createBranchRequest(type, toStoreId, reason: reason);
+  Future<void> createBranchRequest(String type, String toStoreId, String? reason, {String? fromStoreId}) async {
+    await _c.authRepository.createBranchRequest(type, toStoreId, reason: reason, fromStoreId: fromStoreId);
     load();
   }
 
   /// Driver's vehicle broke down mid-ride — flag it (with location) so admin can send a replacement.
   Future<void> reportVehicleFailure(String? note) async {
     final active = await _c.jobsRepository.getActiveJob();
-    if (active?.canReject ?? false) throw StateError(rejectJobBeforeFailureMessage);
+    final notRunning = breakdownBlockedMessage(active);
+    if (notRunning != null) throw StateError(notRunning);
     final fix = await _c.locationTracker.getCurrentLocation();
     if (fix == null) throw StateError(tr('Could not get your location. Enable GPS and try again.'));
-    final activeJobId =
-        active?.id ??
-        jobs
-            .where((j) => j.status == 'IN_PROGRESS' || j.status == 'ASSIGNED' || j.status == 'RETURNING')
-            .firstOrNull
-            ?.id;
-    await _c.jobsRepository.reportVehicleFailure(fix.lat, fix.lng, note: note);
+    final runningJobId =
+        active?.id ?? jobs.where((j) => j.status == 'IN_PROGRESS' || j.status == 'RETURNING').firstOrNull?.id;
+    final result = await _c.jobsRepository.reportVehicleFailure(fix.lat, fix.lng, note: note, jobId: runningJobId);
+    final activeJobId = (result?.jobId.isNotEmpty ?? false) ? result!.jobId : runningJobId;
+    await LocalProfile.instance.recordBreakdown(note: note, jobId: activeJobId, lat: fix.lat, lng: fix.lng);
+    if (activeJobId != null) await saveBreakdownOrderSnapshot(activeJobId, active ?? activeDetails[activeJobId]);
     if (activeJobId != null) {
       jobs = jobs.where((j) => j.id != activeJobId).toList();
       _emit();
     }
     await _c.alertService.stopTracking();
-    load();
     loadHistory(force: true);
     if (activeJobId != null) {
       JobRefreshBus.refresh(activeJobId);
       JobRefreshBus.dropRide(activeJobId);
     }
+    // Picks up the server's OFF_DUTY + open breakdown (see [load]).
+    await load();
+  }
+
+  /// The stranded rider confirms their vehicle works again ("I'm back on the road"). Clears
+  /// the open breakdown so they can go on duty. Throws with a message to show on failure.
+  Future<void> backOnRoad(String jobId) async {
+    try {
+      try {
+        await _c.jobsRepository.confirmBackOnRoad(jobId);
+      } on ApiException catch (e) {
+        // 404: the server has no open breakdown (e.g. reported before breakdowns were
+        // tracked) — nothing to clear. 400: this ride's breakdown is closed but another is
+        // open — clear that one.
+        if (e.status == 404) {
+        } else if (e.status == 400) {
+          try {
+            await _c.jobsRepository.markVehicleFixed();
+          } on ApiException catch (e2) {
+            if (e2.status != 404) rethrow;
+          }
+        } else {
+          rethrow;
+        }
+      }
+    } on ApiException catch (e) {
+      // Don't show a bare "Internal server error" for a server fault.
+      if (e.status >= 500) {
+        throw StateError(
+          tr("Couldn't update your breakdown right now. Try again in a moment, or ask support to clear it."),
+        );
+      }
+      rethrow;
+    }
+    final p = profile;
+    if (p != null) profile = p.copyWith(clearVehicleBreakdown: true);
+    _emit();
+    await refreshProfile();
+    loadHistory(force: true);
   }
 
   /// While online, periodically re-fetch so missed socket events still show jobs.
@@ -254,6 +432,12 @@ class JobsController extends ChangeNotifier {
 
   Future<void> setOnline(bool online) async {
     if (dutyLoading) return;
+    // The server refuses ONLINE while a breakdown is open — say why without a round trip.
+    if (online && (profile?.hasOpenBreakdown ?? false)) {
+      error = vehicleBreakdownOpenMessage();
+      _emit();
+      return;
+    }
     dutyLoading = true;
     error = null;
     _emit();
@@ -282,8 +466,10 @@ class JobsController extends ChangeNotifier {
       dutyLoading = false;
       error = (e.code == 'ACTIVE_JOB' || e.message.toUpperCase().contains('ACTIVE_JOB'))
           ? tr('Cannot go off duty while a delivery run is active. Finish or hand over the run first.')
-          : e.message;
+          : errorMessage(e);
       _emit();
+      // Show the breakdown banner the server knows about.
+      if (e.isVehicleBreakdownOpen) refreshProfile();
     } catch (e) {
       dutyLoading = false;
       error = errorMessage(e, tr('Duty update failed'));
@@ -293,6 +479,11 @@ class JobsController extends ChangeNotifier {
 
   /// Returns true when the claimed job is live (not queued) so the caller can open it.
   Future<bool> claim(String jobId) async {
+    if (profile?.hasOpenBreakdown ?? false) {
+      error = vehicleBreakdownOpenMessage();
+      _emit();
+      return false;
+    }
     if (!isOnline) {
       error = tr('Go online to claim jobs');
       _emit();
@@ -312,6 +503,7 @@ class JobsController extends ChangeNotifier {
       // The cached list can be stale (e.g. a ride just accepted from the alert card).
       await ensureNoUnfinishedRide(_c, claimingJobId: jobId);
       final job = await _c.jobsRepository.claimJob(jobId);
+      OfferOutcomes.instance.record(jobId, OfferOutcome.accepted);
       final queued = job.status == 'QUEUED';
       claimingId = null;
       notice = queued ? queuedNotice : null;
@@ -330,6 +522,7 @@ class JobsController extends ChangeNotifier {
     } on ApiException catch (e) {
       // Claiming a second run while one is live queues it — a success, not a failure.
       if (e.code == 'QUEUED' || e.code == 'JOB_QUEUED') {
+        OfferOutcomes.instance.record(jobId, OfferOutcome.accepted);
         claimingId = null;
         notice = queuedNotice;
         _emit();
@@ -337,8 +530,9 @@ class JobsController extends ChangeNotifier {
         load();
       } else {
         claimingId = null;
-        error = e.message;
+        error = errorMessage(e);
         _emit();
+        if (e.isVehicleBreakdownOpen) refreshProfile();
       }
       return false;
     } catch (e) {
@@ -359,6 +553,7 @@ class JobsController extends ChangeNotifier {
     _c.alertService.beginPostRejectHold(jobId, storeId);
     try {
       await _c.jobsRepository.rejectJob(jobId, reason);
+      OfferOutcomes.instance.record(jobId, OfferOutcome.declined);
       _c.alertService.clearSeen(jobId);
       await refreshAlertEligibility(_c);
       claimingId = null;
@@ -429,6 +624,8 @@ class JobsController extends ChangeNotifier {
     _c.deliverySocket.off('newDeliveryJob', _onNewJob);
     _c.deliverySocket.off('jobAssignedToDriver', _onJobAssigned);
     _c.deliverySocket.off('deliveryJobClaimed', _onJobClaimed);
+    _c.deliverySocket.off('handoverRiderAssigned', _onHandoverRiderAssigned);
+    _c.deliverySocket.off('vehicleBreakdownCleared', _onVehicleBreakdownCleared);
     _refreshSub?.cancel();
     _pollTimer?.cancel();
     _newJobEvents.close();

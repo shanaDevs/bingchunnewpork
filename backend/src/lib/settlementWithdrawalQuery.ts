@@ -1,4 +1,4 @@
-import type { PayoutCycleStage, Prisma, WithdrawalStatus } from '@prisma/client';
+import type { Prisma, WithdrawalStatus } from '@prisma/client';
 import { decimalFieldToCentsNumber } from './moneyDecimal';
 import { prisma } from './prisma';
 import { ensureCommissionSettlementTable } from './settlementSchema';
@@ -20,7 +20,6 @@ export type WithdrawalForDartCodesSettlement = {
   isAdvance: boolean;
   createdAt: string;
   hasSettlement: boolean;
-  cycleStage: PayoutCycleStage;
 };
 
 function toDateStr(d: Date): string {
@@ -39,7 +38,6 @@ function mapRow(row: {
   remarks: string | null;
   isAdvance: boolean;
   createdAt: Date;
-  cycleStage: PayoutCycleStage;
 }): WithdrawalForDartCodesSettlement {
   const amountCents = decimalFieldToCentsNumber(row.amount);
   const finalPayoutAmount = resolveFinalPayoutAmountFromBreakdown(row.breakdown, amountCents);
@@ -57,7 +55,6 @@ function mapRow(row: {
     isAdvance: row.isAdvance,
     createdAt: row.createdAt.toISOString(),
     hasSettlement: false,
-    cycleStage: row.cycleStage,
   };
 }
 

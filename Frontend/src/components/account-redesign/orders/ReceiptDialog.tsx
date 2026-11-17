@@ -6,7 +6,6 @@ import { useEffect, useId, useRef } from "react";
 import { homeFontVariables } from "@/components/home-redesign/fonts";
 import { cn } from "@/components/home-redesign/lib/cn";
 import { api } from "@/lib/api";
-import { orderApiPath, rememberOrderTrackToken } from "@/lib/orderTrackSession";
 import { getSiteOrigin } from "@/lib/orderLinks";
 import type { Order } from "@/types";
 import { focusRing } from "../accountUi";
@@ -24,11 +23,7 @@ export function ReceiptDialog({ orderNumber, onClose }: { orderNumber: string; o
   const id = useId();
   const { data: order, isLoading, isError } = useQuery<Order>({
     queryKey: ["order", orderNumber, "receipt"],
-    queryFn: async () => {
-      const data = await api.get<Order>(orderApiPath(orderNumber), false);
-      if (data?.orderNumber && data.trackToken) rememberOrderTrackToken(data.orderNumber, data.trackToken);
-      return data;
-    },
+    queryFn: () => api.get<Order>(`/orders/${encodeURIComponent(orderNumber)}`, true),
   });
 
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -48,16 +43,6 @@ export function ReceiptDialog({ orderNumber, onClose }: { orderNumber: string; o
   }, []);
 
   const roundButton = cn("grid size-10 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-700 transition-colors hover:bg-brand-100", focusRing);
-
-  const printReceipt = () => {
-    document.documentElement.classList.add("bc-printing-receipt");
-    const cleanup = () => {
-      document.documentElement.classList.remove("bc-printing-receipt");
-      window.removeEventListener("afterprint", cleanup);
-    };
-    window.addEventListener("afterprint", cleanup);
-    window.print();
-  };
 
   return (
     <dialog
@@ -97,8 +82,8 @@ export function ReceiptDialog({ orderNumber, onClose }: { orderNumber: string; o
               </button>
               <button
                 type="button"
-                onClick={printReceipt}
-                className={cn("inline-flex shrink-0 items-center gap-2 rounded-full bg-brand-600 px-4 py-2.5 text-sm font-semibold text-snow transition-colors hover:bg-brand-700", focusRing)}
+                onClick={() => window.print()}
+                className={cn("inline-flex shrink-0 items-center gap-2 rounded-full bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-700", focusRing)}
               >
                 <Printer className="size-4" aria-hidden="true" />
                 Print

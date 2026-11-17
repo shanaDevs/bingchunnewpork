@@ -185,8 +185,8 @@ export function resolveChannelDeliveryFeeLkr(breakdown: SettlementBreakdown | nu
 }
 
 /**
- * Period online revenue subtotals only (pickup cash/card, convenience, delivery fees excluded).
- * Initiate Payout “Available to withdraw” uses wallet all-time balance (online − branch receivable).
+ * Initiate Payout header: Pickup Online + Delivery Online net amounts only
+ * (pickup cash/card, convenience, and delivery fees excluded).
  */
 export function computeAvailableToWithdrawFromChannelBreakdown(
   breakdown: SettlementBreakdown,
@@ -315,27 +315,6 @@ export function formatOnlinePaymentsCollectedHint(
 ): string {
   const amt = formatMoneyAmount;
   return `(Pickup online ${amt(components.pickupRevenueLkr)} + Delivery online ${amt(components.deliveryRevenueLkr)})`;
-}
-
-/** Pickup online + delivery online subtotal before discounts (Payout 1 channel table Subtotal column). */
-export function sumOnlineSubtotalBeforeDiscount(breakdown: SettlementBreakdown): number {
-  const pickup = breakdown.pickupOnline;
-  const delivery = breakdown.deliveryOnline;
-  return (
-    (pickup.subtotalBeforeDiscount ?? pickup.revenueSubtotal ?? 0) +
-    (delivery.subtotalBeforeDiscount ?? delivery.revenueSubtotal ?? 0)
-  );
-}
-
-export function resolveFirstPayoutOnlineSubtotalComponents(
-  breakdown: SettlementBreakdown,
-): { pickupSubtotalLkr: number; deliverySubtotalLkr: number; totalLkr: number } {
-  const components = resolveOnlinePaymentsCollectedComponents(breakdown);
-  return {
-    pickupSubtotalLkr: components.pickupRevenueLkr,
-    deliverySubtotalLkr: components.deliveryRevenueLkr,
-    totalLkr: components.revenueSubtotalLkr,
-  };
 }
 
 /** Pickup online + delivery online revenue subtotals only (excludes delivery & convenience fees). */

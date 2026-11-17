@@ -71,8 +71,6 @@ export interface CartItem {
   productId: string;
   product: { id: string; name: string; imageUrl?: string; basePrice: number };
   size: 'REGULAR' | 'LARGE';
-  sugarLevel?: 'FIFTY' | 'HUNDRED' | null;
-  iceLevel?: 'LESS_ICE' | 'NORMAL_ICE' | null;
   quantity: number;
   unitPrice: number;
   toppings: { topping: Topping }[];
@@ -304,7 +302,6 @@ export interface Order {
     createdAt: string;
   } | null;
   refund?: Refund;
-  cancelledBy?: string | null;
 }
 
 export interface OrderItem {
@@ -313,8 +310,6 @@ export interface OrderItem {
   productName: string;
   product?: { imageUrl?: string | null };
   size: string;
-  sugarLevel?: 'FIFTY' | 'HUNDRED' | null;
-  iceLevel?: 'LESS_ICE' | 'NORMAL_ICE' | null;
   quantity: number;
   unitPrice: number;
   totalPrice: number;

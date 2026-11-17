@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../theme/bc_theme.dart';
-import 'run_kit.dart';
 import 'surfaces.dart';
 import '../../l10n/l10n.dart';
 
@@ -15,8 +14,9 @@ class BcErrorState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
+    // Centred, but scrolls instead of overflowing when the box it's given is short.
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -24,20 +24,20 @@ class BcErrorState extends StatelessWidget {
             Container(
               width: 92,
               height: 92,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: c.danger.withValues(alpha: 0.08)),
+              decoration: BoxDecoration(shape: BoxShape.circle, color: c.errorSoftBg),
               alignment: Alignment.center,
               child: Container(
                 width: 64,
                 height: 64,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: c.danger.withValues(alpha: 0.14)),
-                child: Icon(Icons.cloud_off_rounded, color: c.danger, size: 32),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: c.errorSoftBg),
+                child: Icon(Icons.cloud_off_rounded, color: c.errorStrong, size: 32),
               ),
             ),
             const SizedBox(height: 14),
             Text(
               tr('Something went wrong'),
               textAlign: TextAlign.center,
-              style: TextStyle(color: c.text, fontSize: 18, fontWeight: FontWeight.w800),
+              style: BcType.subtitle.copyWith(color: c.foreground),
             ),
             const SizedBox(height: 6),
             Text(
@@ -45,12 +45,22 @@ class BcErrorState extends StatelessWidget {
               textAlign: TextAlign.center,
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: c.textMuted, fontSize: 13.5, height: 1.4),
+              style: TextStyle(color: c.mutedForeground, fontSize: 14, height: 1.4),
             ),
             const SizedBox(height: 18),
             SizedBox(
               width: 200,
-              child: RunPrimaryButton(label: tr('Retry'), icon: Icons.refresh_rounded, onPressed: onRetry),
+              child: FilledButton.icon(
+                onPressed: onRetry,
+                style: FilledButton.styleFrom(
+                  backgroundColor: c.action,
+                  foregroundColor: c.actionForeground,
+                  minimumSize: const Size(0, 52),
+                  shape: const StadiumBorder(),
+                ),
+                icon: const Icon(Icons.refresh_rounded, size: 20),
+                label: Text(tr('Retry'), style: BcType.button),
+              ),
             ),
           ],
         ),
@@ -88,17 +98,15 @@ class BcInlineBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final col = color ?? c.danger;
+    final col = color ?? c.errorStrong;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
       decoration: BoxDecoration(
-        color: c.card,
+        color: c.surface,
         borderRadius: BorderRadius.circular(BcRadius.card),
         border: Border.all(color: col.withValues(alpha: 0.35)),
-        boxShadow: c.cardShadow.a == 0
-            ? null
-            : [BoxShadow(color: c.cardShadow, blurRadius: 12, offset: const Offset(0, 4))],
+        boxShadow: bcShadow(c),
       ),
       child: Row(
         children: [
@@ -112,7 +120,7 @@ class BcInlineBanner extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: TextStyle(color: c.text, fontSize: 13, fontWeight: FontWeight.w500, height: 1.35),
+              style: TextStyle(color: c.foreground, fontSize: 13, fontWeight: FontWeight.w500, height: 1.35),
             ),
           ),
           if (onClose != null)
@@ -120,7 +128,7 @@ class BcInlineBanner extends StatelessWidget {
               tooltip: tr('Close'),
               visualDensity: VisualDensity.compact,
               onPressed: onClose,
-              icon: Icon(Icons.close_rounded, size: 18, color: c.textMuted),
+              icon: Icon(Icons.close_rounded, size: 18, color: c.mutedForeground),
             ),
         ],
       ),

@@ -29,6 +29,8 @@ import type { DateRange } from 'react-day-picker';
 import { shortBranchName } from '@/lib/branchName';
 import { buildBrandAnalyticsUrl } from '@/lib/brandSalesReportApi';
 
+type Period = Exclude<DashboardPeriod, 'custom'>;
+
 function adminApi<T>(endpoint: string): Promise<T> {
     return fetch(`${getApiBaseUrl()}${endpoint}`, {
     headers: adminAuthHeaders(),
@@ -224,10 +226,15 @@ export default function AdminDashboard() {
     placeholderData: keepPreviousData,
   });
 
-  const handlePeriodChange = (next: DashboardPeriod) => {
+  const handlePresetPeriod = (next: Period) => {
     setPeriod(next);
-    if (next !== 'custom') {
-      setCustomRange(undefined);
+    setCustomRange(undefined);
+  };
+
+  const handleCustomRangeChange = (range: DateRange | undefined) => {
+    setCustomRange(range);
+    if (range?.from && range?.to) {
+      setPeriod('custom');
     }
   };
 
@@ -252,8 +259,8 @@ export default function AdminDashboard() {
           <DashboardPeriodFilter
             period={period}
             customRange={customRange}
-            onPeriodChange={handlePeriodChange}
-            onCustomRangeChange={setCustomRange}
+            onPeriodChange={handlePresetPeriod}
+            onCustomRangeChange={handleCustomRangeChange}
             compact={superMode}
           />
           <button

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { withAdminCredentials } from '@/lib/adminSession';
 
@@ -20,11 +20,7 @@ import {
   channelBreakdownHasSalesActivity,
   parseWithdrawalBreakdown,
   parseWithdrawalBreakdownFromNetPreview,
-  mergeLivePayoutPreviewIntoStoredBreakdown,
   mergeSharedPromoContributionFieldsIntoBreakdown,
-  isWithdrawalFinancialSnapshotLocked,
-  resolveFirstPayoutGatewayBaseLkr,
-  resolveFirstPayoutBranchWalletNetLkr,
   extractSharedPromoLkrFromBreakdown,
   resolvePlatformCommissionForPeriodLkr,
   resolvePeriodNetLkrFromBreakdown,
@@ -37,15 +33,14 @@ import {
   type WithdrawalBreakdown,
   withdrawalBreakdownToLkr,
 } from '@/components/admin/settlementTypes';
-import { resolvePayoutCycleDisplayRange } from '@/components/admin/payoutSecondCycleDisplayRange';
 import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
 import { withdrawalStatusLabel } from '@/components/admin/withdrawalStatusUi';
 import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
 import { centsToLkr, paybackEnabledFromBreakdown, toDateInputValue } from '@/lib/walletUtils';
 import {
+  addDaysToDateStr,
   formatBiweeklyPeriodLabel,
   isValidPayoutRange,
-  resolvePayoutPeriodIncompleteState,
   rollingPeriodLabel,
   todayDateStr,
   type RollingPeriodOption,
@@ -68,8 +63,6 @@ type Props = {
   viewWithdrawal?: WithdrawalRow | null;
   /** Synthetic 15-day period view: skip refetch by id and show Pending (not Pending Approval). */
   viewPeriodOnly?: boolean;
-  /** Override displayed date range / day count (e.g. full 30-day window for second-cycle payout view). */
-  viewPeriodDisplay?: { from: string; to: string; days: number } | null;
 };
 
 function isValidRange(from: string, to: string): boolean {
@@ -172,7 +165,6 @@ export default function WalletWithdrawalModal({
   showGatewayFees = false,
   viewWithdrawal = null,
   viewPeriodOnly = false,
-  viewPeriodDisplay = null,
 }: Props) {
   const isViewMode = viewWithdrawal != null;
   const [portalReady, setPortalReady] = useState(false);
@@ -313,35 +305,6 @@ export default function WalletWithdrawalModal({
     const to = toDateInputValue(viewWithdrawal.periodTo);
     const parsed = parseWithdrawalBreakdown(viewWithdrawal.breakdown);
     const hasFullSnapshot = parsed != null && !!parsed.channelBreakdown;
-    const snapshotLocked = isWithdrawalFinancialSnapshotLocked(viewWithdrawal.status);
-
-    if (snapshotLocked) {
-      let cancelled = false;
-      setViewSnapshotLoading(false);
-      const qs = viewWithdrawal.storeId
-        ? `?storeId=${encodeURIComponent(viewWithdrawal.storeId)}`
-        : '';
-
-      fetch(
-        `${apiBase}/admin/wallet/withdrawals/${encodeURIComponent(viewWithdrawal.id)}${qs}`,
-        withAdminCredentials(),
-      )
-        .then(async (res) => {
-          const json = await res.json();
-          if (!res.ok || cancelled) return;
-          const fresh = json.data as WithdrawalRow | undefined;
-          if (!fresh || fresh.id !== viewWithdrawal.id) return;
-          setResolvedViewWithdrawal(fresh);
-          applyViewWithdrawalSnapshot(fresh);
-        })
-        .catch(() => {
-          // keep table-row snapshot
-        });
-
-      return () => {
-        cancelled = true;
-      };
-    }
 
     if (viewPeriodOnly && hasFullSnapshot) {
       if (!from || !to || !parsed) {
@@ -395,7 +358,7 @@ export default function WalletWithdrawalModal({
             const storedParsed = parseWithdrawalBreakdown(viewWithdrawal.breakdown);
             if (storedParsed?.grossAmount != null && previewBreakdown) {
               setBreakdown(
-                mergeLivePayoutPreviewIntoStoredBreakdown(storedParsed, previewBreakdown),
+                mergeSharedPromoContributionFieldsIntoBreakdown(storedParsed, previewBreakdown),
               );
               setPeriodNet(resolvePeriodNetLkrFromBreakdown(storedParsed));
             } else {
@@ -651,15 +614,12 @@ export default function WalletWithdrawalModal({
     : null;
   const branchCommissionLkr =
     channelPreview?.totalCommission ?? breakdownLkr?.commissionFee ?? 0;
-  const platformCommissionLkr =
-    breakdownLkr?.cycleStage === 'FIRST'
-      ? 0
-      : resolvePlatformCommissionForPeriodLkr({
-          commissionLkr: branchCommissionLkr,
-          periodBreakdownLkr: breakdownLkr,
-          paybackEnabled,
-          sharedPromoPlatformLkr: breakdownLkr?.sharedPromoPlatformContributionLkr ?? 0,
-        });
+  const platformCommissionLkr = resolvePlatformCommissionForPeriodLkr({
+    commissionLkr: branchCommissionLkr,
+    periodBreakdownLkr: breakdownLkr,
+    paybackEnabled,
+    sharedPromoPlatformLkr: breakdownLkr?.sharedPromoPlatformContributionLkr ?? 0,
+  });
   const periodNetLkr =
     (breakdown ? resolvePeriodNetLkrFromBreakdown(breakdown) : null) ??
     periodNet;
@@ -677,43 +637,16 @@ export default function WalletWithdrawalModal({
   const showAdvance = advanceAmountLkr > 0;
   const isAdvance = showAdvance;
   const rangeReady = isValidRange(dateFrom, dateTo);
-  const viewCycleBreakdown =
-    breakdown ?? parseWithdrawalBreakdown(activeViewWithdrawal?.breakdown);
-  const viewCycleRange =
-    isViewMode && !viewPeriodDisplay && dateFrom && dateTo
-      ? resolvePayoutCycleDisplayRange({
-          cycleStage: viewCycleBreakdown?.cycleStage ?? activeViewWithdrawal?.cycleStage ?? null,
-          cycleFrom: viewCycleBreakdown?.cycleFrom ?? null,
-          periodFrom: dateFrom,
-          periodTo: dateTo,
-        })
-      : null;
-  const displayDateFrom = viewPeriodDisplay?.from ?? viewCycleRange?.displayFrom ?? dateFrom;
-  const displayDateTo = viewPeriodDisplay?.to ?? viewCycleRange?.displayTo ?? dateTo;
-  const displayPeriodDays = viewPeriodDisplay?.days ?? viewCycleRange?.displayDays ?? periodDays;
-  const displayRangeReady = isValidRange(displayDateFrom, displayDateTo);
-  const breakdownPanelRangeReady = isViewMode ? displayRangeReady : rangeReady;
-  let periodPillLabel: string | null = null;
-  if (isViewMode) {
-    if (displayRangeReady) {
-      const range = formatBiweeklyPeriodLabel(displayDateFrom, displayDateTo);
-      periodPillLabel = displayPeriodDays != null ? `${range} · ${displayPeriodDays} days` : range;
-    }
-  } else if (rangeReady) {
-    const range = formatBiweeklyPeriodLabel(dateFrom, dateTo);
-    periodPillLabel = periodDays != null ? `${range} · ${periodDays} days` : range;
-  }
   const periodInFuture = !!dateTo && dateTo > todayDateStr();
-  const periodIncompleteState = resolvePayoutPeriodIncompleteState({
-    periodFrom: displayDateFrom,
-    periodTo: displayDateTo,
-    days: displayPeriodDays ?? periodDays,
-  });
-  const periodIncomplete = periodIncompleteState.incomplete;
-  const periodCompleteEndDate = periodIncompleteState.completeEndDate;
+  const selectedPeriodOption =
+    periodDays != null ? periodOptions.find((opt) => opt.days === periodDays) ?? null : null;
+  const periodIncomplete = selectedPeriodOption?.capped ?? false;
+  const periodCompleteEndDate =
+    selectedPeriodOption && periodIncomplete
+      ? addDaysToDateStr(selectedPeriodOption.from, selectedPeriodOption.days - 1)
+      : null;
   const slabRatePct = resolveSlabRatePctFromPreview(channelPreview);
-  const periodLabel =
-    displayDateFrom && displayDateTo ? `${displayDateFrom} → ${displayDateTo}` : null;
+  const periodLabel = dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : null;
   const withdrawalAmountCents =
     isViewMode && activeViewWithdrawal
       ? activeViewWithdrawal.amount
@@ -743,15 +676,10 @@ export default function WalletWithdrawalModal({
             periodNetLkr: periodNetForCap,
           })
         : null;
-  const useFullPeriodBranchPayoutDisplay =
-    isViewMode &&
-    (viewPeriodOnly ||
-      (activeViewWithdrawal != null &&
-        isWithdrawalFinancialSnapshotLocked(activeViewWithdrawal.status)));
   const branchPayout = resolveBranchPayoutDisplay({
     breakdown,
     amountCents: withdrawalAmountCents,
-    ...(useFullPeriodBranchPayoutDisplay
+    ...(isViewMode && viewPeriodOnly
       ? { scope: 'fullPeriod' as const }
       : payableWalletLkr != null && payableWalletLkr > 0
         ? { scope: 'thisPayment' as const, paymentWalletRequestLkr: payableWalletLkr }
@@ -779,14 +707,6 @@ export default function WalletWithdrawalModal({
   const showBreakdownLoadingPlaceholder =
     (netLoading || viewSnapshotLoading) && !breakdownLkr;
 
-  const firstPayoutGatewayBaseLkr =
-    breakdown && breakdownLkr?.cycleStage === 'FIRST'
-      ? resolveFirstPayoutGatewayBaseLkr(breakdown)
-      : null;
-  const firstPayoutBranchWalletNetLkr =
-    breakdown && breakdownLkr?.cycleStage === 'FIRST'
-      ? resolveFirstPayoutBranchWalletNetLkr(breakdown)
-      : null;
   const payoutBreakdownPanelProps = breakdownLkr
     ? {
         preview: isViewMode ? null : channelPreview,
@@ -800,33 +720,19 @@ export default function WalletWithdrawalModal({
         paybackEnabled,
         gatewayRatePct,
         useStoredSnapshot: isViewMode,
-        snapshotGatewayFeeLkr:
-          isViewMode && breakdownLkr.cycleStage === 'FIRST'
-            ? null
-            : isViewMode
-              ? breakdownLkr.gatewayFee
-              : null,
+        snapshotGatewayFeeLkr: isViewMode ? breakdownLkr.gatewayFee : null,
         snapshotGatewayRatePct: isViewMode ? breakdownLkr.gatewayRatePct ?? gatewayRatePct : null,
-        snapshotOnlineWalletGrossLkr:
-          isViewMode && firstPayoutGatewayBaseLkr != null
-            ? firstPayoutGatewayBaseLkr
-            : isViewMode
-              ? breakdownLkr.onlineWalletGross
-              : null,
+        snapshotOnlineWalletGrossLkr: isViewMode ? breakdownLkr.onlineWalletGross : null,
         snapshotNetAmountLkr:
-          isViewMode && breakdownLkr.cycleStage === 'FIRST'
-            ? firstPayoutBranchWalletNetLkr
-            : isViewMode && breakdown
-              ? resolvePeriodNetLkrFromBreakdown(breakdown)
-              : null,
+          isViewMode && breakdown ? resolvePeriodNetLkrFromBreakdown(breakdown) : null,
         sharedPromo,
         loyaltyDiscountLkr: breakdownLkr.periodLoyaltyDiscountTotal ?? 0,
         payoutSplit,
         branchReceivesLkr: branchPayout.totalBranchPayoutLkr,
         platformCommissionLkr,
         periodNetLkr: branchPayout.periodWalletNetLkr,
-        dateFrom: displayDateFrom,
-        dateTo: displayDateTo,
+        dateFrom,
+        dateTo,
         showAdvance,
         advanceAmountLkr,
         branchPayout,
@@ -973,11 +879,13 @@ export default function WalletWithdrawalModal({
                   </span>
                 </p>
               )}
-              {periodPillLabel && (
+              {rangeReady && (
                 <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] font-medium text-[#475569] dark:text-slate-300">
                   <div className="flex items-center gap-2 rounded-full border border-[#cbd5e1] dark:border-slate-600 bg-[#f8fafc] dark:bg-slate-800 px-3 py-1.5">
                     <CalendarRange size={16} className="text-[#3b82f6]" />
-                    <span>{periodPillLabel}</span>
+                    <span>
+                      {formatBiweeklyPeriodLabel(dateFrom, dateTo)} · {periodDays} days
+                    </span>
                   </div>
                   {tierPreview && (
                     <div className="flex items-center gap-2 rounded-full border border-[#cbd5e1] dark:border-slate-600 bg-[#f8fafc] dark:bg-slate-800 px-3 py-1.5">
@@ -1074,8 +982,7 @@ export default function WalletWithdrawalModal({
                 <ChannelSalesTable breakdown={channelTableBreakdown} className="mb-4" />
               )}
 
-              {payoutBreakdownPanelProps &&
-                (isViewMode ? breakdownPanelRangeReady : rangeReady) && (
+              {payoutBreakdownPanelProps && (isViewMode || rangeReady) && (
                   <PayoutBreakdownPanel {...payoutBreakdownPanelProps} className="mb-4" />
                 )}
 

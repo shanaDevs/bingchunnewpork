@@ -20,10 +20,8 @@ export interface StoreWallet {
   totalWithdrawn?: number;
   currentBalance?: number;
   availableBalance?: number;
-  /** Remaining online wallet after payouts (Online Available Balance). */
+  /** Matches branch detail “All-Time Available Balance” (net revenue − paid payout expenses). */
   allTimeAvailableBalanceCents?: number;
-  /** Cumulative pickup + delivery online from day one (All-Time Available Balance). */
-  allTimeOnlineWalletCents?: number;
   updatedAt: string;
   store: { id: string; name: string; city: string; isActive: boolean };
   _count: { transactions: number };
@@ -188,7 +186,7 @@ export default function SuperAdminSystemWalletTab({
                   key={wallet.id}
                   type="button"
                   onClick={() => onBranchClick(wallet)}
-                  className="super-admin-overview-card card group flex min-h-[118px] w-full flex-col gap-1.5 rounded-[12px] p-3 text-left"
+                  className="super-admin-overview-card card group flex h-[118px] w-full flex-col gap-1.5 rounded-[12px] p-3 text-left"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 items-start gap-2">
@@ -217,19 +215,14 @@ export default function SuperAdminSystemWalletTab({
                     </span>
                   </div>
 
-                  <div className="mt-auto">
-                    <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted">
-                      All-Time Available Balance
-                    </p>
-                    <p
-                      className={cn(
-                        'm-0 mt-0.5 text-[15px] font-bold tabular-nums tracking-tight',
-                        payableBalanceClass(cardPayableCents),
-                      )}
-                    >
-                      {fmt(cardPayableCents)}
-                    </p>
-                  </div>
+                  <p
+                    className={cn(
+                      'm-0 mt-auto text-[15px] font-bold tabular-nums tracking-tight',
+                      payableBalanceClass(cardPayableCents),
+                    )}
+                  >
+                    {fmt(cardPayableCents)}
+                  </p>
 
                   <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-[#307ef2]">
                     View details

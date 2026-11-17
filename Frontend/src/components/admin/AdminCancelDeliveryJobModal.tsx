@@ -15,7 +15,6 @@ import {
 import { adminApiJson } from '@/lib/adminApi';
 import { confirmDialog } from '@/store/confirmStore';
 import { displayRideId } from '@/lib/deliveryDisplay';
-import { willAdminCloseReofferJob } from '@/lib/adminDeliveryQueries';
 import type { DeliveryJobListItem } from '@/components/admin/AdminDeliveryJobsTable';
 
 const MERIT_PRESETS = [
@@ -67,12 +66,9 @@ export default function AdminCancelDeliveryJobModal({ job, storeId, open, onClos
         ? ` Merit: ${meritDelta} points for ${job.driver.name}.`
         : '';
 
-    const reoffer = willAdminCloseReofferJob(job);
     const ok = await confirmDialog({
       title: 'Close this ride?',
-      message: reoffer
-        ? `This releases the rider and rings other drivers for this same job. Orders stay on the run; customer order statuses are not changed.${meritLine} Reason: ${trimmed}`
-        : `This marks the delivery job as Cancelled and frees the rider to accept new jobs. Customer order statuses are not changed.${meritLine} Reason: ${trimmed}`,
+      message: `This marks the delivery job as Cancelled and frees the rider to accept new jobs. Customer order statuses are not changed.${meritLine} Reason: ${trimmed}`,
       confirmLabel: 'Close ride',
       cancelLabel: 'Go back',
       variant: 'danger',
@@ -82,7 +78,7 @@ export default function AdminCancelDeliveryJobModal({ job, storeId, open, onClos
     setSubmitting(true);
     try {
       const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
-      const json = await adminApiJson(`/admin/delivery-jobs/${encodeURIComponent(job.id)}/cancel${qs}`, {
+      await adminApiJson(`/admin/delivery-jobs/${encodeURIComponent(job.id)}/cancel${qs}`, {
         method: 'POST',
         body: JSON.stringify({
           reason: trimmed,
@@ -90,17 +86,12 @@ export default function AdminCancelDeliveryJobModal({ job, storeId, open, onClos
           ...(applyMeritPenalty && job.driver ? { meritDelta } : {}),
         }),
       });
-      const payload = (json.data ?? json) as { reoffered?: boolean };
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['admin-delivery-jobs-active'] }),
         queryClient.invalidateQueries({ queryKey: ['admin-delivery-jobs-incomplete'] }),
         queryClient.invalidateQueries({ queryKey: ['admin-delivery-jobs-completed'] }),
       ]);
-      toast.success(
-        payload.reoffered
-          ? 'Ride released — other drivers are being notified.'
-          : 'Delivery ride closed — rider can claim new jobs.',
-      );
+      toast.success('Delivery ride closed — rider can claim new jobs.');
       resetForm();
       onSuccess?.();
       onClose();
@@ -113,7 +104,6 @@ export default function AdminCancelDeliveryJobModal({ job, storeId, open, onClos
 
   const rideLabel = job ? displayRideId(job.rideCode, job.id) : '';
   const riderLabel = job?.driver?.name ?? 'Unassigned';
-  const reofferHint = job ? willAdminCloseReofferJob(job) : false;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -121,17 +111,8 @@ export default function AdminCancelDeliveryJobModal({ job, storeId, open, onClos
         <DialogHeader>
           <DialogTitle>Close delivery ride</DialogTitle>
           <DialogDescription>
-            {reofferHint ? (
-              <>
-                Releases the assigned rider and <strong>rings other drivers</strong> for this job. Orders
-                stay on the run; customer order statuses are not changed.
-              </>
-            ) : (
-              <>
-                Closes the job as <strong>Cancelled</strong> only — undelivered orders keep their current
-                status. The rider can pick up new jobs after this.
-              </>
-            )}
+            Closes the job as <strong>Cancelled</strong> only — undelivered orders keep their current
+            status. The rider can pick up new jobs after this.
           </DialogDescription>
         </DialogHeader>
         {job ? (

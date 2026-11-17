@@ -25,12 +25,7 @@ export default function OAuthCallbackPage() {
       return;
     }
 
-    const rawReturnTo = params.get('returnTo');
-    // Mirror backend safeReturnTo: only same-origin paths (block //evil.com open redirects).
-    const returnTo =
-      typeof rawReturnTo === 'string' && rawReturnTo.startsWith('/') && !rawReturnTo.startsWith('//')
-        ? rawReturnTo
-        : '/';
+    const returnTo = params.get('returnTo') || '/';
 
     void (async () => {
       try {
@@ -41,7 +36,7 @@ export default function OAuthCallbackPage() {
         } catch {
           // access expiry is optional; cookie session still valid
         }
-        router.replace(returnTo);
+        router.replace(returnTo.startsWith('/') ? returnTo : '/');
       } catch (err: unknown) {
         toast.error(err instanceof Error ? err.message : 'Sign-in failed');
         router.replace('/account/login');

@@ -4,7 +4,7 @@ Cross-platform (Android + iOS) port of the Kotlin driver app in [`../driver_andr
 Same screens, theme, APIs, socket events and GPS behaviour, talking to the same core
 backend (`/api`) and delivery service (`/delivery-api`).
 
-Application id: `lk.bingchun.bing_chun_driver` — deliberately different from the Kotlin
+Application id: `com.bringit.driver` — deliberately different from the Kotlin
 app (`lk.bingchun.bing_chun_delivery`) so both can be installed side by side while this
 port is verified. Change `applicationId` in `android/app/build.gradle.kts` (and the iOS
 bundle id) when it replaces the Kotlin app.

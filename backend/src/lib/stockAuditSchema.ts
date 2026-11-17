@@ -1,55 +1,11 @@
 import { prisma } from './prisma';
-import { qualifiedPhysicalTable } from './deliveryPg';
-import {
-  addColumnIfMissing,
-  columnIsNullable,
-  createIndexIfMissing,
-  tableExists,
-  tableHasColumn,
-} from './schemaPatch';
+import { addColumnIfMissing, columnIsNullable, createIndexIfMissing, tableHasColumn } from './schemaPatch';
 import { logger } from '../utils/logger';
-
-/**
- * Required for stock batch receive / audit writes. Runs even when RUNTIME_SCHEMA_PATCHES=false
- * (core-only boot patches), because admin stock APIs must self-heal legacy DBs.
- */
-export async function ensureStockAuditAdminUserNameColumn(): Promise<void> {
-  if (!(await tableExists('stock_audit_logs'))) return;
-  if (await tableHasColumn('stock_audit_logs', 'adminUserName')) return;
-
-  const tableRef = await qualifiedPhysicalTable('stock_audit_logs');
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE ${tableRef} ADD COLUMN IF NOT EXISTS "adminUserName" TEXT`,
-  );
-
-  if (!(await tableHasColumn('stock_audit_logs', 'adminUserName'))) {
-    throw new Error(
-      'Could not add stock_audit_logs.adminUserName. Apply migration 20261107190000_stock_audit_admin_user_name.',
-    );
-  }
-}
 
 export async function ensureStockAuditLogTable(): Promise<void> {
   await createIndexIfMissing('stock_audit_logs', 'stock_audit_logs_storeId_productId_idx', '`storeId`, `productId`');
   await createIndexIfMissing('stock_audit_logs', 'stock_audit_logs_createdAt_idx', '`createdAt`');
   await createIndexIfMissing('stock_audit_logs', 'stock_audit_logs_changeType_idx', '`changeType`');
-  await ensureStockAuditAdminUserNameColumn();
-  await backfillStockAuditAdminUserNames();
-}
-
-async function backfillStockAuditAdminUserNames(): Promise<void> {
-  try {
-    if (!(await tableHasColumn('stock_audit_logs', 'adminUserName'))) return;
-    await prisma.$executeRawUnsafe(`
-      UPDATE "stock_audit_logs" AS sal
-      SET "adminUserName" = au.name
-      FROM "admin_users" AS au
-      WHERE sal."adminUserId" = au.id
-        AND sal."adminUserName" IS NULL
-    `);
-  } catch (err) {
-    logger.warn('Stock audit admin name backfill skipped', err);
-  }
 }
 
 export async function ensureWeeklyStockColumns(): Promise<void> {

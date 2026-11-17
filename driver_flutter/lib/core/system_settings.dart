@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Opens system settings screens that Flutter plugins don't cover.
 /// Android side lives in MainActivity.kt (channel `lk.bingchun.delivery/system`).
@@ -162,6 +163,26 @@ class SystemSettings {
     try {
       await _channel.invokeMethod<bool>('setQuickBubbleSignedIn', signedIn);
     } catch (_) {}
+  }
+
+  static const _bubblePromptedKey = 'quick_bubble_permission_prompted';
+
+  /// First run after install: the bubble is on by default, so ask once for
+  /// "Display over other apps" (Android has no runtime dialog for it — only the
+  /// system settings screen). Skipped if already granted, turned off, or asked before.
+  static Future<void> promptQuickBubblePermissionOnce(
+    Future<bool> Function() confirm,
+  ) async {
+    if (!Platform.isAndroid) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_bubblePromptedKey) == true) return;
+    final status = await quickBubbleStatus();
+    if (!status.enabled || status.permitted) {
+      await prefs.setBool(_bubblePromptedKey, true);
+      return;
+    }
+    await prefs.setBool(_bubblePromptedKey, true);
+    if (await confirm()) await openOverlaySettings();
   }
 
   /// System "Display over other apps" screen for this app.

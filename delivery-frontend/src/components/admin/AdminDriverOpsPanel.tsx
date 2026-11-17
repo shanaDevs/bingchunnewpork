@@ -5,7 +5,6 @@ import { adminFetch } from '@/lib/adminApi';
 import { useEffect, useState } from 'react';
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { confirmDialog } from '@/store/confirmStore';
 import {
   CheckCircle2,
   ChevronLeft,
@@ -956,25 +955,6 @@ export default function AdminDriverOpsPanel({
                               Dismiss
                             </button>
                           </>
-                        )}
-                        {row.status === 'CONFIRMED' && (
-                          <button
-                            type="button"
-                            className="btn-primary px-2 py-1 text-xs"
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              const ok = await confirmDialog({
-                                title: 'Mark complaint resolved?',
-                                message:
-                                  'Mark this complaint as resolved after the issue has been addressed? The driver will see Resolved.',
-                                confirmLabel: 'Resolve complaint',
-                                cancelLabel: 'Cancel',
-                              });
-                              if (ok) reviewComplaint.mutate({ id: row.id, status: 'RESOLVED' });
-                            }}
-                          >
-                            Resolve
-                          </button>
                         )}
                       </div>
                     </td>

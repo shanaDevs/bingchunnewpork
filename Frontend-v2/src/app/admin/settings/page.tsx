@@ -1,7 +1,6 @@
 'use client';
 import { adminApiFetch as adminFetch } from '@/lib/adminApi';
-import { getApiBaseUrl, getWebxpayReturnUrlHint } from '@/lib/apiBase';
-import AdminPinGateModal from '@/components/admin/AdminPinGateModal';
+import { getWebxpayReturnUrlHint } from '@/lib/apiBase';
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -72,9 +71,6 @@ export default function AdminSettingsPage() {
   const [pickupConvenienceFeePercent, setPickupConvenienceFeePercent] = useState('6');
   const [deliveryConvenienceFeePercent, setDeliveryConvenienceFeePercent] = useState('7.5');
   const [gatewayFeePercent, setGatewayFeePercent] = useState('1.9');
-  const [commissionSlab1UpTo, setCommissionSlab1UpTo] = useState('1000000');
-  const [commissionSlab1RatePercent, setCommissionSlab1RatePercent] = useState('6.5');
-  const [commissionSlab2RatePercent, setCommissionSlab2RatePercent] = useState('5');
   const [deliveryPlatformFeePercent, setDeliveryPlatformFeePercent] = useState('0');
   const [pickupAllowAddItemsPaidOnline, setPickupAllowAddItemsPaidOnline] = useState(true);
   const [pickupAllowEditCashUnpaid, setPickupAllowEditCashUnpaid] = useState(true);
@@ -86,7 +82,6 @@ export default function AdminSettingsPage() {
   const [androidAppIconUrl, setAndroidAppIconUrl] = useState('');
   const [iosAppIconUrl, setIosAppIconUrl] = useState('');
   const [cancelWindowMinutes, setCancelWindowMinutes] = useState('10');
-  const [paymentPinGateOpen, setPaymentPinGateOpen] = useState(false);
   const [spinDurationSeconds, setSpinDurationSeconds] = useState('8');
   const [spinsPerWindow, setSpinsPerWindow] = useState('1');
   const [spinWindowValue, setSpinWindowValue] = useState('1');
@@ -250,13 +245,6 @@ export default function AdminSettingsPage() {
     if (payload?.gatewayFeePercent != null) {
       setGatewayFeePercent(String(payload.gatewayFeePercent));
     }
-    if (Array.isArray(payload?.commissionSlabs) && payload.commissionSlabs.length > 0) {
-      const first = payload.commissionSlabs[0];
-      const second = payload.commissionSlabs[1];
-      if (first?.upTo != null) setCommissionSlab1UpTo(String(first.upTo));
-      if (first?.ratePercent != null) setCommissionSlab1RatePercent(String(first.ratePercent));
-      if (second?.ratePercent != null) setCommissionSlab2RatePercent(String(second.ratePercent));
-    }
     if (payload?.deliveryPlatformFeePercent != null) {
       setDeliveryPlatformFeePercent(String(payload.deliveryPlatformFeePercent));
     }
@@ -313,35 +301,8 @@ export default function AdminSettingsPage() {
     }
   }, [appSettings]);
 
-  const buildCommissionSlabsPayload = () => {
-    const threshold = parseFloat(commissionSlab1UpTo);
-    const rateBelowPct = parseFloat(commissionSlab1RatePercent);
-    const rateAbovePct = parseFloat(commissionSlab2RatePercent);
-    if (!Number.isFinite(threshold) || threshold <= 0) {
-      throw new Error('Commission threshold must be a positive LKR amount');
-    }
-    if (!Number.isFinite(rateBelowPct) || rateBelowPct < 0 || rateBelowPct > 100) {
-      throw new Error('Rate at/below threshold must be between 0 and 100');
-    }
-    if (!Number.isFinite(rateAbovePct) || rateAbovePct < 0 || rateAbovePct > 100) {
-      throw new Error('Rate above threshold must be between 0 and 100');
-    }
-    return [
-      {
-        upTo: threshold,
-        rate: rateBelowPct / 100,
-        label: `Up to LKR ${threshold.toLocaleString('en-LK')}`,
-      },
-      {
-        upTo: Number.MAX_SAFE_INTEGER,
-        rate: rateAbovePct / 100,
-        label: `Above LKR ${threshold.toLocaleString('en-LK')}`,
-      },
-    ];
-  };
-
   const savePayments = useMutation({
-    mutationFn: async (password: string) => {
+    mutationFn: async () => {
       await adminFetch('/settings/payment', {
         method: 'PUT',
         body: JSON.stringify({
@@ -356,7 +317,6 @@ export default function AdminSettingsPage() {
           ...(webxpayApiPassword ? { webxpayApiPassword } : {}),
           webxpayMode,
           webxpayReturnUrl: webxpayReturnUrl || undefined,
-          password,
         }),
       });
       await adminFetch('/settings/app', {
@@ -366,8 +326,6 @@ export default function AdminSettingsPage() {
           pickupConvenientFeeRate: parseFloat(pickupConvenienceFeePercent) / 100,
           gatewayFeeRate: parseFloat(gatewayFeePercent) / 100,
           deliveryPlatformFeeRate: parseFloat(deliveryPlatformFeePercent) / 100,
-          commissionSlabs: buildCommissionSlabsPayload(),
-          password,
         }),
       });
     },
@@ -382,11 +340,6 @@ export default function AdminSettingsPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
-
-  const handleSavePayments = () => {
-    if (savePayments.isPending) return;
-    setPaymentPinGateOpen(true);
-  };
 
   const saveOperations = useMutation({
     mutationFn: async () => {
@@ -977,48 +930,6 @@ export default function AdminSettingsPage() {
                 </div>
                 <p className="mt-1 text-[11px] text-muted">
                   Applied to branch revenue when calculating payout gateway deductions.
-                </p>
-              </div>
-              <div className="sm:col-span-2">
-                <label className="text-xs text-muted block mb-1">Branch commission slabs</label>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <div>
-                    <span className="text-[11px] text-muted">Commission threshold (LKR)</span>
-                    <input
-                      className="input-field mt-1"
-                      type="number"
-                      min="0"
-                      value={commissionSlab1UpTo}
-                      onChange={(e) => setCommissionSlab1UpTo(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <span className="text-[11px] text-muted">Rate at/below threshold (%)</span>
-                    <input
-                      className="input-field mt-1"
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="100"
-                      value={commissionSlab1RatePercent}
-                      onChange={(e) => setCommissionSlab1RatePercent(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <span className="text-[11px] text-muted">Rate above threshold (%)</span>
-                    <input
-                      className="input-field mt-1"
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="100"
-                      value={commissionSlab2RatePercent}
-                      onChange={(e) => setCommissionSlab2RatePercent(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <p className="mt-1 text-[11px] text-muted">
-                  Applied on the second payout of each two-window cycle using full-cycle net sales.
                 </p>
               </div>
               <div>
@@ -1703,7 +1614,7 @@ export default function AdminSettingsPage() {
           )}
           {resolvedTab === 'payments' && superAdmin && (
             <TabSaveButton
-              onClick={handleSavePayments}
+              onClick={() => savePayments.mutate()}
               pending={savePayments.isPending}
               label="Save payment settings"
             />
@@ -1740,21 +1651,6 @@ export default function AdminSettingsPage() {
           )}
         </div>
       )}
-
-      <AdminPinGateModal
-        open={paymentPinGateOpen}
-        onClose={() => {
-          if (!savePayments.isPending) setPaymentPinGateOpen(false);
-        }}
-        onVerified={(pin) => {
-          savePayments.mutate(pin);
-        }}
-        apiBase={getApiBaseUrl()}
-        busy={savePayments.isPending}
-        titleId="payment-settings-pin-title"
-        inputId="payment-settings-pin"
-        description="Enter your admin passcode to save payment gateway, fees, and commission settings."
-      />
     </div>
   );
 }

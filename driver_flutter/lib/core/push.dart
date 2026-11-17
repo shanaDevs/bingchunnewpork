@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import '../data/local/secure_store.dart';
 import '../data/repositories/jobs_repository.dart';
 import 'alert_service.dart';
+import 'inbox.dart';
 import 'notifications.dart';
 import 'ride_alert.dart';
 
@@ -30,6 +31,14 @@ Future<void> firebaseBackgroundHandler(RemoteMessage message) async {
       if (orderId.isEmpty) return;
       await BcNotifications.notifyOrderCancelled(orderId, (data['orderNumber'] ?? '').toString());
       await BcNotifications.vibrateCancel();
+    case 'COMPLAINT_UPDATE' || 'BRANCH_REQUEST_UPDATE':
+      // Admin replies: the system shows the notification itself, so just keep it in the inbox.
+      final n = message.notification;
+      await NotificationInbox.instance.add(
+        title: n?.title ?? (data['title'] ?? '').toString(),
+        body: n?.body ?? (data['body'] ?? '').toString(),
+        type: data['type'].toString(),
+      );
   }
 }
 
@@ -64,6 +73,12 @@ class PushTokens {
     if (!_firebaseAvailable) return;
     FirebaseMessaging.onMessage.listen((message) {
       final data = message.data;
+      final n = message.notification;
+      NotificationInbox.instance.add(
+        title: n?.title ?? (data['title'] ?? '').toString(),
+        body: n?.body ?? (data['body'] ?? '').toString(),
+        type: (data['type'] ?? '').toString(),
+      );
       switch (data['type']) {
         case 'NEW_JOB':
           if ((data['jobId'] ?? '').toString().isEmpty) return;

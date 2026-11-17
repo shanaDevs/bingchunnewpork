@@ -6,15 +6,11 @@ import {
   sumBreakdownOrderCount,
   sumBreakdownProviderFee,
   sumCommissionableBase,
-  getSlabIndex,
-  serializeCommissionSlabsForApi,
-  DEFAULT_COMMISSION_SLABS,
   type ChannelSettlementRow,
   type CommissionChannel,
-  type CommissionSlab,
   type SlabInfo,
 } from './commission';
-import { getCommissionSlabs, getConvenienceFeeRates, getGatewayFeeRate } from './appSchema';
+import { getConvenienceFeeRates, getGatewayFeeRate } from './appSchema';
 import { periodActivePaidOrdersWhere } from './walletRevenue';
 
 const PAID_ORDER_SELECT = {
@@ -37,9 +33,7 @@ export type PeriodChannelPreview = {
   orderCount: number;
   /** Sum of promo + loyalty discounts on paid orders in period (invoice display only). */
   storeDiscountsTotal: number;
-  slabInfo: Pick<SlabInfo, 'monthlyBase' | 'effectiveRate' | 'slabIndex'> & {
-    slabs: ReturnType<typeof serializeCommissionSlabsForApi>;
-  };
+  slabInfo: Pick<SlabInfo, 'monthlyBase' | 'effectiveRate' | 'slabIndex'>;
 };
 
 async function fetchPaidOrdersInRange(storeId: string, from: string, to: string) {
@@ -56,10 +50,9 @@ export async function buildPeriodChannelPreview(
   to: string,
 ): Promise<PeriodChannelPreview> {
   const orders = await fetchPaidOrdersInRange(storeId, from, to);
-  const [convenienceFeeRates, gatewayFeeRate, commissionSlabs] = await Promise.all([
+  const [convenienceFeeRates, gatewayFeeRate] = await Promise.all([
     getConvenienceFeeRates(),
     getGatewayFeeRate(),
-    getCommissionSlabs(),
   ]);
   const windowBase = sumCommissionableBase(orders);
   const breakdown = accumulateSettlementBreakdown(
@@ -67,9 +60,8 @@ export async function buildPeriodChannelPreview(
     windowBase,
     convenienceFeeRates,
     gatewayFeeRate,
-    commissionSlabs,
   );
-  const slabInfo = buildSlabInfo(windowBase, commissionSlabs);
+  const slabInfo = buildSlabInfo(windowBase);
 
   return {
     period: { from, to },
@@ -85,44 +77,6 @@ export async function buildPeriodChannelPreview(
       monthlyBase: slabInfo.monthlyBase,
       effectiveRate: slabInfo.effectiveRate,
       slabIndex: slabInfo.slabIndex,
-      slabs: serializeCommissionSlabsForApi(commissionSlabs),
-    },
-  };
-}
-
-export function channelPreviewFromPeriodBreakdown(
-  period: {
-    channelBreakdown: Record<CommissionChannel, ChannelSettlementRow>;
-    windowBase: number;
-    commissionRate: number;
-    periodDiscountsTotal: number;
-    orderCount: number;
-    commissionSlabs?: readonly CommissionSlab[];
-    cycleStage?: string;
-    cycleFrom?: string;
-    cycleTo?: string;
-  },
-  windowFrom: string,
-  windowTo: string,
-): PeriodChannelPreview {
-  const breakdown = period.channelBreakdown;
-  const monthlyBaseLkr = period.windowBase / 100;
-  const slabs = period.commissionSlabs ?? DEFAULT_COMMISSION_SLABS;
-  const from =
-    period.cycleStage === 'SECOND' && period.cycleFrom ? period.cycleFrom : windowFrom;
-  const to = period.cycleTo ?? windowTo;
-  return {
-    period: { from, to },
-    breakdown,
-    totalCommission: sumBreakdownCommission(breakdown),
-    totalProviderFee: sumBreakdownProviderFee(breakdown),
-    orderCount: period.orderCount,
-    storeDiscountsTotal: period.periodDiscountsTotal / 100,
-    slabInfo: {
-      monthlyBase: monthlyBaseLkr,
-      effectiveRate: period.commissionRate,
-      slabIndex: getSlabIndex(monthlyBaseLkr, slabs),
-      slabs: serializeCommissionSlabsForApi(slabs),
     },
   };
 }

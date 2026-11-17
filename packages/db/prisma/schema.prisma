@@ -161,18 +161,6 @@ enum ProductSize {
   @@schema("public")
 }
 
-enum SugarLevel {
-  FIFTY
-  HUNDRED
-  @@schema("public")
-}
-
-enum IceLevel {
-  LESS_ICE
-  NORMAL_ICE
-  @@schema("public")
-}
-
 model User {
   id                String               @id @default(uuid())
   name              String
@@ -379,8 +367,6 @@ model Store {
   deliveryOtpRequired Boolean     @default(false)
   /// Override for branch ride-completion geofence (meters). Null = use AppSetting default.
   completionRadiusM Int?
-  /// Exact Windows printer queue name for cup stickers on this branch PC (varies per store).
-  cupStickerPrinterName String?
   platformDiscountPaybackEnabled Boolean @default(false)
   /// Set when branch admin closes the branch; cleared on Open Branch. Blocks customer online orders.
   branchClosedAt   DateTime?
@@ -624,11 +610,10 @@ model StockAuditLog {
   qtyBefore   Int
   qtyChange   Int
   qtyAfter    Int
-  orderId       String?
-  adminUserId   String?
-  adminUserName String?
-  note          String?         @db.Text
-  createdAt     DateTime        @default(now())
+  orderId     String?
+  adminUserId String?
+  note        String?         @db.Text
+  createdAt   DateTime        @default(now())
 
   store       Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
   product     Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -783,8 +768,6 @@ model CartItem {
   cartId     String
   productId  String
   size       ProductSize       @default(REGULAR)
-  sugarLevel SugarLevel?
-  iceLevel   IceLevel?
   quantity   Int               @default(1)
   unitPrice  Int
 
@@ -956,8 +939,6 @@ model OrderItem {
   productId  String
   productName String
   size       ProductSize        @default(REGULAR)
-  sugarLevel SugarLevel?
-  iceLevel   IceLevel?
   quantity   Int
   unitPrice  Int
   totalPrice Int
@@ -1386,7 +1367,6 @@ model AppSetting {
   convenientFeeRate            Float   @default(0.075)
   pickupConvenientFeeRate      Float   @default(0.06)
   gatewayFeeRate               Float   @default(0.019)
-  commissionSlabsJson          Json?
   deliveryPlatformFeeRate      Float   @default(0)
   pickupAllowAddItemsPaidOnline Boolean @default(true)
   pickupAllowEditCashUnpaid    Boolean @default(true)
@@ -1418,9 +1398,6 @@ model AppSetting {
   spinDisplayJson              Json?
   spinCriteriaJson             Json?
   cancelWindowMinutes          Int       @default(10)
-  weeklyResetDay               Int?
-  /// Max payable LKR total for takeaway orders placed online; null or 0 = no cap.
-  pickupMaxOrderAmount         Int?
   /// Default geofence (meters) for completing a ride at the assigned branch.
   branchCompletionRadiusM      Int       @default(100)
 
@@ -1453,16 +1430,8 @@ enum SettlementPaymentMethod {
   @@schema("public")
 }
 
-enum PayoutCycleStage {
-  FIRST
-  SECOND
-
-  @@schema("public")
-}
-
 enum WithdrawalStatus {
   PENDING
-  IN_REVIEW
   APPROVED
   REJECTED
   CANCELLED
@@ -1511,8 +1480,6 @@ model StoreWithdrawal {
   invoiceData         Json?
   breakdown           Json?
   isAdvance           Boolean                   @default(false)
-  cycleStage          PayoutCycleStage          @default(FIRST)
-  cyclePairId         String?
   requestedById       String
   reviewedById        String?
   reviewedAt          DateTime?
@@ -1522,14 +1489,11 @@ model StoreWithdrawal {
 
   store             Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
   walletTransaction WalletTransaction? @relation(fields: [walletTransactionId], references: [id])
-  cyclePair         StoreWithdrawal?   @relation("PayoutCyclePair", fields: [cyclePairId], references: [id], onDelete: SetNull)
-  pairedSecondPayouts StoreWithdrawal[] @relation("PayoutCyclePair")
   commissionSettlement CommissionSettlement?
   platformEarning   PlatformEarning?
 
   @@index([storeId, createdAt])
   @@index([storeId, status])
-  @@index([cyclePairId])
   @@schema("public")
 
   @@map("store_withdrawals")

@@ -1,18 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Download, Printer, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
 
 import { TopBranchesChannelTableSkeleton } from '@/components/admin/brand-sales/BrandSalesDashboardSkeleton';
-import AdminReportPreviewSheet from '@/components/admin/reports/AdminReportPreviewSheet';
 import DashboardPeriodFilter, {
-  formatDashboardPeriodLabel,
   type DashboardPeriod,
 } from '@/components/admin/DashboardPeriodFilter';
 import type { BranchTierFilter } from '@/components/admin/BranchSalesPerformanceTable';
 import { shortBranchName } from '@/lib/branchName';
-import { downloadCsv } from '@/components/admin/reports/reportUtils';
 import { formatMoneyAmount } from '@/lib/receipt';
 
 export type BranchChannelMetric = {
@@ -43,19 +40,11 @@ function ChannelAmountCell({ metric }: { metric: BranchChannelMetric }) {
   );
 }
 
-function tierLabel(tier: TopBranchesChannelRow['tier']) {
-  return tier === 'top' ? 'Delivery & Pickup' : 'Pickup Only';
-}
-
-function moneyOrDash(value: number) {
-  return value > 0 ? formatMoneyAmount(value) : '—';
-}
-
 type Props = {
   rows: TopBranchesChannelRow[];
   period: DashboardPeriod;
   customRange: DateRange | undefined;
-  onPeriodChange: (period: DashboardPeriod) => void;
+  onPeriodChange: (period: Exclude<DashboardPeriod, 'custom'>) => void;
   onCustomRangeChange: (range: DateRange | undefined) => void;
   loading?: boolean;
   tierFilter?: BranchTierFilter;
@@ -80,8 +69,6 @@ export default function TopBranchesChannelTable({
 }: Props) {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const periodLabel = formatDashboardPeriodLabel(period, customRange, { includeDates: true });
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -96,60 +83,6 @@ export default function TopBranchesChannelTable({
     }
     return list;
   }, [rows, search, tierFilter]);
-
-  const exportColumns = useMemo(() => {
-    const columns = ['Branch Name'];
-    if (showTierColumn) columns.push('Tier');
-    columns.push('Total Orders', 'Sales (LKR)', 'Pickup Cash', 'Pickup Card', 'Pickup Online');
-    if (!hideDeliveryOnline) columns.push('Delivery Online');
-    columns.push('Discounts', 'Refunds');
-    return columns;
-  }, [showTierColumn, hideDeliveryOnline]);
-
-  const exportCsvRows = useMemo(
-    () =>
-      filteredRows.map((row) => {
-        const values: Array<string | number> = [shortBranchName(row.branchName)];
-        if (showTierColumn) values.push(tierLabel(row.tier));
-        values.push(
-          row.totalOrders,
-          Number(row.grossSales.toFixed(2)),
-          Number(row.pickupCash.amount.toFixed(2)),
-          Number(row.pickupCard.amount.toFixed(2)),
-          Number(row.pickupOnline.amount.toFixed(2)),
-        );
-        if (!hideDeliveryOnline) values.push(Number(row.deliveryOnline.amount.toFixed(2)));
-        values.push(Number(row.totalDiscount.toFixed(2)), Number(row.totalRefunds.toFixed(2)));
-        return values;
-      }),
-    [filteredRows, showTierColumn, hideDeliveryOnline],
-  );
-
-  const pdfRows = useMemo(
-    () =>
-      filteredRows.map((row) => {
-        const cells = [shortBranchName(row.branchName)];
-        if (showTierColumn) cells.push(tierLabel(row.tier));
-        cells.push(
-          String(row.totalOrders),
-          formatMoneyAmount(row.grossSales),
-          moneyOrDash(row.pickupCash.amount),
-          moneyOrDash(row.pickupCard.amount),
-          moneyOrDash(row.pickupOnline.amount),
-        );
-        if (!hideDeliveryOnline) cells.push(moneyOrDash(row.deliveryOnline.amount));
-        cells.push(moneyOrDash(row.totalDiscount), moneyOrDash(row.totalRefunds));
-        return { key: row.storeId, cells };
-      }),
-    [filteredRows, showTierColumn, hideDeliveryOnline],
-  );
-
-  const canExport = filteredRows.length > 0;
-
-  function exportCsv() {
-    if (!canExport) return;
-    downloadCsv(`branch-sales-performance-${period}.csv`, exportColumns, exportCsvRows);
-  }
 
   useEffect(() => {
     setPage(0);
@@ -174,8 +107,8 @@ export default function TopBranchesChannelTable({
 
   return (
     <div className="space-y-4">
-      <div className="flex w-full flex-wrap items-center gap-2">
-        <div className="relative min-w-[160px] flex-1">
+      <div className="grid w-full grid-cols-[minmax(160px,1fr)_auto] items-center gap-2">
+        <div className="relative min-w-0">
           <Search
             size={13}
             className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-muted"
@@ -189,33 +122,13 @@ export default function TopBranchesChannelTable({
             aria-label="Search branches by name"
           />
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            className="btn-outline flex items-center gap-1.5 px-3 py-1.5 text-xs"
-            disabled={!canExport}
-            onClick={() => setPreviewOpen(true)}
-          >
-            <Printer size={13} />
-            PDF
-          </button>
-          <button
-            type="button"
-            className="btn-outline flex items-center gap-1.5 px-3 py-1.5 text-xs"
-            disabled={!canExport}
-            onClick={exportCsv}
-          >
-            <Download size={13} />
-            CSV
-          </button>
-        </div>
         <DashboardPeriodFilter
           period={period}
           customRange={customRange}
           onPeriodChange={onPeriodChange}
           onCustomRangeChange={onCustomRangeChange}
           compact
-          className="ml-auto"
+          className="justify-self-end"
         />
       </div>
 
@@ -325,23 +238,6 @@ export default function TopBranchesChannelTable({
           </div>
         </div>
       )}
-
-      <AdminReportPreviewSheet
-        open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-        docTitle="Branch Sales"
-        reportTitle="Branch Sales Performance"
-        reportDescription="Compare performance across all branches."
-        scopeLabel="All Branches"
-        periodLabel={periodLabel}
-        statusLine={`Live Report · ${filteredRows.length} branch${filteredRows.length === 1 ? '' : 'es'}`}
-        referencePrefix="BSP"
-        columns={exportColumns}
-        rows={pdfRows}
-        alignRightFromColumn={showTierColumn ? 3 : 2}
-        rowCountLabel="branches"
-        onExportExcel={exportCsv}
-      />
     </div>
   );
 }

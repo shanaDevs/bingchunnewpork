@@ -23,6 +23,24 @@ class BuildDefaults {
       : (kDebugMode ? Endpoints.localDelivery : Endpoints.productionDelivery);
 }
 
+/// Job-alert ring tones (QuickDrop: chime / pulse / bell).
+enum JobAlertTone {
+  chime('qd_job_alert.wav', 'Chime'),
+  pulse('qd_job_alert_pulse.wav', 'Pulse'),
+  bell('qd_job_alert_bell.wav', 'Bell');
+
+  const JobAlertTone(this.asset, this.label);
+
+  /// File under assets/sounds/.
+  final String asset;
+
+  /// English label, passed through tr() by the UI.
+  final String label;
+
+  static JobAlertTone fromName(String? name) =>
+      JobAlertTone.values.firstWhere((t) => t.name == name, orElse: () => JobAlertTone.chime);
+}
+
 /// Persisted overrides for API hosts + UX prefs (theme, sound, haptics).
 /// Port of RuntimeConfig.kt.
 class RuntimeConfig extends ChangeNotifier {
@@ -35,9 +53,13 @@ class RuntimeConfig extends ChangeNotifier {
   static const _keyTheme = 'theme_mode';
   static const _keySound = 'sound_enabled';
   static const _keyHaptics = 'haptics_enabled';
+  static const _keyAlertTone = 'job_alert_tone';
+  static const _keyAlertRepeat = 'job_alert_repeat';
+  static const _keyAlertVibration = 'job_alert_vibration';
   static const _keyFullScreenAlerts = 'full_screen_alerts_enabled';
   static const _keyFullScreenAlertsReset = 'full_screen_alerts_reset_v1';
   static const _keyLanguage = 'app_language';
+  static const _keyKeepAwake = 'keep_screen_on';
   static const _defaultTheme = 'LIGHT';
 
   SharedPreferences? _prefs;
@@ -45,13 +67,21 @@ class RuntimeConfig extends ChangeNotifier {
   String _themeMode = _defaultTheme;
   bool _soundEnabled = true;
   bool _hapticsEnabled = true;
+  JobAlertTone _alertTone = JobAlertTone.chime;
+  bool _alertRepeat = true;
+  bool _alertVibration = true;
   bool _fullScreenAlertsEnabled = true;
+  bool _keepScreenOn = true;
 
   Future<void> init() async {
     _prefs ??= await SharedPreferences.getInstance();
     _themeMode = _prefs?.getString(_keyTheme) ?? _defaultTheme;
     _soundEnabled = _prefs?.getBool(_keySound) ?? true;
     _hapticsEnabled = _prefs?.getBool(_keyHaptics) ?? true;
+    _keepScreenOn = _prefs?.getBool(_keyKeepAwake) ?? true;
+    _alertTone = JobAlertTone.fromName(_prefs?.getString(_keyAlertTone));
+    _alertRepeat = _prefs?.getBool(_keyAlertRepeat) ?? true;
+    _alertVibration = _prefs?.getBool(_keyAlertVibration) ?? true;
     // Riders who switched full-screen alerts off never saw new rides over the lock screen.
     // Turn it back on once after this update; a later choice to switch it off is kept.
     if (!(_prefs?.getBool(_keyFullScreenAlertsReset) ?? false)) {
@@ -123,10 +153,42 @@ class RuntimeConfig extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Which ring the new-job alert plays.
+  JobAlertTone get alertTone => _alertTone;
+  set alertTone(JobAlertTone value) {
+    _alertTone = value;
+    _prefs?.setString(_keyAlertTone, value.name);
+    notifyListeners();
+  }
+
+  /// Ring until the rider accepts or declines (off: a single ring).
+  bool get alertRepeat => _alertRepeat;
+  set alertRepeat(bool value) {
+    _alertRepeat = value;
+    _prefs?.setBool(_keyAlertRepeat, value);
+    notifyListeners();
+  }
+
+  /// Vibrate with each ring while an offer is up.
+  bool get alertVibration => _alertVibration;
+  set alertVibration(bool value) {
+    _alertVibration = value;
+    _prefs?.setBool(_keyAlertVibration, value);
+    notifyListeners();
+  }
+
   bool get hapticsEnabled => _hapticsEnabled;
   set hapticsEnabled(bool value) {
     _hapticsEnabled = value;
     _prefs?.setBool(_keyHaptics, value);
+    notifyListeners();
+  }
+
+  /// Keep the screen awake while a job dashboard is open.
+  bool get keepScreenOn => _keepScreenOn;
+  set keepScreenOn(bool value) {
+    _keepScreenOn = value;
+    _prefs?.setBool(_keyKeepAwake, value);
     notifyListeners();
   }
 

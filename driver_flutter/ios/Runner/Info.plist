@@ -9,7 +9,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Bing Chun Delivery</string>
+	<string>Bring It</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -17,7 +17,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>bing_chun_driver</string>
+	<string>Bring It</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -72,6 +72,10 @@
 	<string>Bing Chun tracks your location during delivery runs so dispatch and customers can follow your route, and to unlock pickup and completion at the branch.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Bing Chun keeps tracking your active delivery run while the app is in the background.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Bing Chun uses the camera so you can take a profile photo.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Bing Chun lets you choose a profile photo from your library.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

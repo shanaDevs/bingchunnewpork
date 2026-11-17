@@ -16,14 +16,13 @@ import { panel, SectionHeading } from "./todayParts";
  */
 export function RewardsSummary() {
   const { summary, isLoading, balance, spend, tiers, current, currentIndex, next } = useHappyPoints();
-  const spendValue = spend ?? 0;
   const CurrentIcon = current ? tierLook(currentIndex, tiers.length).icon : Sparkles;
   const top = tiers[tiers.length - 1];
   const pointsPerLkr = summary?.settings?.pointsPerLkr;
   const lkrPerPoint = pointsPerLkr ? Math.round(1 / pointsPerLkr) : null;
   const journey = summary?.journey?.active ? summary.journey : null;
   const rewards = (summary?.redeemRewards ?? []).filter((reward) => reward.isActive !== false);
-  const reached = balance != null ? rewards.filter((reward) => reward.cost <= balance).length : 0;
+  const reached = rewards.filter((reward) => reward.cost <= balance).length;
   // Each stop is 1/n wide; the track runs from the first stop's centre to the last's.
   const inset = `${50 / Math.max(1, tiers.length)}%`;
 
@@ -56,11 +55,7 @@ export function RewardsSummary() {
             {current ? `${current.name} member` : "New member"}
           </span>
           <p className="mt-1.5 flex items-end gap-1.5 text-brand-950">
-            {balance != null ? (
-              <CountUp value={balance} className="font-numeric text-4xl leading-none font-extrabold tracking-tight" />
-            ) : (
-              <span className="font-numeric text-4xl leading-none font-extrabold tracking-tight text-brand-300">…</span>
-            )}
+            <CountUp value={balance} className="font-numeric text-4xl leading-none font-extrabold tracking-tight" />
             <span className="pb-0.5 text-sm font-bold text-brand-600">pts</span>
           </p>
           {lkrPerPoint && <p className="mt-1 text-xs text-slate-500">1 point per LKR {lkr(lkrPerPoint)} spent</p>}
@@ -83,16 +78,16 @@ export function RewardsSummary() {
         <div className="mt-4 rounded-2xl bg-cream-50 px-4 pt-3 pb-3.5 ring-1 ring-cream-200">
           <div className="flex flex-wrap items-baseline justify-between gap-x-3">
             <p className="text-[0.6875rem] font-bold tracking-[0.14em] text-amber-700 uppercase">Membership</p>
-            <p className="text-xs text-slate-500">{spend != null ? `LKR ${lkr(spend)} spent so far` : "Loading spend…"}</p>
+            <p className="text-xs text-slate-500">LKR {lkr(spend)} spent so far</p>
           </div>
           <div className="relative mt-3">
             <div aria-hidden="true" className="absolute top-4.5 h-1.5 -translate-y-1/2 rounded-full bg-white" style={{ left: inset, right: inset }}>
-              <div className="h-full rounded-full bg-linear-to-r from-brand-400 to-brand-600" style={{ width: `${Math.min(100, (spendValue / top.minSpendLkr) * 100)}%` }} />
+              <div className="h-full rounded-full bg-linear-to-r from-brand-400 to-brand-600" style={{ width: `${Math.min(100, (spend / top.minSpendLkr) * 100)}%` }} />
             </div>
             <ol data-stagger className="relative grid" style={{ gridTemplateColumns: `repeat(${tiers.length}, minmax(0, 1fr))` }}>
               {tiers.map((tier, index) => {
                 const look = tierLook(index, tiers.length);
-                const isReached = spend != null && spendValue >= tier.minSpendLkr;
+                const isReached = spend >= tier.minSpendLkr;
                 return (
                   <li key={tier.id} className="flex flex-col items-center text-center">
                     <span className={cn("relative grid size-9 place-items-center rounded-full", isReached ? cn("ring-2", look.reached) : "bg-white text-slate-400 ring-1 ring-slate-200")}>
@@ -109,11 +104,7 @@ export function RewardsSummary() {
             </ol>
           </div>
           <p className="mt-2.5 text-center text-xs font-semibold text-brand-950">
-            {next && spend != null
-              ? `LKR ${lkr(next.minSpendLkr - spendValue)} to ${next.name}`
-              : current
-                ? `You've reached ${current.name}, our top level`
-                : ""}
+            {next ? `LKR ${lkr(next.minSpendLkr - spend)} to ${next.name}` : current ? `You've reached ${current.name}, our top level` : ""}
           </p>
         </div>
       )}

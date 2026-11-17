@@ -70,37 +70,12 @@ describe('resolveBranchPayoutDisplay', () => {
     const reportValues = {
       branchNetPayoutLkr: 396_051.28,
       sharedPromoJasonLkr: 1_944,
-      jasonDiscountsLkr: 0,
-    } as Pick<
-      PayoutReportValues,
-      'branchNetPayoutLkr' | 'sharedPromoJasonLkr' | 'jasonDiscountsLkr'
-    > as PayoutReportValues;
+    } as Pick<PayoutReportValues, 'branchNetPayoutLkr' | 'sharedPromoJasonLkr'> as PayoutReportValues;
 
     const display = branchPayoutDisplayFromReportValues(reportValues);
 
     expect(display.periodWalletNetLkr).toBe(396_051.28);
     expect(display.totalBranchPayoutLkr).toBeCloseTo(397_995.28, 2);
-  });
-
-  it('Payout 2: branch receives equals report net payout (Jason already in walkthrough)', () => {
-    const reportValues = {
-      cycleStage: 'SECOND',
-      onlinePaymentsCollectedLkr: 31_605,
-      jasonDiscountsLkr: 691,
-      priorOnlineWalletAmountLkr: 18_834.22,
-      nonReturningRefundsBranchGrossLkr: 0,
-      netPlatformAmountLkr: 809.36,
-      gatewayLkr: 240.4,
-      gatewayRatePct: 1.9,
-      cancelledByBranchGatewayFeeLkr: 0,
-      branchNetPayoutLkr: 11_718.78,
-      sharedPromoJasonLkr: 691,
-    } as PayoutReportValues;
-
-    const display = branchPayoutDisplayFromReportValues(reportValues);
-
-    expect(display.totalBranchPayoutLkr).toBeCloseTo(12_412.02, 2);
-    expect(display.jasonTopUpLkr).toBe(0);
   });
 
   it('caps payable wallet by request, available balance, and period net', () => {

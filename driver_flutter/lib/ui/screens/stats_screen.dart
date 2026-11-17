@@ -4,36 +4,64 @@ import 'package:provider/provider.dart';
 
 import '../../core/app_container.dart';
 import '../../core/format.dart';
+import '../../core/offer_outcomes.dart';
 import '../../data/models/delivery_job.dart';
+import '../../data/models/driver.dart';
+import '../../l10n/l10n.dart';
 import '../../state/jobs_controller.dart';
 import '../../state/stats_controller.dart';
 import '../components/driver_ops.dart';
-import '../components/surfaces.dart';
+import '../components/profile_kit.dart';
+import '../components/qd_kit.dart';
 import '../components/tab_scaffold.dart';
 import '../theme/bc_theme.dart';
-import '../../l10n/l10n.dart';
+import '../../core/feedback.dart';
+import 'delivered_orders_screen.dart';
+import 'shifts_screen.dart';
 
-/// Driver performance and earnings statistics — port of StatsScreen.kt.
+/// Activity tab (QuickDrop `activity.tsx`): period control, live shift banner, stat tiles,
+/// completed-jobs chart and shortcuts. Data comes from [StatsController] + job history.
 class StatsScreen extends StatelessWidget {
-  const StatsScreen({super.key});
+  const StatsScreen({super.key, this.onOpenJobs});
+
+  /// Switches the home shell to the Jobs tab ("Job history").
+  final VoidCallback? onOpenJobs;
 
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (ctx) => StatsController(ctx.read<AppContainer>())..load(period: StatsPeriod.month),
-      child: const _StatsBody(),
+      create: (ctx) => StatsController(ctx.read<AppContainer>())..load(period: StatsPeriod.week),
+      child: _StatsBody(onOpenJobs: onOpenJobs),
     );
   }
 }
 
+const _periods = [StatsPeriod.today, StatsPeriod.week, StatsPeriod.month];
+
+String _periodLabel(StatsPeriod p) => switch (p) {
+  StatsPeriod.today => tr('Today'),
+  StatsPeriod.week => tr('Week'),
+  _ => tr('Month'),
+};
+
+String _periodHint(StatsPeriod p) => switch (p) {
+  StatsPeriod.today => tr('Today so far'),
+  StatsPeriod.week => tr('Last 7 days'),
+  _ => tr('Last 30 days'),
+};
+
 class _StatsBody extends StatefulWidget {
-  const _StatsBody();
+  const _StatsBody({this.onOpenJobs});
+  final VoidCallback? onOpenJobs;
 
   @override
   State<_StatsBody> createState() => _StatsBodyState();
 }
 
 class _StatsBodyState extends State<_StatsBody> {
+  DriverShiftEntry? _shift;
+  bool? _lastOnline;
+
   @override
   void initState() {
     super.initState();
@@ -42,117 +70,182 @@ class _StatsBodyState extends State<_StatsBody> {
     vm.load();
   }
 
+  Future<void> _loadShift() async {
+    final vm = context.read<JobsController>();
+    try {
+      final all = await vm.getShiftHistory();
+      if (!mounted) return;
+      final open = all.where((s) => s.endedAt == null).toList();
+      setState(() => _shift = vm.isOnline && open.isNotEmpty ? open.first : null);
+    } catch (_) {}
+  }
+
+  void _openShifts() {
+    final vm = context.read<JobsController>();
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChangeNotifierProvider<JobsController>.value(value: vm, child: const ShiftsScreen()),
+      ),
+    );
+  }
+
+  DateTime _rangeStart(StatsPeriod p) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    return switch (p) {
+      StatsPeriod.today => today,
+      StatsPeriod.week => today.subtract(const Duration(days: 6)),
+      _ => today.subtract(const Duration(days: 29)),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
     final vm = context.watch<JobsController>();
     final s = context.watch<StatsController>();
 
+    if (_lastOnline != vm.isOnline) {
+      _lastOnline = vm.isOnline;
+      if (!vm.isOnline) {
+        _shift = null;
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _loadShift();
+        });
+      }
+    }
+
     final totals = s.stats?.totals;
-    final totalDelivered = totals?.deliveredStops ?? vm.history.fold<int>(0, (a, r) => a + r.deliveredCount);
-    final totalRuns = totals?.completedRuns ?? vm.history.length;
-    final totalEarnings = totals?.earningsLkr ?? vm.history.fold<int>(0, (a, r) => a + r.deliveredTotal);
-    final distanceLabel = Format.km(totals?.totalDistanceKm ?? 0);
-    // The rating card follows the selected period; the all-time figures only stand in until stats load.
-    final periodRating = s.stats?.rating;
-    final rating = periodRating != null ? periodRating.average : (s.ratingsAverage ?? vm.profile?.avgRating);
-    final ratingCount =
-        periodRating?.count ?? (s.ratingsCount > 0 ? s.ratingsCount : (vm.profile?.ratingCount ?? 0));
-    final meritPoints = s.stats?.merit.points ?? vm.profile?.meritPoints;
-    final rawStatus = s.stats?.merit.status ?? vm.profile?.meritStatus;
-    final meritStatus = (rawStatus == null || rawStatus.trim().isEmpty) ? null : rawStatus.toUpperCase();
-    final meritMissing = meritPoints == null && meritStatus == null;
-    final meritValue = meritMissing ? '—' : '${meritPoints ?? 0}';
+    final start = _rangeStart(s.period);
+    final inRange = [
+      for (final j in vm.history)
+        if (Format.toLocal(j.completedAt ?? j.scheduledAt) case final t? when !t.isBefore(start)) j,
+    ];
+    final totalDelivered = totals?.deliveredStops ?? inRange.fold<int>(0, (a, r) => a + r.deliveredCount);
+    final totalRuns = totals?.completedRuns ?? inRange.length;
+    final totalEarnings = totals?.earningsLkr ?? inRange.fold<int>(0, (a, r) => a + r.deliveredTotal);
+    final issues = inRange.fold<int>(0, (a, r) => a + r.complaintCount);
+    final avgDelivery = totals?.averageDeliveryMinutes;
+    final onlineMinutes = totals?.onlineMinutes;
+
     final pending = s.loading && s.stats == null;
     final error = s.stats == null ? s.error : null;
 
-    return BcTabScaffold(
-      title: tr('Performance &'),
-      titleAccent: tr('Stats'),
-      titleBar: true,
-      heroArt: true,
-      subtitle: tr('Your delivery performance at a glance'),
-      heroExtra: _PeriodChips(
-        selected: s.period,
-        onSelect: (p) => s.load(period: p, force: true),
+    final tiles = <Widget>[
+      _StatTile(icon: Icons.route_rounded, label: tr('Completed jobs'), value: '$totalRuns'),
+      _StatTile(
+        icon: Icons.inventory_2_outlined,
+        label: tr('Delivered orders'),
+        value: '$totalDelivered',
+        onTap: () {
+          BcFeedback.tap();
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => DeliveredOrdersScreen(jobs: inRange)),
+          );
+        },
       ),
-      onRefresh: () => s.load(force: true),
+      _StatTile(
+        icon: Icons.schedule_rounded,
+        label: tr('Online time'),
+        value: onlineMinutes == null ? '—' : Format.duration(onlineMinutes),
+      ),
+      _StatTile(
+        icon: Icons.timer_outlined,
+        label: tr('Avg. delivery time'),
+        value: avgDelivery == null ? '—' : Format.minutes(avgDelivery),
+      ),
+      _StatTile(
+        icon: Icons.account_balance_wallet_outlined,
+        label: tr('Earnings'),
+        value: Format.money(totalEarnings),
+        valueColor: c.successStrong,
+      ),
+      _StatTile(icon: Icons.flag_outlined, label: tr('Reported issues'), value: '$issues'),
+    ];
+
+    return BcTabScaffold(
+      title: tr('Activity'),
+      onRefresh: () async {
+        _loadShift();
+        await s.load(force: true);
+        await vm.loadHistory(force: true);
+      },
       children: [
+        _Segmented(selected: s.period, onSelect: (p) => s.load(period: p, force: true)),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: Text(_periodHint(s.period), style: TextStyle(fontSize: 14, color: c.mutedForeground)),
+        ),
+        if (_shift != null && Format.toLocal(_shift!.startedAt) != null) ...[
+          const SizedBox(height: 16),
+          _ShiftBanner(since: Format.toLocal(_shift!.startedAt)!, onTap: _openShifts),
+        ],
+        const SizedBox(height: 16),
         if (pending)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 48),
-            child: Center(child: CircularProgressIndicator(color: c.brand)),
+            child: Center(child: CircularProgressIndicator(color: c.primary)),
           )
         else if (error != null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 32),
-            child: Text(error, style: TextStyle(color: c.textMuted, fontSize: 14)),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 24),
+            child: Text(error, style: TextStyle(color: c.mutedForeground, fontSize: 14)),
           )
-        else ...[
-          _HeroEarnings(totalEarnings: totalEarnings, completedRuns: totalRuns),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _MetricCard(
-                  icon: Icons.inventory_2_outlined,
-                  iconBg: c.brandSubtle,
-                  iconTint: c.brand,
-                  label: tr('Delivered Orders'),
-                  value: '$totalDelivered',
-                  subtitle: tr('{totalRuns} delivery runs', {'totalRuns': totalRuns}),
+        else
+          for (var i = 0; i < tiles.length; i += 2)
+            Padding(
+              padding: EdgeInsets.only(bottom: i + 2 < tiles.length ? 10 : 0),
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: tiles[i]),
+                    const SizedBox(width: 10),
+                    Expanded(child: i + 1 < tiles.length ? tiles[i + 1] : const SizedBox.shrink()),
+                  ],
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _MetricCard(
-                  icon: Icons.star_outline,
-                  iconBg: c.warningSubtle,
-                  iconTint: c.warning,
-                  label: tr('Driver Rating'),
-                  value: rating == null ? '—' : rating.toStringAsFixed(1),
-                  subtitle: rating == null || ratingCount == 0
-                      ? tr('No reviews yet')
-                      : rating >= 4.8
-                      ? tr('Top rated')
-                      : '$ratingCount reviews',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _MetricCard(
-                  icon: Icons.trending_up,
-                  iconBg: c.accent.withValues(alpha: 0.16),
-                  iconTint: c.accent,
-                  label: tr('Merit Score'),
-                  value: meritValue,
-                  subtitle: meritStatus == null ? '—' : tr(meritStatus),
-                  subtitleColor: meritStatus == null ? c.textMuted : c.accent,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _MetricCard(
-                  icon: Icons.local_shipping_outlined,
-                  iconBg: c.successSubtle,
-                  iconTint: c.success,
-                  label: tr('Distance'),
-                  value: distanceLabel,
-                  subtitle: tr('In this period'),
-                ),
-              ),
-            ],
-          ),
-          if (meritStatus != null) ...[const SizedBox(height: 16), _StandingBanner(meritStatus: meritStatus)],
-        ],
+            ),
         const SizedBox(height: 16),
-        _PerformanceTrends(history: vm.history),
+        ListenableBuilder(
+          listenable: OfferOutcomes.instance,
+          builder: (_, _) {
+            final local = OfferOutcomes.instance.counts(from: start);
+            final server = s.stats?.offers;
+            // The server counts accepted and declined offers; missed ones only exist on this phone.
+            final counts = server == null
+                ? local
+                : OfferOutcomeCounts(
+                    accepted: server.accepted,
+                    declined: server.declined,
+                    missed: server.missed + local.missed,
+                  );
+            return _AcceptanceCard(counts: counts);
+          },
+        ),
+        const SizedBox(height: 24),
+        _CompletedJobsChart(period: s.period, history: vm.history),
+        const SizedBox(height: 24),
+        QdGroup(
+          children: [
+            QdRow(
+              icon: Icons.calendar_month_outlined,
+              title: tr('Shift history'),
+              subtitle: tr('Every online session, recorded automatically'),
+              onTap: _openShifts,
+            ),
+            QdRow(
+              icon: Icons.assignment_outlined,
+              title: tr('Job history'),
+              subtitle: tr('Search and filter past jobs'),
+              onTap: widget.onOpenJobs,
+            ),
+          ],
+        ),
         if (s.ratings.isNotEmpty || s.ratingsLoading) ...[
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
           RiderReviewsSection(ratings: s.ratings, loading: s.ratingsLoading),
         ],
       ],
@@ -160,9 +253,9 @@ class _StatsBodyState extends State<_StatsBody> {
   }
 }
 
-/// Period selector shown inside the gradient hero.
-class _PeriodChips extends StatelessWidget {
-  const _PeriodChips({required this.selected, required this.onSelect});
+/// Segmented control (QuickDrop SegmentedControl): recessed track, raised selected pill.
+class _Segmented extends StatelessWidget {
+  const _Segmented({required this.selected, required this.onSelect});
 
   final StatsPeriod selected;
   final ValueChanged<StatsPeriod> onSelect;
@@ -171,35 +264,40 @@ class _PeriodChips extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.bc;
     return Container(
+      height: 48,
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+        color: c.isDark ? c.surface : c.border,
+        borderRadius: BorderRadius.circular(BcRadius.full),
+        border: c.isDark ? Border.all(color: c.border) : null,
       ),
       child: Row(
         children: [
-          for (final p in StatsPeriod.values)
+          for (final p in _periods)
             Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => onSelect(p),
-                child: AnimatedContainer(
-                  duration: BcMotion.standard,
-                  padding: const EdgeInsets.symmetric(vertical: 9),
-                  decoration: BoxDecoration(
-                    color: p == selected ? Colors.white : Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  alignment: Alignment.center,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
+              child: Semantics(
+                button: true,
+                selected: p == selected,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    if (p != selected) onSelect(p);
+                  },
+                  child: AnimatedContainer(
+                    duration: BcMotion.standard,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: p == selected ? (c.isDark ? c.elevated : c.surface) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(BcRadius.full),
+                      boxShadow: p == selected ? bcShadow(c) : null,
+                    ),
                     child: Text(
-                      tr(p.label),
+                      _periodLabel(p),
+                      maxLines: 1,
                       style: TextStyle(
-                        fontSize: 12.5,
+                        fontSize: 14,
                         fontWeight: p == selected ? FontWeight.w700 : FontWeight.w500,
-                        color: p == selected ? c.brandDark : Colors.white,
+                        color: p == selected ? c.foreground : c.mutedForeground,
                       ),
                     ),
                   ),
@@ -212,194 +310,92 @@ class _PeriodChips extends StatelessWidget {
   }
 }
 
-class _HeroEarnings extends StatelessWidget {
-  const _HeroEarnings({required this.totalEarnings, required this.completedRuns});
-  final int totalEarnings;
-  final int completedRuns;
+/// Yellow "on shift now" banner with the live elapsed clock.
+class _ShiftBanner extends StatelessWidget {
+  const _ShiftBanner({required this.since, required this.onTap});
+  final DateTime since;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(BcRadius.card),
-        gradient: LinearGradient(
-          colors: [c.brandLight, c.brand, c.brandDark],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: [BoxShadow(color: c.brand.withValues(alpha: 0.28), blurRadius: 20, offset: const Offset(0, 10))],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          Positioned.fill(child: CustomPaint(painter: _EarningsDecorPainter())),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 20, 18, 20),
+    return Semantics(
+      button: true,
+      label: tr('On shift now'),
+      child: Material(
+        color: c.accent,
+        borderRadius: BorderRadius.circular(BcRadius.md),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(BcRadius.md),
+          onTap: onTap,
+          child: Container(
+            height: 52,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
+                Container(width: 10, height: 10, decoration: BoxDecoration(color: c.inverse, shape: BoxShape.circle)),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        tr('Total earned'),
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.88),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          Format.money(totalEarnings),
-                          style: const TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        tr('Across {completedRuns} completed runs', {'completedRuns': completedRuns}),
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
-                      ),
-                    ],
+                  child: Text(
+                    tr('On shift now'),
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.accentForeground),
                   ),
                 ),
-                const SizedBox(width: 8),
-                const _CoinStack(),
-                const SizedBox(width: 8),
-                Container(
-                  width: 54,
-                  height: 54,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
-                  ),
-                  child: const Icon(Icons.account_balance_wallet_outlined, color: Colors.white, size: 27),
+                ElapsedClock(
+                  since: since,
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: c.accentForeground),
                 ),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right_rounded, size: 24, color: c.accentForeground),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Faint rising bars + a circle in the earnings card background.
-class _EarningsDecorPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final p = Paint()..color = Colors.white.withValues(alpha: 0.07);
-    canvas.drawCircle(Offset(w * 0.98, h * 0.05), h * 0.55, p);
-    const heights = [0.25, 0.4, 0.32, 0.55, 0.7];
-    for (var i = 0; i < heights.length; i++) {
-      final bh = h * heights[i];
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(Rect.fromLTWH(w * 0.42 + i * 14, h - bh, 9, bh), const Radius.circular(3)),
-        p,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-/// Small stack of gold coins.
-class _CoinStack extends StatelessWidget {
-  const _CoinStack();
-
-  @override
-  Widget build(BuildContext context) {
-    Widget coin(double bottom) => Positioned(
-      bottom: bottom,
-      left: 0,
-      child: Container(
-        width: 30,
-        height: 10,
-        decoration: BoxDecoration(
-          color: const Color(0xFFFFC94D),
-          borderRadius: BorderRadius.circular(99),
-          border: Border.all(color: const Color(0xFFE0A21B), width: 1.2),
         ),
       ),
     );
-    return SizedBox(width: 30, height: 44, child: Stack(children: [coin(0), coin(7), coin(14), coin(21), coin(28)]));
   }
 }
 
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({
-    required this.icon,
-    required this.iconBg,
-    required this.iconTint,
-    required this.label,
-    required this.value,
-    required this.subtitle,
-    this.subtitleColor,
-  });
+/// One headline number with its label (QuickDrop StatTile).
+class _StatTile extends StatelessWidget {
+  const _StatTile({required this.icon, required this.label, required this.value, this.valueColor, this.onTap});
 
   final IconData icon;
-  final Color iconBg;
-  final Color iconTint;
   final String label;
   final String value;
-  final String subtitle;
-  final Color? subtitleColor;
+  final Color? valueColor;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    return BcCard(
-      padding: const EdgeInsets.fromLTRB(12, 14, 12, 14),
-      child: Row(
+    return QdCard(
+      onTap: onTap,
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 40,
             height: 40,
-            decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(12)),
-            child: Icon(icon, color: iconTint, size: 21),
+            decoration: BoxDecoration(color: c.primarySoft, borderRadius: BorderRadius.circular(BcRadius.sm)),
+            child: Icon(icon, color: c.primaryStrong, size: 22),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: c.textMuted, fontSize: 12, fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(height: 4),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    value,
-                    style: TextStyle(color: c.text, fontSize: 22, fontWeight: FontWeight.w800),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: subtitleColor ?? c.textMuted,
-                    fontSize: 12,
-                    fontWeight: subtitleColor != null && subtitle != '—' ? FontWeight.w700 : FontWeight.w400,
-                  ),
-                ),
-              ],
+          const SizedBox(height: 12),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(fontSize: 22, height: 28 / 22, fontWeight: FontWeight.w700, color: valueColor ?? c.foreground),
             ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: c.mutedForeground, fontSize: 13, fontWeight: FontWeight.w500),
           ),
         ],
       ),
@@ -407,556 +403,253 @@ class _MetricCard extends StatelessWidget {
   }
 }
 
-class _StandingBanner extends StatelessWidget {
-  const _StandingBanner({required this.meritStatus});
-  final String meritStatus;
+/// Offer outcomes for the period (QuickDrop OfferOutcomes): accepted share, segmented bar, legend.
+class _AcceptanceCard extends StatelessWidget {
+  const _AcceptanceCard({required this.counts});
+  final OfferOutcomeCounts counts;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final excellent = meritStatus.toUpperCase() == 'EXCELLENT';
-    final lower = meritStatus.toLowerCase();
-    final title = excellent
-        ? tr('Great performance')
-        : L10n.isZh
-        ? tr(meritStatus.toUpperCase())
-        : (lower.isEmpty ? lower : lower[0].toUpperCase() + lower.substring(1));
-    final detail = excellent ? tr('Keep up the good work!') : tr('Your current merit standing');
-    final bg = c.isDark ? const Color(0xFF16233B) : const Color(0xFFEBF3FD);
-    final border = c.isDark ? const Color(0xFF1E3A5F) : const Color(0xFFE2EAF8);
-    final wave = c.isDark ? const Color(0xFF1E304F) : const Color(0xFFDEEBFA);
-    final trophyBg = c.isDark ? const Color(0xFF1E3A8A) : const Color(0xFFD6E7FD);
-    final trophyTint = c.isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
-    return Container(
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: border),
-        boxShadow: [
-          BoxShadow(
-            color: c.isDark ? const Color(0x33000000) : const Color(0x100F172A),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+    final dark = c.isDark;
+    final okColor = dark ? const Color(0xFF34D399) : const Color(0xFF16845C);
+    final declinedColor = dark ? const Color(0xFF3B9CFF) : const Color(0xFF2684FC);
+    final missedColor = dark ? const Color(0xFFFBBF24) : const Color(0xFFE49A25);
+    final total = counts.total;
+    final pct = total == 0 ? null : (counts.accepted * 100 / total).round();
+
+    final rows = [
+      (Icons.check_circle_outline_rounded, tr('Accepted'), counts.accepted, okColor),
+      (Icons.cancel_outlined, tr('Declined'), counts.declined, declinedColor),
+      (Icons.schedule_rounded, tr('Missed'), counts.missed, missedColor),
+    ];
+
+    return QdCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(tr('Acceptance rate'), style: TextStyle(fontSize: 14, color: c.mutedForeground)),
+          const SizedBox(height: 2),
+          Text(
+            pct == null ? '—' : '$pct%',
+            style: TextStyle(fontFamily: 'Inter', fontSize: 28, height: 34 / 28, fontWeight: FontWeight.w700, color: c.foreground),
           ),
+          Text(
+            total == 0
+                ? tr('No offers in this period yet.')
+                : tr('{accepted} of {total} offers accepted', {'accepted': counts.accepted, 'total': total}),
+            style: TextStyle(fontSize: 14, color: c.mutedForeground),
+          ),
+          const SizedBox(height: 16),
+          // Thin segmented bar: the outer ends are fully rounded, segments meet with a small gap.
+          // With no offers yet it is just an empty track.
+          SizedBox(
+            height: 8,
+            child: total == 0
+                ? DecoratedBox(
+                    decoration: BoxDecoration(color: c.muted, borderRadius: BorderRadius.circular(BcRadius.full)),
+                  )
+                : Row(
+                    // Stretch: an empty DecoratedBox is zero-high unless the row gives it the bar height.
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: () {
+                      final parts = rows.where((r) => r.$3 > 0).toList();
+                      return [
+                        for (var i = 0; i < parts.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 2),
+                          Expanded(
+                            flex: parts[i].$3,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: parts[i].$4,
+                                borderRadius: BorderRadius.horizontal(
+                                  left: Radius.circular(i == 0 ? 4 : 0),
+                                  right: Radius.circular(i == parts.length - 1 ? 4 : 0),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ];
+                    }(),
+                  ),
+          ),
+          const SizedBox(height: 16),
+          // Each outcome by name, icon and count, so nothing relies on colour alone.
+          for (var i = 0; i < rows.length; i++)
+            Padding(
+              padding: EdgeInsets.only(top: i == 0 ? 0 : 8),
+              child: Row(
+                children: [
+                  Container(width: 10, height: 10, decoration: BoxDecoration(color: rows[i].$4, shape: BoxShape.circle)),
+                  const SizedBox(width: 12),
+                  Icon(rows[i].$1, size: 18, color: c.mutedForeground),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(rows[i].$2, style: TextStyle(fontSize: 16, color: c.foreground))),
+                  Text(
+                    '${rows[i].$3}',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground),
+                  ),
+                ],
+              ),
+            ),
         ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: CustomPaint(
-        painter: _BannerWavePainter(wave),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: trophyBg),
-                child: Icon(Icons.emoji_events_outlined, color: trophyTint, size: 24),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(color: c.text, fontSize: 15, fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(detail, style: TextStyle(color: c.textMuted, fontSize: 13)),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(width: 56, height: 40, child: CustomPaint(painter: _MiniChartPainter(trophyTint))),
-            ],
-          ),
-        ),
       ),
     );
   }
 }
 
-/// Tiny rising bar chart with a sparkle, used as the banner's trailing graphic.
-class _MiniChartPainter extends CustomPainter {
-  _MiniChartPainter(this.color);
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    const heights = [0.35, 0.55, 0.8];
-    for (var i = 0; i < heights.length; i++) {
-      final bh = h * heights[i];
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(Rect.fromLTWH(i * 13.0, h - bh, 9, bh), const Radius.circular(3)),
-        Paint()..color = color.withValues(alpha: 0.35 + i * 0.25),
-      );
-    }
-    // Four-point sparkle.
-    final cx = w - 9;
-    final cy = h * 0.28;
-    const r = 7.0;
-    final star = Path()
-      ..moveTo(cx, cy - r)
-      ..quadraticBezierTo(cx, cy, cx + r, cy)
-      ..quadraticBezierTo(cx, cy, cx, cy + r)
-      ..quadraticBezierTo(cx, cy, cx - r, cy)
-      ..quadraticBezierTo(cx, cy, cx, cy - r)
-      ..close();
-    canvas.drawPath(star, Paint()..color = const Color(0xFFFFC94D));
-  }
-
-  @override
-  bool shouldRepaint(covariant _MiniChartPainter old) => old.color != color;
-}
-
-class _BannerWavePainter extends CustomPainter {
-  _BannerWavePainter(this.color);
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final path = Path()
-      ..moveTo(w * 0.65, h)
-      ..cubicTo(w * 0.78, h * 0.55, w * 0.90, h * 0.85, w, h * 0.40)
-      ..lineTo(w, h)
-      ..close();
-    canvas.drawPath(path, Paint()..color = color);
-  }
-
-  @override
-  bool shouldRepaint(covariant _BannerWavePainter old) => old.color != color;
-}
-
-/// What the weekly chart is measuring.
-enum _TrendMetric { stops, earnings }
-
-/// Last 7 calendar days of delivered stops (or earnings). One series, one axis, real data only:
-/// summary tiles on top, then a bar chart with recessive gridlines, selective value labels
-/// (today + best day) and tap-for-detail. Empty weeks get an honest empty state, not fake bars.
-class _PerformanceTrends extends StatefulWidget {
-  const _PerformanceTrends({required this.history});
+/// Completed jobs per hour (today) or per day (week / month): flat bars, peak tick, tap a bar.
+class _CompletedJobsChart extends StatefulWidget {
+  const _CompletedJobsChart({required this.period, required this.history});
+  final StatsPeriod period;
   final List<JobHistoryItem> history;
 
   @override
-  State<_PerformanceTrends> createState() => _PerformanceTrendsState();
+  State<_CompletedJobsChart> createState() => _CompletedJobsChartState();
 }
 
-class _PerformanceTrendsState extends State<_PerformanceTrends> {
-  _TrendMetric _metric = _TrendMetric.stops;
+class _CompletedJobsChartState extends State<_CompletedJobsChart> {
   int? _selected;
+
+  @override
+  void didUpdateWidget(covariant _CompletedJobsChart old) {
+    super.didUpdateWidget(old);
+    if (old.period != widget.period) _selected = null;
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final days = [for (var i = 6; i >= 0; i--) today.subtract(Duration(days: i))];
-    final values = days.map((d) {
-      var sum = 0;
-      for (final item in widget.history) {
-        final t = Format.toLocal(item.completedAt ?? item.scheduledAt);
-        if (t != null && DateTime(t.year, t.month, t.day) == d) {
-          sum += _metric == _TrendMetric.stops ? item.deliveredCount : item.deliveredTotal;
-        }
-      }
-      return sum;
-    }).toList();
-    final total = values.fold<int>(0, (a, b) => a + b);
-    final hasActivity = total > 0;
-    final best = values.fold<int>(0, (a, b) => b > a ? b : a);
-    final bestIndex = hasActivity ? values.indexOf(best) : -1;
-    final activeDays = values.where((v) => v > 0).length;
-    final avg = activeDays == 0 ? 0 : (total / 7).round();
-    final weekday = DateFormat('EEE', L10n.dateLocale);
-    String fmt(int v) => _metric == _TrendMetric.stops ? '$v' : Format.money(v);
+    final hourly = widget.period == StatsPeriod.today;
+    final n = hourly ? 24 : (widget.period == StatsPeriod.week ? 7 : 30);
+    final starts = [
+      for (var i = 0; i < n; i++)
+        hourly
+            ? DateTime(today.year, today.month, today.day, i)
+            : DateTime(today.year, today.month, today.day - (n - 1 - i)),
+    ];
+    final counts = List<int>.filled(n, 0);
+    for (final j in widget.history) {
+      if (!(j.displayStatus ?? j.status).toUpperCase().contains('COMPLETED')) continue;
+      final t = Format.toLocal(j.completedAt);
+      if (t == null) continue;
+      final idx = hourly
+          ? (DateTime(t.year, t.month, t.day) == today ? t.hour : -1)
+          : starts.indexWhere((d) => d.year == t.year && d.month == t.month && d.day == t.day);
+      if (idx >= 0 && idx < n) counts[idx]++;
+    }
+    final max = counts.fold<int>(0, (a, b) => b > a ? b : a);
+    final top = max < 1 ? 1 : max;
+    final step = hourly ? 6 : (widget.period == StatsPeriod.week ? 1 : 5);
+    final loc = L10n.dateLocale;
+    String label(DateTime d) => hourly
+        ? DateFormat('h a', loc).format(d)
+        : widget.period == StatsPeriod.week
+        ? DateFormat('EEE', loc).format(d)
+        : DateFormat('MMM d', loc).format(d);
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(BcRadius.card),
-        border: Border.all(color: c.border),
-        boxShadow: c.cardShadow.a == 0
-            ? null
-            : [BoxShadow(color: c.cardShadow, blurRadius: 16, offset: const Offset(0, 5))],
-      ),
+    final sel = _selected;
+    final caption = sel != null
+        ? tr('{label}: {count} completed', {'label': label(starts[sel]), 'count': counts[sel]})
+        : max > 0
+        ? tr('Tap a bar to see its total.')
+        : tr('No completed jobs in this period yet.');
+
+    const plotH = 128.0;
+    const headroom = 18.0;
+    const axisH = 22.0;
+
+    return QdCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(color: c.brandSubtle, borderRadius: BorderRadius.circular(12)),
-                child: Icon(Icons.insights_rounded, color: c.brand, size: 20),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      tr('Last 7 days'),
-                      style: TextStyle(color: c.text, fontSize: 16, fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _metric == _TrendMetric.stops ? tr('Delivered stops by day') : tr('Earnings by day'),
-                      style: TextStyle(color: c.textMuted, fontSize: 12.5),
-                    ),
-                  ],
-                ),
-              ),
-              _MetricToggle(
-                value: _metric,
-                onChanged: (m) => setState(() {
-                  _metric = m;
-                  _selected = null;
-                }),
-              ),
-            ],
+          Text(
+            hourly ? tr('Completed Jobs by Hour') : tr('Completed Jobs by Day'),
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: c.foreground),
           ),
-          const SizedBox(height: 14),
-          // Headline numbers — the chart supports them, not the other way round.
-          Row(
-            children: [
-              Expanded(
-                child: _TrendStat(label: tr('Total'), value: fmt(total), emphasis: true),
-              ),
-              Expanded(
-                child: _TrendStat(label: tr('Best day'), value: hasActivity ? weekday.format(days[bestIndex]) : '—'),
-              ),
-              Expanded(
-                child: _TrendStat(label: tr('Daily avg'), value: hasActivity ? fmt(avg) : '—'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            height: 168,
-            child: hasActivity
-                ? _WeekBars(
-                    values: values,
-                    labels: [for (final d in days) weekday.format(d)],
-                    todayIndex: 6,
-                    bestIndex: bestIndex,
-                    selected: _selected,
-                    format: fmt,
-                    onSelect: (i) => setState(() => _selected = _selected == i ? null : i),
-                  )
-                : _WeekEmpty(labels: [for (final d in days) weekday.format(d)]),
+          const SizedBox(height: 2),
+          Text(caption, style: TextStyle(fontSize: 14, color: c.mutedForeground)),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, box) {
+              final slot = box.maxWidth / n;
+              final barW = (slot - 2).clamp(2.0, 24.0);
+              return Column(
+                children: [
+                  SizedBox(
+                    height: plotH,
+                    child: Stack(
+                      children: [
+                        Positioned(left: 0, right: 0, top: headroom, child: Container(height: 1, color: c.border)),
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          child: Text('$top', style: TextStyle(fontSize: 13, color: c.mutedForeground)),
+                        ),
+                        Positioned(left: 0, right: 0, bottom: 0, child: Container(height: 1, color: c.border)),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            for (var i = 0; i < n; i++)
+                              GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => setState(() => _selected = _selected == i ? null : i),
+                                child: Semantics(
+                                  button: true,
+                                  selected: sel == i,
+                                  label: tr('{label}: {count} completed', {'label': label(starts[i]), 'count': counts[i]}),
+                                  child: SizedBox(
+                                    width: slot,
+                                    height: plotH,
+                                    child: Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: counts[i] == 0
+                                          ? null
+                                          : Container(
+                                              width: barW,
+                                              height: counts[i] / top * (plotH - headroom),
+                                              decoration: BoxDecoration(
+                                                borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                                                color: c.primary.withValues(alpha: sel != null && sel != i ? 0.35 : 1),
+                                              ),
+                                            ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    height: axisH,
+                    child: Stack(
+                      children: [
+                        for (var i = 0; i < n; i += step)
+                          Positioned(
+                            left: (i * slot + slot / 2 - slot * step / 2).clamp(0.0, (box.maxWidth - slot * step).clamp(0.0, box.maxWidth)),
+                            width: slot * step,
+                            top: 4,
+                            child: Text(
+                              label(starts[i]),
+                              maxLines: 1,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 13, color: c.mutedForeground),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
     );
   }
-}
-
-/// Stops | Earnings segmented switch.
-class _MetricToggle extends StatelessWidget {
-  const _MetricToggle({required this.value, required this.onChanged});
-  final _TrendMetric value;
-  final ValueChanged<_TrendMetric> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    Widget seg(_TrendMetric m, String label) {
-      final on = m == value;
-      return Semantics(
-        button: true,
-        selected: on,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => onChanged(m),
-          child: AnimatedContainer(
-            duration: BcMotion.standard,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: on ? c.card : Colors.transparent,
-              borderRadius: BorderRadius.circular(9),
-              boxShadow: on ? const [BoxShadow(color: Color(0x140A2647), blurRadius: 6, offset: Offset(0, 2))] : null,
-            ),
-            child: Text(
-              label,
-              style: TextStyle(
-                color: on ? c.text : c.textMuted,
-                fontSize: 12,
-                fontWeight: on ? FontWeight.w700 : FontWeight.w500,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: c.isDark ? c.surfaceElevated : c.iconTile,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [seg(_TrendMetric.stops, tr('Stops')), seg(_TrendMetric.earnings, tr('Earnings'))],
-      ),
-    );
-  }
-}
-
-class _TrendStat extends StatelessWidget {
-  const _TrendStat({required this.label, required this.value, this.emphasis = false});
-  final String label;
-  final String value;
-  final bool emphasis;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(color: c.textMuted, fontSize: 11.5, fontWeight: FontWeight.w500),
-        ),
-        const SizedBox(height: 2),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            value,
-            style: TextStyle(
-              color: emphasis ? c.brand : c.text,
-              fontSize: emphasis ? 20 : 17,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Seven rounded bars on a recessive dashed grid. Labels only on today, the best day,
-/// and the tapped bar; the rest stay quiet so the shape reads first.
-class _WeekBars extends StatelessWidget {
-  const _WeekBars({
-    required this.values,
-    required this.labels,
-    required this.todayIndex,
-    required this.bestIndex,
-    required this.selected,
-    required this.format,
-    required this.onSelect,
-  });
-
-  final List<int> values;
-  final List<String> labels;
-  final int todayIndex;
-  final int bestIndex;
-  final int? selected;
-  final String Function(int) format;
-  final ValueChanged<int> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    final maxV = values.fold<int>(0, (a, b) => b > a ? b : a);
-    const labelBand = 20.0; // room for value labels above bars
-    const axisBand = 22.0; // weekday labels
-    return LayoutBuilder(
-      builder: (context, box) {
-        final plotH = box.maxHeight - labelBand - axisBand;
-        return Stack(
-          children: [
-            // Gridlines at 0, ½ and max — recessive, dashed.
-            for (final f in [0.0, 0.5, 1.0])
-              Positioned(
-                left: 0,
-                right: 0,
-                top: labelBand + plotH * (1 - f),
-                child: CustomPaint(
-                  size: const Size(double.infinity, 1),
-                  painter: _DashPainter(c.border.withValues(alpha: f == 0 ? 1 : 0.7), dashed: f != 0),
-                ),
-              ),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                for (var i = 0; i < values.length; i++)
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque, // whole column is the hit target
-                      onTap: () => onSelect(i),
-                      child: Semantics(
-                        label: '${labels[i]}: ${format(values[i])}',
-                        button: true,
-                        selected: selected == i,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            SizedBox(
-                              height: labelBand,
-                              child: (i == todayIndex || i == bestIndex || i == selected) && values[i] > 0
-                                  ? FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      child: Text(
-                                        format(values[i]),
-                                        style: TextStyle(
-                                          color: i == selected || i == todayIndex ? c.text : c.textMuted,
-                                          fontSize: 11.5,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                    )
-                                  : null,
-                            ),
-                            TweenAnimationBuilder<double>(
-                              tween: Tween(begin: 0, end: maxV == 0 ? 0 : values[i] / maxV),
-                              duration: const Duration(milliseconds: 600),
-                              curve: Curves.easeOutCubic,
-                              builder: (_, f, _) {
-                                final h = values[i] == 0 ? 3.0 : (plotH * f).clamp(6.0, plotH);
-                                final strong = i == todayIndex || i == selected;
-                                return Container(
-                                  width: 22,
-                                  height: h,
-                                  decoration: BoxDecoration(
-                                    // 4px rounded data end, anchored to the baseline.
-                                    borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
-                                    color: values[i] == 0 ? c.border : null,
-                                    gradient: values[i] == 0
-                                        ? null
-                                        : LinearGradient(
-                                            begin: Alignment.topCenter,
-                                            end: Alignment.bottomCenter,
-                                            colors: strong
-                                                ? [c.brandLight, c.brand]
-                                                : [c.brand.withValues(alpha: 0.45), c.brand.withValues(alpha: 0.28)],
-                                          ),
-                                  ),
-                                );
-                              },
-                            ),
-                            SizedBox(
-                              height: axisBand,
-                              child: Center(
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: i == todayIndex ? c.brand : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(99),
-                                  ),
-                                  child: Text(
-                                    labels[i],
-                                    style: TextStyle(
-                                      color: i == todayIndex ? Colors.white : c.textMuted,
-                                      fontSize: 11,
-                                      fontWeight: i == todayIndex ? FontWeight.w800 : FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// No activity this week: a quiet baseline with weekday ticks and a short message.
-class _WeekEmpty extends StatelessWidget {
-  const _WeekEmpty({required this.labels});
-  final List<String> labels;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    return Column(
-      children: [
-        Expanded(
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 46,
-                  height: 46,
-                  decoration: BoxDecoration(shape: BoxShape.circle, color: c.brandSubtle),
-                  child: Icon(Icons.show_chart_rounded, color: c.brand, size: 22),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  tr('No deliveries in the last 7 days'),
-                  style: TextStyle(color: c.text, fontSize: 14, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  tr('Your daily progress will show up here.'),
-                  style: TextStyle(color: c.textMuted, fontSize: 12.5),
-                ),
-              ],
-            ),
-          ),
-        ),
-        CustomPaint(size: const Size(double.infinity, 1), painter: _DashPainter(c.border, dashed: false)),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            for (var i = 0; i < labels.length; i++)
-              Expanded(
-                child: Center(
-                  child: Text(
-                    labels[i],
-                    style: TextStyle(
-                      color: i == labels.length - 1 ? c.brand : c.textMuted,
-                      fontSize: 11,
-                      fontWeight: i == labels.length - 1 ? FontWeight.w800 : FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _DashPainter extends CustomPainter {
-  _DashPainter(this.color, {required this.dashed});
-  final Color color;
-  final bool dashed;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Paint()
-      ..color = color
-      ..strokeWidth = 1;
-    if (!dashed) {
-      canvas.drawLine(Offset.zero, Offset(size.width, 0), p);
-      return;
-    }
-    for (var x = 0.0; x < size.width; x += 7) {
-      canvas.drawLine(Offset(x, 0), Offset(x + 3.5, 0), p);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DashPainter old) => old.color != color || old.dashed != dashed;
 }

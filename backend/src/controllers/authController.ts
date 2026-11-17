@@ -575,7 +575,7 @@ export async function updateMe(req: Request, res: Response, next: NextFunction) 
   try {
     const schema = z.object({
       name: z.string().min(2).max(100).optional(),
-      email: z.union([z.string().email(), z.literal(''), z.null()]).optional(),
+      email: z.string().email().optional(),
       notifyEmail: z.boolean().optional(),
       notifySms: z.boolean().optional(),
       notifyPush: z.boolean().optional(),
@@ -593,14 +593,8 @@ export async function updateMe(req: Request, res: Response, next: NextFunction) 
     if (existing.deletedAt) {
       throw new AppError('This account has been deleted and cannot be updated.', 403, 'ACCOUNT_DELETED');
     }
-    const { referralCode, email, ...profileData } = data;
-    const user = await prisma.user.update({
-      where: { id: req.user!.sub },
-      data: {
-        ...profileData,
-        ...(email !== undefined ? { email: email && email.length > 0 ? email : null } : {}),
-      },
-    });
+    const { referralCode, ...profileData } = data;
+    const user = await prisma.user.update({ where: { id: req.user!.sub }, data: profileData });
     if (referralCode) {
       await applyReferralCodeToUser(user.id, referralCode);
     }

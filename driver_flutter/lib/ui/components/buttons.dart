@@ -39,13 +39,13 @@ class _BcButtonState extends State<BcButton> {
     final c = context.bc;
     final active = widget.enabled && !widget.loading && widget.onPressed != null;
     final locked = widget.lockedRed && !widget.enabled && !widget.loading;
-    final base = widget.color ?? c.brand;
+    final base = widget.color ?? c.action;
     final bg = active
         ? base
         : locked
-        ? const Color(0xFFFEE2E2)
+        ? c.errorSoftBg
         : base.withValues(alpha: 0.4);
-    final fg = locked ? const Color(0xFFE11D48) : c.onBrand.withValues(alpha: active ? 1 : 0.8);
+    final fg = locked ? c.error : c.actionForeground.withValues(alpha: active ? 1 : 0.8);
     return Semantics(
       button: true,
       label: widget.label,

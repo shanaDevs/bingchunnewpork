@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { ChevronDown, Layers } from 'lucide-react';
 
 import {
-  resolveCommissionSlabs,
+  COMMISSION_SLABS,
   formatCommissionRate,
   getNextTierProgress,
   type MonthlySlabInfo,
@@ -34,11 +34,9 @@ function formatMonthLabel(month: string): string {
 
 function TierScheduleTable({
   activeIndex,
-  slabs,
   showActiveTierLabel = true,
 }: {
   activeIndex: number;
-  slabs: ReturnType<typeof resolveCommissionSlabs>;
   showActiveTierLabel?: boolean;
 }) {
   return (
@@ -52,7 +50,7 @@ function TierScheduleTable({
           </tr>
         </thead>
         <tbody>
-          {slabs.map((slab, index) => {
+          {COMMISSION_SLABS.map((slab, index) => {
             const isActive = index === activeIndex;
             return (
               <tr
@@ -100,8 +98,7 @@ function TierDisclosure({
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const activeIndex = slabInfo.slabIndex;
-  const slabs = resolveCommissionSlabs(slabInfo.slabs);
-  const next = getNextTierProgress(slabInfo.monthlyBase, activeIndex, slabs);
+  const next = getNextTierProgress(slabInfo.monthlyBase, activeIndex);
 
   return (
     <div className="rounded-xl border border-[var(--color-navy-border)]/80 bg-[var(--color-input-bg)]/25">
@@ -187,11 +184,7 @@ function TierDisclosure({
             </div>
           )}
 
-          <TierScheduleTable
-            activeIndex={activeIndex}
-            slabs={slabs}
-            showActiveTierLabel={showActiveTierLabel}
-          />
+          <TierScheduleTable activeIndex={activeIndex} showActiveTierLabel={showActiveTierLabel} />
         </div>
       )}
     </div>
@@ -208,7 +201,6 @@ export default function CommissionSlabTable({
   showActiveTierLabel = true,
 }: Props) {
   const activeIndex = slabInfo?.slabIndex ?? 0;
-  const slabs = resolveCommissionSlabs(slabInfo?.slabs);
 
   if (collapsible && slabInfo) {
     return (
@@ -272,11 +264,7 @@ export default function CommissionSlabTable({
         </div>
       )}
 
-      <TierScheduleTable
-        activeIndex={activeIndex}
-        slabs={slabs}
-        showActiveTierLabel={showActiveTierLabel}
-      />
+      <TierScheduleTable activeIndex={activeIndex} showActiveTierLabel={showActiveTierLabel} />
     </div>
   );
 }

@@ -1,8 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import toast from 'react-hot-toast';
 import ReportSection, {
   ReportPagination,
   ReportTable,
@@ -35,52 +34,6 @@ type LoyaltyRow = {
   totalValue: number;
 };
 
-const LOYALTY_THRESHOLD_MIN = 2;
-const LOYALTY_THRESHOLD_MAX = 9_999;
-
-function clampLoyaltyThreshold(value: number) {
-  if (!Number.isFinite(value)) return LOYALTY_THRESHOLD_MIN;
-  return Math.min(LOYALTY_THRESHOLD_MAX, Math.max(LOYALTY_THRESHOLD_MIN, Math.floor(value)));
-}
-
-type CustomerLoyaltyPayload = {
-  customers: LoyaltyRow[];
-  summary: { total: number; newCount: number; loyalCount: number };
-  loyaltyThreshold: number;
-};
-
-function parseLoyaltyThresholdInput(raw: string) {
-  if (raw.trim() === '') return LOYALTY_THRESHOLD_MIN;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return null;
-  return clampLoyaltyThreshold(n);
-}
-
-function isCustomerLoyaltyPayload(value: unknown): value is CustomerLoyaltyPayload {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
-  if (!Array.isArray(record.customers)) return false;
-  const summary = record.summary;
-  if (!summary || typeof summary !== 'object') return false;
-  const s = summary as Record<string, unknown>;
-  return typeof s.total === 'number' && typeof s.newCount === 'number' && typeof s.loyalCount === 'number';
-}
-
-async function fetchCustomerLoyaltyReport(queryUrl: string): Promise<CustomerLoyaltyPayload> {
-  const payload = await adminFetch<unknown>(queryUrl);
-  if (isCustomerLoyaltyPayload(payload)) {
-    return payload;
-  }
-  const message =
-    payload &&
-    typeof payload === 'object' &&
-    'message' in payload &&
-    typeof (payload as { message?: unknown }).message === 'string'
-      ? (payload as { message: string }).message
-      : 'Failed to load customer loyalty report';
-  throw new Error(message);
-}
-
 const COLUMNS = [
   { key: 'name', label: 'Customer Name / Phone' },
   { key: 'registration', label: 'Registration Date' },
@@ -95,7 +48,7 @@ const COLUMNS = [
 
 export default function CustomerLoyaltyReport({ lockedStoreId, lockedStoreName }: LockedStoreReportProps) {
   const [customerType, setCustomerType] = useState<'ALL' | 'NEW' | 'LOYAL'>('ALL');
-  const [loyaltyThreshold, setLoyaltyThreshold] = useState(LOYALTY_THRESHOLD_MIN);
+  const [loyaltyThreshold, setLoyaltyThreshold] = useState(2);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [storeId, setStoreId] = useState(lockedStoreId ?? '');
@@ -115,32 +68,15 @@ export default function CustomerLoyaltyReport({ lockedStoreId, lockedStoreName }
     return `/admin/reports/customer-loyalty?${params.toString()}`;
   }, [customerType, loyaltyThreshold, from, to, storeId]);
 
-  const { data, isFetching, isError, error, isFetched, isSuccess } = useQuery<CustomerLoyaltyPayload>({
+  const { data, isFetching } = useQuery<{
+    customers: LoyaltyRow[];
+    summary: { total: number; newCount: number; loyalCount: number };
+    loyaltyThreshold: number;
+  }>({
     queryKey: ['report-customer-loyalty', queryUrl],
-    queryFn: () => fetchCustomerLoyaltyReport(queryUrl),
+    queryFn: () => adminFetch(queryUrl),
     placeholderData: keepPreviousData,
   });
-
-  const lastEmptyToastKey = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!isError) return;
-    const message = error instanceof Error ? error.message : 'Failed to load customer loyalty report';
-    toast.error(message);
-  }, [isError, error]);
-
-  useEffect(() => {
-    if (!isSuccess || !data) return;
-    if (data.customers.length > 0) {
-      lastEmptyToastKey.current = null;
-      return;
-    }
-    if (lastEmptyToastKey.current === queryUrl) return;
-    lastEmptyToastKey.current = queryUrl;
-    toast(`No customers match threshold ${loyaltyThreshold}+ for the selected filters.`, {
-      icon: 'ℹ️',
-    });
-  }, [isSuccess, data, queryUrl, loyaltyThreshold]);
 
   const rows = data?.customers ?? [];
   const { page, setPage, pagedRows, totalItems } = useReportPagination(rows);
@@ -154,9 +90,9 @@ export default function CustomerLoyaltyReport({ lockedStoreId, lockedStoreName }
   const periodLabel = formatReportPeriodFromDates(from, to);
   const filterLabel = `Type ${customerType} · Threshold ${loyaltyThreshold}+`;
   const pdfStats = [
-    { label: 'Customers', value: String(data?.summary?.total ?? 0), tone: 'blue' as const },
-    { label: 'New', value: String(data?.summary?.newCount ?? 0), tone: 'teal' as const },
-    { label: 'Loyal', value: String(data?.summary?.loyalCount ?? 0), tone: 'green' as const },
+    { label: 'Customers', value: String(data?.summary.total ?? 0), tone: 'blue' as const },
+    { label: 'New', value: String(data?.summary.newCount ?? 0), tone: 'teal' as const },
+    { label: 'Loyal', value: String(data?.summary.loyalCount ?? 0), tone: 'green' as const },
   ];
   const pdfColumns = COLUMNS.filter((c) => isVisible(c.key)).map((c) => c.label);
   const pdfRows = useMemo(
@@ -186,14 +122,7 @@ export default function CustomerLoyaltyReport({ lockedStoreId, lockedStoreName }
       onToggleColumn={toggleColumn}
       columnOptions={COLUMNS.map((c) => ({ key: c.key, label: c.label }))}
       loading={isFetching && !data}
-      empty={isFetched && rows.length === 0}
-      emptyMessage={
-        isError
-          ? error instanceof Error
-            ? error.message
-            : 'Failed to load customer loyalty report'
-          : 'No customers match the selected filters.'
-      }
+      empty={rows.length === 0}
       onPdfClick={() => setPreviewOpen(true)}
       pdfStats={pdfStats}
       controls={
@@ -212,19 +141,11 @@ export default function CustomerLoyaltyReport({ lockedStoreId, lockedStoreName }
               <input
                 type="number"
                 id="threshold"
-                min={LOYALTY_THRESHOLD_MIN}
-                max={LOYALTY_THRESHOLD_MAX}
-                step={1}
-                className="input-field text-sm px-2 py-1 h-[32px] rounded-lg w-20"
+                min={2}
+                max={100}
+                className="input-field text-sm px-2 py-1 h-[32px] rounded-lg w-16"
                 value={loyaltyThreshold}
-                onChange={(e) => {
-                  const next = parseLoyaltyThresholdInput(e.target.value);
-                  if (next != null) setLoyaltyThreshold(next);
-                }}
-                onBlur={(e) => {
-                  const next = parseLoyaltyThresholdInput(e.target.value);
-                  setLoyaltyThreshold(next ?? LOYALTY_THRESHOLD_MIN);
-                }}
+                onChange={(e) => setLoyaltyThreshold(Math.max(2, Number(e.target.value) || 2))}
               />
             </div>
           </div>

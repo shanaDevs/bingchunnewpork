@@ -1,45 +1,22 @@
 'use client';
 
 import { getApiBaseUrl } from '@/lib/apiBase';
-import { isBranchAdmin, isBranchScoped, isCashier, isDeliveryAdmin, type AdminSession } from '@/lib/adminAuth';
-import { adminApiFetch } from '@/lib/adminApi';
-import { hasMenuReadAccess, hasMenuUpdateAccess, type AdminPermission } from '@/lib/adminPermissions';
+import { isBranchAdmin, isBranchScoped, isDeliveryAdmin, type AdminSession } from '@/lib/adminAuth';
 import { displayRideId, formatBranchName } from '@/lib/deliveryDisplay';
 import {
   playBranchNewOrderSound,
   primeBranchOrderAudio,
   startBranchNewOrderAlertLoop,
-  startBranchStockAlertLoop,
   startVehicleFailureAlertLoop,
   stopBranchNewOrderAlertLoop,
-  stopBranchStockAlertLoop,
   stopVehicleFailureAlertLoop,
 } from '@/lib/uiSounds';
 import { dispatchAdminNewOrder } from '@/lib/adminOrderSync';
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { usePathname, useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  AlertTriangle,
-  ChevronRight,
-  Loader2,
-  Package,
-  ShoppingBag,
-  Sparkles,
-  X,
-  XCircle,
-} from 'lucide-react';
+import { ChevronRight, AlertTriangle, Package, ShoppingBag, Sparkles, X, XCircle } from 'lucide-react';
 import ProductImage from '@/components/ui/ProductImage';
 import type { Socket } from 'socket.io-client';
 import toast from 'react-hot-toast';
@@ -572,12 +549,10 @@ function BranchStockAlertToast({
   alert,
   onFocus,
   onDismiss,
-  restockBusy,
 }: {
   alert: StockAlert;
   onFocus: () => void;
   onDismiss: () => void;
-  restockBusy: boolean;
 }) {
   const isOut = alert.kind === 'out';
   const storeLabel = alert.storeName.replace('Bing Chun - ', '');
@@ -650,16 +625,11 @@ function BranchStockAlertToast({
           type="button"
           className={`branch-order-toast__action ${isOut ? 'branch-stock-toast__action--out' : 'branch-stock-toast__action--low'}`}
           onClick={onFocus}
-          disabled={restockBusy}
-          aria-label={`Restock ${alert.productName} to weekly target`}
+          aria-label={`Open Branch Stock for ${alert.productName}`}
         >
-          {restockBusy ? (
-            <Loader2 size={16} className="animate-spin" aria-hidden />
-          ) : (
-            <Package size={16} strokeWidth={2.25} aria-hidden />
-          )}
-          {restockBusy ? 'Restocking…' : 'Restock to Order Level'}
-          {!restockBusy && <ChevronRight size={16} strokeWidth={2.25} aria-hidden />}
+          <Package size={16} strokeWidth={2.25} aria-hidden />
+          Restock in Branch Stock
+          <ChevronRight size={16} strokeWidth={2.25} aria-hidden />
         </button>
       </div>
     </div>
@@ -745,7 +715,6 @@ function BranchAdminToastStack({
   onFocusFailure,
   onDismissFailure,
   onShowMore,
-  restockingStockKey,
 }: {
   orderToasts: NewOrderAlert[];
   productToasts: NewProductAlert[];
@@ -763,7 +732,6 @@ function BranchAdminToastStack({
   onFocusFailure: (alert: VehicleFailureAlert) => void;
   onDismissFailure: (alert: VehicleFailureAlert) => void;
   onShowMore: () => void;
-  restockingStockKey: string | null;
 }) {
   if (
     orderToasts.length === 0 &&
@@ -784,7 +752,6 @@ function BranchAdminToastStack({
           alert={alert}
           onFocus={() => onFocusStock(alert)}
           onDismiss={() => onDismissStock(alert)}
-          restockBusy={restockingStockKey === alert.key}
         />
       ))}
       {productToasts.map((alert) => (
@@ -844,7 +811,6 @@ function AdminNotificationProviderInner({
   const [orderToasts, setOrderToasts] = useState<NewOrderAlert[]>([]);
   const [productToasts, setProductToasts] = useState<NewProductAlert[]>([]);
   const [stockToasts, setStockToasts] = useState<StockAlert[]>([]);
-  const [restockingStockKey, setRestockingStockKey] = useState<string | null>(null);
   const [failureToasts, setFailureToasts] = useState<VehicleFailureAlert[]>([]);
   const deliveryAdminRef = useRef(isDeliveryAdmin(adminUser));
   deliveryAdminRef.current = isDeliveryAdmin(adminUser);
@@ -852,35 +818,7 @@ function AdminNotificationProviderInner({
   const enableOrderAlerts = !!adminUser && isBranchScoped(adminUser) && !!adminUser.storeId;
   const enableProductAlerts = !!adminUser && isBranchAdmin(adminUser) && !!adminUser.storeId;
   const enableStockAlerts = !!adminUser && (isBranchScoped(adminUser) || adminUser.role === 'SYSTEM_ADMIN');
-
-  const { data: permissionRows = [] } = useQuery<AdminPermission[]>({
-    queryKey: ['admin-me-permissions', adminUser?.id, 'stock-alerts'],
-    queryFn: () => adminApiFetch<AdminPermission[]>('/admin/me/permissions'),
-    enabled: Boolean(adminUser && isCashier(adminUser) && adminUser.storeId),
-    staleTime: 60_000,
-  });
-
-  const permissionsMap = useMemo(
-    () =>
-      Object.fromEntries(permissionRows.map((row) => [row.menu, row])) as Record<string, AdminPermission>,
-    [permissionRows],
-  );
-
-  const cashierCanViewStockAlerts =
-    !!adminUser && isCashier(adminUser) && hasMenuReadAccess(permissionsMap, 'STOCK');
-
-  const enableStockToastAlerts =
-    !!adminUser &&
-    !!adminUser.storeId &&
-    (isBranchAdmin(adminUser) || cashierCanViewStockAlerts);
-
-  const canRestockFromStockAlert = useMemo(() => {
-    if (!adminUser || !adminUser.storeId) return false;
-    if (isBranchAdmin(adminUser)) return true;
-    if (isCashier(adminUser)) return hasMenuUpdateAccess(permissionsMap, 'STOCK');
-    return false;
-  }, [adminUser, permissionsMap]);
-
+  const enableStockToastAlerts = !!adminUser && isBranchAdmin(adminUser) && !!adminUser.storeId;
   const showBranchToasts = enableOrderAlerts || enableProductAlerts || enableStockToastAlerts;
 
   const notifyBell = useCallback((payload: AdminNotificationPayload) => {
@@ -933,11 +871,7 @@ function AdminNotificationProviderInner({
   }, []);
 
   const removeStockToast = useCallback((key: string) => {
-    setStockToasts((prev) => {
-      const next = prev.filter((t) => t.key !== key);
-      if (next.length === 0) stopBranchStockAlertLoop();
-      return next;
-    });
+    setStockToasts((prev) => prev.filter((t) => t.key !== key));
   }, []);
 
   const removeFailureToast = useCallback((key: string) => {
@@ -983,38 +917,12 @@ function AdminNotificationProviderInner({
     [markNotificationRead, removeProductToast],
   );
 
-  const restockStockAlert = useCallback(
-    async (alert: StockAlert) => {
-      if (restockingStockKey) return;
-      if (!canRestockFromStockAlert) {
-        toast.error('You do not have permission to restock branch stock');
-        return;
-      }
-
-      setRestockingStockKey(alert.key);
-      try {
-        const result = await adminApiFetch<{
-          receivedQty?: number;
-        }>(`/admin/stock/${encodeURIComponent(alert.productId)}/restock-to-target`, {
-          method: 'POST',
-          body: JSON.stringify({ storeId: alert.storeId }),
-        });
-        removeStockToast(alert.key);
-        const units = result.receivedQty ?? 0;
-        toast.success(
-          `Restocked ${alert.productName} to weekly target${units > 0 ? ` (${units} units)` : ''}`,
-        );
-        void qc.invalidateQueries({ queryKey: ['admin-stock'] });
-        void qc.invalidateQueries({ queryKey: ['admin-stock-batches'] });
-        void qc.invalidateQueries({ queryKey: ['admin-stock-report'] });
-        void qc.invalidateQueries({ queryKey: ['admin-stock-audit'] });
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Restock failed');
-      } finally {
-        setRestockingStockKey(null);
-      }
+  const focusStock = useCallback(
+    (alert: StockAlert) => {
+      removeStockToast(alert.key);
+      openMainAdminPage(`/admin/stock?highlight=${encodeURIComponent(alert.productId)}`);
     },
-    [canRestockFromStockAlert, qc, removeStockToast, restockingStockKey],
+    [removeStockToast],
   );
 
   const dismissOrderToast = useCallback(
@@ -1129,21 +1037,13 @@ function AdminNotificationProviderInner({
                 (item) => !(item.productId === alert.productId && item.kind === 'low'),
               )
             : withoutDuplicate;
-        const result = [alert, ...next].slice(0, 20);
-        if (result.length > 0) startBranchStockAlertLoop();
-        return result;
+        return [alert, ...next].slice(0, 20);
       });
+
+      playBranchNewOrderSound();
     },
     [adminUser?.storeId, enableStockToastAlerts],
   );
-
-  useEffect(() => {
-    if (stockToasts.length > 0) {
-      startBranchStockAlertLoop();
-    } else {
-      stopBranchStockAlertLoop();
-    }
-  }, [stockToasts.length]);
 
   const enqueueVehicleFailure = useCallback((payload: VehicleFailureEvent) => {
     if (!payload.jobId) return;
@@ -1434,7 +1334,6 @@ function AdminNotificationProviderInner({
       window.removeEventListener('keydown', prime);
       socket?.disconnect();
       stopBranchNewOrderAlertLoop();
-      stopBranchStockAlertLoop();
       stopVehicleFailureAlertLoop();
     };
   }, [adminUserId, adminStoreId, enableStockAlerts, enableStockToastAlerts, qc, syncUnreadOrderAlerts]);
@@ -1470,12 +1369,11 @@ function AdminNotificationProviderInner({
           onDismissOrder={dismissOrderToast}
           onFocusProduct={focusProduct}
           onDismissProduct={dismissProductToast}
-          onFocusStock={restockStockAlert}
+          onFocusStock={focusStock}
           onDismissStock={dismissStockToast}
           onFocusFailure={focusFailure}
           onDismissFailure={dismissFailureToast}
           onShowMore={showMoreInBell}
-          restockingStockKey={restockingStockKey}
         />
       )}
     </AdminNotificationContext.Provider>

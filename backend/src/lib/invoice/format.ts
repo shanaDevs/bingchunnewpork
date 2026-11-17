@@ -35,15 +35,6 @@ export function formatLkr(cents: number): string {
   return `LKR ${formatAmountOnly(cents)}`;
 }
 
-/** Invoice table line amounts (no currency prefix — totals use {@link formatInvoiceLkr}). */
-export function formatInvoiceLineAmount(cents: number): string {
-  const rounded = Math.round(cents);
-  if (rounded < 0) {
-    return `- ${formatAmountOnly(Math.abs(rounded))}`;
-  }
-  return formatAmountOnly(rounded);
-}
-
 /** Invoice amounts: `LKR 28,080.00` or `- LKR 2,312.80` for negatives. */
 export function formatInvoiceLkr(cents: number): string {
   const abs = Math.abs(Math.round(cents));

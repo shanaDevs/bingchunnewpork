@@ -23,6 +23,7 @@ class RideAlert {
   final String dropoffAddress;
   final int extraStopCount;
 
+
   const RideAlert({
     required this.jobId,
     this.rideCode,

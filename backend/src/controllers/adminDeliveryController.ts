@@ -19,10 +19,6 @@ import { buildDeliveryRoutePayload } from '../lib/deliveryRouteResponse';
 import { decimalFieldToLkrNumber, parseDecimalFromDb } from '../lib/moneyDecimal';
 import { serializeDeliveryJobFees } from '../lib/walletApiMoney';
 import {
-  notifyDriverBranchRequestReviewed,
-  notifyDriverComplaintStatusChange,
-} from '../lib/driverNotifications';
-import {
   adminJobOrdersInclude,
   classifyIncompleteJob,
   deriveAdminOrderDeliveryState,
@@ -40,11 +36,9 @@ import {
   orderStopImageMeta,
   parseActualRouteJson,
   simplifyGpsPath,
-  snapGpsPathForDisplay,
   visibleJobOrderLinksForDeliveryJob,
   jobPickedUpForList,
   mapListJobOrderStops,
-  deliveryStateFromOrderStatusForList,
 } from '../lib/deliveryJobHelpers';
 import { jobHasPickedUp } from '../lib/liveDriverTracking';
 import { optimizeDeliveryStops, type RouteStop } from '../lib/routeOptimizer';
@@ -603,12 +597,15 @@ export async function getAdminDeliveryJobActualRoute(req: Request, res: Response
     let path = parseActualRouteJson(job.actualRoute);
     let source: 'stored' | 'gps_fallback' = path.length >= 2 ? 'stored' : 'gps_fallback';
 
-    if (path.length < 2) {
+    if (
+      path.length < 2 &&
+      (job.status === 'COMPLETED' || job.status === 'VEHICLE_FAILURE')
+    ) {
       const startedAt = job.startedAt ?? job.assignedAt ?? job.createdAt;
       const completedAt = job.completedAt ?? new Date();
       const locations = await fetchJobGpsLocations(jobId, startedAt, completedAt, job.driverId);
       if (locations.length >= 2) {
-        path = await snapGpsPathForDisplay(locations);
+        path = simplifyGpsPath(locations);
         source = 'gps_fallback';
       }
     }
@@ -1554,7 +1551,11 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
           ...(storeId
             ? [
                 {
-                  OR: [{ storeId }, activeJobOnBranch],
+                  OR: [
+                    { storeId },
+                    { accessibleStores: { some: { id: storeId } } },
+                    activeJobOnBranch,
+                  ],
                 },
               ]
             : []),
@@ -1566,7 +1567,7 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
         dutyStatus: true,
         vehicleNumber: true,
         storeId: true,
-        store: { select: { id: true, name: true, lat: true, lng: true } },
+        store: { select: { id: true, name: true } },
         driverLocations: {
           orderBy: { recordedAt: 'desc' },
           take: 10,
@@ -1664,15 +1665,14 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
           name: d.name,
           dutyStatus: d.dutyStatus,
           vehicleNumber: d.vehicleNumber,
-          storeId: displayStoreId,
-          storeName: displayStoreName,
+          storeId: d.storeId,
+          storeName: d.store?.name ?? null,
           lat: loc?.lat ?? null,
           lng: loc?.lng ?? null,
           heading: loc?.heading ?? null,
           updatedAt: loc?.recordedAt ?? null,
-          jobId: loc?.jobId ?? currentJob?.id ?? null,
-          activeJobs,
-          currentJob,
+          jobId: loc?.jobId ?? d.deliveryJobs.find((j) => j.status === 'IN_PROGRESS')?.id ?? null,
+          activeJobs: d.deliveryJobs,
           recentPath,
           vehicleBreakdownOpen: Boolean(openBreakdown),
           breakdownReportedAt: openBreakdown?.reportedAt.toISOString() ?? null,
@@ -2165,10 +2165,6 @@ export async function updateDriverComplaint(req: Request, res: Response, next: N
       }).catch(() => {});
     }
 
-    if (existing.status !== updated.status) {
-      notifyDriverComplaintStatusChange(existing.status, updated).catch(() => {});
-    }
-
     return success(res, updated);
   } catch (err) {
     next(err);
@@ -2288,15 +2284,6 @@ export async function reviewDriverBranchRequest(req: Request, res: Response, nex
         reviewNote: body.reviewNote,
       },
     });
-
-    const store = updated.toStoreId
-      ? await prisma.store.findUnique({
-          where: { id: updated.toStoreId },
-          select: { name: true },
-        })
-      : null;
-    notifyDriverBranchRequestReviewed(updated, store?.name).catch(() => {});
-
     return success(res, updated);
   } catch (err) {
     next(err);

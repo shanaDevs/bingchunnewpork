@@ -1,7 +1,6 @@
 import type { Order, OrderStatus } from '@/types';
 import { getStatusLabel } from '@/lib/orderStatus';
 import { formatMoneyAmount } from '@/lib/receipt';
-import { cancellationReasonLabel, OTHER_CANCEL_REASON_VALUE } from '@/lib/cancellationReasons';
 
 /**
  * Friendly partial-refund phrases by percentage band (fallback when amount is unknown).
@@ -25,59 +24,24 @@ export const ORDER_CANCEL_REASON_LABELS: Record<string, string> = {
   PAYMENT_OR_SYSTEM_ISSUE: 'Payment or System Issue / Duplicate Order',
 };
 
-export type OrderRejectReasonInput = {
-  status?: string | null;
+/** Human-readable cancellation summary for admin order lists. */
+export function formatOrderCancellationReason(params: {
+  status: string;
   cancelReason?: string | null;
   cancelledBy?: string | null;
   cancellationNote?: string | null;
-  paymentStatus?: string | null;
-  refundCancellationReason?: string | null;
-  refundCustomReasonText?: string | null;
-};
-
-function refundRejectReason(params: OrderRejectReasonInput): string | null {
-  const custom = params.refundCustomReasonText?.trim();
-  if (params.refundCancellationReason === OTHER_CANCEL_REASON_VALUE && custom) return custom;
-  if (custom && !params.refundCancellationReason) return custom;
-  if (!params.refundCancellationReason) return null;
-  return cancellationReasonLabel(params.refundCancellationReason);
-}
-
-/** Pull a staff/customer reject reason out of the CANCELLED status-event note. */
-export function parseReasonFromCancelNote(note?: string | null): string | null {
-  const trimmed = note?.trim() ?? '';
-  if (!trimmed) return null;
-  const tagged = trimmed.match(/\|\s*Reason:\s*(.+)$/i) ?? trimmed.match(/(?:^|\.\s+)Reason:\s*(.+)$/i);
-  if (tagged?.[1]?.trim()) return tagged[1].trim();
-  if (/^cancelled by customer\b/i.test(trimmed) && /refund/i.test(trimmed)) return null;
-  return trimmed;
-}
-
-/**
- * Reject-reason cell for cancelled-order tables.
- * Prefers the customer-selected / staff-typed reason over the generic admin category.
- */
-export function resolveOrderRejectReason(params: OrderRejectReasonInput): string {
-  const fromNote = parseReasonFromCancelNote(params.cancellationNote);
-  if (fromNote) return fromNote;
-
-  const cancelledByCustomer = (params.cancelledBy ?? '').trim().toLowerCase() === 'customer';
-  const fromRefund = refundRejectReason(params);
-  if (cancelledByCustomer && fromRefund) return fromRefund;
-
-  if (params.cancelReason) {
-    return ORDER_CANCEL_REASON_LABELS[params.cancelReason] ?? params.cancelReason;
-  }
-  if (fromRefund) return fromRefund;
-  if (params.paymentStatus === 'REFUNDED') return 'Refunded';
-  return '—';
-}
-
-/** Human-readable cancellation summary for admin order lists. */
-export function formatOrderCancellationReason(params: OrderRejectReasonInput & { status: string }): string | null {
+}): string | null {
   if (params.status !== 'CANCELLED') return null;
-  const reason = resolveOrderRejectReason(params);
-  if (reason !== '—') return reason;
+
+  const parts: string[] = [];
+  if (params.cancelReason) {
+    parts.push(ORDER_CANCEL_REASON_LABELS[params.cancelReason] ?? params.cancelReason);
+  }
+  const note = params.cancellationNote?.trim();
+  if (note) parts.push(note);
+
+  if (parts.length > 0) return parts.join(' · ');
+
   const by = params.cancelledBy?.trim().toLowerCase();
   if (by === 'customer') return 'Customer cancellation';
   if (by) return `Cancelled by ${by}`;
@@ -182,32 +146,4 @@ export function computeSalesTotal(order: Pick<Order, 'subtotal' | 'discount' | '
 export function formatRefundAmount(amount: number | null | undefined): string {
   if (amount == null) return '—';
   return `LKR ${formatMoneyAmount(amount)}`;
-}
-
-const SELF_CANCEL_SESSION_PREFIX = 'bc-self-cancel:';
-
-/** Skip duplicate cancel toasts when the customer just cancelled in-app. */
-export function markSelfCancelledOrder(orderNumber: string): void {
-  if (typeof window === 'undefined') return;
-  const key = orderNumber?.trim();
-  if (!key) return;
-  try {
-    sessionStorage.setItem(`${SELF_CANCEL_SESSION_PREFIX}${key}`, '1');
-  } catch {
-    /* storage unavailable */
-  }
-}
-
-export function consumeSelfCancelledOrder(orderNumber: string): boolean {
-  if (typeof window === 'undefined') return false;
-  const key = orderNumber?.trim();
-  if (!key) return false;
-  try {
-    const storageKey = `${SELF_CANCEL_SESSION_PREFIX}${key}`;
-    if (!sessionStorage.getItem(storageKey)) return false;
-    sessionStorage.removeItem(storageKey);
-    return true;
-  } catch {
-    return false;
-  }
 }

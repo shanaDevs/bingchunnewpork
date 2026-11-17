@@ -4,9 +4,12 @@ import 'package:flutter/foundation.dart';
 
 import '../core/app_container.dart';
 import '../core/events.dart';
+import '../core/local_profile.dart';
+import '../core/offer_outcomes.dart';
 import '../data/models/delivery_job.dart';
 import '../data/models/delivery_route.dart';
 import '../data/network/api_exception.dart';
+import '../tracking/location_tracker.dart';
 import 'jobs_controller.dart';
 import '../l10n/l10n.dart';
 
@@ -30,6 +33,9 @@ class JobDetailController extends ChangeNotifier {
   DeliveryRoute? route;
   String? error;
 
+  /// Set when an action was refused because an earlier ride was never completed.
+  JobSummary? previousRide;
+
   void _emit() {
     if (!_disposed) notifyListeners();
   }
@@ -44,11 +50,13 @@ class JobDetailController extends ChangeNotifier {
       final j = await _c.jobsRepository.getJob(jobId);
       loading = false;
       job = j;
+      final wantsRoute = j.isActive || j.canAssign || j.isHistorySnapshot;
+      // Flag the route as pending in the same frame the job appears, so the
+      // summary never flashes the stored estimate before the real route.
+      if (wantsRoute) routeLoading = true;
       _emit();
       if (j.isActive) _beginTracking(jobId);
-      if (j.isActive || j.canAssign || j.isHistorySnapshot) {
-        routeLoading = true;
-        _emit();
+      if (wantsRoute) {
         try {
           route = await _c.jobsRepository.getJobRoute(jobId, j);
         } catch (_) {}
@@ -65,10 +73,16 @@ class JobDetailController extends ChangeNotifier {
   Future<bool> assign(String jobId) => _act(() => _c.jobsRepository.assignJob(jobId));
   Future<bool> claim(String jobId) => _act(() async {
     await ensureNoUnfinishedRide(_c, claimingJobId: jobId);
-    return _c.jobsRepository.claimJob(jobId);
+    final j = await _c.jobsRepository.claimJob(jobId);
+    OfferOutcomes.instance.record(jobId, OfferOutcome.accepted);
+    return j;
   });
-  Future<bool> start(String jobId) => _act(() => _c.jobsRepository.startJob(jobId));
+  Future<bool> start(String jobId) => _act(() async {
+    await ensurePreviousRideCompleted(_c, jobId);
+    return _c.jobsRepository.startJob(jobId);
+  });
   Future<bool> pickup(String jobId) => _act(() async {
+    await ensurePreviousRideCompleted(_c, jobId);
     final fix = await requireFix(_c);
     return _c.jobsRepository.pickupJob(jobId, fix.lat, fix.lng);
   });
@@ -87,6 +101,7 @@ class JobDetailController extends ChangeNotifier {
     _c.alertService.beginPostRejectHold(jobId, job?.store.id ?? '');
     try {
       await _c.jobsRepository.rejectJob(jobId, reason);
+      OfferOutcomes.instance.record(jobId, OfferOutcome.declined);
       await _c.alertService.stopTracking();
       _c.alertService.clearSeen(jobId);
       refreshAlertEligibility(_c);
@@ -108,6 +123,7 @@ class JobDetailController extends ChangeNotifier {
     if (acting) return false;
     acting = true;
     error = null;
+    previousRide = null;
     _emit();
     try {
       final j = await block();
@@ -122,6 +138,12 @@ class JobDetailController extends ChangeNotifier {
       _emit();
       JobRefreshBus.refresh(j.id);
       return true;
+    } on PreviousRideIncompleteException catch (e) {
+      // The screen shows the reminder popup; no inline error needed.
+      acting = false;
+      previousRide = e.job;
+      _emit();
+      return false;
     } catch (e) {
       acting = false;
       error = errorMessage(e, tr('Action failed'));
@@ -140,7 +162,10 @@ class JobDetailController extends ChangeNotifier {
 
 /// Port of DashboardViewModel — the live run screen.
 class DashboardController extends ChangeNotifier {
-  DashboardController(this._c) {
+  /// [seed] is a job detail already in memory (e.g. Home's active job), shown at once
+  /// while the fresh copy loads, so the screen never opens blank.
+  DashboardController(this._c, {DeliveryJobDetail? seed}) {
+    job = seed;
     _sub = JobRefreshBus.events.listen((id) {
       if (id == _loadedId) load(id, force: true);
     });
@@ -157,6 +182,9 @@ class DashboardController extends ChangeNotifier {
   DeliveryRoute? route;
   String? error;
 
+  /// Set when start / pickup was refused because an earlier ride was never completed.
+  JobSummary? previousRide;
+
   void _emit() {
     if (!_disposed) notifyListeners();
   }
@@ -169,22 +197,38 @@ class DashboardController extends ChangeNotifier {
     _emit();
     try {
       final j = await _c.jobsRepository.getJob(jobId);
-      DeliveryRoute? r;
-      try {
-        r = await _c.jobsRepository.getJobRoute(jobId, j);
-      } catch (_) {
-        r = route;
-      }
       if (j.isActive) _beginTracking(jobId);
+      // Show the job as soon as it arrives; the route follows without blocking the screen.
       loading = false;
       job = j;
-      route = r;
+      _emit();
+      try {
+        route = await _c.jobsRepository.getJobRoute(jobId, j);
+      } catch (_) {
+        // keep the previous route, if any
+      }
       _emit();
     } catch (e) {
       loading = false;
       error = errorMessage(e, tr('Failed to load dashboard'));
       _emit();
     }
+  }
+
+  /// Vehicle broke down mid-run: flag it with the rider's location so support can send a
+  /// replacement. Throws a [StateError] with a message to show.
+  Future<void> reportVehicleFailure(String jobId, String? note) async {
+    final active = await _c.jobsRepository.getActiveJob();
+    final notRunning = breakdownBlockedMessage(active);
+    if (notRunning != null) throw StateError(notRunning);
+    final fix = await _c.locationTracker.getCurrentLocation();
+    if (fix == null) throw StateError(tr('Could not get your location. Enable GPS and try again.'));
+    await _c.jobsRepository.reportVehicleFailure(fix.lat, fix.lng, note: note, jobId: jobId);
+    await LocalProfile.instance.recordBreakdown(note: note, jobId: jobId, lat: fix.lat, lng: fix.lng);
+    await saveBreakdownOrderSnapshot(jobId, active?.id == jobId ? active : job);
+    await _c.alertService.stopTracking();
+    JobRefreshBus.refresh(jobId);
+    JobRefreshBus.dropRide(jobId);
   }
 
   Future<void> start(String jobId) async {
@@ -201,8 +245,10 @@ class DashboardController extends ChangeNotifier {
     }
     acting = true;
     error = null;
+    previousRide = null;
     _emit();
     try {
+      await ensurePreviousRideCompleted(_c, jobId);
       final j = await _c.jobsRepository.startJob(jobId);
       DeliveryRoute? r;
       try {
@@ -219,6 +265,10 @@ class DashboardController extends ChangeNotifier {
       error = gpsOk ? null : tr('Run started, but GPS tracking didn\'t start. Check location settings.');
       _emit();
       JobRefreshBus.refresh(jobId);
+    } on PreviousRideIncompleteException catch (e) {
+      acting = false;
+      previousRide = e.job;
+      _emit();
     } catch (e) {
       acting = false;
       error = errorMessage(e, tr('Failed to start'));
@@ -230,8 +280,10 @@ class DashboardController extends ChangeNotifier {
     if (acting) return;
     acting = true;
     error = null;
+    previousRide = null;
     _emit();
     try {
+      await ensurePreviousRideCompleted(_c, jobId);
       final fix = await requireFix(_c);
       final j = await _c.jobsRepository.pickupJob(jobId, fix.lat, fix.lng);
       DeliveryRoute? r;
@@ -246,6 +298,10 @@ class DashboardController extends ChangeNotifier {
       route = r;
       _emit();
       JobRefreshBus.refresh(jobId);
+    } on PreviousRideIncompleteException catch (e) {
+      acting = false;
+      previousRide = e.job;
+      _emit();
     } catch (e) {
       acting = false;
       error = errorMessage(e, tr('Failed to confirm pickup'));
@@ -261,6 +317,7 @@ class DashboardController extends ChangeNotifier {
     _c.alertService.beginPostRejectHold(jobId, job?.store.id ?? '');
     try {
       await _c.jobsRepository.rejectJob(jobId, reason);
+      OfferOutcomes.instance.record(jobId, OfferOutcome.declined);
       _c.alertService.clearSeen(jobId);
       acting = false;
       _emit();
@@ -391,7 +448,23 @@ class OrderActionController extends ChangeNotifier {
     otpRequired = false;
     _emit();
     try {
-      final o = await _c.jobsRepository.updateOrderStatus(orderId, status, note: note, otp: otp, outcome: outcome);
+      // Delivered: send where the rider actually is as the drop-off point. Best effort — the
+      // live run fix is instant; without one the server uses the latest GPS ping.
+      DriverFix? dropoff;
+      if (status == 'DELIVERED') {
+        try {
+          dropoff = _c.locationTracker.lastFix ?? await _c.locationTracker.getCurrentLocation();
+        } catch (_) {}
+      }
+      final o = await _c.jobsRepository.updateOrderStatus(
+        orderId,
+        status,
+        note: note,
+        otp: otp,
+        outcome: outcome,
+        lat: dropoff?.lat,
+        lng: dropoff?.lng,
+      );
       acting = false;
       lastUpdated = o;
       order = o;

@@ -269,7 +269,7 @@ export default function AdminPosPage() {
             productId: item.productId,
             size: 'REGULAR',
             sugarLevel: 'HUNDRED',
-            iceLevel: 'NORMAL_ICE',
+            iceLevel: 'REGULAR',
             toppingIds: [],
             quantity: item.quantity,
           })),

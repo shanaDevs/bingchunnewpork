@@ -2,12 +2,9 @@
 
 import { CalendarClock, ChevronRight, Clock } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { cn } from "@/components/home-redesign/lib/cn";
-import { openOrderModal } from "@/components/order/SiteOrderPrompt";
 import { PROMOTION_MASCOTS, toPromotion, type Promotion } from "@/components/offers-redesign/promotion";
-import { applyHomeOfferToCart } from "@/lib/applyHomeOffer";
 import { isSpinLinkedPromo, type PromotionRules } from "@/lib/promotionTypes";
 import type { PromoCode } from "@/types";
 import { focusRing } from "../accountUi";
@@ -118,36 +115,8 @@ const timeAt = (minute: number) => new Intl.DateTimeFormat("en-US", TIME_FORMAT)
 
 /** One offer: its picture, the big figure, what it's on and when, and a way to it on the Offers page; greyed when not on today. */
 function OfferTile({ promotion, when }: { promotion: Promotion; when: When }) {
-  const router = useRouter();
-  const [applying, setApplying] = useState(false);
   const greyed = when.state === "over" || when.state === "otherDay";
   const art = promotion.art.type === "images" ? promotion.art.images[0] : PROMOTION_MASCOTS[promotion.art.mascot].src;
-  const canQuickApply = when.state === "now";
-
-  const quickApply = async () => {
-    if (applying || !canQuickApply) return;
-    const { redeem, offer, banner } = promotion;
-    if (!banner && redeem.type === "code") {
-      router.push(`/checkout?promo=${encodeURIComponent(redeem.code)}`);
-      return;
-    }
-    if (!banner && redeem.type === "auto") {
-      router.push("/cart");
-      return;
-    }
-    const hasProducts = offer.productIds.length > 0;
-    if (banner && !hasProducts) {
-      openOrderModal({ allowSkip: true });
-      return;
-    }
-    setApplying(true);
-    try {
-      const { shouldGoToCart } = await applyHomeOfferToCart(offer);
-      if (shouldGoToCart) router.push("/cart");
-    } finally {
-      setApplying(false);
-    }
-  };
 
   return (
     <li className={cn("flex items-center gap-3 rounded-2xl p-2.5 pr-3 ring-1", greyed ? "bg-slate-50 ring-slate-200" : "bg-brand-50/60 ring-brand-100")}>
@@ -183,28 +152,13 @@ function OfferTile({ promotion, when }: { promotion: Promotion; when: When }) {
           <p className="mt-0.5 truncate text-xs text-slate-500">{requirement(promotion)}</p>
         )}
       </div>
-      {canQuickApply ? (
-        <button
-          type="button"
-          disabled={applying}
-          onClick={quickApply}
-          aria-label={`Apply offer: ${promotion.title}`}
-          className={cn(
-            "shrink-0 rounded-full bg-brand-600 px-3 py-1.5 text-xs font-bold text-snow transition-colors hover:bg-brand-700 disabled:opacity-70",
-            focusRing,
-          )}
-        >
-          {applying ? "…" : "Apply"}
-        </button>
-      ) : (
-        <Link
-          href={`/promotions#promo-${promotion.id}`}
-          aria-label={`See the offer: ${promotion.title}`}
-          className={cn("grid size-8 shrink-0 place-items-center rounded-full bg-white text-brand-700 ring-1 ring-brand-200 transition-colors hover:bg-brand-600 hover:text-snow", focusRing)}
-        >
-          <ChevronRight className="size-4" aria-hidden="true" />
-        </Link>
-      )}
+      <Link
+        href="/promotions"
+        aria-label={`See the offer: ${promotion.title}`}
+        className={cn("grid size-8 shrink-0 place-items-center rounded-full bg-white text-brand-700 ring-1 ring-brand-200 transition-colors hover:bg-brand-600 hover:text-snow", focusRing)}
+      >
+        <ChevronRight className="size-4" aria-hidden="true" />
+      </Link>
     </li>
   );
 }

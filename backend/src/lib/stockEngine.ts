@@ -136,10 +136,6 @@ export async function setWeeklyBaseQty(
 
   if (adminUserId) {
     const { randomUUID } = await import('crypto');
-    const admin = await prisma.adminUser.findUnique({
-      where: { id: adminUserId },
-      select: { name: true },
-    });
     await prisma.stockAuditLog.create({
       data: {
         id: randomUUID(),
@@ -150,7 +146,6 @@ export async function setWeeklyBaseQty(
         qtyChange: weeklyTargetQty - row.weeklyTargetQty,
         qtyAfter: weeklyTargetQty,
         adminUserId,
-        adminUserName: admin?.name ?? null,
         note: `Weekly target set to ${weeklyTargetQty}`,
       },
     }).catch(() => undefined);

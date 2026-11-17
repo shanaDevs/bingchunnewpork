@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { getSocket } from '@/lib/socketClient';
-import { consumeSelfCancelledOrder } from '@/lib/orderCancel';
 import { patchOrderInQueryCache } from '@/lib/orderCache';
 import { useAuthStore } from '@/store/authStore';
 import type { Order, OrderStatus } from '@/types';
@@ -227,19 +226,12 @@ export function useOrderTrackSocket(
   return socketConnected;
 }
 
-/**
- * App-wide customer socket: connect only when signed in.
- * Guest browsing stays offline; order-track pages open their own socket via useOrderTrackSocket.
- */
 export function useCustomerSocket() {
   const queryClient = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   useEffect(() => {
-    // Anonymous shoppers: skip connect (order-track opens its own socket).
-    if (!isAuthenticated || !userId) return;
-
     const socket = getSocket();
 
     const handleNotification = (payload: CustomerNotificationPayload) => {
@@ -264,12 +256,6 @@ export function useCustomerSocket() {
         toast(payload.message || payload.title, { icon: '⏰', duration: 6000 });
       } else if (payload.type === 'DELIVERY_CODE') {
         // Track page handles deliveryCode socket events — skip duplicate toast here.
-      } else if (
-        payload.status === 'CANCELLED' &&
-        payload.orderNumber &&
-        consumeSelfCancelledOrder(payload.orderNumber)
-      ) {
-        // Local cancel already toasted — skip the push notification duplicate.
       } else if (!isCompletion) {
         const icon = payload.status ? STATUS_TOAST[payload.status] ?? '🔔' : '🔔';
         toast(payload.title, {
@@ -297,19 +283,27 @@ export function useCustomerSocket() {
       );
     };
 
-    const joinUserRoom = () => {
-      socket.emit('joinUser', userId);
-    };
-
     socket.on('customerNotification', handleNotification);
     socket.on('orderStatusUpdate', handleStatusUpdate);
-    joinUserRoom();
-    socket.on('connect', joinUserRoom);
 
     return () => {
       socket.off('customerNotification', handleNotification);
       socket.off('orderStatusUpdate', handleStatusUpdate);
+    };
+  }, [queryClient, userId]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    if (!isAuthenticated || !userId) return;
+
+    const joinUserRoom = () => {
+      socket.emit('joinUser', userId);
+    };
+
+    joinUserRoom();
+    socket.on('connect', joinUserRoom);
+    return () => {
       socket.off('connect', joinUserRoom);
     };
-  }, [queryClient, userId, isAuthenticated]);
+  }, [isAuthenticated, userId]);
 }

@@ -51,8 +51,6 @@ interface WalletInfo {
   id: string;
   storeId: string;
   balance: number;
-  /** All-time net payable to branch (cents); prefer over legacy balance fields when present. */
-  allTimeAvailableBalanceCents?: number;
   totalEarnings?: number;
   netTransferableEarnings?: number;
   totalWithdrawn?: number;
@@ -605,12 +603,7 @@ export default function BranchWalletDetail({
           <BranchWalletSummaryCards
             dashboard={walletDashboard}
             loading={loading}
-            allTimeBalanceCents={
-              wallet?.allTimeAvailableBalanceCents ??
-              walletDashboard?.payablesBreakdown?.allTimeAvailableBalanceCents ??
-              wallet?.currentBalance ??
-              wallet?.balance
-            }
+            allTimeBalanceCents={wallet?.currentBalance ?? wallet?.balance}
             periodFrom={periodFrom}
             periodTo={periodTo}
             periodLabel={periodLabel}
@@ -676,15 +669,6 @@ export default function BranchWalletDetail({
             }
             periodSort={duePeriodFocus ? 'oldest' : 'newest'}
             focusOldestPending={!!duePeriodFocus}
-            highlightPeriod={
-              duePeriodFocus
-                ? {
-                    periodFrom: duePeriodFocus.periodFrom,
-                    periodTo: duePeriodFocus.periodTo,
-                  }
-                : null
-            }
-            autoOpenDuePeriod={duePeriodFocus}
           />
         </div>
       )}

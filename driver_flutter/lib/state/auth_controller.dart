@@ -25,7 +25,13 @@ class AuthController extends ChangeNotifier {
   bool loading = false;
   bool checking = true;
   DriverSession? driver;
-  String? error;
+  String? _error;
+
+  /// Stored as the English text it was raised with and translated when read, so a message
+  /// already on screen follows a language switch (server messages without a translation
+  /// pass through unchanged).
+  String? get error => _error == null ? null : tr(_error!);
+  set error(String? value) => _error = value;
 
   bool get isAuthenticated => driver != null;
 
@@ -75,8 +81,9 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
     try {
       final signedIn = await _c.authRepository.login(phone, code.trim(), challenge);
-      // A fresh OTP sign-in starts without an app lock; the rider can set one in Me.
-      await _c.appLock.clear();
+      // An explicit sign-out already cleared the lock, so a new rider starts without one.
+      // After an expired session the lock is kept: the rider just proved who they are.
+      _c.appLock.markUnlocked();
       driver = signedIn;
       _otpChallenge = null;
       _handlingInvalidation = false;
@@ -108,18 +115,21 @@ class AuthController extends ChangeNotifier {
     if (driver == null || _handlingInvalidation) return;
     _handlingInvalidation = true;
     logout(
+      keepLock: true,
       message: reason == SessionInvalidator.sessionSuperseded
           ? tr('Signed in on another device')
           : tr('Session expired. Please sign in again.'),
     );
   }
 
-  Future<void> logout({String? message}) async {
+  /// [keepLock]: an expired session keeps the rider's PIN / biometric lock so they don't
+  /// have to set it up again after signing back in. Explicit sign-outs clear it.
+  Future<void> logout({String? message, bool keepLock = false}) async {
     // Do not force OFF_DUTY here — an active/queued run would 409. Duty stays
     // as-is until the driver toggles it from Me.
     await _c.pushTokens.unregister();
     await _c.authRepository.logout();
-    await _c.appLock.clear();
+    if (!keepLock) await _c.appLock.clear();
     await _c.alertService.stop();
     _c.deliverySocket.disconnect();
     await _c.locationTracker.stop();
