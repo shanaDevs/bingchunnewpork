@@ -1,4 +1,5 @@
 import '../json.dart';
+import '../models/breakdown_handover.dart';
 import '../models/delivery_job.dart';
 import '../models/delivery_route.dart';
 import '../models/driver.dart';
@@ -113,6 +114,25 @@ class JobsRepository {
         ),
         (d) => VehicleFailureResult.fromJson(asJson(d)),
       );
+
+  /// Breakdown & Handover status of a ride this rider reported a vehicle failure on
+  /// (replacement rider, live location, orders, timeline). Planned backend endpoint — see
+  /// docs/driver-breakdown-handover-api.md; callers fall back when it is not served yet.
+  Future<BreakdownHandover> getJobHandover(String jobId) => _api.call(
+    () => _api.core.get<dynamic>('delivery/jobs/$jobId/handover'),
+    (d) => BreakdownHandover.fromJson(asJson(d)),
+  );
+
+  /// The stranded rider is mobile again: clears the open breakdown for [jobId] so they can
+  /// go on duty and claim jobs.
+  Future<void> confirmBackOnRoad(String jobId) => _api.callNullable(
+    () => _api.core.post<dynamic>('delivery/jobs/$jobId/handover/back-on-road', data: const {}),
+    (_) {},
+  );
+
+  /// Clears whatever breakdown is open for this rider (no ride needed).
+  Future<void> markVehicleFixed() =>
+      _api.callNullable(() => _api.core.post<dynamic>('delivery/me/vehicle-fixed', data: const {}), (_) {});
 
   Future<void> postLocationBatch(String? jobId, List<Json> points) => _api.callNullable(
     () => _api.core.post<dynamic>('delivery/locations/batch', data: compact({'jobId': jobId, 'points': points})),

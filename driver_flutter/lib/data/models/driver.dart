@@ -47,6 +47,14 @@ class DriverProfile {
   /// Socket branch-pool rooms from PATCH /delivery/me/duty when GET /me is unavailable.
   final List<String> branchPoolStoreIds;
 
+  /// Open vehicle breakdown: the rider stays OFF_DUTY and can't claim until it is cleared
+  /// (`POST /me/vehicle-fixed` or the handover back-on-road action). Null when none is open.
+  final OpenVehicleBreakdown? vehicleBreakdown;
+
+  /// Whether GET /me reported the `vehicleBreakdown` field at all (older backends don't);
+  /// when false the app falls back to guessing from ride history.
+  final bool vehicleBreakdownKnown;
+
   const DriverProfile({
     required this.id,
     required this.name,
@@ -74,10 +82,13 @@ class DriverProfile {
     this.activeRidePhase = 'NONE',
     this.canClaimMore = true,
     this.branchPoolStoreIds = const [],
+    this.vehicleBreakdown,
+    this.vehicleBreakdownKnown = false,
   });
 
   factory DriverProfile.fromJson(Json j) {
     final store = objOrNull(j, 'store');
+    final breakdown = objOrNull(j, 'vehicleBreakdown');
     return DriverProfile(
       id: str(j, 'id'),
       name: str(j, 'name'),
@@ -105,8 +116,12 @@ class DriverProfile {
       activeRidePhase: str(j, 'activeRidePhase', 'NONE'),
       canClaimMore: boolOf(j, 'canClaimMore', true),
       branchPoolStoreIds: DriverProfile.parseStringList(j, 'branchPoolStoreIds'),
+      vehicleBreakdown: breakdown == null ? null : OpenVehicleBreakdown.fromJson(breakdown),
+      vehicleBreakdownKnown: j.containsKey('vehicleBreakdown'),
     );
   }
+
+  bool get hasOpenBreakdown => vehicleBreakdown != null;
 
   static List<String> parseStringList(Json j, String key) {
     final raw = j[key];
@@ -124,6 +139,7 @@ class DriverProfile {
     List<String>? branchPoolStoreIds,
     String? licenseImageUrl,
     bool? hasLicenseImage,
+    bool clearVehicleBreakdown = false,
   }) {
     return DriverProfile(
       id: id,
@@ -152,6 +168,8 @@ class DriverProfile {
       activeRidePhase: activeRidePhase ?? this.activeRidePhase,
       canClaimMore: canClaimMore ?? this.canClaimMore,
       branchPoolStoreIds: branchPoolStoreIds ?? this.branchPoolStoreIds,
+      vehicleBreakdown: clearVehicleBreakdown ? null : vehicleBreakdown,
+      vehicleBreakdownKnown: vehicleBreakdownKnown,
     );
   }
 
@@ -162,6 +180,39 @@ class DriverProfile {
     ...accessibleStores.map((s) => s.id),
     ...branchPoolStoreIds,
   }.where((id) => id.trim().isNotEmpty).toList();
+}
+
+/// `GET /delivery/me` → `vehicleBreakdown`: the rider's open breakdown.
+class OpenVehicleBreakdown {
+  final String id;
+
+  /// The ride that ended as VEHICLE_FAILURE.
+  final String jobId;
+  final String reportedAt;
+  final double? lat;
+  final double? lng;
+  final String? note;
+  final String? rideCode;
+
+  const OpenVehicleBreakdown({
+    required this.id,
+    required this.jobId,
+    required this.reportedAt,
+    this.lat,
+    this.lng,
+    this.note,
+    this.rideCode,
+  });
+
+  factory OpenVehicleBreakdown.fromJson(Json j) => OpenVehicleBreakdown(
+    id: str(j, 'id'),
+    jobId: str(j, 'jobId'),
+    reportedAt: str(j, 'reportedAt'),
+    lat: dblOrNull(j, 'lat'),
+    lng: dblOrNull(j, 'lng'),
+    note: strOrNull(j, 'note'),
+    rideCode: strOrNull(j, 'rideCode'),
+  );
 }
 
 class BranchOption {

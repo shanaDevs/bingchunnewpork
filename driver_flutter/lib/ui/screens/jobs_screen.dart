@@ -184,7 +184,8 @@ class _JobsTabState extends State<JobsTab> {
     final hasBlockingRun = active.isNotEmpty;
     final alerting = alerts.activeAlertJobIds;
     final firstLoad = vm.loading && vm.jobs.isEmpty && vm.profile == null;
-    final fatalError = vm.error != null && vm.jobs.isEmpty && vm.profile == null;
+    // Only a failed load blanks Home; a refused duty change / claim is a toast.
+    final fatalError = vm.loadFailed && vm.error != null && vm.jobs.isEmpty && vm.profile == null;
     _toastMessages(vm, fatalError);
 
     // Refresh the last-shift card when the rider goes offline (a shift just ended).

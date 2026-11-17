@@ -225,6 +225,7 @@ class DashboardController extends ChangeNotifier {
     if (fix == null) throw StateError(tr('Could not get your location. Enable GPS and try again.'));
     await _c.jobsRepository.reportVehicleFailure(fix.lat, fix.lng, note: note, jobId: jobId);
     await LocalProfile.instance.recordBreakdown(note: note, jobId: jobId, lat: fix.lat, lng: fix.lng);
+    await saveBreakdownOrderSnapshot(jobId, active?.id == jobId ? active : job);
     await _c.alertService.stopTracking();
     JobRefreshBus.refresh(jobId);
     JobRefreshBus.dropRide(jobId);

@@ -16,6 +16,8 @@ class LocalProfile extends ChangeNotifier {
   static const _kBreakdownNote = 'local_last_breakdown_note';
   static const _kBreakdownNotes = 'local_breakdown_notes';
   static const _kBreakdownSpots = 'local_breakdown_spots';
+  static const _kBreakdownOrders = 'local_breakdown_orders';
+  static const _kHandedOver = 'local_breakdown_handed_over';
 
   String? displayName;
   DateTime? lastBreakdownAt;
@@ -27,6 +29,14 @@ class LocalProfile extends ChangeNotifier {
   /// Where each breakdown was reported (jobId -> position). The driver history API does not
   /// return the breakdown spot, so it is kept from the report.
   Map<String, ({double lat, double lng})> breakdownSpots = {};
+
+  /// Customer name + area of each order on a broken-down ride (jobId → orderId → info),
+  /// saved at report time — the handover API sends only order numbers.
+  Map<String, Map<String, ({String name, String area})>> breakdownOrders = {};
+
+  /// Orders this rider confirmed handing to the replacement rider (jobId → order ids).
+  /// There is no backend call for a per-order handover, so the confirmation stays here.
+  Map<String, Set<String>> handedOverOrders = {};
 
   bool _loaded = false;
 
@@ -51,7 +61,67 @@ class LocalProfile extends ChangeNotifier {
         };
       }
     } catch (_) {}
+    try {
+      final raw = p.getString(_kBreakdownOrders);
+      if (raw != null) {
+        breakdownOrders = {
+          for (final job in (jsonDecode(raw) as Map).entries)
+            if (job.value is Map)
+              '${job.key}': {
+                for (final o in (job.value as Map).entries)
+                  if (o.value case {'name': final String name, 'area': final String area}) '${o.key}': (name: name, area: area),
+              },
+        };
+      }
+    } catch (_) {}
+    try {
+      final raw = p.getString(_kHandedOver);
+      if (raw != null) {
+        handedOverOrders = {
+          for (final e in (jsonDecode(raw) as Map).entries)
+            if (e.value is List) '${e.key}': {for (final id in e.value as List) '$id'},
+        };
+      }
+    } catch (_) {}
     _loaded = true;
+    notifyListeners();
+  }
+
+  /// Most rides whose order names are kept; older ones are dropped.
+  static const _maxSavedRides = 30;
+
+  /// Keeps each order's customer name and area for a ride (saved for every active ride the
+  /// app loads, so they are on hand if it breaks down). Skips the write when nothing changed.
+  Future<void> saveBreakdownOrders(String jobId, Map<String, ({String name, String area})> orders) async {
+    if (orders.isEmpty) return;
+    await load();
+    final existing = breakdownOrders[jobId];
+    if (existing != null && mapEquals(existing, orders)) return;
+    final kept = {...breakdownOrders}..remove(jobId);
+    while (kept.length >= _maxSavedRides) {
+      kept.remove(kept.keys.first);
+    }
+    breakdownOrders = {...kept, jobId: orders};
+    final p = await SharedPreferences.getInstance();
+    await p.setString(
+      _kBreakdownOrders,
+      jsonEncode({
+        for (final job in breakdownOrders.entries)
+          job.key: {for (final o in job.value.entries) o.key: {'name': o.value.name, 'area': o.value.area}},
+      }),
+    );
+    notifyListeners();
+  }
+
+  /// The rider confirmed [orderId] is now with the replacement rider.
+  Future<void> confirmHandover(String jobId, String orderId) async {
+    await load();
+    handedOverOrders = {
+      ...handedOverOrders,
+      jobId: {...?handedOverOrders[jobId], orderId},
+    };
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kHandedOver, jsonEncode({for (final e in handedOverOrders.entries) e.key: e.value.toList()}));
     notifyListeners();
   }
 
