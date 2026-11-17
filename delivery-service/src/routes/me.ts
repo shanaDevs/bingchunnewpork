@@ -7,6 +7,7 @@ const router = Router();
 router.get('/', authenticate, requireDeliveryDriver, meController.getMe);
 router.get('/license-image', authenticate, requireDeliveryDriver, meController.getMyLicenseImage);
 router.patch('/duty', authenticate, requireDeliveryDriver, meController.updateDuty);
+router.post('/vehicle-fixed', authenticate, requireDeliveryDriver, meController.markMyVehicleFixed);
 router.post('/fcm-token', authenticate, requireDeliveryDriver, meController.updateFcmToken);
 router.delete('/fcm-token', authenticate, requireDeliveryDriver, meController.deleteFcmToken);
 router.get('/history', authenticate, requireDeliveryDriver, meController.getHistory);

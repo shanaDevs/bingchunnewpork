@@ -278,7 +278,7 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
   try {
     await ensureAppSchema();
     googleMapsApiKey = await getGoogleMapsApiKey();
-    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, gatewayFeeRate, , branchCompletionRadiusM, commissionSlabs, pickupMaxOrderAmount] = await Promise.all([
+    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, gatewayFeeRate, deliveryPlatformFeeRate, branchCompletionRadiusM, commissionSlabs, pickupMaxOrderAmount] = await Promise.all([
       getConvenienceFeeRates(),
       prisma.appSetting.findUnique({ where: { id: 'default' } }),
       getMaxCupsPerRider(),
@@ -302,6 +302,8 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       deliveryConvenientFeePercent: Math.round(feeRates.delivery * 1000) / 10,
       gatewayFeeRate,
       gatewayFeePercent: Math.round(gatewayFeeRate * 1000) / 10,
+      deliveryPlatformFeeRate,
+      deliveryPlatformFeePercent: Math.round(deliveryPlatformFeeRate * 1000) / 10,
       commissionSlabs: commissionSlabs.map((slab) => ({
         upTo: slab.upTo,
         rate: slab.rate,

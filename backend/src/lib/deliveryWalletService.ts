@@ -64,6 +64,11 @@ function processedAtFilter(from?: string, to?: string): Prisma.DateTimeNullableF
   };
 }
 
+/** Retained refund delivery fees only when the order is cancelled (not also in the live PAID set). */
+function retainedDeliveryFeeOrderFilter(): Prisma.OrderWhereInput {
+  return { orderMode: 'DELIVERY', status: 'CANCELLED' };
+}
+
 export function emptyDeliveryWalletSummary(
   platformFeeRate = 0,
   gatewayFeeRate = 0,
@@ -118,6 +123,7 @@ export async function getDeliveryWalletSummary(from?: string, to?: string): Prom
         submittedBy: 'CUSTOMER',
         cancelledWithinWindow: false,
         processedAt: processedAtFilter(from, to),
+        order: retainedDeliveryFeeOrderFilter(),
       },
       select: {
         status: true,
@@ -147,9 +153,7 @@ export async function getDeliveryWalletSummary(from?: string, to?: string): Prom
         NOT: {
           AND: [{ submittedBy: 'CUSTOMER' }, { cancelledWithinWindow: false }],
         },
-        order: {
-          status: 'CANCELLED',
-        },
+        order: retainedDeliveryFeeOrderFilter(),
       },
       select: {
         nonRefundableDeliveryFee: true,
@@ -338,6 +342,7 @@ export async function getDeliveryWalletNetByBucket(
         submittedBy: 'CUSTOMER',
         cancelledWithinWindow: false,
         processedAt: processedAtFilter(from, to),
+        order: retainedDeliveryFeeOrderFilter(),
       },
       select: {
         status: true,
@@ -367,9 +372,7 @@ export async function getDeliveryWalletNetByBucket(
         NOT: {
           AND: [{ submittedBy: 'CUSTOMER' }, { cancelledWithinWindow: false }],
         },
-        order: {
-          status: 'CANCELLED',
-        },
+        order: retainedDeliveryFeeOrderFilter(),
       },
       select: {
         nonRefundableDeliveryFee: true,

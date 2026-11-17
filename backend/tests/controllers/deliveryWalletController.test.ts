@@ -305,10 +305,10 @@ describe('deliveryWalletController', () => {
   describe('createDeliveryPayoutHandler', () => {
     const admin = { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' } as const;
 
-    it('rejects periods other than 15 days', async () => {
+    it('rejects periods other than 30 days', async () => {
       const next = createMockNext();
       await createDeliveryPayoutHandler(
-        createMockReq({ user: admin, body: { periodDays: 30, password: 'pin' } }),
+        createMockReq({ user: admin, body: { periodDays: 15, password: 'pin' } }),
         createMockRes(),
         next,
       );
@@ -321,13 +321,13 @@ describe('deliveryWalletController', () => {
       vi.mocked(createDeliveryPayout).mockResolvedValue({ id: 'payout-1', status: 'APPROVED' } as never);
       const res = createMockRes();
       await createDeliveryPayoutHandler(
-        createMockReq({ user: admin, body: { periodDays: '15', password: 'pin' } }),
+        createMockReq({ user: admin, body: { periodDays: '30', password: 'pin' } }),
         res,
         createMockNext(),
       );
       expect(verifyAdminPin).toHaveBeenCalledWith('admin-1', 'pin');
       expect(createDeliveryPayout).toHaveBeenCalledWith(
-        expect.objectContaining({ periodDays: 15, proofUrl: null }),
+        expect.objectContaining({ periodDays: 30, proofUrl: null }),
       );
       expect(res.status).toHaveBeenCalledWith(201);
     });
@@ -337,12 +337,12 @@ describe('deliveryWalletController', () => {
       vi.mocked(createDeliveryPayout).mockResolvedValue({ id: 'payout-1', status: 'APPROVED' } as never);
       const res = createMockRes();
       await createDeliveryPayoutHandler(
-        createMockReq({ user: admin, body: { periodDays: '15', remarks: 'Aug', password: 'pin' } }),
+        createMockReq({ user: admin, body: { periodDays: '30', remarks: 'Aug', password: 'pin' } }),
         res,
         createMockNext(),
       );
       expect(createDeliveryPayout).toHaveBeenCalledWith({
-        periodDays: 15,
+        periodDays: 30,
         remarks: 'Aug',
         requestedById: 'admin-1',
         proofUrl: 'https://example.com/slip.pdf',

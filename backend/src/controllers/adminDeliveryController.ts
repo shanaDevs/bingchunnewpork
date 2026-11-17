@@ -48,6 +48,7 @@ import {
 } from '../lib/deliveryJobHelpers';
 import { jobHasPickedUp } from '../lib/liveDriverTracking';
 import { optimizeDeliveryStops, type RouteStop } from '../lib/routeOptimizer';
+import { dropoffApiFields, mapPinPoint, resolveLiveLastDropoff } from '@bingchun/delivery-domain';
 import {
   assertDriverPinAvailable,
   driverInternalEmail,
@@ -67,7 +68,12 @@ import {
   roundDistanceKm,
   sumRiderDistanceKm,
   syncRiderProfileFromAdminUser,
+  countOpenVehicleBreakdowns,
+  markVehicleFixed,
+  FIX_COMMENT_REQUIRED_CODE,
 } from '@bingchun/delivery-domain';
+import { broadcastVehicleBreakdownCleared } from '../lib/socket';
+import { throwIfVehicleBreakdownDomainError } from '../lib/vehicleBreakdownErrors';
 import { meritStatusBand, applyMeritDelta, MERIT_DELTAS } from '../lib/meritPoints';
 import {
   assertCashierCanViewJob,
@@ -87,6 +93,12 @@ import {
   reassignFailedDeliveryOrders,
   REDELIVERY_JOB_STATUSES,
 } from '../lib/deliveryFailureReassign';
+
+type AdminRouteStopPin = {
+  orderNumber: string;
+  lat: number;
+  lng: number;
+} & ReturnType<typeof dropoffApiFields>;
 
 async function adminStoreId(req: Request, requested?: string): Promise<string> {
   try {
@@ -533,6 +545,7 @@ export async function getAdminDeliveryJobRoute(req: Request, res: Response, next
         ...orderStopImageMeta(order.items),
         lat,
         lng,
+        ...dropoffApiFields(order),
       });
     }
 
@@ -573,6 +586,9 @@ export async function getAdminDeliveryJobActualRoute(req: Request, res: Response
                 orderNumber: true,
                 deliveryLat: true,
                 deliveryLng: true,
+                actualDropoffLat: true,
+                actualDropoffLng: true,
+                actualDropoffAt: true,
                 address: { select: { lat: true, lng: true } },
               },
             },
@@ -598,12 +614,11 @@ export async function getAdminDeliveryJobActualRoute(req: Request, res: Response
 
     const stops = job.jobOrders
       .map((jo) => {
-        const lat = jo.order.deliveryLat ?? jo.order.address?.lat;
-        const lng = jo.order.deliveryLng ?? jo.order.address?.lng;
-        if (lat == null || lng == null) return null;
-        return { orderNumber: jo.order.orderNumber, lat, lng };
+        const pin = mapPinPoint(jo.order);
+        if (!pin) return null;
+        return { orderNumber: jo.order.orderNumber, lat: pin.lat, lng: pin.lng, ...dropoffApiFields(jo.order) };
       })
-      .filter((s): s is { orderNumber: string; lat: number; lng: number } => s != null);
+      .filter((s): s is AdminRouteStopPin => s != null);
 
     return success(res, {
       jobId: job.id,
@@ -647,6 +662,9 @@ export async function getAdminDeliveryJobLiveRoute(req: Request, res: Response, 
                 orderNumber: true,
                 deliveryLat: true,
                 deliveryLng: true,
+                actualDropoffLat: true,
+                actualDropoffLng: true,
+                actualDropoffAt: true,
                 address: { select: { lat: true, lng: true } },
               },
             },
@@ -673,12 +691,11 @@ export async function getAdminDeliveryJobLiveRoute(req: Request, res: Response, 
 
     const stops = job.jobOrders
       .map((jo) => {
-        const lat = jo.order.deliveryLat ?? jo.order.address?.lat;
-        const lng = jo.order.deliveryLng ?? jo.order.address?.lng;
-        if (lat == null || lng == null) return null;
-        return { orderNumber: jo.order.orderNumber, lat, lng };
+        const pin = mapPinPoint(jo.order);
+        if (!pin) return null;
+        return { orderNumber: jo.order.orderNumber, lat: pin.lat, lng: pin.lng, ...dropoffApiFields(jo.order) };
       })
-      .filter((s): s is { orderNumber: string; lat: number; lng: number } => s != null);
+      .filter((s): s is AdminRouteStopPin => s != null);
 
     return success(res, {
       jobId: job.id,
@@ -1432,6 +1449,9 @@ type LiveJobOrderLink = {
     cancelReason?: string | null;
     deliveryLat?: number | null;
     deliveryLng?: number | null;
+    actualDropoffLat?: number | null;
+    actualDropoffLng?: number | null;
+    actualDropoffAt?: Date | string | null;
   };
 };
 
@@ -1574,6 +1594,9 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
                     cancelReason: true,
                     deliveryLat: true,
                     deliveryLng: true,
+                    actualDropoffLat: true,
+                    actualDropoffLng: true,
+                    actualDropoffAt: true,
                   },
                 },
               },
@@ -1592,10 +1615,21 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
           })
         : null;
 
+    const driverIds = drivers.map((d) => d.id);
+    const openBreakdownRows =
+      driverIds.length === 0
+        ? []
+        : await prisma.vehicleBreakdown.findMany({
+            where: { driverId: { in: driverIds }, fixedAt: null },
+            select: { driverId: true, reportedAt: true },
+          });
+    const breakdownByDriver = new Map(openBreakdownRows.map((b) => [b.driverId, b]));
+
     return success(
       res,
       drivers.map((d) => {
         const loc = d.driverLocations[0];
+        const openBreakdown = breakdownByDriver.get(d.id);
         const recentPath = [...d.driverLocations].reverse().map((point) => ({
           lat: point.lat,
           lng: point.lng,
@@ -1621,6 +1655,7 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
                 visibleJobOrderLinksForDeliveryJob(current.status, current.jobOrders),
               ),
               nextStop: resolveLiveNextStop(current, branchPoint),
+              lastDropoff: resolveLiveLastDropoff(current.jobOrders),
             }
           : null;
         return {
@@ -1638,6 +1673,8 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
           activeJobs,
           currentJob,
           recentPath,
+          vehicleBreakdownOpen: Boolean(openBreakdown),
+          breakdownReportedAt: openBreakdown?.reportedAt.toISOString() ?? null,
         };
       }),
     );
@@ -1840,6 +1877,100 @@ export async function reassignDeliveryFailure(req: Request, res: Response, next:
     });
     return success(res, result, 201);
   } catch (err) {
+    next(err);
+  }
+}
+
+const adminMarkVehicleFixedSchema = z.object({
+  comment: z.string().trim().min(3).max(500),
+});
+
+export async function listVehicleBreakdowns(req: Request, res: Response, next: NextFunction) {
+  try {
+    const storeId = await adminStoreIdOptional(req, req.query.storeId as string | undefined);
+    const openOnly = req.query.openOnly !== 'false';
+    const rows = await prisma.vehicleBreakdown.findMany({
+      where: {
+        ...(storeId ? { storeId } : {}),
+        ...(openOnly ? { fixedAt: null } : {}),
+      },
+      orderBy: { reportedAt: 'desc' },
+      take: 200,
+      select: {
+        id: true,
+        driverId: true,
+        jobId: true,
+        storeId: true,
+        reportedAt: true,
+        reportedLat: true,
+        reportedLng: true,
+        note: true,
+        fixedAt: true,
+        fixedById: true,
+        fixedByRole: true,
+        fixedComment: true,
+        driver: { select: { id: true, name: true, phone: true, vehicleNumber: true } },
+        job: { select: { id: true, rideCode: true, title: true } },
+      },
+    });
+    return success(res, {
+      rows: rows.map((row) => ({
+        ...row,
+        reportedAt: row.reportedAt.toISOString(),
+        fixedAt: row.fixedAt?.toISOString() ?? null,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function adminMarkDriverVehicleFixed(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.params.driverId as string;
+    await adminStoreIdOptional(req, req.query.storeId as string | undefined);
+    const { comment } = adminMarkVehicleFixedSchema.parse(req.body);
+    const adminId = req.user!.sub;
+    let result;
+    try {
+      result = await markVehicleFixed({
+        driverId,
+        fixedById: adminId,
+        fixedByRole: 'ADMIN',
+        comment,
+      });
+    } catch (err) {
+      throwIfVehicleBreakdownDomainError(err);
+      throw err;
+    }
+
+    const row = await prisma.vehicleBreakdown.findUnique({
+      where: { id: result.id },
+      select: { storeId: true, driverId: true, jobId: true },
+    });
+    if (row) {
+      broadcastVehicleBreakdownCleared(row.storeId, {
+        breakdownId: result.id,
+        driverId: row.driverId,
+        jobId: row.jobId,
+        storeId: row.storeId,
+        fixedByRole: 'ADMIN',
+        fixedComment: result.fixedComment,
+      });
+    }
+
+    return success(res, {
+      breakdownId: result.id,
+      jobId: result.jobId,
+      fixedAt: result.fixedAt.toISOString(),
+      fixedComment: result.fixedComment,
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next(
+        new AppError('A comment of at least 3 characters is required', 400, FIX_COMMENT_REQUIRED_CODE),
+      );
+    }
     next(err);
   }
 }
@@ -2856,7 +2987,7 @@ export async function getDeliveryDashboard(req: Request, res: Response, next: Ne
     const driverId = typeof req.query.driverId === 'string' ? req.query.driverId : undefined;
 
     const liveScope = buildDashboardScope(storeId, driverId);
-    const [riders, activeJobRows, completedJobRows, statusGroups, openComplaints, vehicleFailures, pendingBranchRequests] =
+    const [riders, activeJobRows, completedJobRows, statusGroups, openComplaints, vehicleFailures, openVehicleBreakdowns, pendingBranchRequests] =
       await Promise.all([
       prisma.adminUser.findMany({
         where: buildAnalyticsRiderWhere(storeId, driverId),
@@ -2916,6 +3047,7 @@ export async function getDeliveryDashboard(req: Request, res: Response, next: Ne
             },
           })
         : Promise.resolve(0),
+      countOpenVehicleBreakdowns(storeId),
       isAllBranchRole(req.user?.role)
         ? prisma.driverBranchRequest.count({ where: { status: 'PENDING' } })
         : Promise.resolve(0),
@@ -3027,6 +3159,7 @@ export async function getDeliveryDashboard(req: Request, res: Response, next: Ne
       attention: {
         openComplaints,
         vehicleFailures,
+        openVehicleBreakdowns,
         pendingBranchRequests,
       },
     });

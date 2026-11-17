@@ -653,6 +653,51 @@ export function broadcastVehicleFailureReported(
   );
 }
 
+export type VehicleBreakdownEventPayload = {
+  breakdownId: string;
+  driverId: string;
+  jobId: string;
+  storeId: string;
+  lat?: number;
+  lng?: number;
+  fixedByRole?: 'DRIVER' | 'ADMIN';
+  fixedComment?: string | null;
+};
+
+export function broadcastVehicleBreakdownOpened(storeId: string, payload: VehicleBreakdownEventPayload): void {
+  if (!io) return;
+  const body = { ...payload, storeId };
+  io.to(`store:${storeId}`).emit('vehicleBreakdownOpened', body);
+  io.to('delivery-ops').emit('vehicleBreakdownOpened', body);
+}
+
+export function broadcastVehicleBreakdownCleared(storeId: string, payload: VehicleBreakdownEventPayload): void {
+  if (!io) return;
+  const body = { ...payload, storeId };
+  io.to(`store:${storeId}`).emit('vehicleBreakdownCleared', body);
+  io.to('delivery-ops').emit('vehicleBreakdownCleared', body);
+}
+
+export type HandoverRiderAssignedPayload = {
+  originalJobId: string;
+  replacementJobId: string;
+  replacementDriverId: string;
+  replacementDriverName: string;
+  replacementRideCode: string | null;
+};
+
+/** Stranded rider (vehicle failure) — refresh handover screen when admin assigns a replacement. */
+export function broadcastHandoverRiderAssigned(
+  strandedDriverId: string,
+  payload: HandoverRiderAssignedPayload,
+): void {
+  if (!io) return;
+  io.to(`driver:${strandedDriverId}`).emit('handoverRiderAssigned', payload);
+  logger.debug(
+    `Broadcast handoverRiderAssigned ${payload.originalJobId} → replacement ${payload.replacementJobId} to driver:${strandedDriverId}`,
+  );
+}
+
 export type OrderCancelledDriverPayload = {
   jobId: string;
   orderId: string;

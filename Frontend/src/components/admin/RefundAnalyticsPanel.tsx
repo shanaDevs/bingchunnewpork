@@ -2,21 +2,22 @@
 
 import { adminAuthHeaders } from '@/lib/adminSession';
 
-import { useMemo, useState } from 'react';
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { addDays, differenceInCalendarDays, format, parseISO, subDays } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
 import {
   BarChart3,
   CheckCircle2,
-  ChevronLeft,
   DollarSign,
-  LineChart,
-  ListOrdered,
   RefreshCw,
   RotateCcw,
-  ShoppingBag,
-  Trophy,
   XCircle,
 } from 'lucide-react';
 
@@ -31,6 +32,7 @@ import RefundDistributionDonutChart, {
 } from '@/components/admin/RefundDistributionDonutChart';
 import SearchableBranchSelect from '@/components/admin/SearchableBranchSelect';
 import SparklineKpiCard from '@/components/admin/SparklineKpiCard';
+import AnalysisCard from '@/components/admin/wallet-analysis/AnalysisCard';
 import ProductImage from '@/components/ui/ProductImage';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { formatMoney } from '@/lib/receipt';
@@ -81,11 +83,6 @@ export type RefundAnalyticsPayload = {
   dailyTrend: Array<{ date: string; count: number; amountLkr: number }>;
   byOrderMode: Array<{ mode: string; label: string; count: number; percent: number }>;
   avgProcessingHours: number | null;
-};
-
-type Props = {
-  showBranchFilter?: boolean;
-  onBackToProcess?: () => void;
 };
 
 async function fetchRefundAnalytics(endpoint: string): Promise<RefundAnalyticsPayload> {
@@ -151,104 +148,51 @@ function toChartPoints<T extends { label: string; count: number; percent: number
   }));
 }
 
-function AnalyticsDonutCard({
-  title,
-  description,
-  icon: Icon,
-  data,
-  loading,
-  emptyLabel,
-}: {
-  title: string;
-  description: string;
-  icon: typeof BarChart3;
-  data: RefundDistributionPoint[];
-  loading?: boolean;
-  emptyLabel: string;
-}) {
-  return (
-    <div className="card flex min-w-0 flex-col overflow-hidden p-5">
-      <div className="mb-4 flex items-start gap-2">
-        <Icon size={16} className="mt-0.5 shrink-0 text-brand" aria-hidden />
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-fg">{title}</h2>
-          <p className="text-xs text-muted">{description}</p>
-        </div>
-      </div>
-      <div className="flex min-h-[11rem] flex-1 items-center">
-        <RefundDistributionDonutChart
-          data={data}
-          loading={loading}
-          emptyLabel={emptyLabel}
-          compact
-          centerMode="total"
-          legendSide
-        />
-      </div>
-    </div>
-  );
+const KPI_CARD_CLASS = 'super-admin-overview-card';
+
+type AnalyticsContextValue = {
+  showBranchFilter: boolean;
+  period: DashboardPeriod;
+  setPeriod: (p: DashboardPeriod) => void;
+  customRange: DateRange | undefined;
+  setCustomRange: (r: DateRange | undefined) => void;
+  storeFilter: string;
+  setStoreFilter: (id: string) => void;
+  stores: Array<{ id: string; name: string }>;
+  loading: boolean;
+  isFetching: boolean;
+  refetch: () => void;
+  periodLabel: string;
+  changeLabel: string;
+  data: RefundAnalyticsPayload | undefined;
+  previousSummary: RefundAnalyticsPayload['summary'] | undefined;
+  filledTrend: Array<{ date: string; count: number; amountLkr: number }>;
+  sparklineCounts: number[];
+  sparklineAmounts: number[];
+  requestTypeChart: RefundDistributionPoint[];
+  cancelAtChart: RefundDistributionPoint[];
+  orderModeChart: RefundDistributionPoint[];
+};
+
+const RefundAnalyticsContext = createContext<AnalyticsContextValue | null>(null);
+
+function useRefundAnalytics() {
+  const ctx = useContext(RefundAnalyticsContext);
+  if (!ctx) throw new Error('useRefundAnalytics must be used within RefundAnalyticsProvider');
+  return ctx;
 }
 
-function CancellationReasonsCard({
-  items,
-  loading,
-}: {
-  items: Array<{ label: string; count: number; percent: number; fill?: string }>;
-  loading?: boolean;
-}) {
-  const themed = items.map((item, index) => ({
-    ...item,
-    fill: item.fill ?? refundChartColor(index),
-  }));
-  const maxCount = Math.max(...themed.map((item) => item.count), 1);
+type ProviderProps = {
+  showBranchFilter?: boolean;
+  enabled?: boolean;
+  children: ReactNode;
+};
 
-  return (
-    <div className="card flex min-w-0 flex-col overflow-hidden p-5">
-      <div className="mb-4 flex items-start gap-2">
-        <ListOrdered size={16} className="mt-0.5 shrink-0 text-brand" aria-hidden />
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-fg">Cancellation Reasons</h2>
-          <p className="text-xs text-muted">Most common reasons this period</p>
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="space-y-4 py-2">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-8 animate-pulse rounded-lg bg-white/5" />
-          ))}
-        </div>
-      ) : themed.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted">No reason data</p>
-      ) : (
-        <div className="flex flex-1 flex-col justify-center gap-4">
-          {themed.map((item) => (
-            <div key={item.label}>
-              <div className="mb-1.5 flex items-center justify-between gap-3 text-sm">
-                <span className="min-w-0 truncate font-medium text-fg">{item.label}</span>
-                <span className="shrink-0 tabular-nums text-muted">{item.count}</span>
-              </div>
-              <div className="h-3 overflow-hidden rounded-full bg-white/5">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${Math.max((item.count / maxCount) * 100, item.count > 0 ? 8 : 0)}%`,
-                    backgroundColor: item.fill,
-                  }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default function RefundAnalyticsPanel({
+export function RefundAnalyticsProvider({
   showBranchFilter = false,
-  onBackToProcess,
-}: Props) {
+  enabled = true,
+  children,
+}: ProviderProps) {
   const [period, setPeriod] = useState<DashboardPeriod>('month');
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
   const [storeFilter, setStoreFilter] = useState('');
@@ -264,7 +208,7 @@ export default function RefundAnalyticsPanel({
       const rows = json.data ?? json;
       return Array.isArray(rows) ? (rows as Array<{ id: string; name: string }>) : [];
     },
-    enabled: showBranchFilter,
+    enabled: showBranchFilter && enabled,
   });
 
   const currentRange = useMemo(() => orderDateRange(period, customRange), [period, customRange]);
@@ -294,19 +238,19 @@ export default function RefundAnalyticsPanel({
     queryKey: ['admin-refunds-analytics', queryUrl],
     queryFn: () => fetchRefundAnalytics(queryUrl),
     placeholderData: keepPreviousData,
+    enabled,
   });
 
   const previousQuery = useQuery({
     queryKey: ['admin-refunds-analytics-previous', previousQueryUrl],
     queryFn: () => fetchRefundAnalytics(previousQueryUrl!),
-    enabled: Boolean(previousQueryUrl),
+    enabled: enabled && Boolean(previousQueryUrl),
     placeholderData: keepPreviousData,
   });
 
   const loading = isLoading || (isFetching && !data);
   const periodLabel = formatDashboardPeriodLabel(period, customRange);
   const changeLabel = period === 'month' ? 'vs last month' : 'vs previous period';
-  const summary = data?.summary;
   const previousSummary = previousQuery.data?.summary;
 
   const filledTrend = useMemo(
@@ -339,71 +283,189 @@ export default function RefundAnalyticsPanel({
     [data?.byOrderMode],
   );
 
+  const value: AnalyticsContextValue = {
+    showBranchFilter,
+    period,
+    setPeriod,
+    customRange,
+    setCustomRange,
+    storeFilter,
+    setStoreFilter,
+    stores: storesQuery.data ?? [],
+    loading,
+    isFetching,
+    refetch: () => void refetch(),
+    periodLabel,
+    changeLabel,
+    data,
+    previousSummary,
+    filledTrend,
+    sparklineCounts,
+    sparklineAmounts,
+    requestTypeChart,
+    cancelAtChart,
+    orderModeChart,
+  };
+
   return (
-    <div className="min-w-0 space-y-5 overflow-x-hidden">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="mb-2 flex items-center gap-1 text-sm text-muted">
-            {onBackToProcess ? (
-              <button
-                type="button"
-                onClick={onBackToProcess}
-                className="inline-flex items-center gap-1 rounded-lg px-1 py-0.5 hover:bg-navy-light hover:text-fg"
-              >
-                <ChevronLeft size={16} />
-                Refunds
-              </button>
-            ) : (
-              <span>Refunds</span>
-            )}
-            <span aria-hidden>/</span>
-            <span className="text-fg">Analytics</span>
-          </div>
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/10">
-              <RotateCcw size={18} className="text-brand" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-fg sm:text-2xl">Refunds Analytics</h2>
-              <p className="text-sm text-muted">
-                Track refund trends, reasons, and performance insights
-              </p>
-            </div>
-          </div>
-        </div>
+    <RefundAnalyticsContext.Provider value={value}>{children}</RefundAnalyticsContext.Provider>
+  );
+}
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {showBranchFilter && (
-            <SearchableBranchSelect
-              stores={storesQuery.data ?? []}
-              value={storeFilter || undefined}
-              onChange={setStoreFilter}
-              formatName={shortBranchName}
-              placeholder="All branches"
-            />
-          )}
-          <DashboardPeriodFilter
-            period={period}
-            customRange={customRange}
-            onPeriodChange={setPeriod}
-            onCustomRangeChange={(range) => {
-              setCustomRange(range);
-              if (range?.from && range?.to) setPeriod('custom');
-            }}
-            showPresetDates
-            compact
-          />
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="btn-outline p-2.5"
-            aria-label="Refresh analytics"
-          >
-            <RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} />
-          </button>
-        </div>
+export function RefundAnalyticsHeaderActions({ className }: { className?: string }) {
+  const {
+    showBranchFilter,
+    period,
+    setPeriod,
+    customRange,
+    setCustomRange,
+    storeFilter,
+    setStoreFilter,
+    stores,
+    isFetching,
+    refetch,
+  } = useRefundAnalytics();
+
+  return (
+    <div className={`flex flex-wrap items-center justify-end gap-2 ${className ?? ''}`}>
+      {showBranchFilter && (
+        <SearchableBranchSelect
+          stores={stores}
+          value={storeFilter || undefined}
+          onChange={setStoreFilter}
+          formatName={shortBranchName}
+          placeholder="All branches"
+        />
+      )}
+      <DashboardPeriodFilter
+        period={period}
+        customRange={customRange}
+        onPeriodChange={setPeriod}
+        onCustomRangeChange={(range) => {
+          setCustomRange(range);
+          if (range?.from && range?.to) setPeriod('custom');
+        }}
+        showPresetDates
+        compact
+      />
+      <button
+        type="button"
+        onClick={() => refetch()}
+        className="btn-outline p-2.5"
+        aria-label="Refresh analytics"
+      >
+        <RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} />
+      </button>
+    </div>
+  );
+}
+
+function AnalyticsDonutCard({
+  title,
+  subtitle,
+  data,
+  loading,
+  emptyLabel,
+}: {
+  title: string;
+  subtitle: string;
+  data: RefundDistributionPoint[];
+  loading?: boolean;
+  emptyLabel: string;
+}) {
+  return (
+    <AnalysisCard
+      title={title}
+      subtitle={subtitle}
+      className="super-admin-overview-card min-h-[280px]"
+      minHeightClassName="min-h-[280px]"
+    >
+      <div className="flex min-h-[11rem] flex-1 items-center">
+        <RefundDistributionDonutChart
+          data={data}
+          loading={loading}
+          emptyLabel={emptyLabel}
+          compact
+          centerMode="total"
+          legendSide
+        />
       </div>
+    </AnalysisCard>
+  );
+}
 
+function CancellationReasonsCard({
+  items,
+  loading,
+}: {
+  items: Array<{ label: string; count: number; percent: number; fill?: string }>;
+  loading?: boolean;
+}) {
+  const themed = items.map((item, index) => ({
+    ...item,
+    fill: item.fill ?? refundChartColor(index),
+  }));
+  const maxCount = Math.max(...themed.map((item) => item.count), 1);
+
+  return (
+    <AnalysisCard
+      title="Cancellation Reasons"
+      subtitle="Most common reasons this period"
+      className="super-admin-overview-card min-h-[280px]"
+      minHeightClassName="min-h-[280px]"
+    >
+      {loading ? (
+        <div className="space-y-4 py-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-8 animate-pulse rounded-lg bg-white/5" />
+          ))}
+        </div>
+      ) : themed.length === 0 ? (
+        <p className="py-8 text-center text-sm text-muted">No reason data</p>
+      ) : (
+        <div className="flex flex-1 flex-col justify-center gap-4">
+          {themed.map((item) => (
+            <div key={item.label}>
+              <div className="mb-1.5 flex items-center justify-between gap-3 text-sm">
+                <span className="min-w-0 truncate font-medium text-fg">{item.label}</span>
+                <span className="shrink-0 tabular-nums text-muted">{item.count}</span>
+              </div>
+              <div className="h-3 overflow-hidden rounded-full bg-white/5">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${Math.max((item.count / maxCount) * 100, item.count > 0 ? 8 : 0)}%`,
+                    backgroundColor: item.fill,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </AnalysisCard>
+  );
+}
+
+export function RefundAnalyticsContent() {
+  const {
+    loading,
+    periodLabel,
+    changeLabel,
+    data,
+    previousSummary,
+    filledTrend,
+    sparklineCounts,
+    sparklineAmounts,
+    requestTypeChart,
+    cancelAtChart,
+    orderModeChart,
+  } = useRefundAnalytics();
+
+  const summary = data?.summary;
+
+  return (
+    <div className="min-w-0 space-y-4 overflow-x-hidden">
       <div className="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-5">
         <SparklineKpiCard
           label="Total Refunds"
@@ -414,6 +476,7 @@ export default function RefundAnalyticsPanel({
           series={sparklineCounts}
           changePercent={changePercent(summary?.totalCount ?? 0, previousSummary?.totalCount)}
           changeLabel={changeLabel}
+          className={KPI_CARD_CLASS}
         />
         <SparklineKpiCard
           label="Refund Amount"
@@ -427,6 +490,7 @@ export default function RefundAnalyticsPanel({
             previousSummary?.totalRefundAmountLkr,
           )}
           changeLabel={changeLabel}
+          className={KPI_CARD_CLASS}
         />
         <SparklineKpiCard
           label="Average Refund Amount"
@@ -440,12 +504,13 @@ export default function RefundAnalyticsPanel({
             previousSummary?.avgRefundAmountLkr,
           )}
           changeLabel={changeLabel}
+          className={KPI_CARD_CLASS}
         />
         <SparklineKpiCard
           label="Completion Rate"
           value={summary ? `${summary.completeRatePercent}%` : '—'}
           icon={CheckCircle2}
-          tone="green"
+          tone="blue"
           loading={loading}
           series={sparklineCounts}
           changePercent={changePercent(
@@ -453,12 +518,13 @@ export default function RefundAnalyticsPanel({
             previousSummary?.completeRatePercent,
           )}
           changeLabel={changeLabel}
+          className={KPI_CARD_CLASS}
         />
         <SparklineKpiCard
           label="Rejection Rate"
           value={summary ? `${summary.rejectionRatePercent}%` : '—'}
           icon={XCircle}
-          tone="red"
+          tone="blue"
           loading={loading}
           series={sparklineCounts}
           changePercent={changePercent(
@@ -466,58 +532,47 @@ export default function RefundAnalyticsPanel({
             previousSummary?.rejectionRatePercent,
           )}
           changeLabel={changeLabel}
+          className={KPI_CARD_CLASS}
         />
       </div>
 
-      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)]">
+      <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)]">
         <AnalyticsDonutCard
           title="Request Type"
-          description={`Refund request types · ${periodLabel}`}
-          icon={ShoppingBag}
+          subtitle={`Refund request types · ${periodLabel}`}
           data={requestTypeChart}
           loading={loading}
           emptyLabel="No request type data"
         />
 
-        <div className="card min-w-0 overflow-hidden">
-          <div className="flex items-center justify-between gap-2 border-b border-navy-border px-5 py-4">
-            <div className="flex min-w-0 items-center gap-2">
-              <LineChart size={16} className="shrink-0 text-brand" aria-hidden />
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-fg">Refund Trend</h2>
-                <p className="text-xs text-muted">{periodLabel} · refund count per day</p>
-              </div>
-            </div>
+        <AnalysisCard
+          title="Refund Trend"
+          subtitle={`${periodLabel} · refund count per day`}
+          className="super-admin-overview-card min-h-[280px]"
+          minHeightClassName="min-h-[280px]"
+          headerRight={
             <span className="inline-flex items-center gap-1.5 text-[11px] text-muted">
               <span className="h-2 w-2 rounded-full bg-brand" aria-hidden />
               Refunds
             </span>
-          </div>
-          <div className="px-3 py-4 sm:px-5">
-            <RefundDailyTrendChart
-              data={filledTrend}
-              loading={loading}
-              compact
-              variant="line"
-            />
-          </div>
-        </div>
+          }
+        >
+          <RefundDailyTrendChart data={filledTrend} loading={loading} compact variant="line" />
+        </AnalysisCard>
 
         <AnalyticsDonutCard
           title="Cancel at Status"
-          description="Order status when the refund was requested"
-          icon={CheckCircle2}
+          subtitle="Order status when the refund was requested"
           data={cancelAtChart}
           loading={loading}
           emptyLabel="No cancel-at status data"
         />
       </div>
 
-      <div className="grid min-w-0 gap-4 xl:grid-cols-3">
+      <div className="grid min-w-0 gap-3 xl:grid-cols-3">
         <AnalyticsDonutCard
           title="Order Mode Split"
-          description={`Refunds by order mode · ${periodLabel}`}
-          icon={ShoppingBag}
+          subtitle={`Refunds by order mode · ${periodLabel}`}
           data={orderModeChart}
           loading={loading}
           emptyLabel="No order mode data"
@@ -525,15 +580,12 @@ export default function RefundAnalyticsPanel({
 
         <CancellationReasonsCard items={data?.byReason ?? []} loading={loading} />
 
-        <div className="card min-w-0 overflow-hidden p-5">
-          <div className="mb-4 flex items-start gap-2">
-            <Trophy size={16} className="mt-0.5 shrink-0 text-brand" aria-hidden />
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-fg">Top Refunding Products</h2>
-              <p className="text-xs text-muted">Products appearing most often in refunded orders</p>
-            </div>
-          </div>
-
+        <AnalysisCard
+          title="Top Refunding Products"
+          subtitle="Products appearing most often in refunded orders"
+          className="super-admin-overview-card min-h-[280px]"
+          minHeightClassName="min-h-[280px]"
+        >
           {loading ? (
             <div className="space-y-3">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -581,8 +633,55 @@ export default function RefundAnalyticsPanel({
               </table>
             </div>
           )}
-        </div>
+        </AnalysisCard>
       </div>
     </div>
+  );
+}
+
+type PanelProps = {
+  showBranchFilter?: boolean;
+  onBackToProcess?: () => void;
+  embedded?: boolean;
+};
+
+/** Standalone panel (legacy); prefer Provider + Content on the refunds page. */
+export default function RefundAnalyticsPanel({
+  showBranchFilter = false,
+  onBackToProcess,
+  embedded = false,
+}: PanelProps) {
+  if (embedded) {
+    return (
+      <RefundAnalyticsProvider showBranchFilter={showBranchFilter} enabled>
+        <RefundAnalyticsContent />
+      </RefundAnalyticsProvider>
+    );
+  }
+
+  return (
+    <RefundAnalyticsProvider showBranchFilter={showBranchFilter} enabled>
+      <div className="min-w-0 space-y-5 overflow-x-hidden">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            {onBackToProcess ? (
+              <button
+                type="button"
+                onClick={onBackToProcess}
+                className="mb-2 text-sm text-muted hover:text-fg"
+              >
+                Refunds / Analytics
+              </button>
+            ) : null}
+            <h2 className="text-xl font-bold text-fg sm:text-2xl">Refunds Analytics</h2>
+            <p className="text-[13px] text-muted">
+              Track refund trends, reasons, and performance insights
+            </p>
+          </div>
+          <RefundAnalyticsHeaderActions />
+        </div>
+        <RefundAnalyticsContent />
+      </div>
+    </RefundAnalyticsProvider>
   );
 }

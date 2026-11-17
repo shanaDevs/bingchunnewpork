@@ -1,11 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '../../src/middleware/errorHandler';
 
+vi.mock('@bingchun/delivery-domain', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@bingchun/delivery-domain')>();
+  return {
+    ...actual,
+    driverHasOpenVehicleBreakdown: vi.fn().mockResolvedValue(false),
+    loadReassignedRidersByFailedJob: actual.loadReassignedRidersByFailedJob,
+    pickReassignedRiders: actual.pickReassignedRiders,
+  };
+});
+
 vi.mock('../../src/lib/prisma', () => ({
   prisma: {
     deliveryAttempt: { findUnique: vi.fn() },
     deliveryJobOrder: { findMany: vi.fn() },
-    deliveryJob: { findMany: vi.fn(), create: vi.fn(), findFirst: vi.fn() },
+    deliveryJob: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), findFirst: vi.fn() },
     adminUser: { findFirst: vi.fn(), update: vi.fn() },
     $queryRaw: vi.fn(),
     $transaction: vi.fn(),
@@ -28,11 +38,13 @@ vi.mock('../../src/lib/deliveryJobHelpers', async (importOriginal) => {
 
 vi.mock('../../src/lib/driverPush', () => ({
   sendPushToDriver: vi.fn().mockResolvedValue({ tokensSent: 1 }),
+  sendDriverAccountUpdateToDriver: vi.fn().mockResolvedValue({ tokensSent: 1 }),
 }));
 
 vi.mock('../../src/lib/socket', () => ({
   broadcastJobAssignedToDriver: vi.fn(),
   broadcastDeliveryJobUpdated: vi.fn(),
+  broadcastHandoverRiderAssigned: vi.fn(),
 }));
 
 vi.mock('../../src/lib/roadRouting', () => ({
@@ -49,7 +61,8 @@ import {
   reassignFailedDeliveryOrders,
 } from '../../src/lib/deliveryFailureReassign';
 import { sendPushToDriver } from '../../src/lib/driverPush';
-import { broadcastJobAssignedToDriver } from '../../src/lib/socket';
+import { broadcastHandoverRiderAssigned, broadcastJobAssignedToDriver } from '../../src/lib/socket';
+import { sendDriverAccountUpdateToDriver } from '../../src/lib/driverPush';
 import { maybeEnterReturningPhase } from '../../src/lib/deliveryJobHelpers';
 
 const attemptBase = {
@@ -120,6 +133,10 @@ describe('reassignFailedDeliveryOrder', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(prisma.deliveryJob.findMany).mockResolvedValue([]);
+    vi.mocked(prisma.deliveryJob.findUnique).mockResolvedValue({
+      driverId: 'd-stranded',
+      rideCode: 'RIDE-100',
+    } as never);
     mockJobOrderLookups([failedStop]);
     vi.mocked(getDriverAccessibleStoreIds).mockResolvedValue(['store-1']);
     vi.mocked(prisma.$transaction).mockImplementation(async (fn: unknown) => {
@@ -183,6 +200,18 @@ describe('reassignFailedDeliveryOrder', () => {
       }),
     );
     expect(maybeEnterReturningPhase).toHaveBeenCalledWith('job-orig');
+    expect(broadcastHandoverRiderAssigned).toHaveBeenCalledWith(
+      'd-stranded',
+      expect.objectContaining({
+        originalJobId: 'job-orig',
+        replacementJobId: 'job-new',
+        replacementDriverId: 'd2',
+      }),
+    );
+    expect(sendDriverAccountUpdateToDriver).toHaveBeenCalledWith(
+      'd-stranded',
+      expect.objectContaining({ kind: 'HANDOVER_RIDER_ASSIGNED' }),
+    );
   });
 
   it('moves the failed order plus later undelivered stops onto one new job', async () => {

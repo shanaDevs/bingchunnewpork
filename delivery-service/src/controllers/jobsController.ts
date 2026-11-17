@@ -12,9 +12,17 @@ import {
   invalidateJobRoute,
   isRejectAllowed,
   persistJobActualRouteFromGps,
+  dropoffApiFields,
+  mapPinPoint,
   type RouteStop,
   type DeliveryDomainStateValue,
+  assertDriverVehicleReadyForWork,
+  openVehicleBreakdown,
   patchDriverOpsProfile,
+  VEHICLE_BREAKDOWN_OPEN_CODE,
+  buildJobHandoverResponse,
+  JobHandoverError,
+  markVehicleFixed,
 } from '@bingchun/delivery-domain';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
@@ -47,6 +55,7 @@ import { ensureOtpForOrder, isOtpRequiredForStore } from '../lib/otp';
 import { sendPushToDriver, sendPushToBranchDrivers } from '../lib/fcm';
 import { getDriverAccessibleStoreIds } from '../lib/driverAccess';
 import { getEventPublisher } from '../sockets/eventPublisher';
+import { closeDriverShift } from '../lib/driverShift';
 import { applyMeritDelta } from '../lib/meritPoints';
 import { logger } from '../utils/logger';
 
@@ -397,10 +406,36 @@ export async function getJobRoute(req: Request, res: Response, next: NextFunctio
     // Customer identity is already redacted in routingRawStops when !isMine. Geometry stays real
     // either way so a driver can judge the run on the map before claiming it.
     const payload = await buildDeliveryRoutePayload(routeOrigin, routingStops, job.id);
+    const deliveredStops: RouteStop[] = [];
+    for (const jo of job.jobOrders) {
+      if (jo.order.status !== 'DELIVERED') continue;
+      const pin = mapPinPoint(jo.order);
+      if (!pin) continue;
+      deliveredStops.push({
+        orderId: jo.order.id,
+        orderNumber: jo.order.orderNumber,
+        customerName: isMine ? (jo.order.user?.name ?? jo.order.guestName ?? 'Guest') : 'Customer',
+        customerPhone: isMine ? (jo.order.user?.phone ?? jo.order.guestPhone ?? '') : '',
+        addressLine: isMine ? (jo.order.deliveryAddressLine ?? jo.order.address?.addressLine ?? '') : '',
+        city: jo.order.deliveryCity ?? jo.order.address?.city ?? '',
+        district: jo.order.deliveryDistrict ?? jo.order.address?.district ?? '',
+        status: jo.order.status,
+        total: 0,
+        itemCount: jo.order.items.reduce((n, i) => n + i.quantity, 0),
+        ...orderStopImageMeta(jo.order.items),
+        lat: pin.lat,
+        lng: pin.lng,
+        ...dropoffApiFields(jo.order),
+        sequence: jo.sequence,
+        distanceFromPreviousKm: 0,
+        etaMinutesFromPrevious: 0,
+      });
+    }
 
     return success(res, {
       jobId: job.id,
       ...payload,
+      stops: [...payload.stops, ...deliveredStops],
     });
   } catch (err) {
     next(err);
@@ -429,6 +464,15 @@ async function takeScheduledJob(req: Request, res: Response) {
   if (!driver?.isActive) throw new AppError('Driver account is suspended', 403);
   if (driver.dutyStatus !== 'ONLINE' && driver.dutyStatus !== 'ON_DELIVERY') {
     throw new AppError('You must be online and available to accept jobs', 400);
+  }
+  try {
+    await assertDriverVehicleReadyForWork(driverId);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number; code?: string };
+    if (typeof e.statusCode === 'number') {
+      throw new AppError(e.message, e.statusCode, e.code ?? VEHICLE_BREAKDOWN_OPEN_CODE);
+    }
+    throw err;
   }
 
   const job = await prisma.deliveryJob.findUnique({
@@ -1063,12 +1107,16 @@ async function closeRideAsVehicleFailure(opts: {
   });
   await promoteNextQueuedJob(opts.driverId).catch(() => {});
 
-  const remainingHeld = await prisma.deliveryJob.count({
-    where: { driverId: opts.driverId, status: { in: await heldJobStatuses() } },
+  const breakdown = await openVehicleBreakdown({
+    driverId: opts.driverId,
+    jobId: opts.jobId,
+    storeId: opts.storeId,
+    lat: opts.lat,
+    lng: opts.lng,
+    note: opts.note,
   });
-  if (remainingHeld === 0) {
-    await patchDriverOpsProfile(opts.driverId, { dutyStatus: 'ONLINE' }).catch(() => {});
-  }
+  await patchDriverOpsProfile(opts.driverId, { dutyStatus: 'OFF_DUTY' }).catch(() => {});
+  await closeDriverShift(opts.driverId).catch(() => {});
 
   invalidateJobRoute(opts.jobId);
   const orderId = orderIds[0] ?? opts.fallbackOrderId;
@@ -1093,6 +1141,26 @@ async function closeRideAsVehicleFailure(opts: {
     .publish(`store:${opts.storeId}`, 'deliveryJobUpdated', {
       jobId: opts.jobId,
       status: 'VEHICLE_FAILURE',
+    })
+    .catch(() => {});
+  getEventPublisher()
+    .publish(`store:${opts.storeId}`, 'vehicleBreakdownOpened', {
+      breakdownId: breakdown.id,
+      driverId: opts.driverId,
+      jobId: opts.jobId,
+      storeId: opts.storeId,
+      lat: opts.lat,
+      lng: opts.lng,
+    })
+    .catch(() => {});
+  getEventPublisher()
+    .publish('delivery-ops', 'vehicleBreakdownOpened', {
+      breakdownId: breakdown.id,
+      driverId: opts.driverId,
+      jobId: opts.jobId,
+      storeId: opts.storeId,
+      lat: opts.lat,
+      lng: opts.lng,
     })
     .catch(() => {});
 
@@ -1212,6 +1280,76 @@ export async function reportVehicleFailure(req: Request, res: Response, next: Ne
       return executeVehicleFailureReport(req, attempt > 1);
     }, reconnectPrisma);
     return success(res, payload);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getJobHandover(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.user!.sub;
+    const jobId = req.params.id as string;
+    const payload = await buildJobHandoverResponse(jobId, driverId);
+    return success(res, payload);
+  } catch (err) {
+    if (err instanceof JobHandoverError) {
+      return next(new AppError(err.message, err.statusCode));
+    }
+    next(err);
+  }
+}
+
+export async function confirmHandoverBackOnRoad(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.user!.sub;
+    const jobId = req.params.id as string;
+    const job = await prisma.deliveryJob.findUnique({
+      where: { id: jobId },
+      select: { id: true, driverId: true, status: true, storeId: true },
+    });
+    if (!job || job.driverId !== driverId) throw new AppError('Job not found', 404);
+    if (job.status !== 'VEHICLE_FAILURE') {
+      throw new AppError('Back on road is only available after a vehicle failure', 400);
+    }
+
+    let result;
+    try {
+      result = await markVehicleFixed({
+        driverId,
+        fixedById: driverId,
+        fixedByRole: 'DRIVER',
+      });
+    } catch (err) {
+      const e = err as Error & { statusCode?: number; code?: string };
+      if (typeof e.statusCode === 'number') {
+        throw new AppError(e.message, e.statusCode, e.code);
+      }
+      throw err;
+    }
+
+    if (result.jobId !== job.id) {
+      throw new AppError('No open breakdown for this ride', 400);
+    }
+
+    const payload = {
+      breakdownId: result.id,
+      driverId,
+      jobId: job.id,
+      storeId: job.storeId,
+      fixedByRole: 'DRIVER' as const,
+      fixedComment: null,
+    };
+    getEventPublisher()
+      .publish(`store:${job.storeId}`, 'vehicleBreakdownCleared', payload)
+      .catch(() => {});
+    getEventPublisher().publish('delivery-ops', 'vehicleBreakdownCleared', payload).catch(() => {});
+
+    return success(res, {
+      breakdownId: result.id,
+      jobId: result.jobId,
+      fixedAt: result.fixedAt.toISOString(),
+      fixedComment: result.fixedComment,
+    });
   } catch (err) {
     next(err);
   }

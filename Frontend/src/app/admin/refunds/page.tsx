@@ -9,7 +9,6 @@ import { useQuery, useQueries } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
 import {
-  BarChart3,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -19,6 +18,7 @@ import {
   List,
   Loader2,
   Percent,
+  RotateCcw,
   RefreshCw,
   Search,
   Store,
@@ -31,8 +31,19 @@ import DateRangePicker from '@/components/admin/DateRangePicker';
 import CancelReasonConfigPanel from '@/components/admin/CancelReasonConfigPanel';
 import OrderStatusRefundConfigPanel from '@/components/admin/OrderStatusRefundConfigPanel';
 import RefundProcessModal from '@/components/admin/RefundProcessModal';
-import RefundAnalyticsPanel from '@/components/admin/RefundAnalyticsPanel';
+import {
+  RefundAnalyticsContent,
+  RefundAnalyticsHeaderActions,
+  RefundAnalyticsProvider,
+} from '@/components/admin/RefundAnalyticsPanel';
 import SparklineKpiCard from '@/components/admin/SparklineKpiCard';
+import { replaceAdminRefundsQuery } from '@/components/admin/replaceAdminRefundsQuery';
+import {
+  useAdminRefundsView,
+  type RefundPageView,
+} from '@/components/admin/useAdminRefundsView';
+import { WALLET_TAB_TRIGGER_CLASS } from '@/components/admin/useAdminWalletTab';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { RefundRequestTypeBadge, RefundStatusBadge } from '@/components/admin/RefundStatusBadge';
 import SearchableBranchSelect from '@/components/admin/SearchableBranchSelect';
 import { getAdminSession, isCashier, isSuperAdmin, type AdminSession } from '@/lib/adminAuth';
@@ -56,8 +67,6 @@ import toast from 'react-hot-toast';
 
 const PAGE_SIZE = 20;
 
-type RefundMainTab = 'process' | 'analytics';
-
 type RefundStatusTab = 'RECEIVED' | 'COMPLETE' | 'REJECTED' | 'ALL';
 
 const STATUS_TABS: Array<{
@@ -69,15 +78,6 @@ const STATUS_TABS: Array<{
   { id: 'COMPLETE', label: 'Complete', icon: CheckCircle2 },
   { id: 'REJECTED', label: 'Rejected', icon: XCircle },
   { id: 'ALL', label: 'All', icon: List },
-];
-
-const MAIN_TABS: Array<{
-  id: RefundMainTab;
-  label: string;
-  icon: typeof Inbox;
-}> = [
-  { id: 'process', label: 'Process', icon: Inbox },
-  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
 ];
 
 type RefundSummary = {
@@ -195,7 +195,7 @@ export default function AdminRefundsPage() {
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [selectedRefundId, setSelectedRefundId] = useState<string | null>(null);
   const [pageView, setPageView] = useState<'refunds' | 'reasons' | 'status-refunds'>('refunds');
-  const [mainTab, setMainTab] = useState<RefundMainTab>('process');
+  const { activeView, setActiveView } = useAdminRefundsView();
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
@@ -216,7 +216,9 @@ export default function AdminRefundsPage() {
   const closeRefundModal = () => {
     setSelectedRefundId(null);
     if (searchParams.get('refundId')) {
-      router.replace('/admin/refunds');
+      replaceAdminRefundsQuery(router, (params) => {
+        params.delete('refundId');
+      });
     }
   };
 
@@ -404,123 +406,153 @@ export default function AdminRefundsPage() {
     }
   }
 
+  const isAnalytics = activeView === 'analytics';
+
+  const processSubtitle =
+    pageView === 'reasons'
+      ? 'Manage customer cancellation reasons'
+      : pageView === 'status-refunds'
+        ? 'Configure fixed refund percentages by order status'
+        : `${totalItems} refund request${totalItems === 1 ? '' : 's'}${statusTab !== 'ALL' ? ` · ${STATUS_TABS.find((t) => t.id === statusTab)?.label}` : ''}`;
+
   return (
-    <div>
-      <RefundProcessModal
-        refundId={selectedRefundId}
-        onClose={closeRefundModal}
-        onUpdated={() => {
-          void refundsQuery.refetch();
-          void summaryQuery.refetch();
-          void Promise.all(countQueries.map((q) => q.refetch()));
-        }}
-      />
-
-      {mainTab !== 'analytics' && (
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-fg">Refunds</h1>
-          <p className="text-muted text-sm mt-0.5">
-            {pageView === 'reasons'
-              ? 'Manage customer cancellation reasons'
-              : pageView === 'status-refunds'
-                ? 'Configure fixed refund percentages by order status'
-                : `${totalItems} refund request${totalItems === 1 ? '' : 's'}${statusTab !== 'ALL' ? ` · ${STATUS_TABS.find((t) => t.id === statusTab)?.label}` : ''}`}
-          </p>
-        </div>
-        <div className="flex gap-2 shrink-0">
-          {mainTab === 'process' && superAdmin && (
-            <div className="inline-flex rounded-lg border border-navy-border overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setPageView('refunds')}
-                className={`px-3 py-2 text-sm ${pageView === 'refunds' ? 'bg-brand/15 text-brand' : 'text-muted hover:text-fg'}`}
-              >
-                Refund queue
-              </button>
-              <button
-                type="button"
-                onClick={() => setPageView('reasons')}
-                className={`px-3 py-2 text-sm ${pageView === 'reasons' ? 'bg-brand/15 text-brand' : 'text-muted hover:text-fg'}`}
-              >
-                Cancel reasons
-              </button>
-              <button
-                type="button"
-                onClick={() => setPageView('status-refunds')}
-                className={`px-3 py-2 text-sm ${pageView === 'status-refunds' ? 'bg-brand/15 text-brand' : 'text-muted hover:text-fg'}`}
-              >
-                Status refunds
-              </button>
-            </div>
-          )}
-          {mainTab === 'process' && pageView === 'refunds' && (
-            <>
-          <button
-            type="button"
-            onClick={() => {
-              void refundsQuery.refetch();
-              void summaryQuery.refetch();
-              void Promise.all(countQueries.map((q) => q.refetch()));
-            }}
-            className="btn-outline p-2.5"
-            aria-label="Refresh refunds"
-          >
-            <RefreshCw size={15} className={refundsQuery.isFetching ? 'animate-spin' : ''} />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              void handleExportExcel();
-            }}
-            disabled={exporting}
-            className="btn-outline px-3 py-2.5 text-sm flex items-center gap-1.5 disabled:opacity-50"
-          >
-            {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-            Export
-          </button>
-            </>
-          )}
-        </div>
-      </div>
-      )}
-
-      <div className="flex gap-2 mb-6" role="tablist" aria-label="Refund views">
-        {MAIN_TABS.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = mainTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => setMainTab(tab.id)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${
-                isActive ? 'bg-brand text-white' : 'bg-navy-light text-muted'
-              }`}
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <Icon size={14} />
-                {tab.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {mainTab === 'analytics' ? (
-        <RefundAnalyticsPanel
-          showBranchFilter={showStoreColumn}
-          onBackToProcess={() => setMainTab('process')}
+    <RefundAnalyticsProvider showBranchFilter={showStoreColumn} enabled={isAnalytics}>
+      <div
+        className={`admin-dashboard mx-auto max-w-[1400px] space-y-3${
+          superAdmin ? ' admin-dashboard--super' : ''
+        }`}
+      >
+        <RefundProcessModal
+          refundId={selectedRefundId}
+          onClose={closeRefundModal}
+          onUpdated={() => {
+            void refundsQuery.refetch();
+            void summaryQuery.refetch();
+            void Promise.all(countQueries.map((q) => q.refetch()));
+          }}
         />
-      ) : superAdmin && pageView === 'reasons' ? (
+
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            {isAnalytics ? (
+              <>
+                <p className="mb-1 text-[12px] font-medium leading-none text-muted">
+                  <button
+                    type="button"
+                    onClick={() => setActiveView('process')}
+                    className="rounded px-0.5 hover:text-fg"
+                  >
+                    Refunds
+                  </button>
+                  <span aria-hidden className="mx-1">
+                    /
+                  </span>
+                  <span className="text-fg">Analytics</span>
+                </p>
+                <h1 className="m-0 flex items-center gap-2 text-[1.55rem] font-bold leading-tight tracking-tight text-fg">
+                  <RotateCcw size={22} className="shrink-0 text-brand" aria-hidden />
+                  Refunds Analytics
+                </h1>
+                <p className="mt-1 mb-0 text-[13px] leading-snug text-muted">
+                  Track refund trends, reasons, and performance insights
+                </p>
+              </>
+            ) : (
+              <>
+                <h1 className="m-0 text-[1.55rem] font-bold leading-tight tracking-tight text-fg">
+                  Refunds
+                </h1>
+                <p className="mt-1 mb-0 text-[13px] leading-snug text-muted">{processSubtitle}</p>
+              </>
+            )}
+          </div>
+
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {isAnalytics ? (
+              <RefundAnalyticsHeaderActions />
+            ) : (
+              <>
+                {superAdmin && (
+                  <div className="inline-flex overflow-hidden rounded-lg border border-navy-border">
+                    <button
+                      type="button"
+                      onClick={() => setPageView('refunds')}
+                      className={`px-3 py-2 text-sm ${pageView === 'refunds' ? 'bg-brand/15 text-brand' : 'text-muted hover:text-fg'}`}
+                    >
+                      Refund queue
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPageView('reasons')}
+                      className={`px-3 py-2 text-sm ${pageView === 'reasons' ? 'bg-brand/15 text-brand' : 'text-muted hover:text-fg'}`}
+                    >
+                      Cancel reasons
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPageView('status-refunds')}
+                      className={`px-3 py-2 text-sm ${pageView === 'status-refunds' ? 'bg-brand/15 text-brand' : 'text-muted hover:text-fg'}`}
+                    >
+                      Status refunds
+                    </button>
+                  </div>
+                )}
+                {pageView === 'refunds' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void refundsQuery.refetch();
+                        void summaryQuery.refetch();
+                        void Promise.all(countQueries.map((q) => q.refetch()));
+                      }}
+                      className="btn-outline p-2.5"
+                      aria-label="Refresh refunds"
+                    >
+                      <RefreshCw size={15} className={refundsQuery.isFetching ? 'animate-spin' : ''} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleExportExcel();
+                      }}
+                      disabled={exporting}
+                      className="btn-outline flex items-center gap-1.5 px-3 py-2.5 text-sm disabled:opacity-50"
+                    >
+                      {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                      Export
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        <Tabs
+          value={activeView}
+          onValueChange={(value) => setActiveView(value as RefundPageView)}
+          className="mb-0 gap-2 overflow-y-visible"
+        >
+          <TabsList className="mb-0 h-8 w-fit shrink-0 justify-start gap-0.5 overflow-y-hidden">
+            <TabsTrigger value="process" className={WALLET_TAB_TRIGGER_CLASS}>
+              Process
+            </TabsTrigger>
+            <TabsTrigger value="analytics" className={WALLET_TAB_TRIGGER_CLASS}>
+              Analytics
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {isAnalytics ? (
+          <RefundAnalyticsContent />
+        ) : superAdmin && pageView === 'reasons' ? (
         <CancelReasonConfigPanel />
       ) : superAdmin && pageView === 'status-refunds' ? (
         <OrderStatusRefundConfigPanel />
       ) : (
       <>
-      <div className="mb-6">
+      <div className="mb-4">
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 xl:items-stretch">
           <SparklineKpiCard
             label="Customer receive"
@@ -528,6 +560,7 @@ export default function AdminRefundsPage() {
             icon={User}
             tone="green"
             loading={summaryQuery.isLoading}
+            className="super-admin-overview-card"
           />
           <SparklineKpiCard
             label="Branch receive"
@@ -535,6 +568,7 @@ export default function AdminRefundsPage() {
             icon={Store}
             tone="blue"
             loading={summaryQuery.isLoading}
+            className="super-admin-overview-card"
           />
           <SparklineKpiCard
             label="Delivery receive"
@@ -542,6 +576,7 @@ export default function AdminRefundsPage() {
             icon={Truck}
             tone="orange"
             loading={summaryQuery.isLoading}
+            className="super-admin-overview-card"
           />
           <SparklineKpiCard
             label="Platform receive"
@@ -549,6 +584,7 @@ export default function AdminRefundsPage() {
             icon={Percent}
             tone="purple"
             loading={summaryQuery.isLoading}
+            className="super-admin-overview-card"
           />
         </div>
         <p className="mt-2 text-xs text-muted">
@@ -834,7 +870,8 @@ export default function AdminRefundsPage() {
         </div>
       )}
       </>
-      )}
-    </div>
+        )}
+      </div>
+    </RefundAnalyticsProvider>
   );
 }

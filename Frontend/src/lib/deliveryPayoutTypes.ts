@@ -36,8 +36,11 @@ export type DeliveryPayoutHistoryRow = {
   periodFrom: string;
   periodTo: string;
   requestedById?: string;
+  paymentMethod?: string | null;
   proofUrl?: string | null;
   hasProof?: boolean;
+  checkNumber?: string | null;
+  checkDate?: string | null;
   breakdown?: DeliveryWalletSummary | null;
   createdAt: string;
 };
@@ -55,6 +58,10 @@ export type DeliveryPayoutDueRow = {
   days: number;
   orderCount: number;
   grossDeliveryFee: number;
+  platformFeePercent: number;
+  platformFee: number;
+  gatewayFeePercent: number;
+  gatewayFee: number;
   netForDelivery: number;
   payable: boolean;
 };

@@ -120,6 +120,7 @@ export const DELIVERY_TAB_QUERY_KEYS: Partial<Record<string, string[]>> = {
   drivers: ['admin-driver-pool'],
   complaints: ['admin-driver-complaints'],
   failures: ['admin-delivery-failures'],
+  vehicleBreakdowns: ['admin-vehicle-breakdowns'],
   requests: ['admin-driver-branch-requests'],
   analytics: ['admin-driver-analytics'],
 };

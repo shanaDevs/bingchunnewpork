@@ -124,6 +124,9 @@ export async function ensureAppSchema(): Promise<void> {
   await ensureDeliveryZonesTable();
 
   await addColumnIfMissing('orders', 'convenientFee', 'INT NOT NULL DEFAULT 0');
+  await addColumnIfMissing('orders', 'actualDropoffLat', 'DOUBLE PRECISION NULL');
+  await addColumnIfMissing('orders', 'actualDropoffLng', 'DOUBLE PRECISION NULL');
+  await addColumnIfMissing('orders', 'actualDropoffAt', 'TIMESTAMP(3) NULL');
   await addColumnIfMissing(
     'promo_codes',
     'showOnHome',

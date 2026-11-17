@@ -67,6 +67,10 @@ export type DeliveryPayoutDueItem = {
   days: DeliveryPayoutPeriodDays;
   orderCount: number;
   grossDeliveryFee: number;
+  platformFeePercent: number;
+  platformFee: number;
+  gatewayFeePercent: number;
+  gatewayFee: number;
   netForDelivery: number;
   payable: boolean;
 };
@@ -76,6 +80,9 @@ export type DeliveryCurrentPayoutCycle = {
   cycleTo: string;
   through: string;
   days: DeliveryPayoutPeriodDays;
+  orderCount: number;
+  grossDeliveryFee: number;
+  netForDelivery: number;
 };
 
 export type DeliveryPayoutDbRow = {
@@ -215,6 +222,7 @@ async function getEarliestDeliveryFeeDate(): Promise<string | null> {
         submittedBy: 'CUSTOMER',
         cancelledWithinWindow: false,
         processedAt: { not: null },
+        order: { orderMode: 'DELIVERY', status: 'CANCELLED' },
       },
       orderBy: { processedAt: 'asc' },
       select: { processedAt: true },
@@ -227,7 +235,7 @@ async function getEarliestDeliveryFeeDate(): Promise<string | null> {
         NOT: {
           AND: [{ submittedBy: 'CUSTOMER' }, { cancelledWithinWindow: false }],
         },
-        order: { status: 'CANCELLED' },
+        order: { orderMode: 'DELIVERY', status: 'CANCELLED' },
       },
       orderBy: { processedAt: 'asc' },
       select: { processedAt: true },
@@ -257,11 +265,15 @@ export async function getCurrentDeliveryPayoutCycle(): Promise<DeliveryCurrentPa
     today,
   });
   if (!open) return null;
+  const summary = await getDeliveryWalletSummary(open.from, open.through);
   return {
     from: open.from,
     cycleTo: open.cycleTo,
     through: open.through,
     days: open.days,
+    orderCount: summary.orderCount,
+    grossDeliveryFee: summary.grossDeliveryFee,
+    netForDelivery: summary.netForDelivery,
   };
 }
 
@@ -284,7 +296,7 @@ export async function resolveDeliveryPayoutPeriodOptions(): Promise<ResolvedDeli
 }
 
 /**
- * Successive fully-elapsed 15-day windows from last approved payout (or first fee).
+ * Successive fully-elapsed 30-day windows from last approved payout (or first fee).
  * Skips zero-net windows but advances the cursor past them.
  */
 export async function listElapsedDeliveryPayoutWindows(
@@ -354,6 +366,10 @@ export async function listDeliveryPayoutsDue(): Promise<DeliveryPayoutDueItem[]>
         days: window.days,
         orderCount: window.orderCount,
         grossDeliveryFee: window.grossDeliveryFee,
+        platformFeePercent: window.summary.platformFeePercent,
+        platformFee: window.summary.platformFee,
+        gatewayFeePercent: window.summary.gatewayFeePercent,
+        gatewayFee: window.summary.gatewayFee,
         netForDelivery: window.netForDelivery,
         payable: index === 0,
       }));
@@ -378,23 +394,41 @@ function buildStoredDeliveryPayoutBreakdown(
 export async function listDeliveryPayouts(opts?: {
   page?: number;
   limit?: number;
+  status?: string;
 }) {
   await ensureDeliveryPayoutSchema();
   const page = Math.max(1, opts?.page ?? 1);
   const limit = Math.min(50, Math.max(1, opts?.limit ?? 10));
   const skip = (page - 1) * limit;
+  const status = opts?.status === 'APPROVED' ? 'APPROVED' : null;
+  const table = getDeliveryPayoutsSqlRef();
 
   const [items, countRows] = await Promise.all([
-    prisma.$queryRawUnsafe<DeliveryPayoutDbRow[]>(
-      `SELECT * FROM ${getDeliveryPayoutsSqlRef()}
-       ORDER BY "createdAt" DESC
-       LIMIT $1 OFFSET $2`,
-      limit,
-      skip,
-    ),
-    prisma.$queryRawUnsafe<Array<{ n: number | bigint }>>(
-      `SELECT COUNT(*)::int AS n FROM ${getDeliveryPayoutsSqlRef()}`,
-    ),
+    status
+      ? prisma.$queryRawUnsafe<DeliveryPayoutDbRow[]>(
+          `SELECT * FROM ${table}
+           WHERE status = $1
+           ORDER BY "createdAt" DESC
+           LIMIT $2 OFFSET $3`,
+          status,
+          limit,
+          skip,
+        )
+      : prisma.$queryRawUnsafe<DeliveryPayoutDbRow[]>(
+          `SELECT * FROM ${table}
+           ORDER BY "createdAt" DESC
+           LIMIT $1 OFFSET $2`,
+          limit,
+          skip,
+        ),
+    status
+      ? prisma.$queryRawUnsafe<Array<{ n: number | bigint }>>(
+          `SELECT COUNT(*)::int AS n FROM ${table} WHERE status = $1`,
+          status,
+        )
+      : prisma.$queryRawUnsafe<Array<{ n: number | bigint }>>(
+          `SELECT COUNT(*)::int AS n FROM ${table}`,
+        ),
   ]);
 
   const total = Number(countRows[0]?.n ?? 0);

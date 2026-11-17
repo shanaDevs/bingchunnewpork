@@ -7,7 +7,17 @@ import { AppError } from '../middleware/errorHandler';
 import { openDriverShift, closeDriverShift, listDriverShifts } from '../lib/driverShift';
 import { broadcastDriverDutyChanged, broadcastDeliveryJobUpdated } from '../lib/socket';
 import { getDriverAccessibleStoreIds } from '../lib/driverAccess';
-import { patchDriverOpsProfile } from '@bingchun/delivery-domain';
+import {
+  assertDriverVehicleReadyForWork,
+  getOpenVehicleBreakdown,
+  markVehicleFixed,
+  patchDriverOpsProfile,
+  VEHICLE_BREAKDOWN_OPEN_CODE,
+} from '@bingchun/delivery-domain';
+import {
+  broadcastVehicleBreakdownCleared,
+} from '../lib/socket';
+import { throwIfVehicleBreakdownDomainError } from '../lib/vehicleBreakdownErrors';
 import {
   RIDER_LICENSE_IMAGE_ENDPOINT_TIMEOUT_MS,
   RIDER_LICENSE_PRESIGN_TIMEOUT_MS,
@@ -90,6 +100,7 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
 
     const points = driver.meritPoints ?? 100;
     const { alertEligible, activeRidePhase, canClaimMore } = deriveDriverJobFlags(heldJobs);
+    const vehicleBreakdown = await getOpenVehicleBreakdown(driverId);
 
     return success(res, {
       id: driver.id,
@@ -117,6 +128,58 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
       alertEligible,
       activeRidePhase,
       canClaimMore,
+      vehicleBreakdown: vehicleBreakdown
+        ? {
+            id: vehicleBreakdown.id,
+            jobId: vehicleBreakdown.jobId,
+            reportedAt: vehicleBreakdown.reportedAt.toISOString(),
+            lat: vehicleBreakdown.reportedLat,
+            lng: vehicleBreakdown.reportedLng,
+            note: vehicleBreakdown.note,
+            rideCode: vehicleBreakdown.rideCode,
+          }
+        : null,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function markMyVehicleFixed(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.user!.sub;
+    let result;
+    try {
+      result = await markVehicleFixed({
+        driverId,
+        fixedById: driverId,
+        fixedByRole: 'DRIVER',
+      });
+    } catch (err) {
+      throwIfVehicleBreakdownDomainError(err);
+      throw err;
+    }
+
+    const row = await prisma.vehicleBreakdown.findUnique({
+      where: { id: result.id },
+      select: { storeId: true, driverId: true, jobId: true },
+    });
+    if (row) {
+      broadcastVehicleBreakdownCleared(row.storeId, {
+        breakdownId: result.id,
+        driverId: row.driverId,
+        jobId: row.jobId,
+        storeId: row.storeId,
+        fixedByRole: 'DRIVER',
+        fixedComment: null,
+      });
+    }
+
+    return success(res, {
+      breakdownId: result.id,
+      jobId: result.jobId,
+      fixedAt: result.fixedAt.toISOString(),
+      fixedComment: result.fixedComment,
     });
   } catch (err) {
     next(err);
@@ -251,6 +314,22 @@ export async function updateDuty(req: Request, res: Response, next: NextFunction
           409,
           'ACTIVE_JOB',
         );
+      }
+    }
+
+    if (dutyStatus === 'ONLINE') {
+      try {
+        await assertDriverVehicleReadyForWork(driverId);
+      } catch (err) {
+        throwIfVehicleBreakdownDomainError(err);
+        if (!(err instanceof AppError)) {
+          throw new AppError(
+            'Mark your vehicle as fixed before going online',
+            409,
+            VEHICLE_BREAKDOWN_OPEN_CODE,
+          );
+        }
+        throw err;
       }
     }
 

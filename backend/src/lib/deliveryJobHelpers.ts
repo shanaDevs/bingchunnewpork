@@ -5,9 +5,13 @@ import { normalizeProductImageUrl } from './productImages';
 import { prisma } from './prisma';
 import {
   creditedDeliveredTotals,
+  dropoffApiFields,
   groupLatestFailedAttemptsByJob,
+  openVehicleBreakdown,
+  patchDriverOpsProfile,
   persistJobActualRouteFromGps,
 } from '@bingchun/delivery-domain';
+import { closeDriverShift } from './driverShift';
 import { logger } from '../utils/logger';
 import type { RouteStop } from './routeOptimizer';
 import { optimizeDeliveryStops, totalRouteDistanceKm, totalRouteEtaMinutes } from './routeOptimizer';
@@ -17,7 +21,7 @@ import {
   DEFAULT_BRANCH_COMPLETION_RADIUS_M,
   getBranchCompletionRadiusM,
 } from './appSchema';
-import { broadcastDeliveryJobUpdated, broadcastNewJob } from './socket';
+import { broadcastDeliveryJobUpdated, broadcastNewJob, broadcastVehicleBreakdownOpened } from './socket';
 import { invalidateJobRoute } from './routeCache';
 import { ensureDeliveryJobAdminCancellationsSchema, ensureDeliveryJobsTables } from './deliverySchema';
 import { getDeliveryJobsSqlRef } from './deliveryPg';
@@ -433,7 +437,24 @@ export async function recordVehicleFailureAndReleaseJob(opts: {
       totalDeliveryFees: lkrToDecimal(deliveredTotal),
     },
   });
-  await releaseDriverWhenIdle(opts.driverId);
+  const breakdown = await openVehicleBreakdown({
+    driverId: opts.driverId,
+    jobId: opts.jobId,
+    storeId: opts.storeId,
+    lat: opts.lat,
+    lng: opts.lng,
+    note: opts.note,
+  });
+  broadcastVehicleBreakdownOpened(opts.storeId, {
+    breakdownId: breakdown.id,
+    driverId: opts.driverId,
+    jobId: opts.jobId,
+    storeId: opts.storeId,
+    lat: opts.lat,
+    lng: opts.lng,
+  });
+  await patchDriverOpsProfile(opts.driverId, { dutyStatus: 'OFF_DUTY' });
+  await closeDriverShift(opts.driverId).catch(() => {});
   await promoteNextQueuedJob(opts.driverId);
 
   invalidateJobRoute(opts.jobId);
@@ -888,6 +909,7 @@ export function orderToStop(
     ...orderStopImageMeta(order.items),
     lat,
     lng,
+    ...dropoffApiFields(order),
     sequence,
     distanceFromPreviousKm,
     etaMinutesFromPrevious,
@@ -946,6 +968,7 @@ export function formatJobOrder(
     // Name/phone/addressLine above remain redacted until the job is theirs.
     lat,
     lng,
+    ...dropoffApiFields(order),
     items: order.items.map((i) => ({
       productName: i.productName,
       quantity: i.quantity,

@@ -10,6 +10,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useState } 
 import { createPortal } from 'react-dom';
 import {
   AlertCircle,
+  Bike,
   Building2,
   Clock,
   CreditCard,
@@ -18,6 +19,7 @@ import {
   RefreshCw,
   Wallet,
 } from 'lucide-react';
+import DeliveryPayoutHistoryPanel from '@/components/admin/DeliveryPayoutHistoryPanel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { WALLET_TAB_TRIGGER_CLASS } from '@/components/admin/useAdminWalletTab';
 
@@ -89,7 +91,7 @@ type PayoutRow = {
   storeName?: string;
 };
 
-type PayoutHistoryView = 'commission' | 'platform';
+type PayoutHistoryView = 'commission' | 'platform' | 'delivery';
 
 type PayoutHistoryPagination = {
   page: number;
@@ -250,6 +252,7 @@ export default function PaymentHistoryContent({
   const [payoutDateFrom, setPayoutDateFrom] = useState('');
   const [payoutDateTo, setPayoutDateTo] = useState('');
   const [payoutHistoryView, setPayoutHistoryView] = useState<PayoutHistoryView>('commission');
+  const [deliveryHistoryOpened, setDeliveryHistoryOpened] = useState(false);
   const [payoutHistoryPage, setPayoutHistoryPage] = useState(1);
   const [actionsHost, setActionsHost] = useState<HTMLElement | null>(null);
   const [processHost, setProcessHost] = useState<HTMLElement | null>(null);
@@ -705,31 +708,42 @@ export default function PaymentHistoryContent({
         />
       </div>
 
-      <div className="admin-orders-table card overflow-hidden !rounded-[10px]">
+      <div className="admin-orders-table card overflow-x-hidden overflow-y-visible !rounded-[10px]">
         <div className="border-b border-[var(--color-navy-border)] px-4 py-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 w-full flex-1">
               {showPlatformPayoutHistoryTab ? (
                 <Tabs
                   value={payoutHistoryView}
-                  onValueChange={(v) => setPayoutHistoryView(v as PayoutHistoryView)}
+                  onValueChange={(v) => {
+                    const next = v as PayoutHistoryView;
+                    setPayoutHistoryView(next);
+                    if (next === 'delivery') setDeliveryHistoryOpened(true);
+                  }}
                   className="gap-2"
                 >
                   <div className="flex items-start gap-2">
                     {payoutHistoryView === 'platform' ? (
                       <Building2 size={16} className="mt-0.5 shrink-0 text-[var(--color-brand)]" />
+                    ) : payoutHistoryView === 'delivery' ? (
+                      <Bike size={16} className="mt-0.5 shrink-0 text-[var(--color-brand)]" />
                     ) : (
                       <History size={16} className="mt-0.5 shrink-0 text-[var(--color-brand)]" />
                     )}
-                    <div className="min-w-0 flex-1">
-                      <TabsList className="mb-2 h-8 w-fit justify-start gap-0.5 bg-transparent p-0 shadow-none">
+                    <div className="min-w-0 w-full flex-1">
+                      <div className="mb-2 max-w-full overflow-x-auto">
+                        <TabsList className="h-8 w-max max-w-none flex-nowrap justify-start gap-0.5 bg-transparent p-0 shadow-none">
                         <TabsTrigger value="commission" className={WALLET_TAB_TRIGGER_CLASS}>
                           Branch Payout History
                         </TabsTrigger>
                         <TabsTrigger value="platform" className={WALLET_TAB_TRIGGER_CLASS}>
                           Platform Payout History
                         </TabsTrigger>
-                      </TabsList>
+                        <TabsTrigger value="delivery" className={WALLET_TAB_TRIGGER_CLASS}>
+                          Delivery Paid
+                        </TabsTrigger>
+                        </TabsList>
+                      </div>
                       <TabsContent value="commission" className="mt-0 outline-none">
                         <p className="text-xs text-[var(--color-text-muted)]">
                           {hideLocalPeriodControls
@@ -742,6 +756,13 @@ export default function PaymentHistoryContent({
                           {hideLocalPeriodControls
                             ? `Click a row to view the platform receivable breakdown · ${formatPeriodLabel(periodFrom, periodTo)}`
                             : 'Click a row to view the platform receivable breakdown · filter by billing period or paid date'}
+                        </p>
+                      </TabsContent>
+                      <TabsContent value="delivery" className="mt-0 outline-none">
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          {hideLocalPeriodControls
+                            ? 'Paid delivery payout periods — all periods, not limited to the billing window above.'
+                            : 'Paid delivery payout periods'}
                         </p>
                       </TabsContent>
                     </div>
@@ -762,7 +783,7 @@ export default function PaymentHistoryContent({
               )}
             </div>
 
-            {!hideLocalPeriodControls && (
+            {!hideLocalPeriodControls && payoutHistoryView !== 'delivery' && (
             <div className="flex flex-wrap items-end gap-2 lg:justify-end">
               <div className="min-w-[140px]">
                 <label
@@ -842,6 +863,13 @@ export default function PaymentHistoryContent({
           </div>
         </div>
 
+        {showPlatformPayoutHistoryTab && deliveryHistoryOpened && (
+          <div hidden={payoutHistoryView !== 'delivery'}>
+            <DeliveryPayoutHistoryPanel onBack={() => setPayoutHistoryView('commission')} />
+          </div>
+        )}
+        {payoutHistoryView !== 'delivery' && (
+        <>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm">
             <thead>
@@ -1025,6 +1053,8 @@ export default function PaymentHistoryContent({
             itemLabel="payouts"
             ariaLabel="Payout history pagination"
           />
+        )}
+        </>
         )}
       </div>
 

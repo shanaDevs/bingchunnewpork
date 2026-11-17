@@ -24,6 +24,8 @@ export default function DeliveryPayoutsDuePanel({
   allowPay = true,
 }: Props) {
   const count = rows.length;
+  const platformFeePercent = rows[0]?.platformFeePercent;
+  const gatewayFeePercent = rows[0]?.gatewayFeePercent;
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
@@ -42,8 +44,8 @@ export default function DeliveryPayoutsDuePanel({
           <p className="text-base font-semibold text-[var(--color-text)]">No delivery payouts due</p>
           <p className="mt-1 max-w-sm text-sm text-[var(--color-text-muted)]">
             {allowPay
-              ? 'Completed 15-day delivery periods appear here for Super Admin payout.'
-              : 'Completed 15-day periods. Pay from main admin Wallet → Payouts Due → Delivery.'}
+              ? 'Completed 30-day delivery periods appear here for Super Admin payout.'
+              : 'Completed 30-day periods. Pay from main admin Wallet → Payouts Due → Delivery.'}
           </p>
         </div>
       )}
@@ -53,17 +55,25 @@ export default function DeliveryPayoutsDuePanel({
           <div className="flex flex-wrap items-baseline gap-2 border-b border-[var(--color-navy-border)] px-4 py-3 sm:px-5">
             <h3 className="text-sm font-semibold text-[var(--color-text)]">Delivery payouts due</h3>
             <span className="text-xs text-[var(--color-text-muted)]">
-              {count} period{count === 1 ? '' : 's'} · 15-day cycle
+              {count} period{count === 1 ? '' : 's'} · 30-day cycle
             </span>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-left text-xs">
+            <table className="w-full min-w-[980px] text-left text-xs">
               <thead>
                 <tr className="border-b border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/50 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
                   <th className="px-3 py-2.5 font-semibold">Partner</th>
                   <th className="px-3 py-2.5 font-semibold">Period</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Gross</th>
+                  <th className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
+                    Platform fee
+                    {typeof platformFeePercent === 'number' ? ` (${platformFeePercent}%)` : ''}
+                  </th>
+                  <th className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
+                    Gateway fee
+                    {typeof gatewayFeePercent === 'number' ? ` (${gatewayFeePercent}%)` : ''}
+                  </th>
                   <th className="px-3 py-2.5 text-right font-semibold">Net due</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Orders</th>
                   <th className="px-3 py-2.5 text-right font-semibold">View</th>
@@ -96,6 +106,26 @@ export default function DeliveryPayoutsDuePanel({
                     </td>
                     <td className="px-3 py-3 text-right tabular-nums text-[var(--color-text)]">
                       {formatMoney(row.grossDeliveryFee)}
+                    </td>
+                    <td
+                      className="px-3 py-3 text-right tabular-nums text-[var(--color-text-muted)]"
+                      title={
+                        typeof row.platformFeePercent === 'number'
+                          ? `Platform fee (${row.platformFeePercent}%)`
+                          : undefined
+                      }
+                    >
+                      {typeof row.platformFee === 'number' ? formatMoney(row.platformFee) : '—'}
+                    </td>
+                    <td
+                      className="px-3 py-3 text-right tabular-nums text-[var(--color-text-muted)]"
+                      title={
+                        typeof row.gatewayFeePercent === 'number'
+                          ? `Gateway fee (${row.gatewayFeePercent}%)`
+                          : undefined
+                      }
+                    >
+                      {typeof row.gatewayFee === 'number' ? formatMoney(row.gatewayFee) : '—'}
                     </td>
                     <td className="px-3 py-3 text-right font-semibold tabular-nums text-[var(--color-text)]">
                       {formatMoney(row.netForDelivery)}

@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma, type DeliveryAttemptOutcome } from '@bingchun/db';
-import { invalidateJobRoute } from '@bingchun/delivery-domain';
+import { invalidateJobRoute, recordDeliveredAttempt, resolveRiderDropoffCoords } from '@bingchun/delivery-domain';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
 import { formatJobOrder, fetchDriverComplaintsByOrderIds, fetchLatestFailedAttemptsForJob, jobOrdersWithDetails, maybeEnterReturningPhase, heldJobStatuses, jobHasPickedUp, REJECT_JOB_BEFORE_FAILURE_MESSAGE } from '../lib/deliveryJobHelpers';
@@ -66,6 +66,8 @@ const driverStatusSchema = z
     note: z.string().max(250).optional(),
     otp: z.string().optional(),
     outcome: z.enum(OUTCOMES).optional(),
+    lat: z.number().min(-90).max(90).optional(),
+    lng: z.number().min(-180).max(180).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.status !== 'DELIVERY_FAILED') return;
@@ -144,7 +146,7 @@ export async function updateOrderStatus(req: Request, res: Response, next: NextF
     const accessibleStoreIds = await requireAccessibleStores(driverId, req.user!.storeId);
 
     const body = driverStatusSchema.parse(req.body);
-    const { status, note, otp } = body;
+    const { status, note, otp, lat, lng } = body;
     const orderId = req.params.orderId as string;
 
     const link = await getActiveJobOrderLink(orderId, driverId, accessibleStoreIds);
@@ -208,8 +210,24 @@ export async function updateOrderStatus(req: Request, res: Response, next: NextF
       (status === 'DELIVERED' && ['PENDING', 'READY', 'OUT_FOR_DELIVERY', 'RECEIVED', 'PREPARING'].includes(existing.status));
     if (!allowed) throw new AppError(`Cannot change status from ${existing.status} to ${status}`, 400);
 
+    let dropoff: { lat: number; lng: number } | null = null;
     if (status === 'DELIVERED') {
       await assertOtpForDelivery(orderId, jobStoreId, otp);
+      dropoff = await resolveRiderDropoffCoords({
+        lat,
+        lng,
+        driverId,
+        jobId: link.jobId,
+        orderId,
+      });
+      await recordDeliveredAttempt({
+        orderId,
+        jobId: link.jobId,
+        driverId,
+        note: note ?? 'Delivered',
+        lat: dropoff?.lat,
+        lng: dropoff?.lng,
+      });
     }
 
     await enqueueOrderStatusOutbox({
@@ -219,6 +237,9 @@ export async function updateOrderStatus(req: Request, res: Response, next: NextF
       orderNumber: existing.orderNumber,
       userId: existing.userId,
       orderMode: existing.orderMode,
+      lat: dropoff?.lat,
+      lng: dropoff?.lng,
+      dropoffAt: dropoff ? new Date().toISOString() : null,
     });
 
     const publisher = getEventPublisher();
@@ -265,7 +286,11 @@ export async function updateOrderStatus(req: Request, res: Response, next: NextF
   }
 }
 
-const otpVerifySchema = z.object({ code: z.string().min(4).max(8) });
+const otpVerifySchema = z.object({
+  code: z.string().min(4).max(8),
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
+});
 
 /** Issue a fresh delivery code and send it to the customer. */
 export async function resendOrderOtp(req: Request, res: Response, next: NextFunction) {
@@ -287,13 +312,30 @@ export async function verifyOrderOtp(req: Request, res: Response, next: NextFunc
     const driverId = req.user!.sub;
     const accessibleStoreIds = await requireAccessibleStores(driverId, req.user!.storeId);
 
-    const { code } = otpVerifySchema.parse(req.body);
+    const { code, lat, lng } = otpVerifySchema.parse(req.body);
     const orderId = req.params.orderId as string;
 
-    await getActiveJobOrderLink(orderId, driverId, accessibleStoreIds);
+    const link = await getActiveJobOrderLink(orderId, driverId, accessibleStoreIds);
     await verifyDeliveryOtp(orderId, code);
+    const dropoff = await resolveRiderDropoffCoords({
+      lat,
+      lng,
+      driverId,
+      jobId: link.jobId,
+      orderId,
+    });
+    if (dropoff) {
+      await recordDeliveredAttempt({
+        orderId,
+        jobId: link.jobId,
+        driverId,
+        note: 'OTP verified',
+        lat: dropoff.lat,
+        lng: dropoff.lng,
+      });
+    }
 
-    return success(res, { verified: true });
+    return success(res, { verified: true, dropoffLat: dropoff?.lat ?? null, dropoffLng: dropoff?.lng ?? null });
   } catch (err) {
     next(err);
   }
@@ -361,6 +403,17 @@ export async function createDeliveryAttempt(req: Request, res: Response, next: N
       }
     }
 
+    const dropoff =
+      body.outcome === 'DELIVERED'
+        ? await resolveRiderDropoffCoords({
+            lat: body.lat,
+            lng: body.lng,
+            driverId,
+            jobId: link.jobId,
+            orderId,
+          })
+        : null;
+
     const attemptCount = await prisma.deliveryAttempt.count({ where: { orderId } });
 
     const attempt = await prisma.deliveryAttempt.create({
@@ -372,8 +425,8 @@ export async function createDeliveryAttempt(req: Request, res: Response, next: N
         outcome: body.outcome,
         note: body.note,
         photoUrl: body.photoUrl,
-        lat: body.lat,
-        lng: body.lng,
+        lat: dropoff?.lat ?? body.lat,
+        lng: dropoff?.lng ?? body.lng,
       },
     });
 
@@ -385,6 +438,9 @@ export async function createDeliveryAttempt(req: Request, res: Response, next: N
         orderNumber: existing.orderNumber,
         userId: existing.userId,
         orderMode: existing.orderMode,
+        lat: dropoff?.lat ?? body.lat,
+        lng: dropoff?.lng ?? body.lng,
+        dropoffAt: dropoff || body.lat != null ? new Date().toISOString() : null,
       });
       await prisma.deliveryEvent.create({
         data: { orderId, jobId: link.jobId, driverId, state: 'DELIVERED', note: body.note ?? 'Delivered with proof' },

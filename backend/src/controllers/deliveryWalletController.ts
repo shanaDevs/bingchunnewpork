@@ -190,9 +190,11 @@ export async function listDeliveryPayoutsHandler(req: Request, res: Response, ne
   try {
     const page = req.query.page ? parseInt(String(req.query.page), 10) : 1;
     const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 10;
+    const status = String(req.query.status ?? '') === 'APPROVED' ? 'APPROVED' : undefined;
     const result = await listDeliveryPayouts({
       page,
       limit,
+      status,
     });
     return success(res, result);
   } catch (err) {
