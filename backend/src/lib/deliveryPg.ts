@@ -23,6 +23,7 @@ export const DELIVERY_PHYSICAL_TABLES = new Set([
   'merit_point_history',
   'delivery_code_live',
   'rider_profiles',
+  'vehicle_breakdowns',
 ]);
 
 const tableRefCache = new Map<string, string>();

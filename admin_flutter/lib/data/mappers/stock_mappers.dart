@@ -23,6 +23,7 @@ StockItem stockItemFromJson(Json j) {
     frozenBatchCount: intOf(j, 'frozenBatchCount'),
     frozenQty: intOf(j, 'frozenQty'),
     isBranchDeactivated: boolOf(j, 'isBranchDeactivated'),
+    catalogAvailable: boolOf(j, 'catalogAvailable', true),
     isLowStock: boolOf(j, 'isLowStock'),
     isOutOfStock: boolOf(j, 'isOutOfStock'),
     isNewProduct: boolOrNull(j, 'isNewProduct'),

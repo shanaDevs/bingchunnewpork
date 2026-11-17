@@ -310,6 +310,8 @@ export interface OrderItem {
   productName: string;
   product?: { imageUrl?: string | null };
   size: string;
+  sugarLevel?: 'FIFTY' | 'HUNDRED' | null;
+  iceLevel?: 'LESS_ICE' | 'NORMAL_ICE' | null;
   quantity: number;
   unitPrice: number;
   totalPrice: number;

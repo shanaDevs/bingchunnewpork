@@ -61,12 +61,16 @@ function serializeEntry(row: {
   balanceBefore?: Prisma.Decimal | number | null;
   balanceAfter?: Prisma.Decimal | number | null;
 }) {
-  const amountCents = decimalToCentsString(parseDecimalFromDb(row.amount));
+  const amountCents = decimalFieldToCentsNumber(parseDecimalFromDb(row.amount));
+  const balanceBeforeCents =
+    row.balanceBefore != null ? decimalFieldToCentsNumber(parseDecimalFromDb(row.balanceBefore)) : null;
+  const balanceAfterCents =
+    row.balanceAfter != null ? decimalFieldToCentsNumber(parseDecimalFromDb(row.balanceAfter)) : null;
   return {
     id: row.id,
     type: row.type,
-    amount: amountCents,
-    amountLkr: centsToLkr(Number(amountCents)),
+    amount: decimalToCentsString(centsToDecimal(amountCents)),
+    amountLkr: centsToLkr(amountCents),
     description: row.description,
     occurredAt: row.occurredAt.toISOString(),
     isActive: row.isActive,
@@ -74,10 +78,10 @@ function serializeEntry(row: {
     createdAt: row.createdAt.toISOString(),
     storeId: row.storeId ?? null,
     storeWithdrawalId: row.storeWithdrawalId ?? null,
-    balanceBefore:
-      row.balanceBefore != null ? decimalToCentsString(parseDecimalFromDb(row.balanceBefore)) : null,
-    balanceAfter:
-      row.balanceAfter != null ? decimalToCentsString(parseDecimalFromDb(row.balanceAfter)) : null,
+    balanceBefore: balanceBeforeCents != null ? decimalToCentsString(centsToDecimal(balanceBeforeCents)) : null,
+    balanceAfter: balanceAfterCents != null ? decimalToCentsString(centsToDecimal(balanceAfterCents)) : null,
+    balanceBeforeLkr: balanceBeforeCents != null ? centsToLkr(balanceBeforeCents) : null,
+    balanceAfterLkr: balanceAfterCents != null ? centsToLkr(balanceAfterCents) : null,
   };
 }
 

@@ -104,9 +104,16 @@ export async function listBranchStock(req: Request, res: Response, next: NextFun
           totalBatchCount,
         });
 
-      const outOfStock = isNewProduct ? false : (enriched?.isOutOfStock ?? true);
-      const lowStock = isNewProduct ? false : (enriched?.isLowStock ?? false);
-      const orderable = isAvailable && !outOfStock;
+      const catalogAvailable = p.isAvailable;
+      // Global menu deactivation (super admin) or branch power-off — not sellable depletion.
+      const franchiserInactive = !catalogAvailable && !isBranchDeactivated && !isNewProduct;
+      const outOfStock = isNewProduct || franchiserInactive || isBranchDeactivated
+        ? false
+        : (enriched?.isOutOfStock ?? true);
+      const lowStock = isNewProduct || franchiserInactive || isBranchDeactivated
+        ? false
+        : (enriched?.isLowStock ?? false);
+      const orderable = catalogAvailable && isAvailable && !outOfStock;
 
       return {
         productId: p.id,
@@ -116,7 +123,7 @@ export async function listBranchStock(req: Request, res: Response, next: NextFun
         cost: p.cost,
         tag: p.tag,
         category: p.category,
-        catalogAvailable: p.isAvailable,
+        catalogAvailable,
         productCreatedAt: p.createdAt.toISOString(),
         isAvailable,
         visibleToCustomers: orderable,

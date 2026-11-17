@@ -4,9 +4,17 @@ import '../entities/stock.dart';
 
 enum StockLevel { newProducts, inStock, lowStock, outOfStock, inactive }
 
-enum StockStatus { branchInactive, comingSoon, outOfStock, lowStock, inStock }
+enum StockStatus { branchInactive, franchiserInactive, comingSoon, outOfStock, lowStock, inStock }
 
 bool isBranchInactive(StockItem i) => i.isBranchDeactivated || i.frozenBatchCount > 0;
+
+bool isFranchiserInactive(StockItem i) {
+  if (i.catalogAvailable) return false;
+  if (isBranchInactive(i)) return false;
+  return !isNewProduct(i);
+}
+
+bool isStockInactive(StockItem i) => isBranchInactive(i) || isFranchiserInactive(i);
 
 /// Never stocked at this branch yet ("Coming soon").
 bool isNewProduct(StockItem i) {
@@ -20,6 +28,7 @@ bool isNewProduct(StockItem i) {
 
 StockStatus stockStatus(StockItem i) {
   if (isBranchInactive(i)) return StockStatus.branchInactive;
+  if (isFranchiserInactive(i)) return StockStatus.franchiserInactive;
   if (isNewProduct(i)) return StockStatus.comingSoon;
   if (i.isOutOfStock) return StockStatus.outOfStock;
   if (i.isLowStock) return StockStatus.lowStock;
@@ -27,8 +36,8 @@ StockStatus stockStatus(StockItem i) {
 }
 
 bool matchesLevel(StockItem i, StockLevel level) {
-  if (level == StockLevel.inactive) return isBranchInactive(i);
-  if (isBranchInactive(i)) return false;
+  if (level == StockLevel.inactive) return isStockInactive(i);
+  if (isStockInactive(i)) return false;
   return switch (level) {
     StockLevel.newProducts => isNewProduct(i),
     StockLevel.inStock => !isNewProduct(i) && !i.isLowStock && !i.isOutOfStock,
@@ -41,8 +50,8 @@ bool matchesLevel(StockItem i, StockLevel level) {
 /// Web Stock Table KPI cards.
 class StockKpis {
   StockKpis(List<StockItem> items)
-    : active = items.where((i) => i.isAvailable && !i.isOutOfStock && !isBranchInactive(i)).length,
-      inactive = items.where(isBranchInactive).length,
+    : active = items.where((i) => i.isAvailable && !i.isOutOfStock && !isStockInactive(i)).length,
+      inactive = items.where(isStockInactive).length,
       lowStock = items.where((i) => matchesLevel(i, StockLevel.lowStock)).length,
       outOfStock = items.where((i) => matchesLevel(i, StockLevel.outOfStock)).length,
       all = items.length,

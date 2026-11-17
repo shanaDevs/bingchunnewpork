@@ -19,6 +19,7 @@ export function ReportRow({
   indent = 0,
   valueTone = 'default',
   hint,
+  labelInfo,
 }: {
   label: string;
   value: string;
@@ -26,6 +27,8 @@ export function ReportRow({
   indent?: Indent;
   valueTone?: RowTone;
   hint?: string;
+  /** Info icon or other control shown beside the row label (e.g. Jason contribution explainer). */
+  labelInfo?: ReactNode;
 }) {
   const indentClass = indent === 2 ? 'pl-8' : indent === 1 ? 'pl-4' : '';
   return (
@@ -33,7 +36,10 @@ export function ReportRow({
       className={`flex items-start justify-between gap-3 text-[13px] leading-relaxed ${bold ? 'font-bold' : 'font-medium'} ${indentClass}`}
     >
       <div className="min-w-0">
-        <span className="text-[#475569] dark:text-slate-300">{label}</span>
+        <span className="inline-flex max-w-full flex-wrap items-center gap-1 text-[#475569] dark:text-slate-300">
+          <span>{label}</span>
+          {labelInfo}
+        </span>
         {hint ? (
           <p className="mt-0.5 text-[10px] font-medium leading-relaxed text-[#94a3b8] dark:text-slate-500">
             {hint}

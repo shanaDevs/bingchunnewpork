@@ -19,13 +19,14 @@ import {
   statusLabel as periodStatusLabel,
 } from '@/components/admin/payoutPeriodRowModel';
 import type { PeriodPayoutCardAmounts } from '@/components/admin/periodPayoutSplitDisplay';
-import type { PayoutPeriodRow } from '@/components/admin/payoutPeriodTypes';
+import type { PayoutListTab, PayoutPeriodRow } from '@/components/admin/payoutPeriodTypes';
 import {
+  branchPayoutSummaryMetaColumns,
   formatAmountCell,
   formatPayoutPeriodCell,
   PayoutPeriodAmountCells,
   PayoutPeriodTableHead,
-  PAYOUT_SUMMARY_TABLE_MIN_WIDTH_CLASS,
+  payoutSummaryTableMinWidthClass,
 } from '@/components/admin/payoutPeriodTableUi';
 import {
   payoutPeriodDateKey,
@@ -38,36 +39,10 @@ import {
   openWithdrawalInvoice,
 } from '@/lib/adminProtectedFile';
 import type { WithdrawalPagination, WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
-
-function withdrawalStatusLabel(status: WithdrawalRow['status']) {
-  switch (status) {
-    case 'APPROVED':
-      return 'Paid';
-    case 'PENDING':
-      return 'Pending Approval';
-    case 'IN_REVIEW':
-      return 'In review';
-    case 'REJECTED':
-      return 'Rejected';
-    case 'CANCELLED':
-      return 'Cancelled';
-    default:
-      return status;
-  }
-}
-
-function withdrawalStatusBadgeClass(status: WithdrawalRow['status']) {
-  switch (status) {
-    case 'APPROVED':
-      return 'admin-status-badge--green';
-    case 'PENDING':
-      return 'admin-status-badge--amber';
-    case 'REJECTED':
-      return 'admin-status-badge--red';
-    default:
-      return 'admin-status-badge--neutral';
-  }
-}
+import {
+  withdrawalStatusBadgeClass,
+  withdrawalStatusLabel,
+} from '@/components/admin/withdrawalStatusUi';
 
 function formatPayoutDate(iso: string) {
   return formatDate(iso, {
@@ -80,31 +55,6 @@ function formatPayoutDate(iso: string) {
 function formatWithdrawalPeriod(row: WithdrawalRow) {
   if (!row.periodFrom || !row.periodTo) return '—';
   return formatBiweeklyPeriodLabel(row.periodFrom.slice(0, 10), row.periodTo.slice(0, 10));
-}
-
-function NoteCell({
-  value,
-  tone = 'muted',
-}: {
-  value: string | null | undefined;
-  tone?: 'muted' | 'reject';
-}) {
-  const text = value?.trim();
-  if (!text) {
-    return <span className="text-[var(--color-text-muted)]">—</span>;
-  }
-
-  return (
-    <span
-      className={cn(
-        'block max-w-[180px] whitespace-normal text-xs leading-snug',
-        tone === 'reject' ? 'text-red-400' : 'text-[var(--color-text-muted)]',
-      )}
-      title={text}
-    >
-      {text}
-    </span>
-  );
 }
 
 function rowHasProof(row: WithdrawalRow): boolean {
@@ -261,6 +211,7 @@ function ActionViewMenu({
 }
 
 type Props = {
+  listTab: PayoutListTab;
   records: PayoutSummaryRecord[];
   allPeriodRows: PayoutPeriodRow[];
   previewByKey: Map<string, Record<string, unknown>>;
@@ -275,6 +226,7 @@ type Props = {
 };
 
 export default function PayoutSummaryTable({
+  listTab,
   records,
   allPeriodRows,
   previewByKey,
@@ -295,12 +247,16 @@ export default function PayoutSummaryTable({
     highlightPeriodKey == null
       ? null
       : records.find((record) => recordPeriodDateKey(record) === highlightPeriodKey)?.key ?? null;
+  const metaColumns = branchPayoutSummaryMetaColumns(listTab);
+  const showStatusColumn = metaColumns.includes('Status');
 
   return (
     <>
       <div className="overflow-x-auto">
-        <table className={`w-full ${PAYOUT_SUMMARY_TABLE_MIN_WIDTH_CLASS} text-left text-xs`}>
-          <PayoutPeriodTableHead />
+        <table
+          className={`w-full ${payoutSummaryTableMinWidthClass(listTab)} text-left text-xs`}
+        >
+          <PayoutPeriodTableHead metaColumns={metaColumns} />
           <tbody>
             {records.map((record) => {
               const periodRow = record.periodRow;
@@ -357,32 +313,27 @@ export default function PayoutSummaryTable({
                       <td className="px-3 py-3 text-right text-[var(--color-text-muted)]">—</td>
                     </>
                   )}
-                  <td className="px-3 py-3">
-                    {useWithdrawalStatus && withdrawal ? (
-                      <span className={cn('admin-status-badge', withdrawalStatusBadgeClass(withdrawal.status))}>
-                        {withdrawalStatusLabel(withdrawal.status)}
-                      </span>
-                    ) : periodRow ? (
-                      <span className={cn('admin-status-badge', periodStatusBadgeClass(periodRow.status))}>
-                        {periodStatusLabel(periodRow.status)}
-                      </span>
-                    ) : (
-                      <span className="text-[var(--color-text-muted)]">—</span>
-                    )}
-                  </td>
+                  {showStatusColumn ? (
+                    <td className="px-3 py-3">
+                      {useWithdrawalStatus && withdrawal ? (
+                        <span
+                          className={cn('admin-status-badge', withdrawalStatusBadgeClass(withdrawal.status))}
+                        >
+                          {withdrawalStatusLabel(withdrawal.status)}
+                        </span>
+                      ) : periodRow ? (
+                        <span className={cn('admin-status-badge', periodStatusBadgeClass(periodRow.status))}>
+                          {periodStatusLabel(periodRow.status)}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--color-text-muted)]">—</span>
+                      )}
+                    </td>
+                  ) : null}
                   <td className="px-3 py-3">
                     {withdrawal ? <WithdrawalPaymentCell row={withdrawal} /> : (
                       <span className="text-xs text-[var(--color-text-muted)]">—</span>
                     )}
-                  </td>
-                  <td className="px-3 py-3">
-                    <NoteCell value={withdrawal?.remarks} />
-                  </td>
-                  <td className="px-3 py-3">
-                    <NoteCell
-                      value={withdrawal?.rejectionReason}
-                      tone={withdrawal?.status === 'REJECTED' ? 'reject' : 'muted'}
-                    />
                   </td>
                   <td className="px-3 py-3 text-right">
                     <ActionViewMenu record={record} onBreakdown={() => onViewRecord(record)} />

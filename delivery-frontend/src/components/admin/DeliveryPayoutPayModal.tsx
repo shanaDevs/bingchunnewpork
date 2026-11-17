@@ -3,18 +3,17 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Info, Loader2, ShieldCheck, Undo2, X } from 'lucide-react';
+import { Loader2, ShieldCheck, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useQuery } from '@tanstack/react-query';
 import { deliveryWalletFetch } from '@/lib/deliveryWalletApi';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { useDeliveryWalletUnlockToken } from '@/components/admin/DeliveryWalletUnlockContext';
-import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
+import { formatMoney } from '@/lib/receipt';
 import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
 import { confirmDialog } from '@/store/confirmStore';
 import type { DeliveryPayoutDueRow, DeliveryWalletSummary } from '@/lib/deliveryPayoutTypes';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import DeliveryFeesByBranchBreakdown from '@/components/admin/DeliveryFeesByBranchBreakdown';
+import DeliveryWalletPayoutCalculation from '@/components/admin/DeliveryWalletPayoutCalculation';
 import AdminPinGateModal from '@/components/admin/AdminPinGateModal';
 import { cn } from '@/lib/utils';
 
@@ -97,7 +96,6 @@ export default function DeliveryPayoutPayModal({
 
   if (!portalReady || !due) return null;
 
-  const branches = summary?.branches ?? [];
   const netAmount = summary?.netForDelivery ?? due.netForDelivery;
   const isCheck = paymentMethod === 'CHECK';
   const checkValid = !isCheck || (checkNumber.trim().length > 0 && !!checkDate);
@@ -227,67 +225,10 @@ export default function DeliveryPayoutPayModal({
                         </p>
                       </div>
 
-                      <div className="mt-4 rounded-xl border border-navy-border/80 bg-input-bg/25 px-4 py-3.5 text-sm text-muted">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-white">Payout calculation</p>
-                          <Popover>
-                            <PopoverTrigger
-                              type="button"
-                              className="inline-flex rounded-lg p-1 text-brand hover:bg-navy-light/60"
-                              aria-label="Show payout formula"
-                            >
-                              <Info size={16} />
-                            </PopoverTrigger>
-                            <PopoverContent
-                              className="z-[10050] max-w-sm font-mono text-xs"
-                              positionerClassName="z-[10050]"
-                              side="bottom"
-                              align="start"
-                              sideOffset={6}
-                            >
-                              Net = (Gross − {summary.platformFeePercent}% platform) −{' '}
-                              {summary.gatewayFeePercent}% gateway
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-                        <dl className="mt-3 space-y-2 border-t border-navy-border/60 pt-3">
-                          <div className="flex justify-between gap-3">
-                            <dt>Gross delivery fees</dt>
-                            <dd className="font-semibold tabular-nums text-white">
-                              {formatMoneyAmount(summary.grossDeliveryFee)}
-                            </dd>
-                          </div>
-                          <div className="flex justify-between gap-3 text-xs">
-                            <dt className="pl-3">Active orders ({summary.orderCount})</dt>
-                            <dd className="tabular-nums">{formatMoneyAmount(summary.fromActiveOrders)}</dd>
-                          </div>
-                          <div className="flex justify-between gap-3 text-xs">
-                            <dt className="inline-flex items-center gap-1.5 pl-3">
-                              <Undo2 size={12} />
-                              Late-cancel retained ({summary.lateCancelCount})
-                            </dt>
-                            <dd className="tabular-nums">{formatMoneyAmount(summary.fromLateCancels)}</dd>
-                          </div>
-                          <div className="flex justify-between gap-3 border-t border-navy-border/40 pt-2">
-                            <dt>− Platform ({summary.platformFeePercent}%)</dt>
-                            <dd className="tabular-nums text-red-700 dark:text-red-300">
-                              − {formatMoneyAmount(summary.platformFee)}
-                            </dd>
-                          </div>
-                          <div className="flex justify-between gap-3">
-                            <dt>− Gateway ({summary.gatewayFeePercent}%)</dt>
-                            <dd className="tabular-nums text-red-700 dark:text-red-300">
-                              − {formatMoneyAmount(summary.gatewayFee)}
-                            </dd>
-                          </div>
-                        </dl>
-                      </div>
-
-                      <DeliveryFeesByBranchBreakdown
-                        branches={branches}
-                        grossDeliveryFee={summary.grossDeliveryFee}
-                        platformFeePercent={summary.platformFeePercent}
-                        gatewayFeePercent={summary.gatewayFeePercent}
+                      <DeliveryWalletPayoutCalculation
+                        className="mt-4"
+                        summary={summary}
+                        branchListKey={`${due.periodFrom}-${due.periodTo}`}
                       />
                     </>
                   )}

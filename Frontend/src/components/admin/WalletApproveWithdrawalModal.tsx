@@ -36,7 +36,7 @@ import {
   type SettlementPreview,
   type WithdrawalBreakdown,
 } from '@/components/admin/settlementTypes';
-import { formatMoney } from '@/lib/receipt';
+import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
 import { cn } from '@/lib/utils';
 import { openPayoutProof, openPayoutProofById, openWithdrawalInvoice } from '@/lib/adminProtectedFile';
 import {
@@ -46,6 +46,8 @@ import {
   toDateInputValue,
   valuesDifferByMoreThan,
 } from '@/lib/walletUtils';
+import { jasonPayoutDeductionLkr } from '@/components/admin/jasonPayoutDeduction';
+import { hasNegativeLkr } from '@/components/admin/settlement/lkrUtils';
 import {
   formatStoredPayoutPeriodLabel,
   resolvePayoutCycleDisplayRange,
@@ -105,6 +107,8 @@ export default function WalletApproveWithdrawalModal({
   const [resolvedWithdrawal, setResolvedWithdrawal] = useState<WithdrawalRow | null>(null);
   const [snapshotBreakdownRaw, setSnapshotBreakdownRaw] = useState<unknown>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [jasonNetBalanceLkr, setJasonNetBalanceLkr] = useState<number | null>(null);
+  const [jasonBalanceLoading, setJasonBalanceLoading] = useState(false);
   const onCloseRef = useRef(onClose);
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -289,8 +293,16 @@ export default function WalletApproveWithdrawalModal({
     paymentWalletRequestLkr: requestedLkr > 0 ? requestedLkr : null,
   });
   const finalPayoutLkr = branchPayout.totalBranchPayoutLkr;
+  const netPlatformForJasonLkr =
+    periodBreakdownLkr?.cycleStage === 'FIRST' ? 0 : platformCommissionLkr;
+  const jasonDeductionLkr = jasonPayoutDeductionLkr({
+    jasonContributionLkr: sharedPromo.jasonContributionLkr,
+    netPlatformAmountLkr: netPlatformForJasonLkr,
+  });
+  const showNegativeNetPlatformJasonBanner = hasNegativeLkr(netPlatformForJasonLkr);
   const showJasonContributionBanner = hasPositiveLkr(sharedPromo.jasonContributionLkr);
   const showPlatformContributionBanner = hasPositiveLkr(sharedPromo.platformContributionLkr);
+  const showJasonPayoutBanner = jasonDeductionLkr > 0.001;
   const advanceAmountLkr =
     periodNetLkr != null && requestedLkr > periodNetLkr + 0.001
       ? Math.round((requestedLkr - periodNetLkr) * 100) / 100
@@ -352,6 +364,13 @@ export default function WalletApproveWithdrawalModal({
         showAdvance,
         advanceAmountLkr,
         branchPayout,
+        jasonContext: showJasonPayoutBanner
+          ? {
+              jasonDeductionLkr,
+              jasonNetBalanceLkr,
+              jasonBalanceLoading,
+            }
+          : undefined,
       }
     : null;
 
@@ -484,6 +503,34 @@ export default function WalletApproveWithdrawalModal({
     if (!open) return;
 
     let cancelled = false;
+    setJasonBalanceLoading(true);
+    fetch(`${apiBase}/admin/jason`, withAdminCredentials())
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.message || 'Failed to load Jason balance');
+        if (cancelled) return;
+        const net =
+          json.data?.summary && typeof json.data.summary.net === 'number'
+            ? json.data.summary.net
+            : null;
+        setJasonNetBalanceLkr(net);
+      })
+      .catch(() => {
+        if (!cancelled) setJasonNetBalanceLkr(null);
+      })
+      .finally(() => {
+        if (!cancelled) setJasonBalanceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, apiBase]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
     fetch(`${apiBase}/settings/app`, withAdminCredentials())
       .then(async (res) => {
         const json = await res.json();
@@ -590,13 +637,21 @@ export default function WalletApproveWithdrawalModal({
 
   const isCheck = paymentMethod === 'CHECK';
   const checkValid = !isCheck || (checkNumber.trim().length > 0 && !!checkDate);
+  const jasonInsufficient =
+    showJasonPayoutBanner &&
+    !jasonBalanceLoading &&
+    jasonNetBalanceLkr != null &&
+    jasonNetBalanceLkr + 0.005 < jasonDeductionLkr;
   const canSubmit =
     !!withdrawal &&
     !!paymentMethod &&
     checkValid &&
     !!proofFile &&
     !submitting &&
-    !isReadOnly;
+    !isReadOnly &&
+    !jasonBalanceLoading &&
+    !(showJasonPayoutBanner && jasonNetBalanceLkr == null) &&
+    !jasonInsufficient;
 
   const handlePaymentMethodChange = (value: PaymentMethod) => {
     setPaymentMethod(value);
@@ -674,8 +729,8 @@ export default function WalletApproveWithdrawalModal({
     const confirmed = await confirmDialog({
       title: 'Confirm payout?',
       message: `Are you sure you want to pay ${formatMoney(finalPayoutLkr)} to ${branchLabel}?${
-        showJasonContributionBanner
-          ? ` Jason's balance will be reduced by ${formatMoney(sharedPromo.jasonContributionLkr)} for the shared promotion contribution.`
+        showJasonPayoutBanner
+          ? ` Jason's balance will be reduced by ${formatMoney(jasonDeductionLkr)} for this payout${showNegativeNetPlatformJasonBanner ? ' (includes negative net platform amount funded by Jason)' : ''}.`
           : showPlatformContributionBanner
             ? ` Platform commission will be reduced by ${formatMoney(sharedPromo.platformContributionLkr)} for the shared promotion contribution.`
             : ''
@@ -836,13 +891,30 @@ export default function WalletApproveWithdrawalModal({
                     <PayoutBreakdownPanel {...payoutBreakdownPanelProps} className="mb-4" />
                   )}
 
-                  {showJasonContributionBanner && !isReadOnly && (
+                  {jasonInsufficient && !isReadOnly && (
+                    <div className="mb-4 flex gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-[13px] text-[#1e293b] dark:text-slate-100">
+                      <AlertCircle size={18} className="mt-0.5 shrink-0 text-red-600" />
+                      <p className="font-bold text-red-600">
+                        Insufficient Jason balance (LKR {formatMoneyAmount(jasonNetBalanceLkr ?? 0)})
+                        to cover payout contributions (LKR {formatMoneyAmount(jasonDeductionLkr)}).
+                      </p>
+                    </div>
+                  )}
+                  {showJasonPayoutBanner &&
+                    !showNegativeNetPlatformJasonBanner &&
+                    !isReadOnly && (
                     <div className="mb-4 flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px] text-[#1e293b] dark:text-slate-100">
                       <AlertCircle size={18} className="mt-0.5 shrink-0 text-amber-600" />
                       <p>
-                        <span className="font-bold">Jason shared promotion: </span>
-                        LKR {formatMoney(sharedPromo.jasonContributionLkr)} will be deducted from
-                        Jason&apos;s invested balance when you approve.
+                        <span className="font-bold">Jason investment: </span>
+                        LKR {formatMoneyAmount(jasonDeductionLkr)} will be deducted from
+                        Jason&apos;s balance when you approve.
+                        {jasonNetBalanceLkr != null && !jasonBalanceLoading && (
+                          <>
+                            {' '}
+                            Current Jason balance: LKR {formatMoneyAmount(jasonNetBalanceLkr)}.
+                          </>
+                        )}
                       </p>
                     </div>
                   )}

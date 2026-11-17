@@ -32,35 +32,34 @@ export function assertJasonBalanceCoversContribution(
   if (contributionCents <= 0) return;
   if (jasonNetCents < contributionCents) {
     throw new AppError(
-      `Insufficient Jason balance (LKR ${(jasonNetCents / 100).toFixed(2)}) to cover the platform contribution (LKR ${(contributionCents / 100).toFixed(2)}) for this payout.`,
+      `Insufficient Jason balance (LKR ${(jasonNetCents / 100).toFixed(2)}) to cover Jason payout contributions (LKR ${(contributionCents / 100).toFixed(2)}) for this payout.`,
       400,
     );
   }
 }
 
-export async function recordJasonSppcExpense(opts: {
+async function recordJasonLedgerExpense(opts: {
   storeId: string;
   storeWithdrawalId: string;
   amountCents: number;
   reviewerId: string;
   approvedAt: Date;
-  branchName?: string | null;
+  description: string;
 }): Promise<void> {
   if (opts.amountCents <= 0) return;
 
   await ensureJasonLedgerSchema();
+
+  const existing = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+    `SELECT "id" FROM "jason_ledger_entries" WHERE "storeWithdrawalId" = $1 AND "description" = $2 LIMIT 1`,
+    opts.storeWithdrawalId,
+    opts.description,
+  );
+  if (existing.length > 0) return;
+
   const balanceBefore = await computeJasonNetBalance();
   assertJasonBalanceCoversContribution(balanceBefore, opts.amountCents);
   const balanceAfter = balanceBefore - opts.amountCents;
-
-  const branchLabel = opts.branchName?.trim() || 'Branch';
-  const description = `Shared promo platform contribution — ${branchLabel} payout ${opts.storeWithdrawalId.slice(0, 8).toUpperCase()}`;
-
-  const existing = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
-    `SELECT "id" FROM "jason_ledger_entries" WHERE "storeWithdrawalId" = $1 LIMIT 1`,
-    opts.storeWithdrawalId,
-  );
-  if (existing.length > 0) return;
 
   // Raw insert: SPPC columns are added at runtime via ensureJasonLedgerSchema and may
   // not be present on a stale generated Prisma client until `prisma generate` is run.
@@ -72,7 +71,7 @@ export async function recordJasonSppcExpense(opts: {
      VALUES ($1, 'EXPENSE'::"JasonLedgerType", $2, $3, $4, true, $5, $6, $7, $8, $9, NOW(), NOW())`,
     randomUUID(),
     centsToDecimal(opts.amountCents),
-    description,
+    opts.description,
     opts.approvedAt,
     opts.reviewerId,
     opts.storeId,
@@ -80,4 +79,95 @@ export async function recordJasonSppcExpense(opts: {
     centsToDecimal(balanceBefore),
     centsToDecimal(balanceAfter),
   );
+}
+
+type JasonPayoutExpenseKind = 'sppc' | 'negative_net_platform';
+
+function jasonPayoutLedgerDescription(
+  kind: JasonPayoutExpenseKind,
+  branchName: string | null | undefined,
+  storeWithdrawalId: string,
+): string {
+  const branchLabel = branchName?.trim() || 'Branch';
+  const ref = storeWithdrawalId.slice(0, 8).toUpperCase();
+  if (kind === 'sppc') {
+    return `Shared promo platform contribution — ${branchLabel} payout ${ref}`;
+  }
+  return `Net platform deficit (Jason contribution) — ${branchLabel} payout ${ref}`;
+}
+
+async function recordJasonPayoutKindExpense(
+  kind: JasonPayoutExpenseKind,
+  opts: {
+    storeId: string;
+    storeWithdrawalId: string;
+    amountCents: number;
+    reviewerId: string;
+    approvedAt: Date;
+    branchName?: string | null;
+  },
+): Promise<void> {
+  if (opts.amountCents <= 0) return;
+
+  await recordJasonLedgerExpense({
+    storeId: opts.storeId,
+    storeWithdrawalId: opts.storeWithdrawalId,
+    amountCents: opts.amountCents,
+    reviewerId: opts.reviewerId,
+    approvedAt: opts.approvedAt,
+    description: jasonPayoutLedgerDescription(kind, opts.branchName, opts.storeWithdrawalId),
+  });
+}
+
+export async function recordJasonSppcExpense(opts: {
+  storeId: string;
+  storeWithdrawalId: string;
+  amountCents: number;
+  reviewerId: string;
+  approvedAt: Date;
+  branchName?: string | null;
+}): Promise<void> {
+  await recordJasonPayoutKindExpense('sppc', opts);
+}
+
+export async function recordJasonNegativeNetPlatformExpense(opts: {
+  storeId: string;
+  storeWithdrawalId: string;
+  amountCents: number;
+  reviewerId: string;
+  approvedAt: Date;
+  branchName?: string | null;
+}): Promise<void> {
+  await recordJasonPayoutKindExpense('negative_net_platform', opts);
+}
+
+/** SPPC and net-platform deficit ledger lines for an approved branch payout. */
+export async function recordJasonPayoutApprovalExpenses(opts: {
+  storeId: string;
+  storeWithdrawalId: string;
+  sppcJasonCents: number;
+  negativeNetPlatformCents: number;
+  reviewerId: string;
+  approvedAt: Date;
+  branchName?: string | null;
+}): Promise<void> {
+  if (opts.sppcJasonCents <= 0 && opts.negativeNetPlatformCents <= 0) return;
+
+  const base = {
+    storeId: opts.storeId,
+    storeWithdrawalId: opts.storeWithdrawalId,
+    reviewerId: opts.reviewerId,
+    approvedAt: opts.approvedAt,
+    branchName: opts.branchName,
+  };
+
+  if (opts.sppcJasonCents > 0) {
+    await recordJasonSppcExpense({ ...base, amountCents: opts.sppcJasonCents });
+  }
+  if (opts.negativeNetPlatformCents > 0) {
+    await recordJasonNegativeNetPlatformExpense({
+      ...base,
+      amountCents: opts.negativeNetPlatformCents,
+    });
+  }
 }

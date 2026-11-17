@@ -95,6 +95,11 @@ services:
         value: REPLACE_ME
         type: SECRET
       - key: GOOGLE_MAPS_API_KEY
+        scope: RUN_TIME
+        value: REPLACE_ME
+        type: SECRET
+      - key: GOOGLE_MAPS_SERVER_API_KEY
+        scope: RUN_TIME
         value: REPLACE_ME
         type: SECRET
       - key: FRONTEND_URL

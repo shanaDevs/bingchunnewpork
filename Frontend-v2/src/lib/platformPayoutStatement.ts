@@ -17,6 +17,7 @@ export type PlatformPayoutStatement = {
   platformDiscountPaybackEnabled: boolean;
   sharedPromoPlatformLkr: number;
   platformInvoiceUrl: string;
+  hasReceipt?: boolean;
 };
 
 export async function fetchPlatformPayoutStatement(

@@ -4,6 +4,7 @@ import ApprovePayoutBreakdown from '@/components/admin/ApprovePayoutBreakdown';
 import PeriodPayoutSplitCards from '@/components/admin/PeriodPayoutSplitCards';
 import PayoutBreakdownTabs from '@/components/admin/PayoutBreakdownTabs';
 import PayoutFinancialReport from '@/components/admin/PayoutFinancialReport';
+import type { PayoutFinancialReportJasonContext } from '@/components/admin/payoutFinancialReportInfoPopovers';
 import {
   resolvePayoutBreakdownBundle,
   type PayoutBreakdownDisplayInput,
@@ -26,6 +27,7 @@ type Props = PayoutBreakdownDisplayInput & {
   branchPayout?: BranchPayoutDisplay | null;
   branchReceiveDifference?: BranchReceiveDifference | null;
   className?: string;
+  jasonContext?: PayoutFinancialReportJasonContext;
 };
 
 export default function PayoutBreakdownPanel({
@@ -40,6 +42,7 @@ export default function PayoutBreakdownPanel({
   branchPayout = null,
   branchReceiveDifference = null,
   className = 'mb-4',
+  jasonContext,
   ...breakdownInput
 }: Props) {
   const bundle = resolvePayoutBreakdownBundle(breakdownInput);
@@ -79,7 +82,7 @@ export default function PayoutBreakdownPanel({
       }
       reportContent={
         <>
-          <PayoutFinancialReport values={reportValues} />
+          <PayoutFinancialReport values={reportValues} jasonContext={jasonContext} />
           {renderPayoutAllocationCards()}
         </>
       }

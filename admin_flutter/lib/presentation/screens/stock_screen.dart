@@ -155,6 +155,7 @@ const _indigo = Color(0xFF818CF8);
 
 (String, Color) _statusInfo(StockStatus s) => switch (s) {
   StockStatus.branchInactive => (tr('Branch inactive'), _slate),
+  StockStatus.franchiserInactive => (tr('Franchiser inactive'), _slate),
   StockStatus.comingSoon => (tr('Coming soon'), _indigo),
   StockStatus.outOfStock => (tr('Out of stock'), _red),
   StockStatus.lowStock => (tr('Low stock'), _amber),
@@ -452,10 +453,11 @@ class _StockRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.pos;
-    final inactive = isBranchInactive(item);
+    final branchInactive = isBranchInactive(item);
+    final franchiserInactive = isFranchiserInactive(item);
     final (statusText, statusColor) = _statusInfo(stockStatus(item));
-    final onHand = inactive ? item.frozenQty : item.onHandQty;
-    final batchCount = inactive ? item.frozenBatchCount : item.batchCount;
+    final onHand = branchInactive ? item.frozenQty : item.onHandQty;
+    final batchCount = branchInactive ? item.frozenBatchCount : item.batchCount;
     return PosCard(
       onTap: onTap,
       padding: const EdgeInsets.all(PosSpacing.md),
@@ -484,7 +486,14 @@ class _StockRow extends StatelessWidget {
                       '${item.categoryName} · ${formatMoney(item.basePrice)}',
                       style: PosType.caption.copyWith(color: c.textMuted),
                     ),
-                    if (inactive) ...[const SizedBox(height: 4), PosBadge(label: tr('Branch Inactive'), color: _slate)],
+                    if (branchInactive) ...[
+                      const SizedBox(height: 4),
+                      PosBadge(label: tr('Branch Inactive'), color: _slate),
+                    ],
+                    if (franchiserInactive) ...[
+                      const SizedBox(height: 4),
+                      PosBadge(label: tr('Franchiser Inactive'), color: _slate),
+                    ],
                   ],
                 ),
               ),

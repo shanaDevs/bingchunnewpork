@@ -10,11 +10,13 @@ type Props = {
 };
 
 const CHANNEL_CLASS: Record<OrderChannel, string> = {
-  WEB: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
-  APP: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
-  POS: 'bg-amber-500/15 text-amber-200 border-amber-500/30',
-  WHATSAPP: 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40 font-semibold',
-  TELEGRAM: 'bg-blue-500/20 text-blue-300 border-blue-400/40 font-semibold',
+  WEB: 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30',
+  APP: 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-500/15 dark:text-orange-300 dark:border-orange-500/30',
+  POS: 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-500/15 dark:text-amber-200 dark:border-amber-500/30',
+  WHATSAPP:
+    'bg-emerald-100 text-emerald-800 border-emerald-400 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-400/40 font-semibold',
+  TELEGRAM:
+    'bg-blue-100 text-blue-800 border-blue-400 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-400/40 font-semibold',
 };
 
 export default function OrderChannelBadge({ channel, className = '', compact = false }: Props) {

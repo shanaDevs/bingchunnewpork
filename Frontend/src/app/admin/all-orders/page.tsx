@@ -38,6 +38,12 @@ import {
 } from '@/components/admin/RefundStatusBadge';
 import { isOrderChannel, type OrderChannel } from '@/lib/orderChannel';
 import { shortBranchName } from '@/lib/branchName';
+import toast from 'react-hot-toast';
+import {
+  allOrdersExportFilename,
+  exportAllOrdersExcel,
+  fetchAllOrdersForExport,
+} from '@/lib/allOrdersExport';
 
 const API_BASE = getApiBaseUrl();
 
@@ -132,12 +138,6 @@ function PaymentStatusBadge({ order }: { order: AdminOrderRow }) {
   return <span className={adminBadgeClass(variant)}>{label}</span>;
 }
 
-function formatRefundStatusExport(order: AdminOrderRow): string {
-  const refund = order.refund;
-  if (!refund) return '—';
-  return refundStatusLabel(refund.status);
-}
-
 function RefundStatusCell({
   order,
   onOpenRefund,
@@ -183,6 +183,7 @@ export default function AllOrdersPage() {
   const [processedById, setProcessedById] = useState('');
   const [period, setPeriod] = useState<DashboardPeriod>('month');
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
+  const [exporting, setExporting] = useState(false);
 
   const dateRange = useMemo(() => orderDateRange(period, customRange), [period, customRange]);
   const customReady = period !== 'custom' || !!(customRange?.from && customRange?.to);
@@ -358,36 +359,43 @@ export default function AllOrdersPage() {
     setPage(1);
   }
 
-  function exportCsv() {
-    const showRefundColumn = archiveView === 'cancelled';
-    const headers = showRefundColumn
-      ? 'Order,Ordered Time,Channel,Items,Total (LKR),Payment,Refund Status,Status\n'
-      : 'Order,Ordered Time,Channel,Items,Total (LKR),Payment,Status\n';
-    const rows = orders
-      .map((o) => {
-        const items = (o.items ?? []).map((i) => `${i.productName} x${i.quantity}`).join('; ');
-        const payment = isOrderPaid({
-          paymentStatus: o.paymentStatus,
-          paymentMethod: o.paymentMethod as PaymentMethod,
-        })
-          ? 'Paid'
-          : o.paymentStatus === 'FAILED'
-            ? 'Failed'
-            : 'Unpaid';
-        const orderedTime = new Date(o.createdAt).toLocaleString('en-LK');
-        const channel = o.channel || 'WEB';
-        const base = `${o.orderNumber},${orderedTime},${channel},"${items}",${o.total},${payment}`;
-        if (showRefundColumn) {
-          return `${base},${formatRefundStatusExport(o)},${statusLabel(o.status, o.orderMode)}`;
-        }
-        return `${base},${statusLabel(o.status, o.orderMode)}`;
-      })
-      .join('\n');
-    const blob = new Blob([headers + rows], { type: 'text/csv' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'all-orders.csv';
-    a.click();
+  async function handleExportExcel() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const rows = await fetchAllOrdersForExport({
+        archiveView,
+        activeTab,
+        modeFilter,
+        statusFilter,
+        debouncedSearch: debouncedSearch || undefined,
+        sortDir,
+        storeId: storeId || undefined,
+        channelFilter,
+        processedById: processedById || undefined,
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+      });
+      if (rows.length === 0) {
+        toast.error('No orders match the current filters.');
+        return;
+      }
+      const selectedStore = stores.find((s) => s.id === storeId);
+      const scopeLabel = selectedStore ? shortBranchName(selectedStore.name) : 'All branches';
+      exportAllOrdersExcel({
+        orders: rows,
+        scopeLabel,
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+        search: debouncedSearch || undefined,
+        filename: allOrdersExportFilename(dateRange.startDate, dateRange.endDate),
+      });
+      toast.success(`Exported ${rows.length} order${rows.length === 1 ? '' : 's'}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to export orders');
+    } finally {
+      setExporting(false);
+    }
   }
 
   const openRefund = useCallback(
@@ -435,10 +443,12 @@ export default function AllOrdersPage() {
           </button>
           <button
             type="button"
-            onClick={exportCsv}
-            className="btn-outline px-3 py-2.5 text-sm flex items-center gap-1.5"
+            onClick={() => void handleExportExcel()}
+            disabled={exporting}
+            className="btn-outline px-3 py-2.5 text-sm flex items-center gap-1.5 disabled:opacity-60"
           >
-            <Download size={14} /> Export
+            <Download size={14} className={exporting ? 'animate-pulse' : ''} />
+            {exporting ? 'Exporting…' : 'Export'}
           </button>
         </div>
       </div>
@@ -614,6 +624,7 @@ export default function AllOrdersPage() {
         <div className="p-4 sm:p-5 pt-0">
           <div className="all-orders-overview__grid-head hidden lg:grid">
             <span>Order</span>
+            <span>Branch</span>
             <span>Ordered Time</span>
             <span>Channel</span>
             <span>Items</span>
@@ -648,6 +659,10 @@ export default function AllOrdersPage() {
                 >
                   <span className="admin-table__order-num">{order.orderNumber}</span>
 
+                  <span className="text-muted text-xs truncate" title={order.store?.name}>
+                    {order.store?.name ? shortBranchName(order.store.name) : '—'}
+                  </span>
+
                   <span className="all-orders-overview__ordered-time text-muted text-xs whitespace-nowrap tabular-nums">
                     {new Date(order.createdAt).toLocaleString('en-LK', {
                       month: 'short',
@@ -673,7 +688,10 @@ export default function AllOrdersPage() {
                     <PaymentStatusBadge order={order} />
                   </span>
 
-                  <span className="text-muted text-xs whitespace-nowrap">
+                  <span
+                    className="all-orders-overview__processed-by text-muted text-xs"
+                    title={order.processedByName || undefined}
+                  >
                     {order.processedByName || '—'}
                   </span>
 
@@ -684,7 +702,9 @@ export default function AllOrdersPage() {
                     </div>
                   )}
 
-                  <AdminOrderStatusReadonly status={order.status} orderMode={order.orderMode} />
+                  <div className="all-orders-overview__status-cell">
+                    <AdminOrderStatusReadonly status={order.status} orderMode={order.orderMode} />
+                  </div>
 
                   <span className="all-orders-overview__action" aria-hidden>
                     <ChevronRight size={18} />
