@@ -175,6 +175,7 @@ const Map<String, String> zhStrings = {
   'Time taken': '用时',
   'Orders ({n})': '订单（{n}）',
   'Delivery Failures': '配送失败',
+  'Fee earned': '已获配送费',
   'No delivery failures were reported for this job.': '此任务未报告配送失败。',
   'Past jobs are read-only.': '过往任务为只读。',
   'Week': '本周',

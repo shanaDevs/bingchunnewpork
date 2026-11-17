@@ -791,19 +791,28 @@ class _HistoryRunBody extends StatelessWidget {
                 )
               : Column(
                   children: [
-                    for (final o in failedOrders)
+                    for (final (i, o) in failedOrders.indexed)
                       _HistoryFailureRow(
+                        icon: _failureIcon(o.failureOutcome),
                         reason: tr(o.failureTitle),
-                        detail: '#${o.orderNumber} · ${o.customerName}',
+                        orderNumber: o.orderNumber,
+                        customer: o.customerName,
                         note: o.failureDetailNote,
+                        feeEarned: o.isCustomerSideFailure && o.deliveryFee > 0,
+                        divider: i > 0,
                       ),
-                    for (final o in stops)
-                      for (final cp in o.complaints)
-                        _HistoryFailureRow(
-                          reason: cp.category.replaceAll('_', ' '),
-                          detail: '#${o.orderNumber} · ${o.customerName} · ${Format.dateTime(cp.createdAt)}',
-                          note: cp.description,
-                        ),
+                    for (final (i, entry) in [
+                      for (final o in stops)
+                        for (final cp in o.complaints) (order: o, complaint: cp),
+                    ].indexed)
+                      _HistoryFailureRow(
+                        icon: Icons.feedback_outlined,
+                        reason: entry.complaint.category.replaceAll('_', ' '),
+                        orderNumber: entry.order.orderNumber,
+                        customer: '${entry.order.customerName} · ${Format.dateTime(entry.complaint.createdAt)}',
+                        note: entry.complaint.description,
+                        divider: failedOrders.isNotEmpty || i > 0,
+                      ),
                   ],
                 ),
         ),
@@ -922,38 +931,130 @@ class _HistoryOrderRow extends StatelessWidget {
   }
 }
 
+IconData _failureIcon(String? outcome) => switch (outcome) {
+  'VEHICLE_FAILURE' => Icons.car_repair_outlined,
+  'CUSTOMER_UNREACHABLE' => Icons.person_off_outlined,
+  'WRONG_ADDRESS' => Icons.location_off_outlined,
+  'REFUSED' => Icons.block_rounded,
+  'PAYMENT_FAILED' => Icons.payments_outlined,
+  _ => Icons.error_outline_rounded,
+};
+
+/// One reported failure or complaint: tinted icon, reason, order number, then the rider's
+/// note in a soft box. A "Type: description" note shows its type as a small label.
 class _HistoryFailureRow extends StatelessWidget {
-  const _HistoryFailureRow({required this.reason, required this.detail, this.note});
+  const _HistoryFailureRow({
+    required this.icon,
+    required this.reason,
+    required this.orderNumber,
+    required this.customer,
+    this.note,
+    this.feeEarned = false,
+    this.divider = false,
+  });
+  final IconData icon;
   final String reason;
-  final String detail;
+  final String orderNumber;
+  final String customer;
   final String? note;
+  final bool feeEarned;
+  final bool divider;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    final text = note?.trim() ?? '';
+    // "Battery problem: dead battery" -> label "Battery problem" + body "dead battery".
+    final split = text.indexOf(':');
+    final hasLabel = split > 0 && split <= 40 && split < text.length - 1;
+    final noteLabel = hasLabel ? text.substring(0, split).trim() : null;
+    final noteBody = hasLabel ? text.substring(split + 1).trim() : text;
+
+    return Container(
+      decoration: BoxDecoration(border: divider ? Border(top: BorderSide(color: c.border)) : null),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Icon(Icons.cancel_outlined, size: 16, color: c.error),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(color: c.errorSoftBg, borderRadius: BorderRadius.circular(10)),
+            child: Icon(icon, size: 19, color: c.error),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(reason, style: TextStyle(color: c.error, fontSize: 14, fontWeight: FontWeight.w600)),
-                if (note != null && note!.trim().isNotEmpty)
-                  Text(
-                    '“${note!.trim()}”',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: c.mutedForeground, fontSize: 14),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        reason,
+                        style: TextStyle(color: c.foreground, fontSize: 15, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    if (feeEarned) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: c.successSoft, borderRadius: BorderRadius.circular(99)),
+                        child: Text(
+                          tr('Fee earned'),
+                          style: TextStyle(color: c.successStrong, fontSize: 11, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '#$orderNumber',
+                        style: TextStyle(color: c.foreground, fontWeight: FontWeight.w600),
+                      ),
+                      TextSpan(text: '  ·  $customer'),
+                    ],
                   ),
-                Text(detail, style: TextStyle(color: c.mutedForeground, fontSize: 14)),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: c.mutedForeground, fontSize: 13),
+                ),
+                if (text.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                    decoration: BoxDecoration(color: c.muted, borderRadius: BorderRadius.circular(10)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (noteLabel != null) ...[
+                          Text(
+                            noteLabel.toUpperCase(),
+                            style: TextStyle(
+                              color: c.mutedForeground,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.6,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                        ],
+                        Text(
+                          noteBody,
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: c.foreground, fontSize: 14, height: 1.35),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
