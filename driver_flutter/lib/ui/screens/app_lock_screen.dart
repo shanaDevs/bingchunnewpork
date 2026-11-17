@@ -6,8 +6,8 @@ import '../../core/app_lock.dart';
 import '../../core/feedback.dart';
 import '../../state/auth_controller.dart';
 import '../components/bc_dialog.dart';
-import '../components/job_cards.dart';
 import '../components/pin_pad.dart';
+import '../components/profile_kit.dart';
 import '../components/qd_brand.dart';
 import '../components/snack.dart';
 import '../theme/bc_theme.dart';
@@ -153,20 +153,72 @@ class _AppLockScreenState extends State<AppLockScreen> {
     final combined = AppLock.combinedBiometric;
     final isPin = lock.method == AppLockMethod.pin;
 
-    final title = widget.confirmOnly ? tr('Confirm it is you') : tr('Bring It is locked');
+    final title = widget.confirmOnly
+        ? tr('Confirm it is you')
+        : (name.isEmpty ? tr('Welcome back!') : tr('Welcome back, {name}!', {'name': name}));
     final bioHint = isFace
         ? tr('Use face unlock to open the app')
         : combined
         ? tr('Use your fingerprint or face to open the app')
         : tr('Use your fingerprint to open the app');
-    final subtitle = widget.confirmOnly
-        ? (isPin ? tr('Enter your 4-digit app PIN') : bioHint)
-        : (name.isEmpty ? tr('Unlock to continue.') : tr('Unlock to continue, {name}.', {'name': name}));
+    final subtitle = isPin
+        ? (widget.confirmOnly ? tr('Enter your 4-digit app PIN') : tr('Enter your PIN'))
+        : bioHint;
     final bioLabel = isFace
         ? tr('Unlock with face')
         : combined
         ? tr('Unlock with biometrics')
         : tr('Unlock with fingerprint');
+    final bioIcon = isFace ? Icons.face_retouching_natural_rounded : Icons.fingerprint_rounded;
+
+    final header = Column(
+      children: [
+        _LockedAvatar(name: fullName, size: isPin ? 72 : 96),
+        SizedBox(height: isPin ? 16 : 22),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: BcType.title.copyWith(color: c.foreground, fontSize: 26),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          subtitle,
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 15, color: c.mutedForeground, height: 1.4),
+        ),
+      ],
+    );
+
+    final body = isPin
+        ? Column(
+            children: [
+              header,
+              const SizedBox(height: 28),
+              PinDots(length: AppLock.pinLength, filled: _pin.length, errorTick: _errorTick, boxed: true, error: _error != null),
+              const SizedBox(height: 12),
+              _Message(error: _error),
+              const SizedBox(height: 14),
+              PinKeypad(enabled: !_checking, onDigit: _onDigit, onBackspace: _onBackspace),
+            ],
+          )
+        : Column(
+            children: [
+              header,
+              const SizedBox(height: 40),
+              _BiometricOrb(icon: bioIcon, label: bioLabel, busy: _prompting, error: _error != null, onTap: _promptBiometric),
+              const SizedBox(height: 10),
+              AnimatedSwitcher(
+                duration: BcMotion.fast,
+                child: Text(
+                  _prompting ? tr('Verifying…') : (_error != null ? tr('Tap to try again') : bioLabel),
+                  key: ValueKey('${_prompting}_${_error != null}'),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.foreground),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _Message(error: _error),
+            ],
+          );
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: c.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
@@ -174,92 +226,253 @@ class _AppLockScreenState extends State<AppLockScreen> {
         canPop: widget.confirmOnly,
         child: Scaffold(
           backgroundColor: c.background,
-          body: SafeArea(
-            child: Column(
-              children: [
-                SizedBox(
-                  height: 56,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: widget.confirmOnly
-                        ? Padding(
-                            padding: const EdgeInsets.only(left: 12),
-                            child: IconButton(
-                              tooltip: tr('Close'),
-                              onPressed: () => Navigator.of(context).pop(false),
-                              icon: Icon(Icons.close_rounded, color: c.foreground),
-                            ),
-                          )
-                        : null,
-                  ),
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Column(
-                      children: [
-                        const QdLogoMark(size: 56),
-                        const SizedBox(height: 16),
-                        Text(
-                          title,
-                          textAlign: TextAlign.center,
-                          style: BcType.title.copyWith(color: c.foreground, fontSize: 26),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          subtitle,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 15, color: c.mutedForeground, height: 1.4),
-                        ),
-                        if (isPin) ...[
-                          const SizedBox(height: 28),
-                          if (!widget.confirmOnly) ...[
-                            Text(
-                              tr('Enter your PIN'),
-                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.foreground),
-                            ),
-                            const SizedBox(height: 14),
-                          ],
-                          PinDots(length: AppLock.pinLength, filled: _pin.length, errorTick: _errorTick, boxed: true, error: _error != null),
-                          const SizedBox(height: 12),
-                          _Message(error: _error),
-                          const SizedBox(height: 14),
-                          PinKeypad(enabled: !_checking, onDigit: _onDigit, onBackspace: _onBackspace),
-                        ] else ...[
-                          const SizedBox(height: 16),
-                          _Message(error: _error),
-                        ],
-                        const SizedBox(height: 16),
-                      ],
+          body: Stack(
+            children: [
+              // Soft brand glow at the top so the screen doesn't read as an empty void.
+              Positioned(
+                top: -180,
+                left: -100,
+                right: -100,
+                child: IgnorePointer(
+                  child: Container(
+                    height: 460,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [c.primary.withValues(alpha: c.isDark ? 0.22 : 0.12), c.primary.withValues(alpha: 0)],
+                      ),
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (!isPin)
-                        PillButton(
-                          label: bioLabel,
-                          icon: isFace ? Icons.face_retouching_natural_rounded : Icons.fingerprint_rounded,
-                          height: 56,
-                          loading: _prompting,
-                          onTap: _promptBiometric,
+              ),
+              SafeArea(
+                child: Column(
+                  children: [
+                    SizedBox(
+                      height: 56,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Row(
+                          children: [
+                            if (widget.confirmOnly)
+                              IconButton(
+                                tooltip: tr('Close'),
+                                onPressed: () => Navigator.of(context).pop(false),
+                                icon: Icon(Icons.close_rounded, color: c.foreground),
+                              )
+                            else ...[
+                              const SizedBox(width: 12),
+                              const QdLogoMark(size: 28, shadow: false),
+                              const SizedBox(width: 8),
+                              Text(
+                                kAppName,
+                                style: TextStyle(
+                                  fontFamily: BcFonts.sans,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: c.foreground,
+                                ),
+                              ),
+                              const Spacer(),
+                              _LockedChip(label: tr('Locked')),
+                              const SizedBox(width: 12),
+                            ],
+                          ],
                         ),
-                      if (!widget.confirmOnly)
-                        TextButton(
+                      ),
+                    ),
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, box) => SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(minHeight: box.maxHeight),
+                            child: Center(child: body),
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (!widget.confirmOnly)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 4, 24, 12),
+                        child: TextButton.icon(
                           onPressed: _useMobileNumber,
-                          child: Text(
+                          icon: Icon(Icons.phone_iphone_rounded, size: 18, color: c.mutedForeground),
+                          label: Text(
                             tr('Sign in with phone number'),
                             style: TextStyle(color: c.mutedForeground, fontWeight: FontWeight.w600),
                           ),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Rider's initials avatar inside a brand ring, with a small lock badge.
+class _LockedAvatar extends StatelessWidget {
+  const _LockedAvatar({required this.name, required this.size});
+
+  final String name;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final badge = (size * 0.34).clamp(24.0, 34.0);
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: c.primary.withValues(alpha: 0.35), width: 2),
+          ),
+          child: QdAvatar(name: name, size: size),
+        ),
+        Positioned(
+          right: 0,
+          bottom: 0,
+          child: Container(
+            width: badge,
+            height: badge,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: c.primary,
+              border: Border.all(color: c.background, width: 3),
+            ),
+            child: Icon(Icons.lock_rounded, size: badge * 0.5, color: c.primaryForeground),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LockedChip extends StatelessWidget {
+  const _LockedChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(color: c.muted, borderRadius: BorderRadius.circular(99)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.lock_outline_rounded, size: 14, color: c.mutedForeground),
+          const SizedBox(width: 4),
+          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.mutedForeground)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Large round biometric button. Pulses while the system prompt is open; turns red after a failure.
+class _BiometricOrb extends StatefulWidget {
+  const _BiometricOrb({
+    required this.icon,
+    required this.label,
+    required this.busy,
+    required this.error,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool busy;
+  final bool error;
+  final VoidCallback onTap;
+
+  @override
+  State<_BiometricOrb> createState() => _BiometricOrbState();
+}
+
+class _BiometricOrbState extends State<_BiometricOrb> with SingleTickerProviderStateMixin {
+  static const _size = 112.0;
+  static const _spread = 56.0;
+
+  late final AnimationController _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.busy) _pulse.repeat();
+  }
+
+  @override
+  void didUpdateWidget(_BiometricOrb old) {
+    super.didUpdateWidget(old);
+    if (widget.busy && !_pulse.isAnimating) {
+      _pulse.repeat();
+    } else if (!widget.busy && _pulse.isAnimating) {
+      _pulse
+        ..stop()
+        ..value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  Widget _ring(Color tone, double offset) {
+    final t = (_pulse.value + offset) % 1.0;
+    return Container(
+      width: _size + _spread * t,
+      height: _size + _spread * t,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: tone.withValues(alpha: 0.45 * (1 - t)), width: 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final tone = widget.error ? c.error : c.primary;
+    return Semantics(
+      button: true,
+      label: widget.label,
+      child: GestureDetector(
+        onTap: widget.busy ? null : widget.onTap,
+        child: SizedBox(
+          width: _size + _spread,
+          height: _size + _spread,
+          child: AnimatedBuilder(
+            animation: _pulse,
+            builder: (context, child) => Stack(
+              alignment: Alignment.center,
+              children: [
+                if (widget.busy) ...[_ring(tone, 0), _ring(tone, 0.5)],
+                child!,
               ],
+            ),
+            child: AnimatedContainer(
+              duration: BcMotion.standard,
+              width: _size,
+              height: _size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: tone.withValues(alpha: c.isDark ? 0.16 : 0.10),
+                border: Border.all(color: tone.withValues(alpha: 0.55), width: 1.5),
+                boxShadow: [BoxShadow(color: tone.withValues(alpha: 0.25), blurRadius: 32, spreadRadius: -4)],
+              ),
+              child: Icon(widget.icon, size: 52, color: tone),
             ),
           ),
         ),
@@ -286,17 +499,11 @@ class _Message extends StatelessWidget {
             ? null
             : Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: error == null
-                    ? null
-                    : BoxDecoration(color: c.errorSoftBg, borderRadius: BorderRadius.circular(99)),
+                decoration: BoxDecoration(color: c.errorSoftBg, borderRadius: BorderRadius.circular(99)),
                 child: Text(
                   text,
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: error == null ? FontWeight.w500 : FontWeight.w700,
-                    color: error == null ? c.mutedForeground : c.errorStrong,
-                  ),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.errorStrong),
                 ),
               ),
       ),

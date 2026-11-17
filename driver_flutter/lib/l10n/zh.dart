@@ -331,6 +331,8 @@ const Map<String, String> zhStrings = {
   'Unlock to continue, {name}.': '请解锁以继续，{name}。',
   'Enter your PIN': '输入您的 PIN',
   'Sign in with phone number': '使用手机号登录',
+  'Locked': '已锁定',
+  'Tap to try again': '轻点重试',
   'Request History': '申请记录',
   'Open': '营业中',
   'Closed': '已关闭',
