@@ -19,7 +19,7 @@ import {
   minDateStr,
   nextPeriodStartFromPeriodTo,
   resolveDeliveryPayoutPeriodWindow,
-  resolveLiveDeliveryWalletRange,
+  resolveOpenCycleLiveWalletRange,
   resolveOpenDeliveryPayoutWindow,
   toBusinessDateStr,
   todayUtcDateStr,
@@ -193,13 +193,11 @@ export async function getLiveDeliveryWalletRange(): Promise<{
   afterApproved: boolean;
 } | null> {
   const today = todayUtcDateStr();
-  const lastApprovedPeriodTo = await getLastApprovedDeliveryPayoutPeriodTo();
-  const earliestFeeDate = lastApprovedPeriodTo ? null : await getEarliestDeliveryFeeDate();
-  const range = resolveLiveDeliveryWalletRange({
-    lastApprovedPeriodTo,
-    earliestFeeDate,
-    today,
-  });
+  const [periodStart, lastApprovedPeriodTo] = await Promise.all([
+    resolveDeliveryPayoutPeriodStart(),
+    getLastApprovedDeliveryPayoutPeriodTo(),
+  ]);
+  const range = resolveOpenCycleLiveWalletRange({ periodStart, today });
   if (!range) return null;
   return { ...range, afterApproved: Boolean(lastApprovedPeriodTo) };
 }
