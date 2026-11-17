@@ -14,3 +14,4 @@ export * from './riderEfficiency';
 export * from './riderStats';
 export * from './riderProfileSync';
 export * from './integrationEvents';
+export * from './vehicleBreakdown';

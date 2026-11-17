@@ -64,11 +64,14 @@ import {
 } from '../lib/routeOptimizer';
 import { fetchRoadRoute, buildRouteWaypoints } from '../lib/roadRouting';
 import {
+  assertDriverVehicleReadyForWork,
   dropoffApiFields,
   mapPinPoint,
   recordDeliveredAttempt,
   resolveRiderDropoffCoords,
+  VEHICLE_BREAKDOWN_OPEN_CODE,
 } from '@bingchun/delivery-domain';
+import { throwIfVehicleBreakdownDomainError } from '../lib/vehicleBreakdownErrors';
 import { notifyCustomerOrderStatus } from '../lib/customerNotifications';
 import { paymentStatusOnOrderStatus } from '../lib/orderPayment';
 import {
@@ -432,6 +435,12 @@ async function takeScheduledJob(req: Request, res: Response) {
   if (!driver.isActive) throw new AppError('Driver account is suspended', 403);
   if (driver.dutyStatus !== 'ONLINE' && driver.dutyStatus !== 'ON_DELIVERY') {
     throw new AppError('You must be online and available to accept jobs', 400);
+  }
+  try {
+    await assertDriverVehicleReadyForWork(driverId);
+  } catch (err) {
+    throwIfVehicleBreakdownDomainError(err);
+    throw err;
   }
 
   const job = await prisma.deliveryJob.findUnique({

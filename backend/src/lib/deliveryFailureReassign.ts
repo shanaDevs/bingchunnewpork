@@ -13,6 +13,7 @@ import { resolveCustomerDisplayName } from './customerName';
 import { optimizeDeliveryStops, customerRouteStops, totalRouteDistanceKm, totalRouteEtaMinutes, type RouteStop } from './routeOptimizer';
 import { fetchRoadRoute, buildRouteWaypoints } from './roadRouting';
 import { lkrToDecimal } from './moneyDecimal';
+import { driverHasOpenVehicleBreakdown } from '@bingchun/delivery-domain';
 
 /** Jobs that count as an in-flight redelivery (original failed job is excluded separately). */
 export const REDELIVERY_JOB_STATUSES = ['SCHEDULED', 'ASSIGNED', 'QUEUED', 'IN_PROGRESS'] as const;
@@ -581,6 +582,13 @@ async function loadReassignmentDriver(driverId: string, storeId: string): Promis
   const accessible = await getDriverAccessibleStoreIds(driver.id);
   if (!accessible.includes(storeId)) {
     throw new AppError('Rider does not have access to this branch', 403);
+  }
+  if (await driverHasOpenVehicleBreakdown(driver.id)) {
+    throw new AppError(
+      'This rider has an open vehicle breakdown — mark the vehicle fixed before assigning jobs',
+      403,
+      'VEHICLE_BREAKDOWN_OPEN',
+    );
   }
   return driver;
 }

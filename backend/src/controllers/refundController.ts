@@ -187,7 +187,6 @@ export async function getRefundsSummary(req: Request, res: Response, next: NextF
         notReturningSubtotal: true,
         nonRefundableDeliveryFee: true,
         nonRefundableConvenienceFee: true,
-        additionalGatewayFee: true,
       },
     });
 
@@ -198,8 +197,7 @@ export async function getRefundsSummary(req: Request, res: Response, next: NextF
         }
         acc.branchReceiveTotalLkr += refund.notReturningSubtotal ?? 0;
         acc.deliveryReceiveTotalLkr += refund.nonRefundableDeliveryFee ?? 0;
-        acc.platformReceiveTotalLkr +=
-          (refund.nonRefundableConvenienceFee ?? 0) + (refund.additionalGatewayFee ?? 0);
+        acc.platformReceiveTotalLkr += refund.nonRefundableConvenienceFee ?? 0;
         return acc;
       },
       {

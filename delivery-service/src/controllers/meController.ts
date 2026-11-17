@@ -9,7 +9,11 @@ import {
   creditedDeliveredTotals,
   groupLatestFailedAttemptsByJob,
   isRiderStatsPeriod,
+  assertDriverVehicleReadyForWork,
+  getOpenVehicleBreakdown,
+  markVehicleFixed,
   patchDriverOpsProfile,
+  VEHICLE_BREAKDOWN_OPEN_CODE,
 } from '@bingchun/delivery-domain';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
@@ -96,7 +100,10 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
     }
 
     const points = driver.meritPoints ?? 100;
-    const claimMore = await canDriverClaimMore(driverId);
+    const [claimMore, vehicleBreakdown] = await Promise.all([
+      canDriverClaimMore(driverId),
+      getOpenVehicleBreakdown(driverId),
+    ]);
 
     return success(res, {
       id: driver.id,
@@ -124,6 +131,65 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
         : null,
       ratingCount: ratingAgg._count._all,
       canClaimMore: claimMore,
+      vehicleBreakdown: vehicleBreakdown
+        ? {
+            id: vehicleBreakdown.id,
+            jobId: vehicleBreakdown.jobId,
+            reportedAt: vehicleBreakdown.reportedAt.toISOString(),
+            lat: vehicleBreakdown.reportedLat,
+            lng: vehicleBreakdown.reportedLng,
+            note: vehicleBreakdown.note,
+            rideCode: vehicleBreakdown.rideCode,
+          }
+        : null,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function markMyVehicleFixed(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.user!.sub;
+    let result;
+    try {
+      result = await markVehicleFixed({
+        driverId,
+        fixedById: driverId,
+        fixedByRole: 'DRIVER',
+      });
+    } catch (err) {
+      const e = err as Error & { statusCode?: number; code?: string };
+      if (typeof e.statusCode === 'number') {
+        throw new AppError(e.message, e.statusCode, e.code);
+      }
+      throw err;
+    }
+
+    const open = await prisma.vehicleBreakdown.findUnique({
+      where: { id: result.id },
+      select: { storeId: true, driverId: true, jobId: true, reportedLat: true, reportedLng: true },
+    });
+    if (open) {
+      const payload = {
+        breakdownId: result.id,
+        driverId: open.driverId,
+        jobId: open.jobId,
+        storeId: open.storeId,
+        fixedByRole: 'DRIVER' as const,
+        fixedComment: null,
+      };
+      getEventPublisher()
+        .publish(`store:${open.storeId}`, 'vehicleBreakdownCleared', payload)
+        .catch(() => {});
+      getEventPublisher().publish('delivery-ops', 'vehicleBreakdownCleared', payload).catch(() => {});
+    }
+
+    return success(res, {
+      breakdownId: result.id,
+      jobId: result.jobId,
+      fixedAt: result.fixedAt.toISOString(),
+      fixedComment: result.fixedComment,
     });
   } catch (err) {
     next(err);
@@ -183,6 +249,18 @@ export async function updateDuty(req: Request, res: Response, next: NextFunction
           409,
           'ACTIVE_JOB',
         );
+      }
+    }
+
+    if (dutyStatus === 'ONLINE') {
+      try {
+        await assertDriverVehicleReadyForWork(driverId);
+      } catch (err) {
+        const e = err as Error & { statusCode?: number; code?: string };
+        if (typeof e.statusCode === 'number') {
+          throw new AppError(e.message, e.statusCode, e.code ?? VEHICLE_BREAKDOWN_OPEN_CODE);
+        }
+        throw err;
       }
     }
 

@@ -251,6 +251,35 @@ describe('getRefundsSummary', () => {
       }),
     );
   });
+
+  it('excludes the additional gateway fee from platform receive', async () => {
+    vi.mocked(prisma.refund.findMany).mockResolvedValue([
+      {
+        status: 'COMPLETE',
+        refundAmount: 1000,
+        notReturningSubtotal: 0,
+        nonRefundableDeliveryFee: 0,
+        nonRefundableConvenienceFee: 50,
+        additionalGatewayFee: 150,
+      },
+    ] as never);
+
+    const req = createMockReq({ query: {} });
+    const res = createMockRes();
+
+    await getRefundsSummary(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({
+          customerReceiveTotalLkr: 1000,
+          platformReceiveTotalLkr: 50,
+        }),
+      }),
+    );
+  });
 });
 
 describe('getRefund', () => {

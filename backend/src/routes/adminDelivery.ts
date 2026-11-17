@@ -184,6 +184,16 @@ router.post(
   adminDeliveryController.reassignDeliveryFailure,
 );
 router.get(
+  '/vehicle-breakdowns',
+  requirePermission('DELIVERY', 'read'),
+  adminDeliveryController.listVehicleBreakdowns,
+);
+router.post(
+  '/drivers/:driverId/vehicle-fixed',
+  requirePermission('DELIVERY', 'update'),
+  adminDeliveryController.adminMarkDriverVehicleFixed,
+);
+router.get(
   '/driver-complaints',
   requirePermission('DELIVERY', 'read'),
   adminDeliveryController.listDriverComplaints,

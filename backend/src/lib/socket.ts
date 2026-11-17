@@ -653,6 +653,31 @@ export function broadcastVehicleFailureReported(
   );
 }
 
+export type VehicleBreakdownEventPayload = {
+  breakdownId: string;
+  driverId: string;
+  jobId: string;
+  storeId: string;
+  lat?: number;
+  lng?: number;
+  fixedByRole?: 'DRIVER' | 'ADMIN';
+  fixedComment?: string | null;
+};
+
+export function broadcastVehicleBreakdownOpened(storeId: string, payload: VehicleBreakdownEventPayload): void {
+  if (!io) return;
+  const body = { ...payload, storeId };
+  io.to(`store:${storeId}`).emit('vehicleBreakdownOpened', body);
+  io.to('delivery-ops').emit('vehicleBreakdownOpened', body);
+}
+
+export function broadcastVehicleBreakdownCleared(storeId: string, payload: VehicleBreakdownEventPayload): void {
+  if (!io) return;
+  const body = { ...payload, storeId };
+  io.to(`store:${storeId}`).emit('vehicleBreakdownCleared', body);
+  io.to('delivery-ops').emit('vehicleBreakdownCleared', body);
+}
+
 export type OrderCancelledDriverPayload = {
   jobId: string;
   orderId: string;

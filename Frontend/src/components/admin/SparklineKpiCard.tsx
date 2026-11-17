@@ -88,6 +88,7 @@ type Props = {
   changePercent?: number | null;
   changeLabel?: string;
   tone?: SparklineKpiTone;
+  className?: string;
 };
 
 export default function SparklineKpiCard({
@@ -99,6 +100,7 @@ export default function SparklineKpiCard({
   changePercent,
   changeLabel = 'vs last month',
   tone = 'blue',
+  className,
 }: Props) {
   const styles = TONE_STYLES[tone];
   const delta = changePercent ?? null;
@@ -106,7 +108,12 @@ export default function SparklineKpiCard({
   const deltaDown = delta != null && delta < 0;
 
   return (
-    <div className="card flex min-h-[7.25rem] min-w-0 flex-col justify-between overflow-hidden rounded-2xl p-4">
+    <div
+      className={cn(
+        'card flex min-h-[7.25rem] min-w-0 flex-col justify-between overflow-hidden rounded-2xl p-4',
+        className,
+      )}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="mb-3 flex items-center gap-2.5">

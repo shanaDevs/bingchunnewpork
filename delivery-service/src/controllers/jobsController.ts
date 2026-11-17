@@ -16,7 +16,10 @@ import {
   mapPinPoint,
   type RouteStop,
   type DeliveryDomainStateValue,
+  assertDriverVehicleReadyForWork,
+  openVehicleBreakdown,
   patchDriverOpsProfile,
+  VEHICLE_BREAKDOWN_OPEN_CODE,
 } from '@bingchun/delivery-domain';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
@@ -49,6 +52,7 @@ import { ensureOtpForOrder, isOtpRequiredForStore } from '../lib/otp';
 import { sendPushToDriver, sendPushToBranchDrivers } from '../lib/fcm';
 import { getDriverAccessibleStoreIds } from '../lib/driverAccess';
 import { getEventPublisher } from '../sockets/eventPublisher';
+import { closeDriverShift } from '../lib/driverShift';
 import { applyMeritDelta } from '../lib/meritPoints';
 import { logger } from '../utils/logger';
 
@@ -457,6 +461,15 @@ async function takeScheduledJob(req: Request, res: Response) {
   if (!driver?.isActive) throw new AppError('Driver account is suspended', 403);
   if (driver.dutyStatus !== 'ONLINE' && driver.dutyStatus !== 'ON_DELIVERY') {
     throw new AppError('You must be online and available to accept jobs', 400);
+  }
+  try {
+    await assertDriverVehicleReadyForWork(driverId);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number; code?: string };
+    if (typeof e.statusCode === 'number') {
+      throw new AppError(e.message, e.statusCode, e.code ?? VEHICLE_BREAKDOWN_OPEN_CODE);
+    }
+    throw err;
   }
 
   const job = await prisma.deliveryJob.findUnique({
@@ -1091,12 +1104,16 @@ async function closeRideAsVehicleFailure(opts: {
   });
   await promoteNextQueuedJob(opts.driverId).catch(() => {});
 
-  const remainingHeld = await prisma.deliveryJob.count({
-    where: { driverId: opts.driverId, status: { in: await heldJobStatuses() } },
+  const breakdown = await openVehicleBreakdown({
+    driverId: opts.driverId,
+    jobId: opts.jobId,
+    storeId: opts.storeId,
+    lat: opts.lat,
+    lng: opts.lng,
+    note: opts.note,
   });
-  if (remainingHeld === 0) {
-    await patchDriverOpsProfile(opts.driverId, { dutyStatus: 'ONLINE' }).catch(() => {});
-  }
+  await patchDriverOpsProfile(opts.driverId, { dutyStatus: 'OFF_DUTY' }).catch(() => {});
+  await closeDriverShift(opts.driverId).catch(() => {});
 
   invalidateJobRoute(opts.jobId);
   const orderId = orderIds[0] ?? opts.fallbackOrderId;
@@ -1121,6 +1138,26 @@ async function closeRideAsVehicleFailure(opts: {
     .publish(`store:${opts.storeId}`, 'deliveryJobUpdated', {
       jobId: opts.jobId,
       status: 'VEHICLE_FAILURE',
+    })
+    .catch(() => {});
+  getEventPublisher()
+    .publish(`store:${opts.storeId}`, 'vehicleBreakdownOpened', {
+      breakdownId: breakdown.id,
+      driverId: opts.driverId,
+      jobId: opts.jobId,
+      storeId: opts.storeId,
+      lat: opts.lat,
+      lng: opts.lng,
+    })
+    .catch(() => {});
+  getEventPublisher()
+    .publish('delivery-ops', 'vehicleBreakdownOpened', {
+      breakdownId: breakdown.id,
+      driverId: opts.driverId,
+      jobId: opts.jobId,
+      storeId: opts.storeId,
+      lat: opts.lat,
+      lng: opts.lng,
     })
     .catch(() => {});
 

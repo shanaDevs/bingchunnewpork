@@ -17,6 +17,7 @@ router.use(deliveryProxy);
 router.get('/me', authenticate, requireDeliveryDriver, driverSelfController.getMe);
 router.get('/me/license-image', authenticate, requireDeliveryDriver, driverSelfController.getMyLicenseImage);
 router.patch('/me/duty', authenticate, requireDeliveryDriver, driverSelfController.updateDuty);
+router.post('/me/vehicle-fixed', authenticate, requireDeliveryDriver, driverSelfController.markMyVehicleFixed);
 router.post('/me/fcm-token', authenticate, requireDeliveryDriver, driverSelfController.updateFcmToken);
 router.delete('/me/fcm-token', authenticate, requireDeliveryDriver, driverSelfController.deleteFcmToken);
 router.get('/me/merit-history', authenticate, requireDeliveryDriver, driverSelfController.getMeritHistory);
