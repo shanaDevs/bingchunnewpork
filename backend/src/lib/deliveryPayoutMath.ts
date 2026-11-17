@@ -124,7 +124,10 @@ export function nextPeriodStartFromPeriodTo(periodTo: Date | string): string {
   return addDaysToDateStr(dateStr, 1);
 }
 
-/** Live wallet: day after last approved payout (else first fee) through today. */
+/**
+ * Span from last approved payout (or first fee) through today.
+ * Includes unpaid elapsed due windows — not used for Delivery Wallet live totals.
+ */
 export function resolveLiveDeliveryWalletRange(params: {
   lastApprovedPeriodTo: Date | string | null | undefined;
   earliestFeeDate: string | null;
@@ -136,6 +139,24 @@ export function resolveLiveDeliveryWalletRange(params: {
   const from = fromApproved ?? params.earliestFeeDate;
   if (!from || from > params.today) return null;
   return { from, to: params.today };
+}
+
+/**
+ * Wallet live range: the in-progress 30-day cycle through today.
+ * Walks past unpaid elapsed windows so paid and due periods are excluded.
+ */
+export function resolveOpenCycleLiveWalletRange(params: {
+  periodStart: string | null;
+  today: string;
+}): { from: string; to: string } | null {
+  if (!params.periodStart) return null;
+  const open = resolveOpenDeliveryPayoutWindow({
+    periodStart: params.periodStart,
+    days: DELIVERY_PAYOUT_ELAPSED_DAYS,
+    today: params.today,
+  });
+  if (!open) return null;
+  return { from: open.from, to: open.through };
 }
 
 export function validateDeliveryPayoutRange(params: {
