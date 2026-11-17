@@ -8,7 +8,7 @@
 - **Admin:** `POST /admin/delivery/drivers/:driverId/vehicle-fixed` with required `{ comment }` (min 3 chars).
 - **Lists:** `GET /admin/delivery/vehicle-breakdowns?openOnly=true` for ops; dashboard `attention.openVehicleBreakdowns`; live drivers expose `vehicleBreakdownOpen`.
 
-**Driver mobile app:** not updated in this change — consume `vehicleBreakdown` on `GET /me`, `POST /me/vehicle-fixed`, and `VEHICLE_BREAKDOWN_OPEN` on duty/claim when you implement the app separately.
+**Driver mobile app:** consume `vehicleBreakdown` on `GET /me`, `POST /me/vehicle-fixed`, and `VEHICLE_BREAKDOWN_OPEN` on duty/claim. Handover screen: see [driver-breakdown-handover-api.md](../driver-breakdown-handover-api.md).
 
 ## Distinction
 

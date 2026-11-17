@@ -678,6 +678,26 @@ export function broadcastVehicleBreakdownCleared(storeId: string, payload: Vehic
   io.to('delivery-ops').emit('vehicleBreakdownCleared', body);
 }
 
+export type HandoverRiderAssignedPayload = {
+  originalJobId: string;
+  replacementJobId: string;
+  replacementDriverId: string;
+  replacementDriverName: string;
+  replacementRideCode: string | null;
+};
+
+/** Stranded rider (vehicle failure) — refresh handover screen when admin assigns a replacement. */
+export function broadcastHandoverRiderAssigned(
+  strandedDriverId: string,
+  payload: HandoverRiderAssignedPayload,
+): void {
+  if (!io) return;
+  io.to(`driver:${strandedDriverId}`).emit('handoverRiderAssigned', payload);
+  logger.debug(
+    `Broadcast handoverRiderAssigned ${payload.originalJobId} → replacement ${payload.replacementJobId} to driver:${strandedDriverId}`,
+  );
+}
+
 export type OrderCancelledDriverPayload = {
   jobId: string;
   orderId: string;

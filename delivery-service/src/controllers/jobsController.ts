@@ -20,6 +20,9 @@ import {
   openVehicleBreakdown,
   patchDriverOpsProfile,
   VEHICLE_BREAKDOWN_OPEN_CODE,
+  buildJobHandoverResponse,
+  JobHandoverError,
+  markVehicleFixed,
 } from '@bingchun/delivery-domain';
 import { success } from '../utils/apiResponse';
 import { AppError } from '../middleware/errorHandler';
@@ -1277,6 +1280,76 @@ export async function reportVehicleFailure(req: Request, res: Response, next: Ne
       return executeVehicleFailureReport(req, attempt > 1);
     }, reconnectPrisma);
     return success(res, payload);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getJobHandover(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.user!.sub;
+    const jobId = req.params.id as string;
+    const payload = await buildJobHandoverResponse(jobId, driverId);
+    return success(res, payload);
+  } catch (err) {
+    if (err instanceof JobHandoverError) {
+      return next(new AppError(err.message, err.statusCode));
+    }
+    next(err);
+  }
+}
+
+export async function confirmHandoverBackOnRoad(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.user!.sub;
+    const jobId = req.params.id as string;
+    const job = await prisma.deliveryJob.findUnique({
+      where: { id: jobId },
+      select: { id: true, driverId: true, status: true, storeId: true },
+    });
+    if (!job || job.driverId !== driverId) throw new AppError('Job not found', 404);
+    if (job.status !== 'VEHICLE_FAILURE') {
+      throw new AppError('Back on road is only available after a vehicle failure', 400);
+    }
+
+    let result;
+    try {
+      result = await markVehicleFixed({
+        driverId,
+        fixedById: driverId,
+        fixedByRole: 'DRIVER',
+      });
+    } catch (err) {
+      const e = err as Error & { statusCode?: number; code?: string };
+      if (typeof e.statusCode === 'number') {
+        throw new AppError(e.message, e.statusCode, e.code);
+      }
+      throw err;
+    }
+
+    if (result.jobId !== job.id) {
+      throw new AppError('No open breakdown for this ride', 400);
+    }
+
+    const payload = {
+      breakdownId: result.id,
+      driverId,
+      jobId: job.id,
+      storeId: job.storeId,
+      fixedByRole: 'DRIVER' as const,
+      fixedComment: null,
+    };
+    getEventPublisher()
+      .publish(`store:${job.storeId}`, 'vehicleBreakdownCleared', payload)
+      .catch(() => {});
+    getEventPublisher().publish('delivery-ops', 'vehicleBreakdownCleared', payload).catch(() => {});
+
+    return success(res, {
+      breakdownId: result.id,
+      jobId: result.jobId,
+      fixedAt: result.fixedAt.toISOString(),
+      fixedComment: result.fixedComment,
+    });
   } catch (err) {
     next(err);
   }

@@ -15,3 +15,5 @@ export * from './riderStats';
 export * from './riderProfileSync';
 export * from './integrationEvents';
 export * from './vehicleBreakdown';
+export * from './reassignedRiders';
+export * from './jobHandover';

@@ -94,6 +94,12 @@ import {
   REDELIVERY_JOB_STATUSES,
 } from '../lib/deliveryFailureReassign';
 
+type AdminRouteStopPin = {
+  orderNumber: string;
+  lat: number;
+  lng: number;
+} & ReturnType<typeof dropoffApiFields>;
+
 async function adminStoreId(req: Request, requested?: string): Promise<string> {
   try {
     return await resolveAdminStoreIdForRequest(req, requested);
@@ -612,7 +618,7 @@ export async function getAdminDeliveryJobActualRoute(req: Request, res: Response
         if (!pin) return null;
         return { orderNumber: jo.order.orderNumber, lat: pin.lat, lng: pin.lng, ...dropoffApiFields(jo.order) };
       })
-      .filter((s): s is { orderNumber: string; lat: number; lng: number } => s != null);
+      .filter((s): s is AdminRouteStopPin => s != null);
 
     return success(res, {
       jobId: job.id,
@@ -689,7 +695,7 @@ export async function getAdminDeliveryJobLiveRoute(req: Request, res: Response, 
         if (!pin) return null;
         return { orderNumber: jo.order.orderNumber, lat: pin.lat, lng: pin.lng, ...dropoffApiFields(jo.order) };
       })
-      .filter((s): s is { orderNumber: string; lat: number; lng: number } => s != null);
+      .filter((s): s is AdminRouteStopPin => s != null);
 
     return success(res, {
       jobId: job.id,

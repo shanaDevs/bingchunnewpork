@@ -65,8 +65,11 @@ import {
 import { fetchRoadRoute, buildRouteWaypoints } from '../lib/roadRouting';
 import {
   assertDriverVehicleReadyForWork,
+  buildJobHandoverResponse,
   dropoffApiFields,
+  JobHandoverError,
   mapPinPoint,
+  markVehicleFixed,
   recordDeliveredAttempt,
   resolveRiderDropoffCoords,
   VEHICLE_BREAKDOWN_OPEN_CODE,
@@ -78,6 +81,7 @@ import {
   broadcastDeliveryJobUpdated,
   broadcastJobClaimed,
   broadcastNewJob,
+  broadcastVehicleBreakdownCleared,
   broadcastVehicleFailureReported,
 } from '../lib/socket';
 import { jobHasPickedUp } from '../lib/liveDriverTracking';
@@ -1576,6 +1580,70 @@ export async function reportVehicleFailure(req: Request, res: Response, next: Ne
       return executeVehicleFailureReport(req, body, attempt > 1);
     }, reconnectPrisma);
     return success(res, payload);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getJobHandover(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.user!.sub;
+    const jobId = req.params.id as string;
+    const payload = await buildJobHandoverResponse(jobId, driverId);
+    return success(res, payload);
+  } catch (err) {
+    if (err instanceof JobHandoverError) {
+      return next(new AppError(err.message, err.statusCode));
+    }
+    next(err);
+  }
+}
+
+/** Confirms the stranded rider is mobile again — same as `POST /me/vehicle-fixed` scoped to this failed job. */
+export async function confirmHandoverBackOnRoad(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.user!.sub;
+    const jobId = req.params.id as string;
+    const job = await prisma.deliveryJob.findUnique({
+      where: { id: jobId },
+      select: { id: true, driverId: true, status: true, storeId: true },
+    });
+    if (!job || job.driverId !== driverId) throw new AppError('Job not found', 404);
+    if (job.status !== 'VEHICLE_FAILURE') {
+      throw new AppError('Back on road is only available after a vehicle failure', 400);
+    }
+
+    let result;
+    try {
+      result = await markVehicleFixed({
+        driverId,
+        fixedById: driverId,
+        fixedByRole: 'DRIVER',
+      });
+    } catch (err) {
+      throwIfVehicleBreakdownDomainError(err);
+      throw err;
+    }
+
+    if (result.jobId !== job.id) {
+      throw new AppError('No open breakdown for this ride', 400);
+    }
+
+    broadcastVehicleBreakdownCleared(job.storeId, {
+      breakdownId: result.id,
+      driverId,
+      jobId: job.id,
+      storeId: job.storeId,
+      fixedByRole: 'DRIVER',
+      fixedComment: null,
+    });
+
+    return success(res, {
+      breakdownId: result.id,
+      jobId: result.jobId,
+      fixedAt: result.fixedAt.toISOString(),
+      fixedComment: result.fixedComment,
+    });
   } catch (err) {
     next(err);
   }
