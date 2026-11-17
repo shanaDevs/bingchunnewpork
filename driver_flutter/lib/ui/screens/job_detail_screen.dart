@@ -652,10 +652,15 @@ class _HistoryRunBody extends StatelessWidget {
     final c = context.bc;
     final stops = [...job.orders]..sort((a, b) => a.sequence.compareTo(b.sequence));
     final distanceKm = job.actualDistanceKm ?? job.estimatedDistanceKm;
-    // Earned = fees of the stops actually delivered (the stored ride total can be stale).
-    final earned = job.orders.isEmpty
+    // A finished ride's total comes from the backend's credit rules: delivered stops,
+    // customer-side failures and customer cancels after pickup. For a ride that never
+    // finished, add up the same stops here (its stored total can be stale).
+    const settledRide = {'COMPLETED', 'VEHICLE_FAILURE', 'CANCELLED'};
+    final earned = job.orders.isEmpty || settledRide.contains(job.status)
         ? job.totalDeliveryFees
-        : job.orders.where((o) => o.isDelivered && !o.isFailed).fold<int>(0, (s, o) => s + o.deliveryFee);
+        : job.orders
+              .where((o) => o.isFailed ? o.isCustomerSideFailure : o.isDelivered)
+              .fold<int>(0, (s, o) => s + o.deliveryFee);
     final finishedIso = job.completedAt ?? job.returnStartedAt ?? job.startedAt ?? job.scheduledAt;
     final finished = Format.toLocal(finishedIso);
     final acceptedIso = job.assignedAt ?? job.startedAt;

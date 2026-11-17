@@ -168,6 +168,17 @@ class _FailureSheet extends StatefulWidget {
 }
 
 /// QuickDrop failure reasons: label, icon and the outcome the API understands.
+/// Reason text at the start of the failure note. The main backend still works out the
+/// outcome from the note's wording and ignores the `outcome` field, so customer-side
+/// reasons lead with the outcome's English label (e.g. "Customer not available").
+/// Without it, "Customer isn't there", "Couldn't contact the customer" or any translated
+/// reason is filed as a driver error and the rider loses the stop's delivery fee.
+String _failureNoteLabel(String reason, DeliveryOutcome outcome) {
+  final shown = tr(reason);
+  if (!outcome.customerSide || shown == outcome.label) return shown;
+  return '${outcome.label} ($shown)';
+}
+
 const _failureReasons = <(String, IconData, DeliveryOutcome)>[
   ("Customer isn't there", Icons.person_off_outlined, DeliveryOutcome.customerUnreachable),
   ("Couldn't contact the customer", Icons.phone_disabled_outlined, DeliveryOutcome.customerUnreachable),
@@ -272,7 +283,7 @@ class _FailureSheetState extends State<_FailureSheet> {
             if (!confirmed || !mounted) return;
             final reason = _failureReasons[_selected!];
             final desc = _note.text.trim();
-            final label = tr(reason.$1);
+            final label = _failureNoteLabel(reason.$1, reason.$3);
             final note = desc.isEmpty ? label : '$label: $desc';
             if (await widget.onSubmit(reason.$3, note.length > _noteMax ? note.substring(0, _noteMax) : note)) {
               nav.pop();

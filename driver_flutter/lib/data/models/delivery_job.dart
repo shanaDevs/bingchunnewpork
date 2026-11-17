@@ -429,6 +429,10 @@ class JobOrder {
   bool get isDelivered => status == 'DELIVERED';
   bool get isFailed => deliveryFailed || status == 'DELIVERY_FAILED';
 
+  /// Failed for a customer-side reason, so the rider still earns this stop's fee
+  /// (same rule as the backend's CUSTOMER_SIDE_FAILURE_OUTCOMES).
+  bool get isCustomerSideFailure => isFailed && DeliveryOutcome.isCustomerSide(failureOutcome);
+
   /// Untranslated heading for this stop's failure, e.g. "Customer not available".
   /// A driver-side "OTHER" outcome stays generic — the rider's own reason is in the note.
   String get failureTitle {
@@ -634,4 +638,10 @@ enum DeliveryOutcome {
   const DeliveryOutcome(this.label, this.apiValue);
   final String label;
   final String apiValue;
+
+  /// Customer-side outcomes still pay the rider the stop's delivery fee.
+  bool get customerSide => this != DeliveryOutcome.other;
+
+  static bool isCustomerSide(String? apiValue) =>
+      apiValue != null && values.any((o) => o.customerSide && o.apiValue == apiValue);
 }
