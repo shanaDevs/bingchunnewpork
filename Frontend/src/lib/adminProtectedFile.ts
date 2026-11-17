@@ -3,7 +3,6 @@ import { ensureAdminAccessToken, withAdminCredentials } from '@/lib/adminSession
 
 const API_ADMIN_INVOICE_PATH = /^\/api(\/admin\/invoices\/[^?#]+)/;
 const ADMIN_INVOICE_PATH = /^(\/admin\/invoices\/[^?#]+)/;
-const PAYOUT_DRAFT_INVOICE_PATH = /^\/admin\/wallet\/payout-draft-invoice/;
 
 function legacyProtectedFileApiPath(
   url: string | null | undefined,
@@ -213,26 +212,8 @@ export async function openPlatformProviderSettlementInvoice(settlementId: string
   );
 }
 
-/** Open a frozen branch payout draft invoice (`/admin/wallet/payout-draft-invoice`). */
-export async function openPayoutDraftInvoice(apiPath: string | null | undefined): Promise<void> {
-  if (!apiPath?.trim()) throw new Error('No invoice available');
-  const path = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
-  await openProtectedApiPath(path);
-}
-
 export async function openWithdrawalInvoice(invoiceUrl: string | null | undefined): Promise<void> {
   if (!invoiceUrl) throw new Error('No invoice available');
-
-  if (PAYOUT_DRAFT_INVOICE_PATH.test(invoiceUrl)) {
-    const withdrawalId = new URL(invoiceUrl, 'http://local').searchParams.get('withdrawalId');
-    if (withdrawalId) {
-      await openProtectedApiPath(`/admin/invoices/withdrawal/${encodeURIComponent(withdrawalId)}`);
-      return;
-    }
-    const path = invoiceUrl.startsWith('/') ? invoiceUrl : `/${invoiceUrl}`;
-    await openProtectedApiPath(path);
-    return;
-  }
 
   const apiPath = resolveWithdrawalInvoiceApiPath(invoiceUrl);
   if (apiPath) {

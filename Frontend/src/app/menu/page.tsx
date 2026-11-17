@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
 import JsonLd from '@/components/seo/JsonLd';
 import { menuItemListSchema, type ProductForSchema } from '@/components/seo/schemas';
-import { MenuGate } from '@/components/menu-redesign/MenuGate';
-import { MenuRedesignShell } from '@/components/menu-redesign/MenuRedesignShell';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { absoluteUrl } from '@/lib/seo';
+import type { Category, Product } from '@/types';
+import MenuClient from './MenuClient';
 
 export const metadata: Metadata = {
   title: 'Menu',
@@ -21,13 +21,13 @@ export const metadata: Metadata = {
   },
 };
 
-async function fetchMenuProducts(): Promise<ProductForSchema[]> {
+async function fetchMenuProducts(): Promise<Product[]> {
   try {
     const res = await fetch(`${getApiBaseUrl()}/menu/products`, {
       next: { revalidate: 3600 },
     });
     if (!res.ok) return [];
-    const json = (await res.json()) as { data?: ProductForSchema[] } | ProductForSchema[];
+    const json = (await res.json()) as { data?: Product[] } | Product[];
     const list = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
     return list.filter((p) => p?.id && p?.name);
   } catch {
@@ -35,15 +35,28 @@ async function fetchMenuProducts(): Promise<ProductForSchema[]> {
   }
 }
 
+async function fetchMenuCategories(): Promise<Category[]> {
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/menu/categories`, {
+      next: { revalidate: 3600 },
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { data?: Category[] } | Category[];
+    const list = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+    return list.filter((c) => c?.id && c?.slug);
+  } catch {
+    return [];
+  }
+}
+
 export default async function MenuPage() {
-  const products = await fetchMenuProducts();
+  const [products, categories] = await Promise.all([fetchMenuProducts(), fetchMenuCategories()]);
+  const schemaProducts = products as ProductForSchema[];
 
   return (
     <>
-      {products.length > 0 ? <JsonLd data={menuItemListSchema(products)} /> : null}
-      <MenuRedesignShell>
-        <MenuGate />
-      </MenuRedesignShell>
+      {schemaProducts.length > 0 ? <JsonLd data={menuItemListSchema(schemaProducts)} /> : null}
+      <MenuClient initialProducts={products} initialCategories={categories} />
     </>
   );
 }

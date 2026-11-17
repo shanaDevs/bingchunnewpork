@@ -71,10 +71,14 @@ export function statusHeadline(order: Order) {
   }
 }
 
-/** Kitchen ETA in minutes from the backend only (no clock time derived from placement). */
-export function orderEtaMinutes(order: Order): number | null {
-  const minutes = order.estimatedMinutes;
-  return typeof minutes === "number" && minutes > 0 ? minutes : null;
+/**
+ * When it should be ready (pickup) or with the customer (delivery): the scheduled pickup if there is one, else the
+ * kitchen's estimate from when it was placed. Null when the backend has no estimate.
+ */
+export function orderEta(order: Order): Date | null {
+  if (!isDelivery(order) && order.scheduledPickupAt) return new Date(order.scheduledPickupAt);
+  if (!order.estimatedMinutes) return null;
+  return new Date(new Date(order.createdAt).getTime() + order.estimatedMinutes * 60_000);
 }
 
 /** Pickup or Delivery, with its icon. */
@@ -211,15 +215,7 @@ export function useReorder() {
       try {
         const product = await api.get<{ isAvailable: boolean } & Record<string, unknown>>(`/menu/products/${item.productId}`);
         if (!product.isAvailable) continue;
-        const result = addItem({
-          product: product as never,
-          size: item.size as never,
-          sugarLevel: item.sugarLevel ?? null,
-          iceLevel: item.iceLevel ?? null,
-          toppings: [],
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-        });
+        const result = addItem({ product: product as never, size: item.size as never, toppings: [], quantity: item.quantity, unitPrice: item.unitPrice });
         if (result?.ok !== false) added++;
       } catch (err) {
         // Gone from the menu: skipped, as before.

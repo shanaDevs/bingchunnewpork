@@ -9,7 +9,13 @@ export type StoredPlatformProviderReceivable = PlatformProviderReceivablePayload
 export async function resolveStoredPlatformProviderReceivable(
   breakdown: unknown,
 ): Promise<StoredPlatformProviderReceivable> {
-  const raw = breakdown as ({ platformProviderReceivable?: StoredPlatformProviderReceivable } & Partial<PeriodBreakdown>) | null;
+  const raw = breakdown as
+    | ({ platformProviderReceivable?: StoredPlatformProviderReceivable } & Partial<PeriodBreakdown>)
+    | null;
+
+  if (raw?.platformProviderReceivable?.totalPlatformProviderReceivableCents != null) {
+    return raw.platformProviderReceivable;
+  }
 
   return resolvePlatformProviderReceivableFromBreakdown(raw ?? {});
 }

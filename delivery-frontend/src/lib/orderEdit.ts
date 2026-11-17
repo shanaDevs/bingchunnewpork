@@ -170,8 +170,8 @@ export type UpdateOrderItemPayload =
   | {
       productId: string;
       size: 'REGULAR' | 'LARGE';
-      sugarLevel: 'FIFTY' | 'HUNDRED' | null;
-      iceLevel: 'LESS_ICE' | 'NORMAL_ICE' | null;
+      sugarLevel: 'ZERO' | 'TWENTY_FIVE' | 'FIFTY' | 'SEVENTY_FIVE' | 'HUNDRED';
+      iceLevel: 'NO_ICE' | 'LESS_ICE' | 'REGULAR';
       toppingIds: string[];
       quantity: number;
     };
@@ -192,8 +192,8 @@ export type DraftOrderItem =
       productId: string;
       productName: string;
       size: 'REGULAR' | 'LARGE';
-      sugarLevel: 'FIFTY' | 'HUNDRED' | null;
-      iceLevel: 'LESS_ICE' | 'NORMAL_ICE' | null;
+      sugarLevel: 'ZERO' | 'TWENTY_FIVE' | 'FIFTY' | 'SEVENTY_FIVE' | 'HUNDRED';
+      iceLevel: 'NO_ICE' | 'LESS_ICE' | 'REGULAR';
       toppingIds: string[];
       unitPrice: number;
       quantity: number;

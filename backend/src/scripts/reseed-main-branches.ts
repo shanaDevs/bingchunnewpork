@@ -29,7 +29,7 @@ assertDevSeedOnly();
 const SEED_NOTE = 'seed-main-';
 const TREND_DAYS = 60;
 const MIN_TREND_ORDERS = 60;
-const WEEKLY_TARGET_QTY = 200;
+const WEEKLY_TARGET_QTY = 80;
 const RESET_QTY = 50;
 const DELIVERY_FEE_RATE = 0.065;
 const PICKUP_FEE_RATE = 0.06;

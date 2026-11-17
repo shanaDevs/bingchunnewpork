@@ -13,12 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import ProductImage from '@/components/ui/ProductImage';
-import {
-  adminStockFetch,
-  DEFAULT_WEEKLY_TARGET_QTY,
-  type StockItem,
-  type StockSettingsResult,
-} from '@/lib/stockApi';
+import { adminStockFetch, type StockItem, type StockSettingsResult } from '@/lib/stockApi';
 
 interface StockSettingsDrawerProps {
   item: StockItem;
@@ -83,9 +78,7 @@ export default function StockSettingsDrawer({
   onClose,
   onSuccess,
 }: StockSettingsDrawerProps) {
-  const [weeklyTargetQty, setWeeklyTargetQty] = useState(
-    item.weeklyTargetQty > 0 ? String(item.weeklyTargetQty) : String(DEFAULT_WEEKLY_TARGET_QTY),
-  );
+  const [weeklyTargetQty, setWeeklyTargetQty] = useState(String(item.weeklyTargetQty));
   const [lowStockThreshold, setLowStockThreshold] = useState(String(item.lowStockThreshold));
   const [onlineOutOfStockThreshold, setOnlineOutOfStockThreshold] = useState(
     String(item.onlineOutOfStockThreshold),

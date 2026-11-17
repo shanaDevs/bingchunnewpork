@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
+
 import '../json.dart';
 import '../local/secure_store.dart';
 import '../models/driver.dart';
@@ -42,12 +44,13 @@ class AuthRepository {
   Future<List<BranchOption>> listStores() =>
       _api.call(() => _api.core.get<dynamic>('stores'), (d) => _list(d, BranchOption.fromJson));
 
-  Future<void> createBranchRequest(String type, String toStoreId, {String? reason}) => _api.call(
+  Future<void> createBranchRequest(String type, String toStoreId, {String? reason, String? fromStoreId}) => _api.call(
     () => _api.core.post<dynamic>(
       'delivery/me/branch-requests',
       data: compact({
         'type': type,
         'toStoreId': toStoreId,
+        'fromStoreId': fromStoreId,
         'reason': (reason != null && reason.trim().isNotEmpty) ? reason : null,
       }),
     ),
@@ -86,6 +89,17 @@ class AuthRepository {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Uploads a new profile photo; returns the stored photo URL.
+  Future<String> uploadProfilePhoto(String filePath) async {
+    final name = filePath.split(RegExp(r'[\/]')).last;
+    final form = FormData.fromMap({'profilePhoto': await MultipartFile.fromFile(filePath, filename: name)});
+    final res = await _api.call(
+      () => _api.core.patch<dynamic>('delivery/me/profile-photo', data: form),
+      (d) => asJson(d),
+    );
+    return str(res, 'profilePhotoUrl');
   }
 
   Future<List<DriverShiftEntry>> getShiftHistory() =>

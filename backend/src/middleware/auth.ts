@@ -215,14 +215,6 @@ export function requireBranchAdminOnly(req: Request, _res: Response, next: NextF
   next();
 }
 
-/** Branch-scoped staff (STORE_MANAGER or CASHIER) — excludes Super Admin and HQ roles. */
-export function requireBranchStaff(req: Request, _res: Response, next: NextFunction) {
-  if (!req.user || req.user.type !== 'admin' || !isBranchScopedRole(req.user.role)) {
-    throw new AppError('Forbidden', 403);
-  }
-  next();
-}
-
 export function requireDeliveryDriver(req: Request, _res: Response, next: NextFunction) {
   if (!req.user || req.user.type !== 'admin') return next(new AppError('Forbidden', 403));
   if (req.user.role !== 'DELIVERY_DRIVER') return next(new AppError('Delivery driver access only', 403));

@@ -4,7 +4,6 @@ import { uuidParamSchema } from '../lib/httpSchemas';
 import { AppError } from '../middleware/errorHandler';
 import { assertOrderStoreAccess } from '../middleware/auth';
 import {
-  enrichWithdrawalInvoiceInputFromWithdrawal,
   parseWithdrawalInvoiceInput,
   parseCommissionSettlementInvoiceInput,
   renderWithdrawalInvoiceToBuffer,
@@ -13,7 +12,6 @@ import {
   commissionSettlementInvoiceRef,
 } from '../lib/withdrawalInvoice';
 import { renderPlatformProviderSettlementInvoiceToBuffer } from '../lib/invoice/renderPlatformProviderSettlementInvoice';
-import { rebaseSecondPayoutPriorBeforeGateway } from '../lib/secondPayoutPriorDisplay';
 import { platformProviderSettlementInvoiceRef } from '../lib/invoice/refs';
 import { loadSettlementPlatformReceivableDetail } from '../lib/settlementPlatformReceivable';
 
@@ -34,43 +32,17 @@ export async function getWithdrawalInvoiceHandler(
     const withdrawalId = uuidParamSchema.parse(req.params.withdrawalId);
     const withdrawal = await prisma.storeWithdrawal.findUnique({
       where: { id: withdrawalId },
-      select: {
-        id: true,
-        storeId: true,
-        invoiceRef: true,
-        invoiceData: true,
-        breakdown: true,
-        cycleStage: true,
-        cyclePairId: true,
-        paymentMethod: true,
-        checkNumber: true,
-        checkDate: true,
-      },
+      select: { id: true, storeId: true, invoiceRef: true, invoiceData: true },
     });
 
     if (!withdrawal) throw new AppError('Invoice not found', 404);
     await assertOrderStoreAccess(req, withdrawal.storeId);
     if (!withdrawal.invoiceData) throw new AppError('Invoice data not available', 404);
 
-    const parsed = parseWithdrawalInvoiceInput(withdrawal.invoiceData);
-    if (!parsed) throw new AppError('Invalid invoice data', 500);
+    const input = parseWithdrawalInvoiceInput(withdrawal.invoiceData);
+    if (!input) throw new AppError('Invalid invoice data', 500);
 
-    const rebased = await rebaseSecondPayoutPriorBeforeGateway({
-      storeId: withdrawal.storeId,
-      cycleStage: withdrawal.cycleStage,
-      cyclePairId: withdrawal.cyclePairId,
-      breakdown: withdrawal.breakdown,
-      payoutStatement: parsed.payoutStatement,
-    });
-    const merged = enrichWithdrawalInvoiceInputFromWithdrawal(parsed, withdrawal);
-    const input = rebased.payoutStatement
-      ? { ...merged, payoutStatement: rebased.payoutStatement }
-      : merged;
-
-    const buffer = await renderWithdrawalInvoiceToBuffer(input, {
-      withdrawalBreakdown: rebased.breakdown,
-      cycleStage: withdrawal.cycleStage,
-    });
+    const buffer = await renderWithdrawalInvoiceToBuffer(input);
     const ref = withdrawal.invoiceRef ?? withdrawalInvoiceRef(withdrawal.id);
     sendPdf(res, buffer, `${ref}.pdf`);
   } catch (err) {

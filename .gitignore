@@ -41,11 +41,7 @@ playwright-report/
 test-results/
 
 # Backend test files
-backend/tests/lib/
-backend/test
-
-# Frontend-v2 unit tests (local only — do not publish)
-Frontend-v2/**/*.test.ts
+backend/tests/
 
 # Next.js build output
 .next/
@@ -100,6 +96,7 @@ deploy/digitalocean/.generated-app.admin.yaml
 deploy/digitalocean/.generated-app.shop.payment-envs.json
 deploy/digitalocean/.live-shop-spec.json
 deploy/digitalocean/.live-delivery-me-audit.json
+
 .env
 .env.*
 .env.local

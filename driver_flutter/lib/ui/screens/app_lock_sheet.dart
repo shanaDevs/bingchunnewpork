@@ -139,7 +139,6 @@ class _AppLockSheetState extends State<_AppLockSheet> with WidgetsBindingObserve
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final dark = c.isDark;
     final lock = context.watch<AppLock>();
     final support = _support;
     final notOnPhone = tr('Not set up on this phone');
@@ -148,8 +147,8 @@ class _AppLockSheetState extends State<_AppLockSheet> with WidgetsBindingObserve
     return BcSheetBody(
       header: BcSheetHeader(
         icon: Icons.shield_outlined,
-        iconBg: dark ? const Color(0xFF052E2B) : const Color(0xFFCCFBF1),
-        iconTint: dark ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488),
+        iconBg: c.successSoft,
+        iconTint: c.successStrong,
         title: tr('App lock'),
         subtitle: tr('Ask for verification each time the app opens'),
         onClose: () => Navigator.of(context).pop(),
@@ -157,7 +156,7 @@ class _AppLockSheetState extends State<_AppLockSheet> with WidgetsBindingObserve
       children: [
         Container(
           padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: c.brandSubtle, borderRadius: BorderRadius.circular(BcRadius.md)),
+          decoration: BoxDecoration(color: c.primarySoft, borderRadius: BorderRadius.circular(BcRadius.md)),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -201,7 +200,7 @@ class _AppLockSheetState extends State<_AppLockSheet> with WidgetsBindingObserve
               Divider(height: 1, color: c.border),
               _OptionRow(
                 icon: Icons.fingerprint_rounded,
-                tint: dark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED),
+                tint: c.primary,
                 title: combined ? tr('Biometric') : tr('Fingerprint'),
                 subtitle: support == null || support.fingerprint
                     ? (combined
@@ -217,7 +216,7 @@ class _AppLockSheetState extends State<_AppLockSheet> with WidgetsBindingObserve
                 Divider(height: 1, color: c.border),
                 _OptionRow(
                   icon: Icons.face_retouching_natural_rounded,
-                  tint: dark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
+                  tint: c.primary,
                   title: tr('Face ID'),
                   subtitle: support == null || support.face ? tr('Unlock by looking at your phone') : notOnPhone,
                   selected: lock.method == AppLockMethod.face,
@@ -228,6 +227,36 @@ class _AppLockSheetState extends State<_AppLockSheet> with WidgetsBindingObserve
             ],
           ),
         ),
+        if (lock.enabled) ...[
+          const SizedBox(height: 14),
+          Text(tr('Lock the app'), style: BcType.bodyStrong.copyWith(color: c.foreground)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final t in AppLock.timeoutOptions)
+                ChoiceChip(
+                  label: Text(_timeoutLabel(t)),
+                  selected: lock.lockTimeout == t,
+                  showCheckmark: false,
+                  selectedColor: c.action,
+                  backgroundColor: c.surface,
+                  side: BorderSide(color: lock.lockTimeout == t ? c.action : c.border),
+                  labelStyle: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: lock.lockTimeout == t ? c.actionForeground : c.mutedForeground,
+                  ),
+                  shape: const StadiumBorder(),
+                  onSelected: (_) {
+                    BcFeedback.tap();
+                    lock.setLockTimeout(t);
+                  },
+                ),
+            ],
+          ),
+        ],
         if (lock.method == AppLockMethod.pin) ...[
           const SizedBox(height: 12),
           OutlinedButton.icon(
@@ -235,7 +264,7 @@ class _AppLockSheetState extends State<_AppLockSheet> with WidgetsBindingObserve
             icon: const Icon(Icons.edit_outlined, size: 18),
             label: Text(tr('Change PIN'), style: BcType.button),
             style: OutlinedButton.styleFrom(
-              foregroundColor: c.brand,
+              foregroundColor: c.primaryStrong,
               minimumSize: const Size.fromHeight(48),
               side: BorderSide(color: c.brand.withValues(alpha: 0.5)),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(BcRadius.button)),
@@ -246,6 +275,13 @@ class _AppLockSheetState extends State<_AppLockSheet> with WidgetsBindingObserve
     );
   }
 }
+
+String _timeoutLabel(int t) => switch (t) {
+  0 => tr('Immediately'),
+  60 => tr('After 1 minute'),
+  300 => tr('After 5 minutes'),
+  _ => tr('Only when app starts'),
+};
 
 class _OptionRow extends StatelessWidget {
   const _OptionRow({
@@ -308,8 +344,8 @@ class _OptionRow extends StatelessWidget {
                   height: 22,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: selected ? c.brand : Colors.transparent,
-                    border: Border.all(color: selected ? c.brand : c.inputBorder, width: 2),
+                    color: selected ? c.action : Colors.transparent,
+                    border: Border.all(color: selected ? c.action : c.border, width: 2),
                   ),
                   child: selected ? const Icon(Icons.check_rounded, size: 14, color: Colors.white) : null,
                 ),

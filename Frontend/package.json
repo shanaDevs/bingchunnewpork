@@ -6,7 +6,7 @@
     "dev": "cross-env TZ=Asia/Colombo NODE_OPTIONS=--max-old-space-size=4096 next dev --webpack",
     "dev:turbo": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbopack",
     "clean": "rimraf .next",
-    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next build --webpack",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",

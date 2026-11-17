@@ -48,15 +48,8 @@ function PickupQueue({ tracking }: { tracking: OrderTracking }) {
 
   if (!queuePosition && !scheduledPickupAt) return null;
   const ready = status === "READY";
-  const estimate =
-    tracking.etaMinutes != null && tracking.etaMinutes > 0 ? tracking.etaMinutes : left != null ? left : null;
-  const percent = scheduledPickupAt && left != null && estimate != null
-    ? Math.min(100, Math.max(5, 100 - (left / Math.max(estimate, 1)) * 100))
-    : ready
-      ? 100
-      : estimate != null
-        ? 40
-        : 0;
+  const estimate = tracking.order?.estimatedMinutes ?? 15;
+  const percent = scheduledPickupAt ? Math.min(100, Math.max(5, 100 - ((left ?? estimate) / Math.max(estimate, 15)) * 100)) : ready ? 100 : 40;
 
   return (
     <div aria-labelledby="pickup-queue" role="group" className="mb-5 border-b-2 border-dashed border-brand-100 pb-5">

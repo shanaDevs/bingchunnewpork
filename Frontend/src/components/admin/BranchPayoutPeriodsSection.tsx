@@ -1,36 +1,38 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import { CalendarRange } from 'lucide-react';
 import { getApiBaseUrl } from '@/lib/apiBase';
+import { adminAuthHeaders } from '@/lib/adminSession';
+import { formatMoneyAmount } from '@/lib/receipt';
+import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
+import { cn } from '@/lib/utils';
 import WalletWithdrawalModal from '@/components/admin/WalletWithdrawalModal';
+import type { WithdrawalRow } from '@/components/admin/WalletWithdrawalTable';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
-  filterWithdrawalsForCompletedPayoutTab,
-  type WithdrawalPagination,
-  type WithdrawalRow,
-} from '@/components/admin/WalletWithdrawalTable';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { WALLET_TAB_TRIGGER_CLASS } from '@/components/admin/useAdminWalletTab';
-import {
-  dueFocusToPeriodView,
-  type DuePeriodFocus,
-} from '@/components/admin/payoutPeriodView';
-import type { PayoutListTab, PayoutPeriodSort } from '@/components/admin/payoutPeriodTypes';
-import {
-  isCompletedPayout,
-  periodToViewRow,
-  viewPeriodDisplayForModal,
-} from '@/components/admin/payoutPeriodRowModel';
-import { PayoutPeriodsTableSkeleton } from '@/components/admin/payoutPeriodTableUi';
-import { useBranchPayoutPeriodsData } from '@/components/admin/useBranchPayoutPeriodsData';
-import PayoutSummaryTable from '@/components/admin/PayoutSummaryTable';
-import {
-  buildPayoutSummaryRecords,
-  type PayoutSummaryRecord,
-} from '@/components/admin/payoutSummaryTableModel';
+  fetchPayoutPeriodNetPreview,
+  resolvePayoutPeriodRowDisplayAmounts,
+} from '@/components/admin/payoutPeriodRowAmounts';
+import { syntheticPeriodViewWithdrawal } from '@/components/admin/payoutPeriodView';
 
-export type { PayoutPeriodRow, PayoutPeriodSort, PayoutPeriodStatus } from '@/components/admin/payoutPeriodTypes';
-export { fetchPayoutPeriods, payoutPeriodsQueryKey } from '@/components/admin/payoutPeriodsApi';
+export type PayoutPeriodStatus = 'PAID' | 'PENDING' | 'IN_PROGRESS';
+
+export type PayoutPeriodRow = {
+  key: string;
+  periodFrom: string;
+  periodTo: string;
+  /** In-progress cycles: orders/summary run through this date (today). */
+  summaryThrough?: string;
+  status: PayoutPeriodStatus;
+  amountCents: number;
+  orderCount: number;
+  breakdown?: unknown;
+  withdrawal?: WithdrawalRow | null;
+};
+
+export type PayoutPeriodSort = 'newest' | 'oldest';
 
 type Props = {
   storeId?: string;
@@ -41,15 +43,203 @@ type Props = {
   highlightPeriod?: { periodFrom: string; periodTo: string } | null;
   /** Open the oldest unpaid period from the full list, ignoring the wallet date filter. */
   focusOldestPending?: boolean;
-  /** When auto-opening from Payouts Due, use this if the period row is not in the table yet. */
-  autoOpenDuePeriod?: DuePeriodFocus | null;
-  withdrawals?: WithdrawalRow[];
-  withdrawalsLoading?: boolean;
-  withdrawalStoreNames?: Record<string, string>;
-  withdrawalPagination?: WithdrawalPagination | null;
-  onWithdrawalPageChange?: (page: number) => void;
-  onViewWithdrawal?: (row: WithdrawalRow) => void;
 };
+
+const AMOUNT_COLUMNS = [
+  'Branch receives',
+  'Customer convenience fee',
+  'Net platform amount',
+  'Delivery fee received',
+] as const;
+
+function statusLabel(status: PayoutPeriodStatus) {
+  if (status === 'PAID') return 'Paid';
+  if (status === 'IN_PROGRESS') return 'In progress';
+  return 'Pending';
+}
+
+function statusBadgeClass(status: PayoutPeriodStatus) {
+  if (status === 'PAID') return 'admin-status-badge--green';
+  return 'admin-status-badge--amber';
+}
+
+function previewPeriodTo(row: PayoutPeriodRow) {
+  const through = row.summaryThrough ?? row.periodTo;
+  // Guard inverted ranges (e.g. last-day boundary bugs) so summaries never run from > to.
+  if (through < row.periodFrom) return row.periodFrom;
+  return through;
+}
+
+function formatPayoutPeriodCell(row: PayoutPeriodRow) {
+  if (row.status !== 'IN_PROGRESS') {
+    return formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo);
+  }
+  const through = previewPeriodTo(row);
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span>{formatBiweeklyPeriodLabel(row.periodFrom, through)}</span>
+      <span className="text-[10px] font-normal text-[var(--color-text-muted)]">
+        15-day cycle closes {row.periodTo}
+      </span>
+    </span>
+  );
+}
+
+function asIsoDate(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (value instanceof Date) return value.toISOString();
+  return null;
+}
+
+function toWithdrawalRow(raw: WithdrawalRow, fallbackStoreId?: string): WithdrawalRow {
+  return {
+    ...raw,
+    storeId: raw.storeId ?? fallbackStoreId,
+    periodFrom: asIsoDate(raw.periodFrom) ?? raw.periodFrom,
+    periodTo: asIsoDate(raw.periodTo) ?? raw.periodTo,
+    createdAt: asIsoDate(raw.createdAt) ?? raw.createdAt,
+    reviewedAt: asIsoDate(raw.reviewedAt) ?? raw.reviewedAt,
+    checkDate: asIsoDate(raw.checkDate) ?? raw.checkDate,
+  };
+}
+
+export function payoutPeriodsQueryKey(storeId?: string) {
+  return ['payout-periods', storeId ?? ''] as const;
+}
+
+export async function fetchPayoutPeriods(apiBase: string, storeId?: string): Promise<PayoutPeriodRow[]> {
+  const qs = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
+  const res = await fetch(`${apiBase}/admin/wallet/payout-periods${qs}`, {
+    headers: adminAuthHeaders(),
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error('Failed to load payout periods');
+  const json = await res.json();
+  return (json.data ?? []) as PayoutPeriodRow[];
+}
+
+function PayoutPeriodsTableSkeleton() {
+  return (
+    <div className="overflow-x-auto" aria-hidden>
+      <table className="w-full min-w-[960px] text-left text-xs">
+        <thead>
+          <tr className="border-b border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/50 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+            <th className="px-3 py-2.5 font-semibold">Payout Period</th>
+            {AMOUNT_COLUMNS.map((label) => (
+              <th key={label} className="px-3 py-2.5 text-right font-semibold">
+                {label}
+              </th>
+            ))}
+            <th className="px-3 py-2.5 font-semibold">Status</th>
+            <th className="px-3 py-2.5 text-right font-semibold">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: 5 }).map((_, row) => (
+            <tr key={row} className="border-b border-[var(--color-navy-border)]/70 last:border-b-0">
+              <td className="px-3 py-3">
+                <Skeleton className="h-3.5 w-44 bg-[var(--color-navy-light)]/70" />
+              </td>
+              {AMOUNT_COLUMNS.map((label) => (
+                <td key={label} className="px-3 py-3 text-right">
+                  <Skeleton className="ml-auto h-3.5 w-20 bg-[var(--color-navy-light)]/70" />
+                </td>
+              ))}
+              <td className="px-3 py-3">
+                <Skeleton className="h-5 w-16 rounded-full bg-[var(--color-navy-light)]/70" />
+              </td>
+              <td className="px-3 py-3 text-right">
+                <Skeleton className="ml-auto h-7 w-14 rounded-lg bg-[var(--color-navy-light)]/70" />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function periodToViewRow(row: PayoutPeriodRow, storeId?: string): {
+  withdrawal: WithdrawalRow;
+  viewPeriodOnly: boolean;
+} {
+  if (row.withdrawal) {
+    return {
+      withdrawal: toWithdrawalRow(row.withdrawal, storeId ?? row.withdrawal.storeId),
+      viewPeriodOnly: false,
+    };
+  }
+
+  return syntheticPeriodViewWithdrawal({
+    key: row.key,
+    periodFrom: row.periodFrom,
+    periodTo: previewPeriodTo(row),
+    amountCents: row.amountCents,
+    storeId,
+    breakdown: row.breakdown,
+  });
+}
+
+function formatAmountCell(value: number) {
+  return formatMoneyAmount(value);
+}
+
+function PayoutPeriodAmountCells({
+  row,
+  netPreviewData,
+  previewLoading,
+  previewPeriodTo: summaryTo,
+}: {
+  row: PayoutPeriodRow;
+  netPreviewData?: Record<string, unknown>;
+  previewLoading: boolean;
+  previewPeriodTo: string;
+}) {
+  const needsPreview = !row.breakdown;
+  const amounts = resolvePayoutPeriodRowDisplayAmounts({
+    amountCents: row.amountCents,
+    breakdown: row.breakdown,
+    periodFrom: row.periodFrom,
+    periodTo: summaryTo,
+    netPreviewData: needsPreview ? netPreviewData : undefined,
+  });
+
+  const feeColumnsLoading = needsPreview && previewLoading;
+
+  const values = [
+    amounts.branchReceives,
+    amounts.orderConvenienceFeeLkr,
+    amounts.commissionLkr,
+    amounts.deliveryFee,
+  ];
+
+  return (
+    <>
+      {values.map((value, index) => (
+        <td
+          key={AMOUNT_COLUMNS[index]}
+          className="px-3 py-3 text-right font-semibold tabular-nums text-[var(--color-text)]"
+        >
+          {feeColumnsLoading && index > 0 ? (
+            <Skeleton className="ml-auto inline-block h-3.5 w-16 bg-[var(--color-navy-light)]/70" />
+          ) : (
+            formatAmountCell(value ?? 0)
+          )}
+        </td>
+      ))}
+    </>
+  );
+}
+
+function sortPayoutPeriodRows(rows: PayoutPeriodRow[], periodSort: PayoutPeriodSort) {
+  return [...rows].sort((a, b) => {
+    const byEnd = a.periodTo.localeCompare(b.periodTo);
+    if (byEnd !== 0) return periodSort === 'oldest' ? byEnd : -byEnd;
+    const byStart = a.periodFrom.localeCompare(b.periodFrom);
+    return periodSort === 'oldest' ? byStart : -byStart;
+  });
+}
 
 export default function BranchPayoutPeriodsSection({
   storeId,
@@ -59,12 +249,6 @@ export default function BranchPayoutPeriodsSection({
   periodSort = 'newest',
   highlightPeriod = null,
   focusOldestPending = false,
-  autoOpenDuePeriod = null,
-  withdrawals,
-  withdrawalsLoading = false,
-  withdrawalPagination = null,
-  onWithdrawalPageChange,
-  onViewWithdrawal,
 }: Props) {
   const apiBase = getApiBaseUrl();
   const highlightRowRef = useRef<HTMLTableRowElement | null>(null);
@@ -72,176 +256,109 @@ export default function BranchPayoutPeriodsSection({
   const [viewRow, setViewRow] = useState<{
     withdrawal: WithdrawalRow;
     viewPeriodOnly: boolean;
-    periodDisplay?: { from: string; to: string; days: number };
   } | null>(null);
-  const [listTab, setListTab] = useState<PayoutListTab>('pending');
-
-  const completedWithdrawalRows = useMemo(
-    () => filterWithdrawalsForCompletedPayoutTab(withdrawals ?? []),
-    [withdrawals],
-  );
 
   const {
-    rows,
-    periodsLoading,
-    previewByKey,
-    previewLoadingByKey,
-    displayRows,
-    tabRows,
-    displayAmountsByKey,
-    oldestPending,
+    data: payoutPeriodsData,
+    isPending,
+    isFetching,
     refetch,
-  } = useBranchPayoutPeriodsData({
-    apiBase,
-    storeId,
-    periodSort,
-    focusOldestPending,
-    listTab,
+  } = useQuery({
+    queryKey: payoutPeriodsQueryKey(storeId),
+    queryFn: () => fetchPayoutPeriods(apiBase, storeId),
+    enabled: Boolean(storeId),
   });
+
+  const rows = payoutPeriodsData ?? [];
+  /** Disabled query (no storeId) or first fetch — avoid empty state while wallet overview still loads. */
+  const periodsLoading =
+    !storeId || isPending || (isFetching && payoutPeriodsData === undefined);
+
+  const rowsNeedingPreview = useMemo(
+    () =>
+      rows.filter((row) => !row.breakdown && row.periodFrom && previewPeriodTo(row)),
+    [rows],
+  );
+
+  const previewQueries = useQueries({
+    queries: rowsNeedingPreview.map((row) => ({
+      queryKey: [
+        'payout-period-net-preview',
+        storeId,
+        row.periodFrom,
+        previewPeriodTo(row),
+      ] as const,
+      queryFn: () =>
+        fetchPayoutPeriodNetPreview(apiBase, storeId!, row.periodFrom, previewPeriodTo(row)),
+      enabled: Boolean(storeId),
+      staleTime: 45_000,
+    })),
+  });
+
+  const previewByKey = useMemo(() => {
+    const map = new Map<string, Record<string, unknown>>();
+    rowsNeedingPreview.forEach((row, index) => {
+      const data = previewQueries[index]?.data;
+      if (data) map.set(row.key, data);
+    });
+    return map;
+  }, [rowsNeedingPreview, previewQueries]);
+
+  const previewLoadingByKey = useMemo(() => {
+    const map = new Map<string, boolean>();
+    rowsNeedingPreview.forEach((row, index) => {
+      map.set(row.key, previewQueries[index]?.isLoading ?? false);
+    });
+    return map;
+  }, [rowsNeedingPreview, previewQueries]);
 
   useEffect(() => {
     if (refreshSignal > 0) void refetch();
   }, [refreshSignal, refetch]);
 
-  const highlightedPeriodRow = useMemo(() => {
-    if (!highlightPeriod) return null;
-    return (
-      displayRows.find(
-        (row) =>
-          row.periodFrom === highlightPeriod.periodFrom &&
-          row.periodTo === highlightPeriod.periodTo,
-      ) ?? null
-    );
-  }, [displayRows, highlightPeriod]);
-
-  const periodRowToAutoOpen = highlightedPeriodRow ?? oldestPending;
-
-  const activeHighlight = periodRowToAutoOpen
-    ? { periodFrom: periodRowToAutoOpen.periodFrom, periodTo: periodRowToAutoOpen.periodTo }
-    : highlightPeriod;
-
-  const summaryRecords = useMemo(
-    () =>
-      buildPayoutSummaryRecords({
-        listTab,
-        periodTabRows: tabRows,
-        allPeriodRows: rows,
-        withdrawals:
-          listTab === 'completed' && withdrawals != null ? completedWithdrawalRows : undefined,
-      }),
-    [listTab, tabRows, rows, completedWithdrawalRows],
+  const displayRows = useMemo(
+    () => sortPayoutPeriodRows(rows, focusOldestPending ? 'oldest' : periodSort),
+    [rows, periodSort, focusOldestPending],
   );
+
+  const oldestPending = useMemo(
+    () => (focusOldestPending ? displayRows.find((row) => row.status === 'PENDING') ?? null : null),
+    [displayRows, focusOldestPending],
+  );
+
+  const activeHighlight = oldestPending
+    ? { periodFrom: oldestPending.periodFrom, periodTo: oldestPending.periodTo }
+    : highlightPeriod;
 
   useEffect(() => {
     openedOldestPending.current = false;
   }, [storeId]);
 
   useEffect(() => {
-    if (!focusOldestPending || periodsLoading || openedOldestPending.current) return;
-
-    if (periodRowToAutoOpen) {
-      openedOldestPending.current = true;
-      setViewRow({
-        ...periodToViewRow(periodRowToAutoOpen, storeId),
-        periodDisplay: viewPeriodDisplayForModal(periodRowToAutoOpen, rows, previewByKey),
-      });
-      return;
-    }
-
-    if (autoOpenDuePeriod) {
-      openedOldestPending.current = true;
-      setViewRow(dueFocusToPeriodView(autoOpenDuePeriod));
-    }
-  }, [
-    focusOldestPending,
-    periodsLoading,
-    periodRowToAutoOpen,
-    storeId,
-    autoOpenDuePeriod,
-    rows,
-    previewByKey,
-  ]);
-
-  useEffect(() => {
-    if (!highlightedPeriodRow) return;
-    setListTab(isCompletedPayout(highlightedPeriodRow.status) ? 'completed' : 'pending');
-  }, [highlightedPeriodRow]);
+    if (!focusOldestPending || periodsLoading || openedOldestPending.current || !oldestPending) return;
+    openedOldestPending.current = true;
+    setViewRow(periodToViewRow(oldestPending, storeId));
+  }, [focusOldestPending, periodsLoading, oldestPending, storeId]);
 
   useEffect(() => {
     if (!activeHighlight || periodsLoading) return;
     const el = highlightRowRef.current;
     if (!el) return;
     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [
-    activeHighlight?.periodFrom,
-    activeHighlight?.periodTo,
-    periodsLoading,
-    listTab,
-    summaryRecords.length,
-  ]);
-
-  function openRecord(record: PayoutSummaryRecord) {
-    if (record.withdrawal && onViewWithdrawal && listTab === 'completed') {
-      onViewWithdrawal(record.withdrawal);
-      return;
-    }
-    if (record.periodRow) {
-      setViewRow({
-        ...periodToViewRow(record.periodRow, storeId),
-        periodDisplay: viewPeriodDisplayForModal(record.periodRow, rows, previewByKey),
-      });
-      return;
-    }
-    if (record.withdrawal) {
-      setViewRow({
-        withdrawal: record.withdrawal,
-        viewPeriodOnly: false,
-      });
-    }
-  }
-
-  const tableLoading =
-    periodsLoading || (listTab === 'completed' && withdrawals != null && withdrawalsLoading);
-
-  const showEmptyPeriods = !periodsLoading && rows.length === 0;
-  const showEmptyTab =
-    !tableLoading &&
-    rows.length > 0 &&
-    summaryRecords.length === 0;
+  }, [activeHighlight?.periodFrom, activeHighlight?.periodTo, periodsLoading, displayRows.length]);
 
   return (
     <div className="mb-7 overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-navy-border)] px-4 py-3 sm:px-5">
-        <div className="flex min-w-0 flex-wrap items-baseline gap-2">
-          <h3 className="text-sm font-semibold text-[var(--color-text)]">Payout Summary</h3>
-          <span className="text-xs text-[var(--color-text-muted)]">
-            View only · amounts in LKR
-          </span>
-        </div>
-        <Tabs
-          value={listTab}
-          onValueChange={(value) => setListTab(value as PayoutListTab)}
-        >
-          <TabsList className="branch-wallet-page__tabs h-9 w-fit justify-start gap-0.5 overflow-y-hidden rounded-full border border-[var(--color-navy-border)] bg-[var(--color-input-bg)] p-0.5">
-            <TabsTrigger
-              value="pending"
-              className={`branch-wallet-page__tab ${WALLET_TAB_TRIGGER_CLASS}`}
-            >
-              Pending Payouts
-            </TabsTrigger>
-            <TabsTrigger
-              value="completed"
-              className={`branch-wallet-page__tab ${WALLET_TAB_TRIGGER_CLASS}`}
-            >
-              Completed Payouts
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+      <div className="flex flex-wrap items-baseline gap-2 border-b border-[var(--color-navy-border)] px-4 py-3 sm:px-5">
+        <h3 className="text-sm font-semibold text-[var(--color-text)]">15-Day Payout Periods</h3>
+        <span className="text-xs text-[var(--color-text-muted)]">
+          View only · current and completed cycles · amounts in LKR
+        </span>
       </div>
 
-      {tableLoading && <PayoutPeriodsTableSkeleton listTab={listTab} />}
+      {periodsLoading && <PayoutPeriodsTableSkeleton />}
 
-      {showEmptyPeriods && (
+      {!periodsLoading && rows.length === 0 && (
         <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-brand-subtle)] text-[var(--color-brand)]">
             <CalendarRange size={28} />
@@ -253,36 +370,68 @@ export default function BranchPayoutPeriodsSection({
         </div>
       )}
 
-      {showEmptyTab && (
-        <div className="flex flex-col items-center justify-center px-4 py-14 text-center">
-          <p className="text-sm font-semibold text-[var(--color-text)]">
-            {listTab === 'pending' ? 'No pending payouts' : 'No completed payouts'}
-          </p>
-          <p className="mt-1 max-w-sm text-xs text-[var(--color-text-muted)]">
-            {listTab === 'pending'
-              ? 'Open cycles, unpaid periods, and payouts in review show here.'
-              : 'Paid and rejected payout records appear here.'}
-          </p>
+      {!periodsLoading && displayRows.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[960px] text-left text-xs">
+            <thead>
+              <tr className="border-b border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/50 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                <th className="px-3 py-2.5 font-semibold">Payout Period</th>
+                {AMOUNT_COLUMNS.map((label) => (
+                  <th key={label} className="px-3 py-2.5 text-right font-semibold">
+                    {label}
+                  </th>
+                ))}
+                <th className="px-3 py-2.5 font-semibold">Status</th>
+                <th className="px-3 py-2.5 text-right font-semibold">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {displayRows.map((row) => {
+                const highlighted =
+                  activeHighlight != null &&
+                  row.periodFrom === activeHighlight.periodFrom &&
+                  row.periodTo === activeHighlight.periodTo;
+                return (
+                <tr
+                  key={row.key}
+                  ref={highlighted ? highlightRowRef : undefined}
+                  className={cn(
+                    'border-b border-[var(--color-navy-border)]/70 last:border-b-0 hover:bg-[var(--color-input-bg)]/40',
+                    highlighted && 'bg-[var(--color-brand-subtle)]/40 ring-1 ring-inset ring-[var(--color-brand)]/30',
+                  )}
+                >
+                  <td className="px-3 py-3 whitespace-nowrap text-[var(--color-text)]">
+                    {formatPayoutPeriodCell(row)}
+                  </td>
+                  <PayoutPeriodAmountCells
+                    row={row}
+                    netPreviewData={previewByKey.get(row.key)}
+                    previewLoading={previewLoadingByKey.get(row.key) ?? false}
+                    previewPeriodTo={previewPeriodTo(row)}
+                  />
+                  <td className="px-3 py-3">
+                    <span className={cn('admin-status-badge', statusBadgeClass(row.status))}>
+                      {statusLabel(row.status)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setViewRow(periodToViewRow(row, storeId))}
+                      className={cn(
+                        'inline-flex items-center rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5',
+                        'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
+                      )}
+                    >
+                      View
+                    </button>
+                  </td>
+                </tr>
+              );
+              })}
+            </tbody>
+          </table>
         </div>
-      )}
-
-      {!tableLoading && summaryRecords.length > 0 && (
-        <PayoutSummaryTable
-          listTab={listTab}
-          records={summaryRecords}
-          allPeriodRows={rows}
-          previewByKey={previewByKey}
-          previewLoadingByKey={previewLoadingByKey}
-          displayAmountsByKey={displayAmountsByKey}
-          highlightPeriod={activeHighlight}
-          highlightRowRef={highlightRowRef}
-          onViewRecord={openRecord}
-          pagination={
-            listTab === 'completed' && onWithdrawalPageChange ? withdrawalPagination : null
-          }
-          onPageChange={listTab === 'completed' ? onWithdrawalPageChange : undefined}
-          paginationLoading={withdrawalsLoading}
-        />
       )}
 
       <WalletWithdrawalModal
@@ -290,7 +439,6 @@ export default function BranchPayoutPeriodsSection({
         onClose={() => setViewRow(null)}
         viewWithdrawal={viewRow?.withdrawal ?? null}
         viewPeriodOnly={viewRow?.viewPeriodOnly ?? false}
-        viewPeriodDisplay={viewRow?.periodDisplay}
         walletBalance={walletBalance}
         availableBalance={availableBalance}
         storeId={storeId ?? viewRow?.withdrawal.storeId}

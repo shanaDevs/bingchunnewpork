@@ -42,7 +42,8 @@ import kotlin.math.hypot
 object QuickBubble {
 
     private const val PREFS = "bc_quick_bubble"
-    private const val KEY_ENABLED = "enabled"
+    // "_v2": on by default — older builds may have saved "off" under the previous key.
+    private const val KEY_ENABLED = "enabled_v2"
     private const val KEY_SIGNED_IN = "signedIn"
     private const val KEY_RIGHT = "right"
     private const val KEY_Y = "y"
@@ -144,7 +145,7 @@ object QuickBubble {
             elevation = dp(ctx, 6f).toFloat()
             outlineProvider = ViewOutlineProvider.BACKGROUND
             setPadding(ring, ring, ring, ring)
-            contentDescription = "Open Bing Chun Delivery"
+            contentDescription = "Open Bring It"
         }
         val logo = ImageView(ctx).apply {
             setImageResource(R.drawable.quick_bubble_logo)

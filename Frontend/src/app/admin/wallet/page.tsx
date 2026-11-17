@@ -17,12 +17,11 @@ import BranchWalletTabs from '@/components/admin/BranchWalletTabs';
 import SuperAdminWalletTabs from '@/components/admin/SuperAdminWalletTabs';
 import type { PayoutDueRow } from '@/components/admin/PayoutsDuePanel';
 import {
-  dueRowToPeriodView,
+  duePeriodFocusFromRow,
   type DuePeriodFocus,
 } from '@/components/admin/payoutPeriodView';
 import type { StoreWallet } from '@/components/admin/SuperAdminSystemWalletTab';
 import WalletPeriodFilterBar from '@/components/admin/WalletPeriodFilterBar';
-import WalletPayoutsDueBranchFilter from '@/components/admin/WalletPayoutsDueBranchFilter';
 import {
   adminWalletOverviewQueryKey,
   adminWalletWithdrawalsQueryKey,
@@ -41,6 +40,8 @@ import toast from 'react-hot-toast';
 import { adminAuthHeaders } from '@/lib/adminSession';
 import { normalizeWithdrawalFromApi } from '@/lib/moneyString';
 import {
+  branchPayoutsDueQueryKey,
+  fetchBranchPayoutsDue,
   refreshBranchPayoutsDueQueries,
   removePaidBranchFromPayoutsDueCache,
   type BranchPayoutCompletedMeta,
@@ -103,14 +104,11 @@ function WalletOverviewPageContent() {
     periodFrom: string;
     periodTo: string;
     days: number;
-    withdrawalId?: string;
   } | null>(null);
-  const [duePayoutViewRow, setDuePayoutViewRow] = useState<PayoutDueRow | null>(null);
   const [payoutPeriodsRefresh, setPayoutPeriodsRefresh] = useState(0);
 
   const apiBase = getApiBaseUrl();
   const dueTabActive = searchParams.get('tab') === 'due';
-  const dueStoreId = searchParams.get('dueStoreId');
   const urlFrom = searchParams.get('from');
   const urlTo = searchParams.get('to');
 
@@ -174,10 +172,25 @@ function WalletOverviewPageContent() {
     void queryClient.invalidateQueries({ queryKey: ['admin-wallet-overview'] });
     void queryClient.invalidateQueries({ queryKey: ['admin-wallet-withdrawals'] });
     void queryClient.invalidateQueries({ queryKey: ['payout-periods'] });
-    void queryClient.invalidateQueries({ queryKey: ['wallet-analysis'] });
-    void queryClient.invalidateQueries({ queryKey: ['admin-stats'] });
-    void queryClient.invalidateQueries({ queryKey: ['admin-dashboard'] });
   }, [queryClient]);
+
+  const superAdminSession = admin != null && isSuperAdmin(admin);
+
+  const branchPayoutsDueQuery = useQuery({
+    queryKey: branchPayoutsDueQueryKey(),
+    queryFn: ({ signal }) => fetchBranchPayoutsDue(apiBase, signal),
+    enabled: superAdminSession && dueTabActive && Boolean(periodFrom && periodTo),
+    staleTime: 45_000,
+  });
+
+  const duePayouts = branchPayoutsDueQuery.data ?? [];
+  const duePayoutsLoading =
+    branchPayoutsDueQuery.isLoading ||
+    (branchPayoutsDueQuery.isFetching && !branchPayoutsDueQuery.isFetched);
+  const duePayoutsLoadingMore =
+    branchPayoutsDueQuery.isFetching &&
+    branchPayoutsDueQuery.isFetched &&
+    !branchPayoutsDueQuery.isLoading;
 
   const invalidateBranchPayoutsDue = useCallback(() => {
     void refreshBranchPayoutsDueQueries(queryClient);
@@ -249,12 +262,6 @@ function WalletOverviewPageContent() {
   const superAdmin = isSuperAdmin(admin);
   const pickupOnly = isPickupOnlyBranchAdmin(admin);
 
-  const branchAllTimeAvailableCents =
-    walletSummary?.allTimeAvailableBalanceCents ??
-    wallets[0]?.allTimeAvailableBalanceCents ??
-    walletDashboard?.payablesBreakdown?.allTimeAvailableBalanceCents ??
-    null;
-
   const branchSummary: WalletSummary | null =
     walletSummary ??
     (wallets[0]
@@ -268,9 +275,6 @@ function WalletOverviewPageContent() {
             .filter((w) => w.storeId === wallets[0].storeId || !w.storeId)
             .reduce((s, w) => s + w.amount, 0),
           availableBalance: wallets[0].availableBalance ?? wallets[0].balance,
-          allTimeAvailableBalanceCents:
-            wallets[0].allTimeAvailableBalanceCents ??
-            walletDashboard?.payablesBreakdown?.allTimeAvailableBalanceCents,
         }
       : null);
 
@@ -282,11 +286,6 @@ function WalletOverviewPageContent() {
 
   const storeNameMap = Object.fromEntries(
     wallets.map((w) => [w.storeId, branchDisplayName(w.store.name)]),
-  );
-
-  const branchFilterStores = useMemo(
-    () => wallets.map((w) => ({ id: w.storeId, name: w.store.name })),
-    [wallets],
   );
 
   const walletFromDueRow = (row: PayoutDueRow): StoreWallet => {
@@ -304,7 +303,16 @@ function WalletOverviewPageContent() {
   };
 
   const handleViewDuePayout = (row: PayoutDueRow) => {
-    setDuePayoutViewRow(row);
+    const oldest =
+      duePayouts
+        .filter((item) => item.storeId === row.storeId)
+        .sort(
+          (a, b) =>
+            a.periodTo.localeCompare(b.periodTo) || a.periodFrom.localeCompare(b.periodFrom),
+        )[0] ?? row;
+    setAutoInitiatePayout(false);
+    setDuePeriodFocus(duePeriodFocusFromRow(oldest));
+    setBranchWalletTarget(walletFromDueRow(oldest));
   };
 
   const handleReviewDuePayout = (row: PayoutDueRow) => {
@@ -313,7 +321,6 @@ function WalletOverviewPageContent() {
       periodFrom: row.periodFrom,
       periodTo: row.periodTo,
       days: row.days,
-      ...(row.withdrawalId ? { withdrawalId: row.withdrawalId } : {}),
     });
   };
 
@@ -380,11 +387,7 @@ function WalletOverviewPageContent() {
               : 'Manage branch wallet, payouts and transaction history'}
           </p>
         </div>
-        {superAdmin && dueTabActive ? (
-          <WalletPayoutsDueBranchFilter stores={branchFilterStores} className="shrink-0" />
-        ) : (
-          <WalletPeriodFilterBar filter={periodFilter} className="shrink-0" />
-        )}
+        <WalletPeriodFilterBar filter={periodFilter} className="shrink-0" />
       </div>
 
       {error && (
@@ -399,11 +402,7 @@ function WalletOverviewPageContent() {
             dashboard={walletDashboard}
             loading={loading && !branchSummary}
             periodLoading={dashboardLoading}
-            allTimeBalanceCents={
-              branchAllTimeAvailableCents ??
-              branchSummary?.allTimeAvailableBalanceCents ??
-              undefined
-            }
+            allTimeBalanceCents={branchSummary?.currentBalance}
             periodFrom={periodFrom}
             periodTo={periodTo}
             periodLabel={periodLabel}
@@ -440,8 +439,9 @@ function WalletOverviewPageContent() {
               setDuePeriodFocus(null);
               setBranchWalletTarget(wallet);
             }}
-            dueListEnabled={dueTabActive}
-            dueStoreId={dueStoreId}
+            duePayouts={duePayouts}
+            duePayoutsLoading={duePayoutsLoading}
+            duePayoutsLoadingMore={duePayoutsLoadingMore}
             onViewDuePayout={handleViewDuePayout}
             onReviewDuePayout={handleReviewDuePayout}
             tabActions={walletTabActions}
@@ -490,32 +490,6 @@ function WalletOverviewPageContent() {
         />
       )}
 
-      {superAdmin && duePayoutViewRow && (() => {
-        const dueWallet = walletFromDueRow(duePayoutViewRow);
-        const dueView = dueRowToPeriodView(duePayoutViewRow);
-        return (
-          <WalletWithdrawalModal
-            open
-            onClose={() => setDuePayoutViewRow(null)}
-            viewWithdrawal={dueView.withdrawal}
-            viewPeriodOnly={dueView.viewPeriodOnly}
-            viewPeriodDisplay={dueView.periodDisplay}
-            walletBalance={dueWallet.balance ?? dueWallet.currentBalance ?? 0}
-            availableBalance={
-              dueWallet.availableBalance ??
-              Math.max(
-                0,
-                (dueWallet.netTransferableEarnings ?? 0) - (dueWallet.totalWithdrawn ?? 0),
-              )
-            }
-            storeId={duePayoutViewRow.storeId}
-            apiBase={apiBase}
-            onSubmitted={() => undefined}
-            showGatewayFees={false}
-          />
-        );
-      })()}
-
       {superAdmin && initiatePayoutTarget && (
         <AdminInitiatePayoutModal
           open
@@ -527,7 +501,6 @@ function WalletOverviewPageContent() {
           presetPeriodFrom={initiatePayoutPreset?.periodFrom ?? null}
           presetPeriodTo={initiatePayoutPreset?.periodTo ?? null}
           presetPeriodDays={initiatePayoutPreset?.days ?? null}
-          presetWithdrawalId={initiatePayoutPreset?.withdrawalId ?? null}
           storeId={initiatePayoutTarget.storeId}
           branchName={branchDisplayName(initiatePayoutTarget.store.name)}
           walletBalance={initiatePayoutTarget.balance ?? 0}

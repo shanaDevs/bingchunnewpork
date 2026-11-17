@@ -127,25 +127,13 @@ export function upsertOptimisticAdminOrder(
     });
   }
 
-  for (const query of qc.getQueryCache().findAll({ queryKey: ['admin-orders-queue-counts'] })) {
-    const activeTab = query.queryKey[1];
-    qc.setQueryData<{
-      tabs: { pickup: number; delivery: number };
-      status: { RECEIVED: number; PREPARING: number; READY: number };
-    }>(query.queryKey, (prev) => {
-      if (!prev?.tabs) return prev;
-      const nextTabs = { ...prev.tabs };
-      if (order.orderMode === 'TAKEAWAY') nextTabs.pickup += 1;
-      if (order.orderMode === 'DELIVERY') nextTabs.delivery += 1;
-      const nextStatus = { ...prev.status };
-      // New orders land in RECEIVED for the active queue tab.
-      if (
-        (order.orderMode === 'TAKEAWAY' && activeTab === 'pickup') ||
-        (order.orderMode === 'DELIVERY' && activeTab === 'delivery')
-      ) {
-        nextStatus.RECEIVED = (nextStatus.RECEIVED ?? 0) + 1;
-      }
-      return { ...prev, tabs: nextTabs, status: nextStatus };
+  for (const query of qc.getQueryCache().findAll({ queryKey: ['admin-orders-count'] })) {
+    const mode = query.queryKey[1];
+    if (mode !== order.orderMode) continue;
+
+    qc.setQueryData<number>(query.queryKey, (prev) => {
+      if (typeof prev !== 'number') return prev;
+      return prev + 1;
     });
   }
 }

@@ -8,15 +8,15 @@ import '../../core/feedback.dart';
 import '../../core/format.dart';
 import '../../state/auth_controller.dart';
 import '../components/auth_kit.dart';
+import '../components/auth_scene.dart';
 import '../components/bc_dialog.dart';
-import '../components/inputs.dart';
 import '../theme/bc_theme.dart';
 import 'otp_screen.dart';
 import 'server_url_dialog.dart';
 import '../../l10n/l10n.dart';
 
 /// Mobile-number sign-in, step 1 — the rider's number gets a 6-digit code by SMS.
-/// Port of LoginScreen.kt's layout (illustrated hero + notched card).
+/// QuickDrop layout: blue fade with greeting + rider scene, +94 phone row, Continue, help footer.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -26,7 +26,10 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _phone = TextEditingController();
+  final _focus = FocusNode();
   int _logoTaps = 0;
+  int _mascotTaps = 0;
+  DateTime? _lastMascotTap;
   String? _lastError;
   String? _appSignature;
 
@@ -42,15 +45,31 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _phone.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
-  /// Hidden debug tool: tap the logo 5 times to open the server-URL dialog.
+  /// Hidden debug tool: tap the wordmark 5 times to open the server-URL dialog.
   void _onBadgeTap() {
     if (!kDebugMode) return;
     _logoTaps++;
     if (_logoTaps >= 5) {
       _logoTaps = 0;
+      showBcDialog<void>(context, builder: (_) => const ServerUrlDialog());
+    }
+  }
+
+  /// Tap the rider mascot 3 times (within 2s of each other) to open the API-change dialog.
+  void _onMascotTap() {
+    final now = DateTime.now();
+    if (_lastMascotTap != null && now.difference(_lastMascotTap!) > const Duration(seconds: 2)) {
+      _mascotTaps = 0;
+    }
+    _lastMascotTap = now;
+    _mascotTaps++;
+    if (_mascotTaps >= 3) {
+      _mascotTaps = 0;
+      _lastMascotTap = null;
       showBcDialog<void>(context, builder: (_) => const ServerUrlDialog());
     }
   }
@@ -69,6 +88,11 @@ class _LoginScreenState extends State<LoginScreen> {
     if (mounted) auth.clearError();
   }
 
+  bool get _complete {
+    final d = _phone.text.replaceAll(RegExp(r'\D'), '');
+    return d.length >= (d.startsWith('0') ? 10 : 9);
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthController>();
@@ -78,53 +102,61 @@ class _LoginScreenState extends State<LoginScreen> {
     _lastError = auth.error;
     final ready = Format.lkMobile(_phone.text) != null;
     final c = context.bc;
+    final error = (isTop ? auth.error : null) ??
+        (_complete && !ready ? tr('Enter a valid mobile number, e.g. 077 123 4567.') : null);
 
     return BcAuthScaffold(
-      kicker: tr('Welcome Back!'),
-      subtitle: tr('Sign in with your registered mobile number to open your delivery dashboard.'),
-      badge: GestureDetector(onTap: _onBadgeTap, child: const BcAuthBadge()),
-      card: Column(
+      onLogoTap: _onBadgeTap,
+      hero: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+            child: BcAuthGreeting(
+              lead: tr('Welcome back,'),
+              title: tr('Rider!'),
+              subtitle: tr('Sign in with your mobile number to continue.'),
+            ),
+          ),
+          BcRiderCityScene(onRiderTap: _onMascotTap),
+        ],
+      ),
+      body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          BcAuthCardHeader(
-            title: tr('Enter Mobile Number'),
-            message: Text(tr("We'll text a 6-digit code to the\nnumber registered with your rider account.")),
-          ),
-          const SizedBox(height: 22),
-          BcTextField(
+          _PhoneRow(
             controller: _phone,
-            label: tr('Mobile number'),
-            placeholder: '07X XXX XXXX',
-            isError: isTop && auth.error != null,
-            supportingText: (isTop ? auth.error : null) ?? tr('Sri Lankan mobile, e.g. 077 123 4567'),
-            keyboardType: TextInputType.phone,
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
-              LengthLimitingTextInputFormatter(15),
-            ],
-            onChanged: (_) {
+            focus: _focus,
+            isError: error != null,
+            onChanged: () {
               auth.clearError();
               setState(() {});
             },
-            trailing: Icon(Icons.phone_iphone_rounded, color: c.textMuted),
+            onSubmit: ready && !auth.loading ? () => _sendCode(auth) : null,
           ),
-          const SizedBox(height: 20),
+          if (error != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+              child: Text(error, style: BcType.caption.copyWith(fontSize: 14, color: c.errorStrong)),
+            ),
+          const SizedBox(height: 18),
           BcAuthButton(
-            label: auth.loading ? tr('Sending code…') : tr('Send code'),
+            label: auth.loading ? tr('Sending code…') : tr('Continue'),
             loading: auth.loading,
             enabled: ready && !auth.loading,
             onPressed: () => _sendCode(auth),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.lock_outline_rounded, size: 14, color: c.textMuted),
-              const SizedBox(width: 6),
+              Icon(Icons.verified_user_outlined, size: 20, color: c.primary),
+              const SizedBox(width: 8),
               Flexible(
                 child: Text(
-                  tr('Only registered Bing Chun riders can sign in.'),
-                  style: BcType.tiny.copyWith(color: c.textMuted),
+                  tr("We'll send you a one-time verification code."),
+                  textAlign: TextAlign.center,
+                  style: BcType.caption.copyWith(fontSize: 14, color: c.mutedForeground),
                 ),
               ),
             ],
@@ -132,5 +164,100 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
       ),
     );
+  }
+}
+
+/// Rounded phone row: flag, +94, hairline divider, digits-only field.
+class _PhoneRow extends StatelessWidget {
+  const _PhoneRow({
+    required this.controller,
+    required this.focus,
+    required this.isError,
+    required this.onChanged,
+    required this.onSubmit,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focus;
+  final bool isError;
+  final VoidCallback onChanged;
+  final VoidCallback? onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    return ListenableBuilder(
+      listenable: focus,
+      builder: (context, _) => AnimatedContainer(
+        duration: BcMotion.fast,
+        height: 60,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isError ? c.errorStrong : (focus.hasFocus ? c.primary : c.border),
+            width: focus.hasFocus || isError ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Semantics(
+              label: tr('Sri Lanka country code +94'),
+              excludeSemantics: true,
+              child: Row(
+                children: [
+                  const BcSriLankaFlag(width: 26),
+                  const SizedBox(width: 8),
+                  Text('+94', style: BcType.bodyStrong.copyWith(fontWeight: FontWeight.w700, color: c.foreground)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Container(width: 1, height: 28, color: c.border),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: controller,
+                focusNode: focus,
+                keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.done,
+                autofillHints: const [AutofillHints.telephoneNumberNational],
+                cursorColor: c.primary,
+                style: BcType.body.copyWith(fontSize: 16, color: c.foreground),
+                inputFormatters: [_LkPhoneFormatter()],
+                onChanged: (_) => onChanged(),
+                onSubmitted: (_) => onSubmit?.call(),
+                decoration: InputDecoration(
+                  isCollapsed: true,
+                  border: InputBorder.none,
+                  hintText: tr('Enter your mobile number'),
+                  hintStyle: BcType.body.copyWith(fontSize: 16, color: c.iconMuted),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Digits only, grouped like Format.lkMobileDisplay: `077 123 4567` (or `77 123 4567`).
+class _LkPhoneFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    var d = newValue.text.replaceAll(RegExp(r'\D'), '');
+    if (d.startsWith('94') && d.length >= 11) d = d.substring(2); // pasted +94…
+    final max = d.startsWith('0') ? 10 : 9;
+    if (d.length > max) d = d.substring(0, max);
+    final first = d.startsWith('0') ? 3 : 2;
+    final b = StringBuffer();
+    for (var i = 0; i < d.length; i++) {
+      if (i == first || i == first + 3) b.write(' ');
+      b.write(d[i]);
+    }
+    final out = b.toString();
+    return TextEditingValue(text: out, selection: TextSelection.collapsed(offset: out.length));
   }
 }

@@ -20,13 +20,7 @@ interface ReportItem {
   isOutOfStock: boolean;
   lowStockHits: Array<{ createdAt: string; qtyAfter: number }>;
   depletionHits: Array<{ createdAt: string; qtyAfter: number }>;
-  restockHistory: Array<{
-    createdAt: string;
-    qtyChange: number;
-    note?: string | null;
-    adminUserId?: string | null;
-    adminUserName?: string | null;
-  }>;
+  restockHistory: Array<{ createdAt: string; qtyChange: number; note?: string | null }>;
 }
 
 interface AuditLog {
@@ -87,21 +81,6 @@ export default function StockReportsPanel({ storeId }: { storeId: string }) {
 
   const lowStockProducts = useMemo(
     () => items.filter((i) => i.lowStockHits.length > 0 || i.isLowStock),
-    [items],
-  );
-
-  const restockEvents = useMemo(
-    () =>
-      items
-        .flatMap((item) =>
-          item.restockHistory.map((entry) => ({
-            ...entry,
-            productId: item.productId,
-            productName: item.name,
-          })),
-        )
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 50),
     [items],
   );
 
@@ -232,30 +211,6 @@ export default function StockReportsPanel({ storeId }: { storeId: string }) {
               </table>
             </div>
           </div>
-
-          {restockEvents.length > 0 && (
-            <div className="card p-4">
-              <h2 className="font-semibold text-fg mb-3">Restock history</h2>
-              <ul className="space-y-2 text-sm">
-                {restockEvents.map((entry) => (
-                  <li
-                    key={`${entry.productId}-${entry.createdAt}-${entry.qtyChange}`}
-                    className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-navy-border/40 pb-2"
-                  >
-                    <span className="text-muted whitespace-nowrap text-xs">
-                      {new Date(entry.createdAt).toLocaleString()}
-                    </span>
-                    <span className="font-medium text-fg">{entry.productName}</span>
-                    <span className="text-green-400 font-semibold">+{entry.qtyChange}</span>
-                    {entry.adminUserName && (
-                      <span className="text-muted text-xs">by {entry.adminUserName}</span>
-                    )}
-                    {entry.note && <span className="text-muted text-xs w-full">{entry.note}</span>}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
 
           {lowStockProducts.length > 0 && (
             <div className="card p-4">

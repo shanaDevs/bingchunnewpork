@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChannelSettlementRow } from '../../src/lib/commission';
-import { formatInvoiceLineAmount, formatInvoiceLkr } from '../../src/lib/invoice/format';
+import { formatInvoiceLkr } from '../../src/lib/invoice/format';
 import type { GenerateWithdrawalInvoiceInput, InvoiceChannelSummary } from '../../src/lib/invoice/types';
-import { buildNetBranchPayoutRows } from '../../src/lib/invoice/dataBuilders';
-import { INVOICE_PRIOR_PAYOUT_ONLINE_WALLET_ROW_LABEL } from '../../src/lib/invoice/payoutInvoiceCopy';
 import {
   buildInvoiceSummaryRows,
   buildOnlineGrossCalculation,
@@ -67,17 +65,6 @@ describe('formatInvoiceLkr', () => {
   });
 });
 
-describe('formatInvoiceLineAmount', () => {
-  it('formats line amounts without a currency prefix', () => {
-    expect(formatInvoiceLineAmount(2_808_000)).toBe('28,080.00');
-    expect(formatInvoiceLineAmount(0)).toBe('0.00');
-  });
-
-  it('formats negative line amounts with a leading minus', () => {
-    expect(formatInvoiceLineAmount(-231_280)).toBe('- 2,312.80');
-  });
-});
-
 describe('buildPlatformSalesRows', () => {
   it('always renders four channels plus a highlighted total', () => {
     const cs: InvoiceChannelSummary = {
@@ -102,7 +89,7 @@ describe('buildPlatformSalesRows', () => {
     expect(rows[3]).toMatchObject({
       label: 'Delivery online',
       orders: '1',
-      amount: '530.00',
+      amount: 'LKR 530.00',
     });
     expect(rows[4]).toMatchObject({
       label: 'Total platform sales',
@@ -118,61 +105,6 @@ describe('buildPlatformSalesRows', () => {
     expect(rows).toHaveLength(5);
     expect(rows.slice(0, 4).every((row) => row.amount === '—')).toBe(true);
     expect(rows[4]?.amount).toBe('LKR 0.00');
-  });
-});
-
-describe('resolvePriorOnlineWalletAmountCentsFromBreakdown', () => {
-  it('uses firstPayoutOnlineSubtotalCents on Payout 2 snapshots', async () => {
-    const { resolvePriorOnlineWalletAmountCentsFromBreakdown } = await import(
-      '../../src/lib/invoice/payoutStatement'
-    );
-    expect(
-      resolvePriorOnlineWalletAmountCentsFromBreakdown(
-        {
-          cycleStage: 'SECOND',
-          firstPayoutOnlineSubtotalCents: 2_149_000,
-          commissionFee: 80_936,
-        },
-        'SECOND',
-      ),
-    ).toBe(2_149_000);
-  });
-
-  it('does not treat Payout 1 subtotal as a prior deduction on Payout 1 invoices', async () => {
-    const { resolvePriorOnlineWalletAmountCentsFromBreakdown } = await import(
-      '../../src/lib/invoice/payoutStatement'
-    );
-    expect(
-      resolvePriorOnlineWalletAmountCentsFromBreakdown(
-        {
-          cycleStage: 'FIRST',
-          firstPayoutOnlineSubtotalCents: 2_149_000,
-        },
-        'FIRST',
-      ),
-    ).toBe(0);
-  });
-});
-
-describe('buildNetBranchPayoutRows', () => {
-  it('includes prior Payout 1 online wallet on Payout 2 invoices (display only)', () => {
-    const statement = buildPayoutStatementFromBreakdown(
-      {
-        cycleStage: 'SECOND',
-        onlinePaymentsCollected: 3_160_500,
-        firstPayoutOnlineSubtotalCents: 2_149_000,
-        commissionFee: 80_936,
-        gatewayFee: 19_219,
-        sharedPromoJasonContributionAmount: 69_100,
-      },
-      980_445,
-      true,
-    );
-    const rows = buildNetBranchPayoutRows(statement);
-    expect(rows.find((row) => row.label === INVOICE_PRIOR_PAYOUT_ONLINE_WALLET_ROW_LABEL)).toMatchObject({
-      label: INVOICE_PRIOR_PAYOUT_ONLINE_WALLET_ROW_LABEL,
-      amount: '21,490.00',
-    });
   });
 });
 
@@ -303,26 +235,6 @@ describe('buildPayoutStatementFromBreakdown', () => {
     expect(statement.platformDiscountsReportCents).toBe(8_000);
     expect(statement.netPlatformAmountCents).toBe(2_000);
   });
-
-  it('defers net platform amount and platform discounts on FIRST payout invoices', () => {
-    const statement = buildPayoutStatementFromBreakdown(
-      {
-        cycleStage: 'FIRST',
-        grossAmount: 432_000,
-        onlinePaymentsCollected: 310_500,
-        commissionFee: 0,
-        platformPaybackTotal: 19_500,
-        platformOwnedPromoDiscountTotal: 0,
-        gatewayFee: 5_900,
-        netPlatformEarning: 0,
-      },
-      304_600,
-      true,
-    );
-    expect(statement.commissionCents).toBe(0);
-    expect(statement.platformDiscountsReportCents).toBe(0);
-    expect(statement.netPlatformAmountCents).toBe(0);
-  });
 });
 
 describe('buildPage2PayoutSections', () => {
@@ -359,7 +271,7 @@ describe('buildPage2PayoutSections', () => {
       'Jason',
       'Total by Cost Partner',
     ]);
-    expect(discounts?.rows.find((row) => row.label === 'Jason')?.amount).toBe('0.00');
+    expect(discounts?.rows.find((row) => row.label === 'Jason')?.amount).toBe('LKR 0.00');
 
     const refunds = buildPage2PayoutSections(statement).find((s) => s.title === 'Refunds');
     expect(refunds?.rows.at(-1)).toMatchObject({
@@ -373,7 +285,7 @@ describe('buildPage2PayoutSections', () => {
     const netBranch = buildPage2PayoutSections(statement).find((s) => s.title === 'Net branch payout');
     const penalty = netBranch?.rows.find((row) => row.label.startsWith('– Bank penalty'));
     expect(penalty?.hint).toBe('LKR 150 × 1 order');
-    expect(penalty?.amount).toBe('150.00');
+    expect(penalty?.amount).toBe('LKR 150.00');
     expect(netBranch?.rows.at(-1)).toMatchObject({
       label: 'Branch Net Payout',
       amount: 'LKR 34,457.32',
@@ -393,57 +305,6 @@ describe('buildPage2PayoutSections', () => {
       loyaltyDiscountCents: 0,
     }).find((s) => s.title === 'Net branch payout');
     expect(withJason?.rows.some((row) => row.label === '+ Jason Discounts')).toBe(true);
-  });
-
-  it('keeps net platform amount on FIRST payout invoices as LKR 0.00', () => {
-    const firstBreakdown = {
-      cycleStage: 'FIRST' as const,
-      grossAmount: 432_000,
-      onlinePaymentsCollected: 310_500,
-      commissionFee: 0,
-      platformPaybackTotal: 19_500,
-      platformOwnedPromoDiscountTotal: 0,
-      gatewayFee: 5_900,
-      netPlatformEarning: 0,
-    };
-    const firstStatement = buildPayoutStatementFromBreakdown(firstBreakdown, 304_600, true);
-    const summary = buildInvoiceSummaryRows(
-      {
-        requestedCents: 304_600,
-        payoutStatement: {
-          ...firstStatement,
-          platformDiscountsReportCents: 19_500,
-          netPlatformAmountCents: -19_500,
-        },
-      } as GenerateWithdrawalInvoiceInput,
-      { withdrawalBreakdown: firstBreakdown, cycleStage: 'FIRST' },
-    );
-    const summaryNpa = summary.find((row) => row.label === '– Net Platform Amount');
-    expect(summaryNpa?.amount).toBe('—');
-
-    const sections = buildPage2PayoutSections(firstStatement, { cycleStage: 'FIRST' });
-    const npa = sections.find((section) => section.title === 'Net platform amount');
-    expect(npa).toBeDefined();
-    expect(npa?.rows.find((row) => row.label === 'Commission')?.amount).toBe('—');
-    expect(npa?.rows.find((row) => row.label === '– Platform Discounts')?.amount).toBe('—');
-    expect(npa?.rows.find((row) => row.label === 'Net Platform Amount')).toMatchObject({
-      amount: 'LKR 0.00',
-      bold: true,
-      highlight: true,
-    });
-    const discounts = sections.find((section) => section.title === 'Discounts');
-    expect(discounts?.rows.find((row) => row.label === 'Platform-owned discount')?.amount).toBe('—');
-    expect(discounts?.rows.find((row) => row.label === 'Total by Cost Partner')?.amount).toBe(
-      'considered on next payout',
-    );
-    const refunds = sections.find((section) => section.title === 'Refunds');
-    expect(refunds?.rows.find((row) => row.label === 'Non-returning refunds (Branch)')?.amount).toBe(
-      '—',
-    );
-    expect(refunds?.rows.find((row) => row.label === 'Total Refund Amount')?.amount).toBe(
-      'considered on next payout',
-    );
-    expect(sections.some((section) => section.title === 'Net branch payout')).toBe(true);
   });
 });
 

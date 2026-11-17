@@ -102,18 +102,18 @@ export async function resolveDeliveryValidation(
   }
 
   const ranked = stores
-    .map((store: (typeof stores)[number]) => ({
+    .map((store) => ({
       store,
       distanceKm: haversineKm(userLat, userLng, store.lat, store.lng),
     }))
-    .sort((a: { distanceKm: number }, b: { distanceKm: number }) => a.distanceKm - b.distanceKm);
+    .sort((a, b) => a.distanceKm - b.distanceKm);
 
   const nearest = ranked[0];
-  const withinRange = ranked.filter((r: { distanceKm: number }) => r.distanceKm <= DELIVERY_MAX_KM);
+  const withinRange = ranked.filter((r) => r.distanceKm <= DELIVERY_MAX_KM);
   const suggested = withinRange.slice(0, 2);
-  const suggestedIds = new Set(suggested.map((s: { store: { id: string } }) => s.store.id));
+  const suggestedIds = new Set(suggested.map((s) => s.store.id));
 
-  const allBranchOptions = ranked.map(({ store, distanceKm }: { store: (typeof stores)[number]; distanceKm: number }) =>
+  const allBranchOptions = ranked.map(({ store, distanceKm }) =>
     toBranchOption(store, distanceKm, suggestedIds.has(store.id)),
   );
 
@@ -136,9 +136,9 @@ export async function resolveDeliveryValidation(
   let selected = suggested[0];
 
   if (storeId) {
-    const match = suggested.find((s: { store: { id: string } }) => s.store.id === storeId);
+    const match = suggested.find((s) => s.store.id === storeId);
     if (!match) {
-      const requested = ranked.find((r: { store: { id: string } }) => r.store.id === storeId);
+      const requested = ranked.find((r) => r.store.id === storeId);
       const dist = requested?.distanceKm ?? nearest.distanceKm;
       return {
         eligible: false,

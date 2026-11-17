@@ -459,11 +459,7 @@ class _SettingsSheet extends StatefulWidget {
 }
 
 class _SettingsSheetState extends State<_SettingsSheet> {
-  late final _target = TextEditingController(
-    text: widget.item.weeklyTargetQty == 0
-        ? '$defaultWeeklyTargetQty'
-        : '${widget.item.weeklyTargetQty}',
-  );
+  late final _target = TextEditingController(text: widget.item.weeklyTargetQty == 0 ? '' : '${widget.item.weeklyTargetQty}');
   late final _low = TextEditingController(text: '${widget.item.lowStockThreshold}');
   late final _oos = TextEditingController(text: '${widget.item.onlineOutOfStockThreshold}');
   bool _busy = false;

@@ -8,27 +8,11 @@ import { addColumnIfMissing } from './schemaPatch';
 export type PaymentMethodKey = 'PAYHERE' | 'CASH_AT_COUNTER' | 'CARD';
 export type OnlineGateway = 'PAYHERE' | 'WEBXPAY';
 
-/** Fallback when admin has not set a pickup order amount limit. */
+/** Pickup orders above this subtotal (LKR) must be paid online. */
 export const PICKUP_ONLINE_PAYMENT_THRESHOLD = 1000;
 
-export function requiresOnlinePaymentForPickup(
-  subtotal: number,
-  limit: number | null | undefined = PICKUP_ONLINE_PAYMENT_THRESHOLD,
-): boolean {
-  const threshold =
-    limit != null && Number.isFinite(limit) && limit > 0 ? limit : PICKUP_ONLINE_PAYMENT_THRESHOLD;
-  return subtotal >= threshold;
-}
-
-async function cashAtCounterThreshold(): Promise<number> {
-  try {
-    const { getPickupMaxOrderAmount } = await import('./appSchema');
-    const adminLimit = await getPickupMaxOrderAmount();
-    if (adminLimit != null && adminLimit > 0) return adminLimit;
-  } catch {
-    /* fall through */
-  }
-  return PICKUP_ONLINE_PAYMENT_THRESHOLD;
+export function requiresOnlinePaymentForPickup(subtotal: number): boolean {
+  return subtotal >= PICKUP_ONLINE_PAYMENT_THRESHOLD;
 }
 
 export interface PaymentMethodConfig {
@@ -299,11 +283,10 @@ export async function getEnabledMethodsForCheckout(
     })
     .map(([id, m]) => ({ id, label: m.label, icon: DEFAULT_METHODS[id].icon }));
 
-  const cashThreshold = await cashAtCounterThreshold();
   if (
     orderMode === 'TAKEAWAY' &&
     orderSubtotal != null &&
-    !requiresOnlinePaymentForPickup(orderSubtotal, cashThreshold)
+    !requiresOnlinePaymentForPickup(orderSubtotal)
   ) {
     const cash = settings.methods.CASH_AT_COUNTER;
     if (
@@ -327,15 +310,14 @@ export async function assertPaymentMethodAllowed(
   orderMode: 'DELIVERY' | 'TAKEAWAY',
   orderSubtotal?: number,
 ): Promise<void> {
-  const cashThreshold = await cashAtCounterThreshold();
   if (
     orderMode === 'TAKEAWAY' &&
     method === 'CASH_AT_COUNTER' &&
     orderSubtotal != null &&
-    requiresOnlinePaymentForPickup(orderSubtotal, cashThreshold)
+    requiresOnlinePaymentForPickup(orderSubtotal)
   ) {
     throw new AppError(
-      `Takeaway orders of LKR ${cashThreshold.toLocaleString()} or more must be paid online`,
+      `Takeaway orders of LKR ${PICKUP_ONLINE_PAYMENT_THRESHOLD.toLocaleString()} or more must be paid online`,
       400,
     );
   }
@@ -344,7 +326,7 @@ export async function assertPaymentMethodAllowed(
     method === 'CASH_AT_COUNTER' &&
     orderMode === 'TAKEAWAY' &&
     orderSubtotal != null &&
-    !requiresOnlinePaymentForPickup(orderSubtotal, cashThreshold)
+    !requiresOnlinePaymentForPickup(orderSubtotal)
   ) {
     const settings = await getPaymentSettings();
     const cash = settings.methods.CASH_AT_COUNTER;

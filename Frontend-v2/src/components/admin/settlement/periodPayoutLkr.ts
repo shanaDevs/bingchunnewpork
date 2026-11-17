@@ -1,5 +1,5 @@
 import type { SettlementPreview } from './settlementModels';
-import { sumOnlineRevenueSubtotals, type SettlementBreakdown } from './channelBreakdown';
+import { sumOnlineRevenueSubtotals } from './channelBreakdown';
 import { resolveTotalPlatformCommissionDisplayLkr } from './platformCommissionLkr';
 
 /** Total customer convenience fee for payout allocation (order + retained refund fees). */
@@ -44,29 +44,6 @@ export function computePeriodGatewayLkr(params: {
   return Math.round(params.onlinePaymentsCollectedLkr * 100 * rate) / 100;
 }
 
-/** Payout 2 — matches admin “Branch wallet before gateway” walkthrough (LKR). */
-export function computeBranchWalletBeforeGatewayLkr(params: {
-  onlinePaymentsCollectedLkr: number;
-  jasonDiscountsLkr?: number;
-  priorOnlineWalletAmountLkr?: number;
-  nonReturningRefundsBranchGrossLkr?: number;
-  netPlatformAmountLkr?: number;
-  /** Display subtotal only. Omit when computing the 1.9% gateway-fee base. */
-  bankPenaltyLkr?: number;
-}): number {
-  return (
-    Math.round(
-      (params.onlinePaymentsCollectedLkr +
-        (params.jasonDiscountsLkr ?? 0) -
-        (params.priorOnlineWalletAmountLkr ?? 0) +
-        (params.nonReturningRefundsBranchGrossLkr ?? 0) -
-        (params.netPlatformAmountLkr ?? 0) -
-        (params.bankPenaltyLkr ?? 0)) *
-        100,
-    ) / 100
-  );
-}
-
 /** Branch net payout using the same formula as ApprovePayoutBreakdown summary. */
 export function computePeriodPayoutNetFromPreview(params: {
   preview: SettlementPreview | null;
@@ -79,11 +56,8 @@ export function computePeriodPayoutNetFromPreview(params: {
     netPlatformEarning?: number;
     sharedPromoPlatformContributionLkr?: number;
     onlineWalletGross?: number;
-    gatewayBase?: number;
     convenienceFee?: number;
     deliveryFee?: number;
-    cycleStage?: 'FIRST' | 'SECOND';
-    channelBreakdown?: SettlementBreakdown;
     cancelledByBranchGatewayFee?: number;
     customerLateCancelNetAmount?: number;
     rejectedRefundNetAmount?: number;
@@ -100,11 +74,7 @@ export function computePeriodPayoutNetFromPreview(params: {
   const period = params.periodBreakdownLkr;
   const onlinePaymentsCollectedLkr = preview
     ? sumOnlineRevenueSubtotals(preview.breakdown)
-    : period.cycleStage === 'FIRST' && period.channelBreakdown
-      ? sumOnlineRevenueSubtotals(period.channelBreakdown)
-      : period.cycleStage === 'FIRST'
-        ? (period.gatewayBase ?? period.onlineWalletGross ?? 0)
-        : (period.onlineWalletGross ?? 0);
+    : (period.onlineWalletGross ?? 0);
   const commissionLkr = preview?.totalCommission ?? period.commissionFee;
   const sharedPromoPlatformLkr =
     params.sharedPromoPlatformLkr ?? period.sharedPromoPlatformContributionLkr ?? 0;

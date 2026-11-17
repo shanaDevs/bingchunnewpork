@@ -8,8 +8,9 @@ let socketUrl: string | null = null;
 function buildSocket(url: string): Socket {
   return io(url, {
     path: '/socket.io',
-    // Prefer WebSocket; fall back to polling if the upgrade is blocked.
-    transports: ['websocket', 'polling'],
+    // Polling first avoids the "closed before established" race when a proxy
+    // briefly rejects the WebSocket upgrade; Socket.IO then upgrades to WS.
+    transports: ['polling', 'websocket'],
     upgrade: true,
     withCredentials: true,
     autoConnect: true,

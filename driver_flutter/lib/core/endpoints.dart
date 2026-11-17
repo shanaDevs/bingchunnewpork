@@ -24,4 +24,9 @@ abstract final class Endpoints {
 abstract final class SupportContact {
   static const phone = '+94765466686';
   static const display = '076 546 6686';
+  static const intl = '+94 76 546 6686';
+  static const whatsapp = 'https://wa.me/94765466686';
+
+  /// Placeholder address - confirm the real support mailbox.
+  static const email = 'support@bingchunsrilanka.com';
 }

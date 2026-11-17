@@ -14,7 +14,6 @@ import {
 } from 'lucide-react';
 import ProductImage from '@/components/ui/ProductImage';
 import {
-  DEFAULT_WEEKLY_TARGET_QTY,
   isNewProductItem,
   submitBulkRestock,
   type StockItem,
@@ -69,7 +68,7 @@ export default function BulkRestockModal({
   const [rows, setRows] = useState<BulkRow[]>(() => buildRows(products));
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
-  const [bulkTarget, setBulkTarget] = useState(String(DEFAULT_WEEKLY_TARGET_QTY));
+  const [bulkTarget, setBulkTarget] = useState('');
   const [note, setNote] = useState('');
 
   const filteredRows = useMemo(() => {

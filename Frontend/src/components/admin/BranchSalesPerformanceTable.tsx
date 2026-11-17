@@ -46,7 +46,7 @@ type Props = {
   rows: BranchPerformanceRow[];
   period: DashboardPeriod;
   customRange: DateRange | undefined;
-  onPeriodChange: (period: DashboardPeriod) => void;
+  onPeriodChange: (period: Exclude<DashboardPeriod, 'custom'>) => void;
   onCustomRangeChange: (range: DateRange | undefined) => void;
   defaultLimit?: number;
   loading?: boolean;

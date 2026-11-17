@@ -25,12 +25,20 @@ class ApiException implements Exception {
   bool get isMultipleBranches =>
       status == 409 && (code == 'MULTIPLE_BRANCHES' || message.toLowerCase().contains('multiple branches'));
 
+  /// 409 from going on duty / claiming while a vehicle breakdown is still open.
+  bool get isVehicleBreakdownOpen => code == 'VEHICLE_BREAKDOWN_OPEN';
+
   @override
   String toString() => message;
 }
 
+/// Shown when the server refuses work because a vehicle breakdown is still open.
+String vehicleBreakdownOpenMessage() =>
+    tr("You can't go online while your vehicle breakdown is open. Check its progress in Breakdown status.");
+
 /// Readable message for any thrown error — the Kotlin code used `e.message ?: fallback`.
 String errorMessage(Object e, [String? fallback]) {
+  if (e is ApiException && e.isVehicleBreakdownOpen) return vehicleBreakdownOpenMessage();
   if (e is ApiException) return e.message;
   if (e is StateError) return e.message;
   if (e is TimeoutException) return tr('The server is taking too long to respond. Please try again.');

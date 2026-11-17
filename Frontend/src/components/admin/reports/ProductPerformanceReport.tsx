@@ -16,12 +16,10 @@ import {
   formatLkr,
   defaultReportMonthDateStrings,
   formatReportPeriodFromDates,
-  orderModeLabel,
   type LockedStoreReportProps,
   ReportFooterTotalCell,
 } from '@/components/admin/reports/reportUtils';
 import { formatPrintMoneyNoSymbol } from '@/components/admin/AdminPrintReport';
-import type { Category } from '@/types';
 
 type ProductRow = {
   productId: string;
@@ -46,7 +44,6 @@ const COLUMNS = [
 
 export default function ProductPerformanceReport({ lockedStoreId, lockedStoreName }: LockedStoreReportProps) {
   const [orderMode, setOrderMode] = useState<'ALL' | 'TAKEAWAY' | 'DELIVERY'>('ALL');
-  const [categoryId, setCategoryId] = useState('');
   const [sortBy, setSortBy] = useState<'top' | 'least'>('top');
   const [metric, setMetric] = useState<'quantity' | 'revenue'>('quantity');
   const monthDefaults = defaultReportMonthDateStrings();
@@ -57,24 +54,18 @@ export default function ProductPerformanceReport({ lockedStoreId, lockedStoreNam
   const { visibleColumns, toggleColumn, isVisible } = useColumnVisibility(COLUMNS.map((c) => c.key));
   const scopeLabel = useReportScopeLabel(storeId, lockedStoreName);
 
-  const { data: categories = [] } = useQuery<Category[]>({
-    queryKey: ['report-product-categories'],
-    queryFn: () => adminFetch<Category[]>('/menu/categories'),
-  });
-
   const queryUrl = useMemo(() => {
     const params = new URLSearchParams({
+      orderMode,
       sortBy,
       metric,
       limit: '50',
     });
-    if (orderMode !== 'ALL') params.set('orderMode', orderMode);
-    if (categoryId) params.set('categoryId', categoryId);
     if (from) params.set('from', from);
     if (to) params.set('to', to);
     if (storeId) params.set('storeId', storeId);
     return `/admin/reports/top-products?${params.toString()}`;
-  }, [orderMode, categoryId, sortBy, metric, from, to, storeId]);
+  }, [orderMode, sortBy, metric, from, to, storeId]);
 
   const { data = [], isFetching } = useQuery<ProductRow[]>({
     queryKey: ['report-product-performance', queryUrl],
@@ -93,12 +84,7 @@ export default function ProductPerformanceReport({ lockedStoreId, lockedStoreNam
   }), [data]);
 
   const periodLabel = formatReportPeriodFromDates(from, to);
-  const categoryLabel =
-    categoryId === ''
-      ? 'All categories'
-      : categories.find((c) => c.id === categoryId)?.name ?? 'Category';
-  const channelLabel = orderMode === 'ALL' ? 'All channels' : orderModeLabel(orderMode);
-  const filterLabel = `${categoryLabel} · ${channelLabel} · ${sortBy} · ${metric}`;
+  const filterLabel = `${orderMode} · ${sortBy} · ${metric}`;
   const previewLeftColumns = 1 + COLUMNS.filter(
     (c) =>
       visibleColumns[c.key] !== false &&
@@ -203,25 +189,9 @@ export default function ProductPerformanceReport({ lockedStoreId, lockedStoreNam
           </div>
           {!lockedStoreId && <ReportBranchFilter value={storeId} onChange={setStoreId} />}
           <div className="flex items-center gap-2">
-            <label htmlFor="productCategory" className="text-[11px] font-medium text-muted uppercase tracking-wider">Category</label>
+            <label htmlFor="orderCategory" className="text-[11px] font-medium text-muted uppercase tracking-wider">Category</label>
             <select
-              id="productCategory"
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
-              className="input-field text-sm rounded-lg px-2 py-1 h-[32px] min-w-[120px] cursor-pointer"
-            >
-              <option value="">All</option>
-              {categories.map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label htmlFor="orderChannel" className="text-[11px] font-medium text-muted uppercase tracking-wider">Channel</label>
-            <select
-              id="orderChannel"
+              id="orderCategory"
               value={orderMode}
               onChange={(e) => setOrderMode(e.target.value as typeof orderMode)}
               className="input-field text-sm rounded-lg px-2 py-1 h-[32px] min-w-[100px] cursor-pointer"

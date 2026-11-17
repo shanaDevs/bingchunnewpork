@@ -369,62 +369,6 @@ export function stopVehicleFailureAlertLoop(): void {
   }
 }
 
-/** Warning chime for low / out-of-stock branch alerts */
-export function playBranchStockAlertSound(): void {
-  const ctx = getAudioContext();
-  if (!ctx) return;
-
-  const play = () => {
-    const t = ctx.currentTime;
-    const chimes = [
-      { freq: 587.33, at: 0, vol: 0.3 },
-      { freq: 440, at: 0.16, vol: 0.32 },
-      { freq: 587.33, at: 0.34, vol: 0.3 },
-    ];
-
-    chimes.forEach(({ freq, at, vol }) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, t + at);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      const start = t + at;
-      gain.gain.setValueAtTime(0, start);
-      gain.gain.linearRampToValueAtTime(vol, start + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.4);
-      osc.start(start);
-      osc.stop(start + 0.42);
-    });
-  };
-
-  if (ctx.state === 'suspended') {
-    void ctx.resume().then(play).catch(() => undefined);
-    return;
-  }
-
-  play();
-}
-
-let branchStockAlertLoopTimer: ReturnType<typeof setInterval> | null = null;
-
-/** Repeats the stock warning chime until stopBranchStockAlertLoop() is called. */
-export function startBranchStockAlertLoop(): void {
-  stopBranchStockAlertLoop();
-  primeBranchOrderAudio();
-  playBranchStockAlertSound();
-  branchStockAlertLoopTimer = setInterval(() => {
-    playBranchStockAlertSound();
-  }, 2500);
-}
-
-export function stopBranchStockAlertLoop(): void {
-  if (branchStockAlertLoopTimer !== null) {
-    clearInterval(branchStockAlertLoopTimer);
-    branchStockAlertLoopTimer = null;
-  }
-}
-
 /** Unlock audio on the spin-button tap so wheel ticks can play. */
 export function primeSpinAudio(): void {
   primeBranchOrderAudio();

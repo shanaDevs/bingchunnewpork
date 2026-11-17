@@ -52,13 +52,6 @@ export function invalidateAnalyticsCacheByPrefix(prefix: string): void {
   }
 }
 
-/** Branch payables / online wallet KPIs in GET /admin/analytics/dashboard-stats. */
-const DASHBOARD_STATS_CACHE_PREFIX = analyticsCacheKey(['dashboard-stats']);
-
-export function invalidateDashboardStatsCache(): void {
-  invalidateAnalyticsCacheByPrefix(DASHBOARD_STATS_CACHE_PREFIX);
-}
-
 export function clearAnalyticsResponseCache(): void {
   store.clear();
 }

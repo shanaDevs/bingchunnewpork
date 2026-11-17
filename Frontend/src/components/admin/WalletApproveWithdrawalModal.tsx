@@ -44,6 +44,7 @@ import {
   formatPayoutPaymentMethodLabel,
   paybackEnabledFromBreakdown,
   toDateInputValue,
+  valuesDifferByMoreThan,
 } from '@/lib/walletUtils';
 import { jasonPayoutDeductionLkr } from '@/components/admin/jasonPayoutDeduction';
 import { hasNegativeLkr } from '@/components/admin/settlement/lkrUtils';
@@ -185,6 +186,24 @@ export default function WalletApproveWithdrawalModal({
       ? sumOnlineRevenueSubtotals(preview.breakdown)
       : null;
   const onlineOrderSubtotalLkr = totalSalesLkr;
+  const liveTotalSalesLkr = preview ? sumAllRevenueSubtotal(preview) : null;
+  const liveDiscountLkr = preview ? sumAllDiscounts(preview.breakdown) : null;
+  const liveOnlinePaymentsLkr = preview ? sumOnlineRevenueSubtotals(preview.breakdown) : null;
+  const snapshotTotalSalesLkr = previewForBreakdown && channelBreakdown
+    ? sumAllRevenueSubtotal(previewForBreakdown)
+    : storedBreakdownLkr?.grossAmount ?? null;
+  const snapshotDiscountLkr = channelBreakdown
+    ? sumAllDiscounts(channelBreakdown)
+    : storedBreakdownLkr?.periodDiscountsTotal ?? null;
+  const snapshotOnlineLkr = channelBreakdown
+    ? sumOnlineRevenueSubtotals(channelBreakdown)
+    : storedBreakdownLkr?.onlineWalletGross ?? null;
+  const hasLiveSnapshotDiscrepancy =
+    channelBreakdown != null &&
+    preview != null &&
+    (valuesDifferByMoreThan(liveTotalSalesLkr, snapshotTotalSalesLkr) ||
+      valuesDifferByMoreThan(liveDiscountLkr, snapshotDiscountLkr) ||
+      valuesDifferByMoreThan(liveOnlinePaymentsLkr, snapshotOnlineLkr));
   const convenienceFeeLkr =
     periodBreakdownLkr?.convenienceFee ??
     resolvePreviewConvenienceFeeLkr(previewForBreakdown, resolvePreviewConvenienceFeeLkr(preview));
@@ -261,15 +280,12 @@ export default function WalletApproveWithdrawalModal({
     : (previewForBreakdown?.totalCommission ?? periodBreakdownLkr?.commissionFee ?? 0);
   const requestedLkr = activeWithdrawal ? activeWithdrawal.amount / 100 : 0;
   const sharedPromo = extractSharedPromoLkrFromBreakdown(breakdown, activeWithdrawal?.amount ?? 0);
-  const platformCommissionLkr =
-    periodBreakdownLkr?.cycleStage === 'FIRST'
-      ? 0
-      : resolvePlatformCommissionForPeriodLkr({
-          commissionLkr: branchCommissionLkr,
-          periodBreakdownLkr,
-          paybackEnabled,
-          sharedPromoPlatformLkr: sharedPromo.platformContributionLkr,
-        });
+  const platformCommissionLkr = resolvePlatformCommissionForPeriodLkr({
+    commissionLkr: branchCommissionLkr,
+    periodBreakdownLkr,
+    paybackEnabled,
+    sharedPromoPlatformLkr: sharedPromo.platformContributionLkr,
+  });
   const branchPayout = resolveBranchPayoutDisplay({
     breakdown,
     amountCents: activeWithdrawal?.amount ?? 0,
@@ -850,6 +866,16 @@ export default function WalletApproveWithdrawalModal({
                     <div className="mb-6 flex items-center justify-center gap-2 py-4 text-sm text-[#64748b] dark:text-slate-400">
                       <Loader2 size={20} className="animate-spin text-[#3b82f6]" />
                       Loading current channel activity…
+                    </div>
+                  )}
+
+                  {hasLiveSnapshotDiscrepancy && (
+                    <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+                      <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                      <span>
+                        Live totals differ from the submitted snapshot. Summary figures below
+                        reflect the amounts locked in at request time.
+                      </span>
                     </div>
                   )}
 

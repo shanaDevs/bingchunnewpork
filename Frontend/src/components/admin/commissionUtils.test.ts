@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   commissionRateToDisplayPct,
-  getEffectiveRate,
-  resolveCommissionSlabs,
   resolveSlabRatePct,
   resolveSlabRatePctFromPreview,
 } from '@/components/admin/commissionUtils';
@@ -29,19 +27,8 @@ describe('resolveSlabRatePctFromPreview', () => {
   it('reads effectiveRate from settlement preview', () => {
     expect(
       resolveSlabRatePctFromPreview({
-        slabInfo: { monthlyBase: 0, effectiveRate: 0.05, slabIndex: 1 },
+        slabInfo: { monthlyBase: 0, effectiveRate: 0.045, slabIndex: 3 },
       }),
-    ).toBe(5);
-  });
-});
-
-describe('resolveCommissionSlabs', () => {
-  it('uses API slabs when provided', () => {
-    const slabs = resolveCommissionSlabs([
-      { upTo: 2_000_000, rate: 0.08, label: 'Up to 2M' },
-      { upTo: null, rate: 0.03, label: 'Above 2M' },
-    ]);
-    expect(getEffectiveRate(2_000_000, slabs)).toBe(0.08);
-    expect(getEffectiveRate(2_000_001, slabs)).toBe(0.03);
+    ).toBe(4.5);
   });
 });

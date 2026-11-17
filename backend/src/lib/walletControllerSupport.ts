@@ -12,24 +12,10 @@ import {
   walletReportOrderSelect,
   platformItemSalesLkr,
 } from './walletRevenue';
-import { buildPeriodChannelPreview, channelPreviewFromPeriodBreakdown } from './periodChannelPreview';
-import {
-  computePeriodBreakdownForPayout,
-  resolveCycleContextsForWindows,
-  resolveCycleContextForWindow,
-  resolveSecondPayoutTableAllocationCents,
-  payoutWindowKey,
-  type PayoutWindowBounds,
-} from './withdrawalPeriodNet';
-import {
-  secondPayoutPriorBeforeGatewayFeeCents,
-  type PayoutCycleContext,
-} from './payoutCycle';
+import { buildPeriodChannelPreview, type PeriodChannelPreview } from './periodChannelPreview';
 import { computePeriodOrderAvailableCents } from './periodOrderAvailable';
-import { invalidateWalletAnalysisCache } from './walletAnalysis';
 import {
   computeBreakdownForPeriod,
-  refreshSecondPayoutGatewayAndNet,
   computeBranchPayablesBreakdown,
   computeNetTransferableEarnings,
   enrichWalletRow,
@@ -64,7 +50,6 @@ import { getConvenienceFeeRates, getGatewayFeeRate } from './appSchema';
 import {
   addDaysToDateStr,
   buildElapsedPayoutWindowsFromStart,
-  payoutWindowOverlapsRange,
   listElapsedPayoutWindows,
   PAYOUT_PERIOD_DAYS,
   resolveOpenRollingPayoutWindow,
@@ -75,13 +60,9 @@ import {
 import { dayAfterUtcDateStr, toUtcDateStr } from './utcDateString';
 import {
   analyticsCacheKey,
-  invalidateAnalyticsCache,
-  invalidateDashboardStatsCache,
   withAnalyticsCache,
 } from './analyticsResponseCache';
 import { resolveBranchStoreId } from '../middleware/auth';
-import { payoutDraftInvoiceApiPath } from './payoutInReviewDraft';
-import { ensureWithdrawalInReviewEnumReady } from './withdrawalSchema';
 import { decimalFieldToCentsNumber } from './moneyDecimal';
 import {
   serializeEnrichedWalletRow,
@@ -248,29 +229,25 @@ export const PAYOUT_PERIOD_LIST_SELECT = {
   createdAt: true,
   isAdvance: true,
   breakdown: true,
-  cycleStage: true,
-  cyclePairId: true,
 } as const;
 
 /** Table-row summary: merged period net/orderCount without channel snapshot extras. */
-export async function computeMergedPeriodSummary(
-  storeId: string,
-  from: string,
-  to: string,
-  cycleCtx?: PayoutCycleContext,
-) {
-  return computePeriodBreakdownForPayout(storeId, from, to, cycleCtx);
+export async function computeMergedPeriodSummary(storeId: string, from: string, to: string) {
+  const [sharedPromo, breakdown] = await Promise.all([
+    computeSharedPromoContribution(storeId, from, to),
+    computeBreakdownForPeriod(storeId, from, to),
+  ]);
+  return mergeSharedPromoIntoBreakdown(breakdown, sharedPromo);
 }
 
 export const PAYOUT_PERIODS_CACHE_TTL_MS = 45_000;
 
 export async function loadPayoutPeriodItems(storeId: string) {
-  await ensureWithdrawalInReviewEnumReady();
   const [withdrawals, unpaidWindows] = await Promise.all([
     prisma.storeWithdrawal.findMany({
       where: {
         storeId,
-        status: { in: ['PENDING', 'APPROVED', 'IN_REVIEW'] },
+        status: { in: ['PENDING', 'APPROVED'] },
         periodFrom: { not: null },
         periodTo: { not: null },
       },
@@ -286,12 +263,11 @@ export async function loadPayoutPeriodItems(storeId: string) {
     periodFrom: string;
     periodTo: string;
     summaryThrough?: string;
-    status: 'PAID' | 'PENDING' | 'IN_PROGRESS' | 'PAYMENT_PENDING';
+    status: 'PAID' | 'PENDING' | 'IN_PROGRESS';
     amountCents: number;
     orderCount: number;
     breakdown: unknown;
     withdrawal: (typeof withdrawals)[number] | null;
-    draftInvoiceUrl?: string | null;
   }> = [];
 
   for (const withdrawal of withdrawals) {
@@ -299,69 +275,20 @@ export async function loadPayoutPeriodItems(storeId: string) {
     const periodTo = withdrawalPeriodDateStr(withdrawal.periodTo);
     if (!periodFrom || !periodTo) continue;
     covered.add(periodKey(periodFrom, periodTo));
-    const isInReview = withdrawal.status === 'IN_REVIEW';
-    let breakdown: unknown = withdrawal.breakdown ?? null;
-    if (withdrawal.cycleStage === 'SECOND' && breakdown && typeof breakdown === 'object') {
-      const prior = await secondPayoutPriorBeforeGatewayFeeCents(storeId, withdrawal.cyclePairId);
-      if (prior != null) {
-        breakdown = refreshSecondPayoutGatewayAndNet({
-          ...(breakdown as PeriodBreakdown),
-          cycleStage: 'SECOND',
-          priorOnlineWalletAmountCents: prior,
-        });
-      }
-    }
-    const withdrawalForRow =
-      breakdown === withdrawal.breakdown
-        ? withdrawal
-        : { ...withdrawal, breakdown: breakdown as Prisma.JsonValue };
     items.push({
       key: `wd-${withdrawal.id}`,
       periodFrom,
       periodTo,
-      status:
-        withdrawal.status === 'APPROVED'
-          ? 'PAID'
-          : isInReview
-            ? 'PAYMENT_PENDING'
-            : 'PENDING',
+      status: withdrawal.status === 'APPROVED' ? 'PAID' : 'PENDING',
       amountCents: withdrawalAmountCents(withdrawal),
-      orderCount: breakdownOrderCount(breakdown),
-      breakdown,
-      withdrawal: withdrawalForRow,
-      draftInvoiceUrl: isInReview
-        ? withdrawal.invoiceUrl ?? payoutDraftInvoiceApiPath(withdrawal.id)
-        : undefined,
+      orderCount: breakdownOrderCount(withdrawal.breakdown),
+      breakdown: withdrawal.breakdown ?? null,
+      withdrawal,
     });
   }
 
   const uncoveredWindows = unpaidWindows.filter(
     (window) => !covered.has(periodKey(window.from, window.to)),
-  );
-
-  const openWindow = await resolveOpenRollingPayoutWindow(storeId, FIXED_PAYOUT_PERIOD_DAYS);
-  let inProgressIdealTo: string | null = null;
-  if (openWindow?.capped && openWindow.from <= openWindow.to) {
-    inProgressIdealTo = addDaysToDateStr(openWindow.from, FIXED_PAYOUT_PERIOD_DAYS - 1);
-  }
-
-  const windowsForCycleContext: PayoutWindowBounds[] = uncoveredWindows.map((window) => ({
-    from: window.from,
-    to: window.to,
-  }));
-  if (openWindow && inProgressIdealTo) {
-    const inProgressKey = periodKey(openWindow.from, inProgressIdealTo);
-    const pendingKeysPreview = new Set(
-      uncoveredWindows.map((w) => periodKey(w.from, w.to)),
-    );
-    if (!covered.has(inProgressKey) && !pendingKeysPreview.has(inProgressKey)) {
-      windowsForCycleContext.push({ from: openWindow.from, to: inProgressIdealTo });
-    }
-  }
-
-  const cycleContextsByWindow = await resolveCycleContextsForWindows(
-    storeId,
-    windowsForCycleContext,
   );
 
   const pendingWindows: Array<{
@@ -371,16 +298,12 @@ export async function loadPayoutPeriodItems(storeId: string) {
     status: 'PENDING';
     amountCents: number;
     orderCount: number;
-    breakdown: unknown;
+    breakdown: null;
     withdrawal: null;
   }> = [];
 
   for (const window of uncoveredWindows) {
-    const cycleCtx =
-      cycleContextsByWindow.get(payoutWindowKey(window.from, window.to)) ?? {
-        cycleStage: 'FIRST' as const,
-      };
-    const merged = await computeMergedPeriodSummary(storeId, window.from, window.to, cycleCtx);
+    const merged = await computeMergedPeriodSummary(storeId, window.from, window.to);
     if (merged.netAmount <= 0) continue;
     pendingWindows.push({
       key: `period-${window.from}-${window.to}`,
@@ -389,49 +312,38 @@ export async function loadPayoutPeriodItems(storeId: string) {
       status: 'PENDING',
       amountCents: merged.netAmount,
       orderCount: merged.orderCount,
-      breakdown: {
-        cycleStage: merged.cycleStage ?? cycleCtx.cycleStage,
-        cycleFrom: merged.cycleFrom ?? cycleCtx.cycleFrom,
-        cycleTo: merged.cycleTo ?? cycleCtx.cycleTo ?? window.to,
-      },
+      breakdown: null,
       withdrawal: null,
     });
   }
 
   items.push(...pendingWindows);
 
-  if (openWindow?.capped && openWindow.from <= openWindow.to && inProgressIdealTo) {
-    const inProgressKey = periodKey(openWindow.from, inProgressIdealTo);
+  const openWindow = await resolveOpenRollingPayoutWindow(storeId, FIXED_PAYOUT_PERIOD_DAYS);
+  if (openWindow?.capped && openWindow.from <= openWindow.to) {
+    const idealTo = addDaysToDateStr(openWindow.from, FIXED_PAYOUT_PERIOD_DAYS - 1);
+    const inProgressKey = periodKey(openWindow.from, idealTo);
     const pendingKeys = new Set(
       pendingWindows.map((w) => periodKey(w.periodFrom, w.periodTo)),
     );
     if (!covered.has(inProgressKey) && !pendingKeys.has(inProgressKey)) {
       const summaryThrough =
         openWindow.to < openWindow.from ? openWindow.from : openWindow.to;
-      const cycleCtx =
-        cycleContextsByWindow.get(payoutWindowKey(openWindow.from, inProgressIdealTo)) ?? {
-          cycleStage: 'FIRST' as const,
-        };
       const merged = await computeMergedPeriodSummary(
         storeId,
         openWindow.from,
         summaryThrough,
-        cycleCtx,
       );
       // Visibility only — same summary helpers; show open cycle even when net is still zero.
       items.push({
-        key: `period-in-progress-${openWindow.from}-${inProgressIdealTo}`,
+        key: `period-in-progress-${openWindow.from}-${idealTo}`,
         periodFrom: openWindow.from,
-        periodTo: inProgressIdealTo,
+        periodTo: idealTo,
         summaryThrough,
         status: 'IN_PROGRESS',
         amountCents: merged.netAmount,
         orderCount: merged.orderCount,
-        breakdown: {
-          cycleStage: merged.cycleStage ?? cycleCtx.cycleStage,
-          cycleFrom: merged.cycleFrom ?? cycleCtx.cycleFrom,
-          cycleTo: merged.cycleTo ?? cycleCtx.cycleTo ?? inProgressIdealTo,
-        },
+        breakdown: null,
         withdrawal: null,
       });
     }
@@ -700,6 +612,29 @@ export async function resolveNetPreviewPeriodBounds(
   return { from, to };
 }
 
+/** Build the API channelPreview shape from a period breakdown's reused channel rows. */
+export function channelPreviewFromPeriodBreakdown(
+  from: string,
+  to: string,
+  period: PeriodBreakdown,
+): PeriodChannelPreview {
+  const breakdown = period.channelBreakdown;
+  const monthlyBaseLkr = period.windowBase / 100;
+  return {
+    period: { from, to },
+    breakdown,
+    totalCommission: sumBreakdownCommission(breakdown),
+    totalProviderFee: sumBreakdownProviderFee(breakdown),
+    orderCount: sumBreakdownOrderCount(breakdown),
+    storeDiscountsTotal: period.periodDiscountsTotal / 100,
+    slabInfo: {
+      monthlyBase: monthlyBaseLkr,
+      effectiveRate: period.commissionRate,
+      slabIndex: getSlabIndex(monthlyBaseLkr),
+    },
+  };
+}
+
 export async function buildNetPreviewResponseData(storeId: string, from: string, to: string) {
   const loadStorePaybackFlag = () =>
     prisma.store.findUnique({
@@ -707,32 +642,28 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
       select: { platformDiscountPaybackEnabled: true },
     });
 
-  const cycle = await resolveCycleContextForWindow(storeId, from, to);
+  // PR #27 calc path: channel preview + order-available match the Initiate Payout UI.
+  // Run all independent reads in parallel (same as wallet-issue-fix).
+  const [breakdown, channelPreview, orderAvailable, storeRow, sharedPromo, promoOwnership] =
+    await Promise.all([
+      computeBreakdownForPeriod(storeId, from, to),
+      buildPeriodChannelPreview(storeId, from, to),
+      computePeriodOrderAvailableCents(storeId, from, to),
+      loadStorePaybackFlag().catch(async (err) => {
+        const code = (err as { code?: string })?.code;
+        if (code !== 'P2022') throw err;
+        await ensurePlatformPaybackSchema();
+        return loadStorePaybackFlag();
+      }),
+      computeSharedPromoContribution(storeId, from, to),
+      loadPromoOwnershipTotalsForPeriod(storeId, from, to),
+    ]);
 
-  const [periodBreakdown, orderAvailable, storeRow] = await Promise.all([
-    computePeriodBreakdownForPayout(storeId, from, to, cycle),
-    computePeriodOrderAvailableCents(storeId, from, to, cycle),
-    loadStorePaybackFlag().catch(async (err) => {
-      const code = (err as { code?: string })?.code;
-      if (code !== 'P2022') throw err;
-      await ensurePlatformPaybackSchema();
-      return loadStorePaybackFlag();
-    }),
-  ]);
-  const channelPreview = channelPreviewFromPeriodBreakdown(periodBreakdown, from, to);
-  const finalPayoutFields = enrichSharedPromoForApi(
-    {
-      sharedPromoTotalDiscount: periodBreakdown.sharedPromoTotalDiscount ?? 0,
-      sharedPromoBranchContributionPct: periodBreakdown.sharedPromoBranchContributionPct ?? 0,
-      sharedPromoBranchContributionAmount: periodBreakdown.sharedPromoBranchContributionAmount ?? 0,
-      sharedPromoPlatformContributionPct: periodBreakdown.sharedPromoPlatformContributionPct ?? 0,
-      sharedPromoPlatformContributionAmount:
-        periodBreakdown.sharedPromoPlatformContributionAmount ?? 0,
-      sharedPromoJasonContributionPct: periodBreakdown.sharedPromoJasonContributionPct ?? 0,
-      sharedPromoJasonContributionAmount: periodBreakdown.sharedPromoJasonContributionAmount ?? 0,
-    },
-    periodBreakdown.netAmount,
+  const periodBreakdown = attachPromoOwnershipTotals(
+    mergeSharedPromoIntoBreakdown(breakdown, sharedPromo),
+    promoOwnership,
   );
+  const finalPayoutFields = enrichSharedPromoForApi(sharedPromo, periodBreakdown.netAmount);
 
   const durationDays =
     Math.floor(
@@ -740,55 +671,25 @@ export async function buildNetPreviewResponseData(storeId: string, from: string,
         (24 * 60 * 60 * 1000),
     ) + 1;
 
-  const cycleLabel =
-    periodBreakdown.cycleStage === 'SECOND'
-      ? `Payout 2 · cycle ${periodBreakdown.cycleFrom ?? from} – ${to}`
-      : 'Payout 1';
-
-  const cycleStage = periodBreakdown.cycleStage ?? cycle.cycleStage;
-  let tableAllocationConvenienceFee = periodBreakdown.convenienceFee;
-  let tableAllocationDeliveryFee = periodBreakdown.deliveryFee;
-  if (cycleStage === 'SECOND') {
-    const cycleFrom = periodBreakdown.cycleFrom ?? cycle.cycleFrom ?? from;
-    const cycleTo = periodBreakdown.cycleTo ?? to;
-    const tableAlloc = await resolveSecondPayoutTableAllocationCents(
-      storeId,
-      cycleFrom,
-      cycleTo,
-    );
-    tableAllocationConvenienceFee = tableAlloc.convenienceFee;
-    tableAllocationDeliveryFee = tableAlloc.deliveryFee;
-  }
-
   return {
     ...periodBreakdown,
     from,
     to,
     durationDays,
-    cycleLabel,
-    cycleStage,
-    cycleFrom: periodBreakdown.cycleFrom ?? cycle.cycleFrom,
-    cycleTo: periodBreakdown.cycleTo ?? to,
-    payoutWindowFrom: periodBreakdown.payoutWindowFrom ?? from,
-    payoutWindowTo: periodBreakdown.payoutWindowTo ?? to,
-    tableAllocationConvenienceFee,
-    tableAllocationDeliveryFee,
-    priorOnlineWalletAmountLkr: (periodBreakdown.priorOnlineWalletAmountCents ?? 0) / 100,
-    remainingOnlineWalletLkr: (periodBreakdown.remainingOnlineWalletCents ?? 0) / 100,
     platformDiscountPaybackEnabled: storeRow?.platformDiscountPaybackEnabled ?? false,
-    totalSalesLkr: periodBreakdown.windowBase / 100,
-    commissionRatePct: Math.round(periodBreakdown.commissionRate * 1000) / 10,
-    tierLabel: periodBreakdown.tierLabel,
-    commissionAmountLkr: periodBreakdown.commissionFee / 100,
+    totalSalesLkr: breakdown.windowBase / 100,
+    commissionRatePct: Math.round(breakdown.commissionRate * 1000) / 10,
+    tierLabel: breakdown.tierLabel,
+    commissionAmountLkr: breakdown.commissionFee / 100,
     netAmountLkr: periodBreakdown.netAmount / 100,
-    cancelledByBranchGatewayFeeLkr: periodBreakdown.cancelledByBranchGatewayFee / 100,
-    cancelledByBranchOrderCount: periodBreakdown.cancelledByBranchOrderCount,
-    customerLateCancelSubtotalLkr: periodBreakdown.customerLateCancelSubtotal / 100,
-    customerLateCancelGatewayDeductionLkr: periodBreakdown.customerLateCancelGatewayDeduction / 100,
-    customerLateCancelNetAmountLkr: periodBreakdown.customerLateCancelNetAmount / 100,
-    rejectedRefundSubtotalLkr: periodBreakdown.rejectedRefundSubtotal / 100,
-    rejectedRefundGatewayDeductionLkr: periodBreakdown.rejectedRefundGatewayDeduction / 100,
-    rejectedRefundNetAmountLkr: periodBreakdown.rejectedRefundNetAmount / 100,
+    cancelledByBranchGatewayFeeLkr: breakdown.cancelledByBranchGatewayFee / 100,
+    cancelledByBranchOrderCount: breakdown.cancelledByBranchOrderCount,
+    customerLateCancelSubtotalLkr: breakdown.customerLateCancelSubtotal / 100,
+    customerLateCancelGatewayDeductionLkr: breakdown.customerLateCancelGatewayDeduction / 100,
+    customerLateCancelNetAmountLkr: breakdown.customerLateCancelNetAmount / 100,
+    rejectedRefundSubtotalLkr: breakdown.rejectedRefundSubtotal / 100,
+    rejectedRefundGatewayDeductionLkr: breakdown.rejectedRefundGatewayDeduction / 100,
+    rejectedRefundNetAmountLkr: breakdown.rejectedRefundNetAmount / 100,
     channelPreview,
     orderAvailableFromOrdersLkr: orderAvailable.fromOrdersCents / 100,
     orderAvailableRemainingLkr: orderAvailable.remainingCents / 100,
@@ -853,10 +754,6 @@ export type SuperAdminPayoutDueItem = {
   orderCount: number;
   /** Period ledger snapshot for allocation columns (withdrawal JSON or computed period breakdown). */
   breakdown: unknown | null;
-  /** Set when the due row is backed by a branch withdrawal (PENDING or IN_REVIEW). */
-  withdrawalId?: string;
-  /** Oldest unpaid window for this branch across the full due list. */
-  isOldestUnpaid: boolean;
 };
 
 /** Max elapsed 15-day windows per branch in the Super Admin due queue (matches payout validation). */
@@ -899,7 +796,7 @@ async function buildStorePayoutsDueRows(
     const periodTo = withdrawalPeriodDateStr(withdrawal.periodTo);
     if (!periodFrom || !periodTo) continue;
     covered.add(periodKey(periodFrom, periodTo));
-    if (withdrawal.status !== 'PENDING' && withdrawal.status !== 'IN_REVIEW') continue;
+    if (withdrawal.status !== 'PENDING') continue;
     const netAmountCents = withdrawalAmountCents(withdrawal as never);
     if (netAmountCents <= 0) continue;
     rows.push({
@@ -911,8 +808,6 @@ async function buildStorePayoutsDueRows(
       netAmountCents,
       orderCount: breakdownOrderCount(withdrawal.breakdown),
       breakdown: withdrawal.breakdown ?? null,
-      withdrawalId: withdrawal.id,
-      isOldestUnpaid: false,
     });
   }
 
@@ -923,26 +818,12 @@ async function buildStorePayoutsDueRows(
     PAYOUTS_DUE_UNPAID_WINDOW_MAX,
   ).filter((window) => !covered.has(periodKey(window.from, window.to)));
 
-  const cycleContextsByWindow = await resolveCycleContextsForWindows(
-    storeId,
-    unpaidWindows.map((window) => ({ from: window.from, to: window.to })),
-  );
-
   // Period breakdown is expensive — run a few at a time, not serially forever.
   const windowRows = await promiseAllLimited(
     Math.min(2, getPrismaFanOutLimit()),
     unpaidWindows.map(
       (window) => async (): Promise<SuperAdminPayoutDueItem | null> => {
-        const cycleCtx =
-          cycleContextsByWindow.get(payoutWindowKey(window.from, window.to)) ?? {
-            cycleStage: 'FIRST' as const,
-          };
-        const merged = await computeMergedPeriodSummary(
-          storeId,
-          window.from,
-          window.to,
-          cycleCtx,
-        );
+        const merged = await computeMergedPeriodSummary(storeId, window.from, window.to);
         if (merged.netAmount <= 0) return null;
         return {
           storeId,
@@ -952,12 +833,8 @@ async function buildStorePayoutsDueRows(
           days: inclusivePeriodDays(window.from, window.to),
           netAmountCents: merged.netAmount,
           orderCount: merged.orderCount,
-          breakdown: {
-            cycleStage: merged.cycleStage ?? cycleCtx.cycleStage,
-            cycleFrom: merged.cycleFrom ?? cycleCtx.cycleFrom,
-            cycleTo: merged.cycleTo ?? cycleCtx.cycleTo ?? window.to,
-          },
-          isOldestUnpaid: false,
+          // Panel lazy-loads detail when null; skip shipping huge breakdown JSON.
+          breakdown: null,
         };
       },
     ),
@@ -966,162 +843,122 @@ async function buildStorePayoutsDueRows(
   for (const row of windowRows) {
     if (row) rows.push(row);
   }
-  rows.sort(
-    (a, b) => a.periodFrom.localeCompare(b.periodFrom) || a.periodTo.localeCompare(b.periodTo),
-  );
-  return rows.map((row, index) => ({ ...row, isOldestUnpaid: index === 0 }));
+  return rows;
 }
 
-/** Stores computed together so Prisma fan-out stays bounded. */
-const PAYOUTS_DUE_STORE_CHUNK = 3;
+/** Branches per payouts-due page. Frontend chains pages until done. */
+export const PAYOUTS_DUE_STORE_CHUNK = 3;
 
 const PAYOUTS_DUE_CACHE_TTL_MS = 60_000;
 
-export const PAYOUTS_DUE_PAGE_SIZE = 10;
-
 export type SuperAdminPayoutsDuePage = {
   items: SuperAdminPayoutDueItem[];
-  total: number;
-  allTotal: number;
-  page: number;
-  limit: number;
-  pages: number;
+  nextCursor: string | null;
+  done: boolean;
 };
 
-function branchPayoutDueSearchHaystack(storeName: string): string {
-  const raw = storeName.toLowerCase();
-  const label = storeName.replace(/^Bing Chun\s*[-–]\s*/i, '').trim().toLowerCase();
-  return `${raw}\n${label}`;
-}
+export async function listSuperAdminPayoutsDueItems(query?: {
+  from?: string;
+  to?: string;
+  cursor?: string;
+}): Promise<SuperAdminPayoutsDuePage> {
+  const cacheKey = analyticsCacheKey(['wallet-payouts-due', query?.cursor ?? '']);
 
-function matchesPayoutDueSearch(storeName: string, query: string): boolean {
-  if (!query) return true;
-  return branchPayoutDueSearchHaystack(storeName).includes(query);
-}
-
-async function buildPayoutsDueRowsForStores(
-  slice: Array<{ id: string; name: string }>,
-): Promise<SuperAdminPayoutDueItem[]> {
-  if (slice.length === 0) return [];
-  const storeIds = slice.map((store) => store.id);
-  const allWithdrawals = await prisma.storeWithdrawal.findMany({
-    where: {
-      storeId: { in: storeIds },
-      status: { in: ['PENDING', 'APPROVED', 'IN_REVIEW'] },
-      periodFrom: { not: null },
-      periodTo: { not: null },
-    },
-    orderBy: { periodTo: 'desc' },
-    select: PAYOUT_PERIOD_LIST_SELECT,
-  });
-
-  const withdrawalsByStore = new Map<string, PayoutPeriodWithdrawalRow[]>();
-  for (const row of allWithdrawals) {
-    const list = withdrawalsByStore.get(row.storeId) ?? [];
-    list.push(row as PayoutPeriodWithdrawalRow);
-    withdrawalsByStore.set(row.storeId, list);
-  }
-
-  const storesNeedingEarliest = storeIds.filter(
-    (id) => (withdrawalsByStore.get(id)?.length ?? 0) === 0,
-  );
-  const earliestByStore = new Map<string, string>();
-  if (storesNeedingEarliest.length > 0) {
-    const earliestRows = await promiseAllLimited(
-      getPrismaFanOutLimit(),
-      storesNeedingEarliest.map(
-        (storeId) => async () => {
-          const earliest = await prisma.order.findFirst({
-            where: { storeId, paymentStatus: 'PAID' },
-            orderBy: { createdAt: 'asc' },
-            select: { storeId: true, createdAt: true },
-          });
-          return earliest;
-        },
-      ),
-    );
-    for (const row of earliestRows) {
-      if (!row) continue;
-      const day = withdrawalPeriodDateStr(row.createdAt);
-      if (day) earliestByStore.set(row.storeId, day);
-    }
-  }
-
-  const perStoreRows = await promiseAllLimited(
-    getPrismaFanOutLimit(),
-    slice.map(
-      (store) => () =>
-        buildStorePayoutsDueRows(
-          store.id,
-          store.name,
-          withdrawalsByStore.get(store.id) ?? [],
-          earliestByStore.get(store.id) ?? null,
-        ),
-    ),
-  );
-  return perStoreRows.flat();
-}
-
-async function loadAllSuperAdminPayoutsDueItems(): Promise<SuperAdminPayoutDueItem[]> {
-  const cacheKey = analyticsCacheKey(['wallet-payouts-due', 'all']);
   return withAnalyticsCache(cacheKey, async () => {
     const stores = await prisma.store.findMany({
       where: { isActive: true },
       select: { id: true, name: true },
     });
     stores.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-    if (stores.length === 0) return [];
-
-    const items: SuperAdminPayoutDueItem[] = [];
-    for (let start = 0; start < stores.length; start += PAYOUTS_DUE_STORE_CHUNK) {
-      const slice = stores.slice(start, start + PAYOUTS_DUE_STORE_CHUNK);
-      items.push(...(await buildPayoutsDueRowsForStores(slice)));
+    if (stores.length === 0) {
+      return { items: [], nextCursor: null, done: true };
     }
+
+    let start = 0;
+    if (query?.cursor) {
+      const cursorIndex = stores.findIndex((store) => store.id === query.cursor);
+      if (cursorIndex < 0) {
+        return { items: [], nextCursor: null, done: true };
+      }
+      start = cursorIndex + 1;
+    }
+
+    const slice = stores.slice(start, start + PAYOUTS_DUE_STORE_CHUNK);
+    if (slice.length === 0) {
+      return { items: [], nextCursor: null, done: true };
+    }
+
+    const storeIds = slice.map((store) => store.id);
+    const allWithdrawals = await prisma.storeWithdrawal.findMany({
+      where: {
+        storeId: { in: storeIds },
+        status: { in: ['PENDING', 'APPROVED'] },
+        periodFrom: { not: null },
+        periodTo: { not: null },
+      },
+      orderBy: { periodTo: 'desc' },
+      select: PAYOUT_PERIOD_LIST_SELECT,
+    });
+
+    const withdrawalsByStore = new Map<string, PayoutPeriodWithdrawalRow[]>();
+    for (const row of allWithdrawals) {
+      const list = withdrawalsByStore.get(row.storeId) ?? [];
+      list.push(row as PayoutPeriodWithdrawalRow);
+      withdrawalsByStore.set(row.storeId, list);
+    }
+
+    const storesNeedingEarliest = storeIds.filter(
+      (id) => (withdrawalsByStore.get(id)?.length ?? 0) === 0,
+    );
+    const earliestByStore = new Map<string, string>();
+    if (storesNeedingEarliest.length > 0) {
+      const earliestRows = await promiseAllLimited(
+        getPrismaFanOutLimit(),
+        storesNeedingEarliest.map(
+          (storeId) => async () => {
+            const earliest = await prisma.order.findFirst({
+              where: { storeId, paymentStatus: 'PAID' },
+              orderBy: { createdAt: 'asc' },
+              select: { storeId: true, createdAt: true },
+            });
+            return earliest;
+          },
+        ),
+      );
+      for (const row of earliestRows) {
+        if (!row) continue;
+        const day = withdrawalPeriodDateStr(row.createdAt);
+        if (day) earliestByStore.set(row.storeId, day);
+      }
+    }
+
+    const perStoreRows = await promiseAllLimited(
+      getPrismaFanOutLimit(),
+      slice.map(
+        (store) => () =>
+          buildStorePayoutsDueRows(
+            store.id,
+            store.name,
+            withdrawalsByStore.get(store.id) ?? [],
+            earliestByStore.get(store.id) ?? null,
+          ),
+      ),
+    );
+    const items: SuperAdminPayoutDueItem[] = perStoreRows.flat();
+
     items.sort(
       (a, b) =>
         a.periodFrom.localeCompare(b.periodFrom) ||
         a.periodTo.localeCompare(b.periodTo) ||
         a.storeName.localeCompare(b.storeName),
     );
-    return items;
+    const done = start + slice.length >= stores.length;
+    return {
+      items,
+      nextCursor: done ? null : slice[slice.length - 1].id,
+      done,
+    };
   }, PAYOUTS_DUE_CACHE_TTL_MS);
-}
-
-export async function listSuperAdminPayoutsDueItems(query?: {
-  from?: string;
-  to?: string;
-  storeId?: string;
-  page?: number;
-  limit?: number;
-  search?: string;
-}): Promise<SuperAdminPayoutsDuePage> {
-  await ensureWithdrawalInReviewEnumReady();
-  const limit = Math.min(100, Math.max(1, query?.limit ?? PAYOUTS_DUE_PAGE_SIZE));
-  const search = (query?.search ?? '').trim().toLowerCase();
-  const storeId = (query?.storeId ?? '').trim();
-  const all = await loadAllSuperAdminPayoutsDueItems();
-  const from = query?.from && isValidYmdDate(query.from) ? query.from : null;
-  const to = query?.to && isValidYmdDate(query.to) ? query.to : null;
-  const inMonth =
-    from && to
-      ? all.filter((item) => payoutWindowOverlapsRange(item.periodFrom, item.periodTo, from, to))
-      : all;
-  const byStore = storeId ? inMonth.filter((item) => item.storeId === storeId) : inMonth;
-  const filtered = search
-    ? byStore.filter((item) => matchesPayoutDueSearch(item.storeName, search))
-    : byStore;
-  const total = filtered.length;
-  const pages = Math.max(1, Math.ceil(total / limit) || 1);
-  const page = Math.min(Math.max(1, query?.page ?? 1), pages);
-  const start = (page - 1) * limit;
-  return {
-    items: filtered.slice(start, start + limit),
-    total,
-    allTotal: all.length,
-    page,
-    limit,
-    pages,
-  };
 }
 
 export type PeriodBranchReportRow = {
@@ -1255,30 +1092,19 @@ export async function loadAdminWalletListPayload(
   }
 
   const allTimeAvailableByStore = new Map<string, number>();
-  const allTimeOnlineWalletByStore = new Map<string, number>();
-  if (storeIds.length > 0) {
-    const rows: Array<{
-      storeId: string;
-      remainingCents: number;
-      allTimeOnlineWalletCents: number;
-    }> = await promiseAllLimited(
+  if (isSuper && storeIds.length > 0) {
+    const rows: Array<{ storeId: string; cents: number }> = await promiseAllLimited(
       getPrismaFanOutLimit(),
       storeIds.map(
-        (id) => (): Promise<{
-          storeId: string;
-          remainingCents: number;
-          allTimeOnlineWalletCents: number;
-        }> =>
+        (id) => (): Promise<{ storeId: string; cents: number }> =>
           computeBranchPayablesBreakdown(id).then((breakdown) => ({
             storeId: id,
-            remainingCents: breakdown.allTimeAvailableBalanceCents,
-            allTimeOnlineWalletCents: breakdown.allTimeOnlineWalletCents,
+            cents: breakdown.allTimeAvailableBalanceCents,
           })),
       ),
     );
     for (const row of rows) {
-      allTimeAvailableByStore.set(row.storeId, row.remainingCents);
-      allTimeOnlineWalletByStore.set(row.storeId, row.allTimeOnlineWalletCents);
+      allTimeAvailableByStore.set(row.storeId, row.cents);
     }
   }
 
@@ -1291,7 +1117,6 @@ export async function loadAdminWalletListPayload(
       currentBalance: enriched.currentBalance,
       availableBalance: enriched.availableBalance,
       allTimeAvailableBalanceCents: allTimeAvailableByStore.get(w.storeId),
-      allTimeOnlineWalletCents: allTimeOnlineWalletByStore.get(w.storeId),
       _count: { transactions: txnCountMap.get(w.storeId) ?? 0 },
     });
   });
@@ -1318,12 +1143,7 @@ export async function loadAdminWalletListPayload(
     systemTotals = {
       totalIn: String(decimalFieldToCentsNumber(aggIn._sum.amount)),
       totalOut: String(Math.abs(decimalFieldToCentsNumber(aggOut._sum.amount))),
-      totalBalance: String(
-        wallets.reduce(
-          (s, w) => s + (allTimeAvailableByStore.get(w.storeId) ?? walletBalanceCents(w)),
-          0,
-        ),
-      ),
+      totalBalance: String(wallets.reduce((s, w) => s + walletBalanceCents(w), 0)),
     };
   }
 
@@ -1487,7 +1307,7 @@ export async function finalizeWithdrawalWithInvoice(input: WithdrawalInvoiceFina
     netTransferableEarnings - totalWithdrawnBefore - withdrawnCents,
   );
 
-  const invoicePayload = await generateWithdrawalInvoice({
+  const invoice = await generateWithdrawalInvoice({
     storeId,
     withdrawalId: updated.id,
     storeName,
@@ -1516,29 +1336,19 @@ export async function finalizeWithdrawalWithInvoice(input: WithdrawalInvoiceFina
       storePaybackEnabled,
     ),
   });
-  const invoiceDataJson = JSON.parse(
-    JSON.stringify(invoicePayload.invoiceData),
-  ) as object;
 
   try {
-    const finalized = await prisma.storeWithdrawal.update({
+    return await prisma.storeWithdrawal.update({
       where: { id: updated.id },
       data: {
-        invoiceRef: invoicePayload.invoiceRef,
-        invoiceUrl: invoicePayload.invoiceUrl,
-        invoiceData: invoiceDataJson,
+        invoiceRef: invoice.invoiceRef,
+        invoiceUrl: invoice.invoiceUrl,
+        invoiceData: invoice.invoiceData as object,
       },
     });
-    invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
-    invalidateWalletAnalysisCache();
-    invalidateDashboardStatsCache();
-    return finalized;
   } catch (err) {
     // Payout already succeeded; invoice metadata is best-effort. Don't fail the HTTP request.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
-      invalidateAnalyticsCache(analyticsCacheKey(['wallet-payout-periods', storeId]));
-      invalidateWalletAnalysisCache();
-      invalidateDashboardStatsCache();
       return updated;
     }
     throw err;

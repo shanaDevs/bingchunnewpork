@@ -108,6 +108,12 @@ class JobHistoryItem {
   /// Why the rider cancelled — set only on runs they accepted then rejected.
   final String? cancelReason;
 
+  /// Stops that ended in a failed attempt on this run (customer-side or breakdown).
+  final int failedCount;
+
+  /// Per-stop rows: current order status plus the latest failed attempt on this run.
+  final List<JobHistoryOrder> orders;
+
   const JobHistoryItem({
     required this.id,
     required this.title,
@@ -123,6 +129,8 @@ class JobHistoryItem {
     this.complaintCount = 0,
     this.rideCode,
     this.cancelReason,
+    this.failedCount = 0,
+    this.orders = const [],
   });
 
   factory JobHistoryItem.fromJson(Json j) => JobHistoryItem(
@@ -140,10 +148,90 @@ class JobHistoryItem {
     complaintCount: intOf(j, 'complaintCount'),
     rideCode: strOrNull(j, 'rideCode'),
     cancelReason: strOrNull(j, 'cancelReason'),
+    failedCount: intOf(j, 'failedCount'),
+    orders: listOf(j, 'orders', JobHistoryOrder.fromJson),
   );
+
+  bool get isVehicleFailure => displayStatus == 'VEHICLE_FAILURE' || status == 'VEHICLE_FAILURE';
+
+  /// Stops this rider handed over because of the breakdown (left undelivered on the run).
+  List<JobHistoryOrder> get handedOverOrders => orders.where((o) => o.isVehicleFailure).toList();
+
+  /// The note the rider sent with the breakdown report ("Type: description"), as stored on
+  /// the server. Null when the run had no stops left to hand over (RETURNING) or the server
+  /// only recorded its default text.
+  String? get vehicleFailureNote {
+    for (final o in orders) {
+      final n = o.failureNote?.trim();
+      if (o.isVehicleFailure && n != null && n.isNotEmpty && n != 'Vehicle failure') return n;
+    }
+    return null;
+  }
+
+  /// Closed by an admin (the server reports "ADMIN_CLOSED", or a CANCELLED run in history).
+  bool get isAdminClosed => displayStatus == 'ADMIN_CLOSED' || status == 'ADMIN_CLOSED' || status == 'CANCELLED';
 
   bool get isIncomplete =>
       displayStatus == 'ABANDONED' || displayStatus == 'PARTIALLY_COMPLETED' || displayStatus == 'VEHICLE_FAILURE';
+}
+
+/// One stop on a past run (`GET delivery/jobs/history` → `orders[]`).
+class JobHistoryOrder {
+  final String orderId;
+
+  /// The order's current status — after a breakdown handover this follows the new rider.
+  final String status;
+  final bool deliveryFailed;
+
+  /// Latest failed attempt on this run, e.g. "VEHICLE_FAILURE" or "CUSTOMER_UNAVAILABLE".
+  final String? failureOutcome;
+  final String? failureNote;
+  final String? failureReason;
+
+  const JobHistoryOrder({
+    required this.orderId,
+    required this.status,
+    this.deliveryFailed = false,
+    this.failureOutcome,
+    this.failureNote,
+    this.failureReason,
+  });
+
+  factory JobHistoryOrder.fromJson(Json j) => JobHistoryOrder(
+    orderId: str(j, 'orderId'),
+    status: str(j, 'status'),
+    deliveryFailed: boolOf(j, 'deliveryFailed'),
+    failureOutcome: strOrNull(j, 'failureOutcome'),
+    failureNote: strOrNull(j, 'failureNote'),
+    failureReason: strOrNull(j, 'failureReason'),
+  );
+
+  bool get isVehicleFailure => failureOutcome == 'VEHICLE_FAILURE';
+
+  bool get isDelivered => status == 'DELIVERED';
+
+  /// No further delivery will happen on this order (delivered, cancelled or refunded).
+  bool get isSettled => const {'DELIVERED', 'CANCELLED', 'REFUNDED', 'RETURNED'}.contains(status);
+
+  /// Picked up by the replacement rider and on its way.
+  bool get isOutForDelivery => status == 'OUT_FOR_DELIVERY';
+}
+
+/// Response of `POST delivery/jobs/vehicle-failure`.
+class VehicleFailureResult {
+  final String jobId;
+
+  /// First stop that was handed over; empty when the run had none left (RETURNING).
+  final String orderId;
+  final bool rideReleased;
+
+  const VehicleFailureResult({required this.jobId, required this.orderId, this.rideReleased = true});
+
+  factory VehicleFailureResult.fromJson(Json j) => VehicleFailureResult(
+    jobId: str(j, 'jobId'),
+    orderId: str(j, 'orderId'),
+    rideReleased: boolOf(j, 'rideReleased', true),
+  );
 }
 
 /// Driver-raised complaint on an order stop.
@@ -153,6 +241,8 @@ class DriverComplaint {
   final String description;
   final String status;
   final String createdAt;
+  final String? orderId;
+  final String? resolvedAt;
 
   const DriverComplaint({
     required this.id,
@@ -160,6 +250,8 @@ class DriverComplaint {
     required this.description,
     required this.status,
     required this.createdAt,
+    this.orderId,
+    this.resolvedAt,
   });
 
   factory DriverComplaint.fromJson(Json j) => DriverComplaint(
@@ -168,6 +260,8 @@ class DriverComplaint {
     description: str(j, 'description'),
     status: str(j, 'status'),
     createdAt: str(j, 'createdAt'),
+    orderId: strOrNull(j, 'orderId'),
+    resolvedAt: strOrNull(j, 'resolvedAt'),
   );
 }
 
@@ -181,6 +275,9 @@ class JobStore {
   final bool deliveryOtpRequired;
   final int completionRadiusM;
 
+  /// Branch phone, for the "Call branch" button (empty when the branch has none).
+  final String phone;
+
   const JobStore({
     required this.id,
     required this.name,
@@ -190,6 +287,7 @@ class JobStore {
     required this.lng,
     this.deliveryOtpRequired = false,
     this.completionRadiusM = 100,
+    this.phone = '',
   });
 
   factory JobStore.fromJson(Json j) => JobStore(
@@ -201,6 +299,7 @@ class JobStore {
     lng: dbl(j, 'lng'),
     deliveryOtpRequired: boolOf(j, 'deliveryOtpRequired'),
     completionRadiusM: intOf(j, 'completionRadiusM', 100),
+    phone: str(j, 'phone'),
   );
 }
 
@@ -255,6 +354,15 @@ class JobOrder {
   final List<JobOrderItem> items;
   final bool deliveryFailed;
 
+  /// Reason the rider gave when marking this order as failed.
+  final String? failureReason;
+
+  /// Latest failed attempt on this ride, e.g. "CUSTOMER_UNREACHABLE" or "VEHICLE_FAILURE".
+  final String? failureOutcome;
+
+  /// Note the rider wrote with that failed attempt ("Reason: description").
+  final String? failureNote;
+
   /// Store/global rule: driver must enter the customer code to mark delivered.
   final bool deliveryOtpRequired;
   final List<DriverComplaint> complaints;
@@ -279,6 +387,9 @@ class JobOrder {
     this.lng,
     this.items = const [],
     this.deliveryFailed = false,
+    this.failureReason,
+    this.failureOutcome,
+    this.failureNote,
     this.deliveryOtpRequired = false,
     this.complaints = const [],
   });
@@ -303,6 +414,9 @@ class JobOrder {
     lng: dblOrNull(j, 'lng'),
     items: listOf(j, 'items', JobOrderItem.fromJson),
     deliveryFailed: boolOf(j, 'deliveryFailed'),
+    failureReason: strOrNull(j, 'failureReason'),
+    failureOutcome: strOrNull(j, 'failureOutcome'),
+    failureNote: strOrNull(j, 'failureNote'),
     deliveryOtpRequired: boolOf(j, 'deliveryOtpRequired'),
     complaints: listOf(j, 'complaints', DriverComplaint.fromJson),
   );
@@ -314,8 +428,42 @@ class JobOrder {
 
   bool get isDelivered => status == 'DELIVERED';
   bool get isFailed => deliveryFailed || status == 'DELIVERY_FAILED';
+
+  /// Failed for a customer-side reason, so the rider still earns this stop's fee
+  /// (same rule as the backend's CUSTOMER_SIDE_FAILURE_OUTCOMES).
+  bool get isCustomerSideFailure => isFailed && DeliveryOutcome.isCustomerSide(failureOutcome);
+
+  /// Untranslated heading for this stop's failure, e.g. "Customer not available".
+  /// A driver-side "OTHER" outcome stays generic — the rider's own reason is in the note.
+  String get failureTitle {
+    final label = deliveryFailureOutcomeLabels[failureOutcome];
+    if (label != null) return label;
+    final reason = failureReason?.trim();
+    return reason != null && reason.isNotEmpty ? reason : 'Delivery failed';
+  }
+
+  /// The rider's note for this failure, or null when the server only stored its default
+  /// text (the outcome code or its label).
+  String? get failureDetailNote {
+    final n = failureNote?.trim();
+    if (n == null || n.isEmpty) return null;
+    final lower = n.toLowerCase();
+    if (lower == failureOutcome?.toLowerCase() || lower == failureTitle.toLowerCase()) return null;
+    return n;
+  }
+
   bool get isCancelled => status == 'CANCELLED';
   bool get isPending => !isDelivered && status != 'CANCELLED' && !isFailed;
+
+  /// Customer instructions to show the rider. Internal test/seed markers written by
+  /// simulation scripts ("Simulated order (scripts/sim-new-job.ts)", "seed-…") are hidden.
+  String? get displayNotes {
+    final n = notes?.trim();
+    if (n == null || n.isEmpty) return null;
+    if (RegExp(r'^(simulated order|seed-)', caseSensitive: false).hasMatch(n) || n.contains('scripts/')) return null;
+    return n;
+  }
+
   int get itemCount => items.fold(0, (sum, i) => sum + i.quantity);
 }
 
@@ -468,6 +616,17 @@ class DeliveryJobDetail {
   bool pickupUnlockedAt(double? distanceM) => hasPickupOverride || withinBranchAt(distanceM);
 }
 
+/// Headings for a failed attempt's outcome (keys of the backend's DeliveryAttemptOutcome).
+/// "OTHER" is left out on purpose: the server files any reason it can't classify there,
+/// so it is shown as a plain "Delivery failed" with the rider's note.
+const deliveryFailureOutcomeLabels = <String, String>{
+  'CUSTOMER_UNREACHABLE': 'Customer not available',
+  'WRONG_ADDRESS': 'Wrong / incomplete address',
+  'REFUSED': 'Customer refused delivery',
+  'PAYMENT_FAILED': 'Payment issue',
+  'VEHICLE_FAILURE': 'Vehicle failure',
+};
+
 /// Structured failure reason sent with DELIVERY_FAILED alongside the free-text note.
 enum DeliveryOutcome {
   customerUnreachable('Customer not available', 'CUSTOMER_UNREACHABLE'),
@@ -479,4 +638,10 @@ enum DeliveryOutcome {
   const DeliveryOutcome(this.label, this.apiValue);
   final String label;
   final String apiValue;
+
+  /// Customer-side outcomes still pay the rider the stop's delivery fee.
+  bool get customerSide => this != DeliveryOutcome.other;
+
+  static bool isCustomerSide(String? apiValue) =>
+      apiValue != null && values.any((o) => o.customerSide && o.apiValue == apiValue);
 }

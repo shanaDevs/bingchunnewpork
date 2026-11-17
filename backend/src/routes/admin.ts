@@ -18,7 +18,6 @@ import {
   requireAdmin,
   requireSystemAdmin,
   requireBranchAdminOnly,
-  requireBranchStaff,
   blockCashier,
 } from '../middleware/auth';
 import { requireAnyPermission, requirePermission } from '../middleware/permission';
@@ -26,25 +25,18 @@ import { adminReportsRateLimiter, authRateLimiter } from '../middleware/rateLimi
 import { deliveryAdminServiceProxy } from '../middleware/deliveryAdminProxy';
 import { settlementProofMemoryUpload } from '../middleware/upload';
 import adminDeliveryRoutes from './adminDelivery';
-import { verifyAdminPinHandler } from '../lib/verifyAdminPin';
 import {
   enqueueCupStickerJob,
-  getCupStickerAgentPresenceAsync,
+  getCupStickerAgentPresence,
   getCupStickerJob,
   type CupStickerPayload,
 } from '../lib/cupStickerJobs';
-import {
-  getStoreCupStickerPrinterName,
-  setStoreCupStickerPrinterName,
-} from '../lib/cupStickerStoreSettings';
 
 const router = Router();
 
 router.use(authenticate, requireAdmin);
 router.use('/reports', adminReportsRateLimiter);
 router.use(deliveryAdminServiceProxy);
-
-router.post('/verify-pin', authRateLimiter, verifyAdminPinHandler);
 
 router.get(
   '/invoices/withdrawal/:withdrawalId',
@@ -206,27 +198,21 @@ router.get('/stock', requirePermission('STOCK', 'read'), storeInventoryControlle
 router.get('/stock/batch-preview', requirePermission('STOCK', 'read'), batchStockController.previewNextBatchNumber);
 router.get('/stock/batches', requirePermission('STOCK', 'read'), batchStockController.listBranchBatches);
 router.get('/stock/reset/preview', requirePermission('STOCK', 'read'), batchStockController.previewResetBatchNumber);
-router.post('/stock/reset', requirePermission('STOCK', 'update'), requireBranchStaff, batchStockController.createStockReset);
-router.post('/stock/bulk-restock', requirePermission('STOCK', 'update'), requireBranchStaff, batchStockController.createBulkRestock);
+router.post('/stock/reset', requirePermission('STOCK', 'update'), requireBranchAdminOnly, batchStockController.createStockReset);
+router.post('/stock/bulk-restock', requirePermission('STOCK', 'update'), requireBranchAdminOnly, batchStockController.createBulkRestock);
 router.get('/stock/reset-groups', requirePermission('STOCK', 'read'), batchStockController.listStockBatchGroups);
 router.get('/stock/invariant-check', requireSystemAdmin, batchStockController.stockInvariantCheck);
 router.get('/stock/:productId/pricing', requirePermission('STOCK', 'read'), batchStockController.getProductPricing);
 router.get('/stock/:productId/batches', requirePermission('STOCK', 'read'), batchStockController.listProductBatches);
-router.post('/stock/:productId/batches', requirePermission('STOCK', 'update'), requireBranchStaff, batchStockController.receiveStockBatch);
-router.post(
-  '/stock/:productId/restock-to-target',
-  requirePermission('STOCK', 'update'),
-  requireBranchStaff,
-  batchStockController.restockToWeeklyTarget,
-);
-router.patch('/stock/batches/:batchId', requirePermission('STOCK', 'update'), requireBranchStaff, batchStockController.patchBatch);
-router.patch('/stock/:productId/settings', requirePermission('STOCK', 'update'), requireBranchStaff, batchStockController.updateProductStockSettings);
+router.post('/stock/:productId/batches', requirePermission('STOCK', 'update'), requireBranchAdminOnly, batchStockController.receiveStockBatch);
+router.patch('/stock/batches/:batchId', requirePermission('STOCK', 'update'), requireBranchAdminOnly, batchStockController.patchBatch);
+router.patch('/stock/:productId/settings', requirePermission('STOCK', 'update'), requireBranchAdminOnly, batchStockController.updateProductStockSettings);
 router.get('/stock/report', requirePermission('STOCK', 'read'), stockReportController.stockWeeklyReport);
 router.get('/stock/audit-logs', requirePermission('STOCK', 'read'), stockReportController.stockAuditLogs);
 router.get('/stock/movement-ledger', requirePermission('STOCK', 'read'), stockReportController.stockMovementLedger);
-router.post('/stock/sync', requirePermission('STOCK', 'update'), requireBranchStaff, storeInventoryController.syncBranchInventory);
-router.patch('/stock/:productId', requirePermission('STOCK', 'update'), requireBranchStaff, storeInventoryController.updateBranchStock);
-router.post('/stock/:productId/topup', requirePermission('STOCK', 'update'), requireBranchStaff, stockReportController.stockTopUp);
+router.post('/stock/sync', requirePermission('STOCK', 'update'), requireBranchAdminOnly, storeInventoryController.syncBranchInventory);
+router.patch('/stock/:productId', requirePermission('STOCK', 'update'), requireBranchAdminOnly, storeInventoryController.updateBranchStock);
+router.post('/stock/:productId/topup', requirePermission('STOCK', 'update'), requireBranchAdminOnly, stockReportController.stockTopUp);
 
 // Notifications usually don't need strict RBAC because they are personal. 
 // We'll leave them protected by general admin auth.
@@ -281,35 +267,6 @@ router.get(
   requireSystemAdmin,
   requirePermission('WALLET', 'read'),
   walletController.getPayoutsDueHandler,
-);
-router.get(
-  '/wallet/payout-reviews',
-  requireSystemAdmin,
-  requirePermission('WALLET', 'read'),
-  walletController.listPayoutReviewsHandler,
-);
-router.put(
-  '/wallet/payout-reviews',
-  requireSystemAdmin,
-  requirePermission('WALLET', 'update'),
-  walletController.setPayoutReviewHandler,
-);
-router.get(
-  '/wallet/payout-review-invoice',
-  requireSystemAdmin,
-  requirePermission('WALLET', 'read'),
-  walletController.getPayoutReviewInvoiceHandler,
-);
-router.get(
-  '/wallet/payout-draft-invoice',
-  requirePermission('WALLET', 'read'),
-  walletController.getPayoutDraftInvoiceHandler,
-);
-router.post(
-  '/wallet/payout-review-zip',
-  requireSystemAdmin,
-  requirePermission('WALLET', 'read'),
-  walletController.downloadPayoutReviewZipHandler,
 );
 router.get(
   '/wallet/payout-periods',
@@ -399,58 +356,20 @@ router.post(
   messagingAdminController.sendAdminMessagingReply,
 );
 
-router.get('/cup-sticker-agent/status', async (req, res) => {
-  const presence = await getCupStickerAgentPresenceAsync();
-  const storeId =
-    (typeof req.query.storeId === 'string' && req.query.storeId) ||
-    (req as { user?: { storeId?: string | null } }).user?.storeId ||
-    null;
-  const printerName = storeId ? await getStoreCupStickerPrinterName(storeId) : '';
+router.get('/cup-sticker-agent/status', (_req, res) => {
+  const presence = getCupStickerAgentPresence();
   res.json({
     success: true,
     data: {
       online: presence.online,
       lastSeenAt: presence.lastSeenAt,
-      storeId,
-      printerName,
-      printerHint:
-        'On the cashier PC run BingChunCupStickerAgent.exe (or Setup → Save && Install). Local health: http://127.0.0.1:9177/health',
+      printerHint: 'Run tools/cup-sticker-agent/start.bat on the cashier PC',
     },
   });
 });
 
-/** Branch-wise cup-sticker printer queue name (Windows printer point). */
-router.get('/cup-sticker-settings', async (req, res) => {
-  const storeId =
-    (typeof req.query.storeId === 'string' && req.query.storeId) ||
-    (req as { user?: { storeId?: string | null } }).user?.storeId ||
-    null;
-  if (!storeId) {
-    res.status(400).json({ success: false, message: 'storeId required (branch account or ?storeId=)' });
-    return;
-  }
-  const printerName = await getStoreCupStickerPrinterName(storeId);
-  res.json({ success: true, data: { storeId, printerName } });
-});
-
-router.put('/cup-sticker-settings', async (req, res) => {
-  const storeId =
-    (typeof req.body?.storeId === 'string' && req.body.storeId.trim()) ||
-    (req as { user?: { storeId?: string | null } }).user?.storeId ||
-    null;
-  if (!storeId) {
-    res.status(400).json({ success: false, message: 'storeId required (branch account or body.storeId)' });
-    return;
-  }
-  const printerName = await setStoreCupStickerPrinterName(
-    storeId,
-    typeof req.body?.printerName === 'string' ? req.body.printerName : '',
-  );
-  res.json({ success: true, data: { storeId, printerName } });
-});
-
 /** Queue a cup-sticker print for the local Windows agent (polls /cup-sticker-agent/claim). */
-router.post('/cup-sticker-jobs', async (req, res) => {
+router.post('/cup-sticker-jobs', (req, res) => {
   const stickers = Array.isArray(req.body?.stickers) ? (req.body.stickers as CupStickerPayload[]) : [];
   if (stickers.length === 0) {
     res.status(400).json({ success: false, message: 'stickers array required' });
@@ -460,23 +379,12 @@ router.post('/cup-sticker-jobs', async (req, res) => {
     (typeof req.body?.storeId === 'string' && req.body.storeId) ||
     (req as { user?: { storeId?: string | null } }).user?.storeId ||
     null;
-  const bodyPrinter =
-    typeof req.body?.printerName === 'string' ? req.body.printerName.trim() : '';
-  const storePrinter = storeId ? await getStoreCupStickerPrinterName(storeId) : '';
-  // Prefer the branch system setting; body is only a one-off override when setting is empty.
-  const printerName = storePrinter || bodyPrinter;
-  if (!printerName) {
-    res.status(400).json({
-      success: false,
-      message:
-        'No cup sticker printer name configured for this branch. Set it under Admin → Printer (exact Windows printer name).',
-    });
-    return;
-  }
+  const printerName =
+    (typeof req.body?.printerName === 'string' && req.body.printerName.trim()) || 'Xprinter XP-D35B';
   const job = enqueueCupStickerJob({ storeId, printerName, stickers });
   res.status(201).json({
     success: true,
-    data: { id: job.id, status: job.status, createdAt: job.createdAt, printerName },
+    data: { id: job.id, status: job.status, createdAt: job.createdAt },
   });
 });
 

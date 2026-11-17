@@ -75,7 +75,7 @@ function mapExternalUrl(lat?: number | null, lng?: number | null, address?: stri
 type Props = {
   complaintId: string | null;
   onClose: () => void;
-  onReview: (status: 'CONFIRMED' | 'DISMISSED' | 'RESOLVED') => void;
+  onReview: (status: 'CONFIRMED' | 'DISMISSED') => void;
   isReviewing: boolean;
 };
 
@@ -141,17 +141,6 @@ export default function AdminComplaintDetailModal({
       cancelLabel: 'Cancel',
     });
     if (ok) onReview('DISMISSED');
-  };
-
-  const handleResolve = async () => {
-    const ok = await confirmDialog({
-      title: 'Mark complaint resolved?',
-      message:
-        'Mark this complaint as resolved after the issue has been addressed? The driver will see Resolved. No additional merit points will change.',
-      confirmLabel: 'Resolve complaint',
-      cancelLabel: 'Cancel',
-    });
-    if (ok) onReview('RESOLVED');
   };
 
   if (!portalReady) return null;
@@ -488,24 +477,6 @@ export default function AdminComplaintDetailModal({
                     onClick={handleConfirm}
                   >
                     Confirm
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {row?.status === 'CONFIRMED' && (
-              <div className="shrink-0 border-t border-navy-border px-5 py-4 space-y-3">
-                <p className="text-xs text-muted">
-                  This complaint is confirmed. Mark it resolved once remediation is complete.
-                </p>
-                <div className="flex flex-wrap gap-2 justify-end">
-                  <button
-                    type="button"
-                    className="btn-primary px-4 py-2 text-sm"
-                    disabled={isReviewing}
-                    onClick={handleResolve}
-                  >
-                    Resolve complaint
                   </button>
                 </div>
               </div>

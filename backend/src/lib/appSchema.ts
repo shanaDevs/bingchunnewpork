@@ -3,13 +3,11 @@ import { prisma } from './prisma';
 import {
   addColumnIfMissing,
   createIndexIfMissing,
-  ensureEnumTypeIfMissing,
-  pgColumnDef,
   runtimeSchemaPatchesAllowed,
   tableExists,
   tableHasColumn,
 } from './schemaPatch';
-import { getDeliveryZonesSqlRef, primeDeliverySqlRefs, qualifiedPhysicalTable } from './deliveryPg';
+import { getDeliveryZonesSqlRef, primeDeliverySqlRefs } from './deliveryPg';
 import { ensureCancelReasonSchema } from './cancelReasonConfig';
 import { ensureOrderStatusRefundSchema } from './orderStatusRefundConfig';
 import {
@@ -20,74 +18,8 @@ import {
   type SpinCriterion,
   type SpinDisplaySettings,
 } from './spinDisplay';
-import {
-  DEFAULT_COMMISSION_SLABS,
-  normalizeCommissionSlabs,
-  type CommissionSlab,
-} from './commission';
 
 let appSchemaReady = false;
-let appSettingsColumnsReady = false;
-
-/** Ensures optional app_settings columns exist before raw SQL writes (dev DBs may skip boot patches). */
-async function ensureAppSettingsColumnForWrite(column: string, columnDef: string): Promise<void> {
-  if (await tableHasColumn('app_settings', column)) return;
-  await addColumnIfMissing('app_settings', column, columnDef);
-  if (await tableHasColumn('app_settings', column)) return;
-  const tableRef = await qualifiedPhysicalTable('app_settings');
-  const quoted = `"${column.replace(/"/g, '""')}"`;
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE ${tableRef} ADD COLUMN IF NOT EXISTS ${quoted} ${pgColumnDef(columnDef)}`,
-  );
-}
-
-/** Prisma findUnique on AppSetting selects every field; keep these present even when boot patches are off. */
-const APP_SETTINGS_COLUMNS: ReadonlyArray<[string, string]> = [
-  ['googleMapsApiKey', 'VARCHAR(256) NULL'],
-  ['commissionSlabsJson', 'JSON NULL'],
-  ['pickupConvenientFeeRate', 'DOUBLE PRECISION NOT NULL DEFAULT 0.06'],
-  ['gatewayFeeRate', 'DOUBLE PRECISION NOT NULL DEFAULT 0.019'],
-  ['deliveryPlatformFeeRate', 'DOUBLE PRECISION NOT NULL DEFAULT 0'],
-  ['pickupAllowAddItemsPaidOnline', 'BOOLEAN NOT NULL DEFAULT true'],
-  ['pickupAllowEditCashUnpaid', 'BOOLEAN NOT NULL DEFAULT true'],
-  ['maxCupsPerRider', 'INT NOT NULL DEFAULT 20'],
-  ['deliveryMilestone1Orders', 'INT NOT NULL DEFAULT 50'],
-  ['deliveryMilestone2Orders', 'INT NOT NULL DEFAULT 150'],
-  ['deliveryMilestone3Orders', 'INT NOT NULL DEFAULT 300'],
-  ['requireAppDownload', 'BOOLEAN NOT NULL DEFAULT true'],
-  ['androidStoreUrl', 'VARCHAR(512) NULL'],
-  ['iosStoreUrl', 'VARCHAR(512) NULL'],
-  ['androidAppIconUrl', 'VARCHAR(512) NULL'],
-  ['iosAppIconUrl', 'VARCHAR(512) NULL'],
-  ['spinDurationSeconds', 'INT NOT NULL DEFAULT 8'],
-  ['spinsPerWindow', 'INT NOT NULL DEFAULT 1'],
-  ['spinWindowHours', 'INT NOT NULL DEFAULT 24'],
-  ['spinTrackByIp', 'BOOLEAN NOT NULL DEFAULT true'],
-  ['spinEnabled', 'BOOLEAN NOT NULL DEFAULT true'],
-  ['spinFirstOrderOnly', 'BOOLEAN NOT NULL DEFAULT false'],
-  ['spinRequireLogin', 'BOOLEAN NOT NULL DEFAULT false'],
-  ['spinDaysOfWeekJson', 'JSON NULL'],
-  ['spinTimeStart', 'VARCHAR(5) NULL'],
-  ['spinTimeEnd', 'VARCHAR(5) NULL'],
-  ['spinStartsAt', 'TIMESTAMP(3) NULL'],
-  ['spinExpiresAt', 'TIMESTAMP(3) NULL'],
-  ['spinMaxPerDay', 'INT NULL'],
-  ['spinMaxPerCustomer', 'INT NULL'],
-  ['spinDisplayJson', 'JSON NULL'],
-  ['spinCriteriaJson', 'JSON NULL'],
-  ['cancelWindowMinutes', 'INT NOT NULL DEFAULT 10'],
-  ['weeklyResetDay', 'INT NULL'],
-  ['pickupMaxOrderAmount', 'INT NULL'],
-  ['branchCompletionRadiusM', 'INT NOT NULL DEFAULT 100'],
-];
-
-async function ensureAppSettingsColumnsForPrisma(): Promise<void> {
-  if (appSettingsColumnsReady) return;
-  for (const [column, columnDef] of APP_SETTINGS_COLUMNS) {
-    await ensureAppSettingsColumnForWrite(column, columnDef);
-  }
-  appSettingsColumnsReady = true;
-}
 
 async function ensureDeliveryZonesTable(): Promise<void> {
   if (await tableExists('delivery_zones')) return;
@@ -109,10 +41,6 @@ async function ensureDeliveryZonesTable(): Promise<void> {
 }
 
 export async function ensureAppSchema(): Promise<void> {
-  // Prisma selects every AppSetting field; ensure columns exist even when full runtime patches are skipped
-  // (local .env often sets RUNTIME_SCHEMA_PATCHES=false against the remote DB).
-  await ensureAppSettingsColumnsForPrisma();
-
   if (appSchemaReady) return;
   // Non-core surfaces must not run DDL on the request path (pool exhaustion / locks).
   if (!runtimeSchemaPatchesAllowed()) {
@@ -183,9 +111,6 @@ export async function ensureAppSchema(): Promise<void> {
     'gatewayFeeRate',
     'DOUBLE NOT NULL DEFAULT 0.019',
   );
-  await addColumnIfMissing('app_settings', 'commissionSlabsJson', 'JSON NULL');
-  await addColumnIfMissing('store_withdrawals', 'cycleStage', "TEXT NOT NULL DEFAULT 'FIRST'");
-  await addColumnIfMissing('store_withdrawals', 'cyclePairId', 'TEXT NULL');
   await addColumnIfMissing(
     'app_settings',
     'deliveryPlatformFeeRate',
@@ -259,7 +184,6 @@ export async function ensureAppSchema(): Promise<void> {
   await addColumnIfMissing('app_settings', 'spinDisplayJson', 'JSON NULL');
   await addColumnIfMissing('app_settings', 'spinCriteriaJson', 'JSON NULL');
   await addColumnIfMissing('app_settings', 'cancelWindowMinutes', 'INT NOT NULL DEFAULT 10');
-  await addColumnIfMissing('app_settings', 'pickupMaxOrderAmount', 'INT NULL');
   await addColumnIfMissing(
     'app_settings',
     'branchCompletionRadiusM',
@@ -288,13 +212,22 @@ export async function ensureAppSchema(): Promise<void> {
     /* table exists */
   }
 
-  await ensureEnumTypeIfMissing('SugarLevel', ['FIFTY', 'HUNDRED']);
-  await ensureEnumTypeIfMissing('IceLevel', ['LESS_ICE', 'NORMAL_ICE']);
-  await addColumnIfMissing('stores', 'cupStickerPrinterName', 'VARCHAR(256) NULL');
-  await addColumnIfMissing('cart_items', 'sugarLevel', '"SugarLevel"');
-  await addColumnIfMissing('cart_items', 'iceLevel', '"IceLevel"');
-  await addColumnIfMissing('order_items', 'sugarLevel', '"SugarLevel"');
-  await addColumnIfMissing('order_items', 'iceLevel', '"IceLevel"');
+  for (const col of ['sugarLevel', 'iceLevel']) {
+    if (await tableHasColumn('cart_items', col)) {
+      try {
+        await prisma.$executeRawUnsafe(`ALTER TABLE "cart_items" DROP COLUMN "${col}"`);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (await tableHasColumn('order_items', col)) {
+      try {
+        await prisma.$executeRawUnsafe(`ALTER TABLE "order_items" DROP COLUMN "${col}"`);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 
   await primeDeliverySqlRefs();
   const zonesTable = getDeliveryZonesSqlRef();
@@ -368,76 +301,6 @@ export async function getGatewayFeeRate(): Promise<number> {
   const row = await prisma.appSetting.findUnique({ where: { id: 'default' } });
   gatewayFeeRateCache = row?.gatewayFeeRate ?? 0.019;
   return gatewayFeeRateCache;
-}
-
-let commissionSlabsCache: readonly CommissionSlab[] | null = null;
-
-export function invalidateCommissionSlabsCache(): void {
-  commissionSlabsCache = null;
-}
-
-function parseCommissionSlabsJson(value: unknown): readonly CommissionSlab[] | null {
-  if (!Array.isArray(value)) return null;
-  const rows: { upTo: number; rate: number; label?: string }[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== 'object') continue;
-    const row = item as { upTo?: unknown; rate?: unknown; label?: unknown };
-    const upTo = Number(row.upTo);
-    const rate = Number(row.rate);
-    if (!Number.isFinite(upTo) || !Number.isFinite(rate)) continue;
-    rows.push({
-      upTo,
-      rate,
-      label: typeof row.label === 'string' ? row.label : undefined,
-    });
-  }
-  return rows.length ? normalizeCommissionSlabs(rows) : null;
-}
-
-export async function getCommissionSlabs(): Promise<readonly CommissionSlab[]> {
-  if (commissionSlabsCache) return commissionSlabsCache;
-  await ensureAppSchema();
-  const row = await prisma.appSetting.findUnique({ where: { id: 'default' } });
-  commissionSlabsCache =
-    parseCommissionSlabsJson(row?.commissionSlabsJson) ?? DEFAULT_COMMISSION_SLABS;
-  return commissionSlabsCache;
-}
-
-export function assertValidCommissionSlabsInput(
-  slabs: readonly { upTo: number; rate: number; label?: string }[],
-): void {
-  if (slabs.length < 2) {
-    throw new Error('Commission slabs require at least two tiers (at/below threshold and above)');
-  }
-  const sorted = [...slabs].sort((a, b) => a.upTo - b.upTo);
-  const threshold = sorted[0]!.upTo;
-  if (!Number.isFinite(threshold) || threshold <= 0) {
-    throw new Error('Commission threshold must be a positive LKR amount');
-  }
-  for (const row of sorted) {
-    if (!Number.isFinite(row.rate) || row.rate < 0 || row.rate > 1) {
-      throw new Error('Each commission rate must be between 0 and 1 (0%–100%)');
-    }
-  }
-}
-
-export async function setCommissionSlabs(
-  slabs: readonly { upTo: number; rate: number; label?: string }[],
-): Promise<readonly CommissionSlab[]> {
-  assertValidCommissionSlabsInput(slabs);
-  const normalized = normalizeCommissionSlabs(slabs);
-  await ensureAppSchema();
-  await prisma.appSetting.upsert({
-    where: { id: 'default' },
-    update: { commissionSlabsJson: normalized as unknown as object[] },
-    create: {
-      id: 'default',
-      commissionSlabsJson: normalized as unknown as object[],
-    },
-  });
-  invalidateCommissionSlabsCache();
-  commissionSlabsCache = normalized;
-  return normalized;
 }
 
 let deliveryPlatformFeeRateCache: number | null = null;
@@ -639,55 +502,6 @@ export async function getCancelWindowMinutes(): Promise<number> {
   return cancelWindowMinutesCache;
 }
 
-/** Null or unset means no pickup amount cap. */
-let pickupMaxOrderAmountCache: number | null | undefined;
-
-export function invalidatePickupMaxOrderAmountCache(): void {
-  pickupMaxOrderAmountCache = undefined;
-}
-
-function normalizePickupMaxOrderAmount(value: number | null | undefined): number | null {
-  if (value == null || !Number.isFinite(value)) return null;
-  const rounded = Math.round(value);
-  if (rounded <= 0) return null;
-  return rounded;
-}
-
-async function readPickupMaxOrderAmountFromDb(): Promise<number | null> {
-  await ensureAppSchema();
-  const rows = await prisma.$queryRawUnsafe<Array<{ pickupMaxOrderAmount: number | bigint | null }>>(
-    'SELECT "pickupMaxOrderAmount" FROM "app_settings" WHERE "id" = $1 LIMIT 1',
-    'default',
-  );
-  const raw = rows[0]?.pickupMaxOrderAmount;
-  if (raw == null) return null;
-  return normalizePickupMaxOrderAmount(Number(raw));
-}
-
-export async function setPickupMaxOrderAmount(value: number | null): Promise<number | null> {
-  const normalized = normalizePickupMaxOrderAmount(value);
-  await ensureAppSchema();
-  await ensureAppSettingsColumnForWrite('pickupMaxOrderAmount', 'INT NULL');
-  await prisma.$executeRawUnsafe(
-    'UPDATE "app_settings" SET "pickupMaxOrderAmount" = $1 WHERE "id" = $2',
-    normalized,
-    'default',
-  );
-  pickupMaxOrderAmountCache = normalized;
-  return normalized;
-}
-
-export async function getPickupMaxOrderAmount(): Promise<number | null> {
-  if (pickupMaxOrderAmountCache !== undefined) return pickupMaxOrderAmountCache;
-  pickupMaxOrderAmountCache = await readPickupMaxOrderAmountFromDb();
-  return pickupMaxOrderAmountCache;
-}
-
-export function isPickupOrderOverMaxAmount(total: number, maxAmount: number | null): boolean {
-  if (maxAmount == null || maxAmount <= 0) return false;
-  return total > maxAmount;
-}
-
 let weeklyResetDayCache: number | null | undefined;
 
 export function invalidateWeeklyResetDayCache(): void {
@@ -711,7 +525,6 @@ async function readWeeklyResetDayFromDb(): Promise<number | null> {
 
 export async function setWeeklyResetDay(value: number | null): Promise<number | null> {
   await ensureAppSchema();
-  await ensureAppSettingsColumnForWrite('weeklyResetDay', 'INT NULL');
   const next = value == null ? null : clampWeeklyResetDay(value);
   await prisma.$executeRawUnsafe(
     'UPDATE "app_settings" SET "weeklyResetDay" = $1 WHERE "id" = $2',

@@ -38,25 +38,25 @@ class DriverStopCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.bc;
     final border = order.isFailed
-        ? c.danger.withValues(alpha: 0.5)
+        ? c.errorStrong.withValues(alpha: 0.5)
         : highlighted
-        ? c.brand
+        ? c.primaryStrong
         : order.isDelivered
         ? c.success.withValues(alpha: 0.5)
         : c.border;
     final badgeBg = order.isDelivered
         ? c.successSubtle
         : order.isFailed
-        ? c.dangerSubtle
+        ? c.errorSoftBg
         : highlighted
         ? c.infoSubtle
         : c.surfacePill;
     final badgeBorder = order.isDelivered
         ? c.success.withValues(alpha: 0.35)
         : order.isFailed
-        ? c.danger.withValues(alpha: 0.35)
+        ? c.errorStrong.withValues(alpha: 0.35)
         : highlighted
-        ? c.brand.withValues(alpha: 0.35)
+        ? c.primaryStrong.withValues(alpha: 0.35)
         : c.border;
     final name = order.customerName.trim().isNotEmpty
         ? order.customerName
@@ -69,7 +69,7 @@ class DriverStopCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: border, width: highlighted || order.isDelivered ? 1.5 : 1),
         boxShadow: [
-          BoxShadow(color: const Color(0x180A2647), blurRadius: highlighted ? 14 : 6, offset: const Offset(0, 2)),
+          BoxShadow(color: c.foreground.withValues(alpha: 0.08), blurRadius: highlighted ? 14 : 8, offset: const Offset(0, 2)),
         ],
       ),
       child: Material(
@@ -79,7 +79,7 @@ class DriverStopCard extends StatelessWidget {
         child: InkWell(
           onTap: onOpen,
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -101,7 +101,7 @@ class DriverStopCard extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w700,
-                                color: highlighted ? c.brand : c.text,
+                                color: highlighted ? c.primaryStrong : c.foreground,
                               ),
                             ),
                     ),
@@ -117,7 +117,7 @@ class DriverStopCard extends StatelessWidget {
                                   name,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700, color: c.text),
+                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.foreground),
                                 ),
                               ),
                               if (highlighted && order.isPending) ...[
@@ -131,7 +131,7 @@ class DriverStopCard extends StatelessWidget {
                             '#${order.orderNumber} · ${Format.money(order.deliveryFee)}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 12.5, color: c.textMuted),
+                            style: TextStyle(fontSize: 13, color: c.mutedForeground),
                           ),
                           if (order.complaints.isNotEmpty) ...[
                             const SizedBox(height: 2),
@@ -168,14 +168,14 @@ class DriverStopCard extends StatelessWidget {
                   children: [
                     Padding(
                       padding: const EdgeInsets.only(top: 2, right: 8),
-                      child: Icon(Icons.place, color: c.brand, size: 18),
+                      child: Icon(Icons.place, color: c.primaryStrong, size: 18),
                     ),
                     Expanded(
                       child: Text(
                         order.shortAddress,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 13.5, color: c.text.withValues(alpha: 0.88)),
+                        style: TextStyle(fontSize: 14, color: c.foreground.withValues(alpha: 0.88)),
                       ),
                     ),
                   ],
@@ -186,7 +186,7 @@ class DriverStopCard extends StatelessWidget {
                     order.items.map((i) => '${i.quantity}× ${i.productName}').join(' · '),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12.5, color: c.textMuted),
+                    style: TextStyle(fontSize: 13, color: c.mutedForeground),
                   ),
                 ],
                 if (order.isPending && showCustomerActions) ...[
@@ -205,10 +205,10 @@ class DriverStopCard extends StatelessWidget {
                   children: [
                     Text(
                       tr('View order'),
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.brand),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.primaryStrong),
                     ),
                     const SizedBox(width: 4),
-                    Icon(Icons.arrow_forward_ios, size: 11, color: c.brand),
+                    Icon(Icons.arrow_forward_ios, size: 11, color: c.primaryStrong),
                   ],
                 ),
               ],
@@ -253,10 +253,10 @@ class StopPreviewList extends StatelessWidget {
           final s = list[i];
           final current = i == 0;
           return Material(
-            color: current ? c.brandSubtle : c.card,
+            color: current ? c.primarySoft : c.card,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: current ? c.brand : c.border, width: current ? 1.5 : 1),
+              side: BorderSide(color: current ? c.primaryStrong : c.border, width: current ? 1.5 : 1),
             ),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
@@ -270,13 +270,13 @@ class StopPreviewList extends StatelessWidget {
                       Container(
                         width: 30,
                         height: 30,
-                        decoration: BoxDecoration(shape: BoxShape.circle, color: current ? c.brand : c.iconTile),
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: current ? c.primaryStrong : c.primarySoft),
                         alignment: Alignment.center,
                         child: Text(
                           '${i + 1}'.padLeft(2, '0'),
                           style: TextStyle(
-                            color: current ? Colors.white : c.textMuted,
-                            fontSize: 11,
+                            color: current ? c.primaryForeground : c.mutedForeground,
+                            fontSize: 12,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -291,13 +291,13 @@ class StopPreviewList extends StatelessWidget {
                               s.customerName.trim().isEmpty ? tr('Customer') : s.customerName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: c.text, fontSize: 13.5, fontWeight: FontWeight.w700),
+                              style: TextStyle(color: c.foreground, fontSize: 14, fontWeight: FontWeight.w700),
                             ),
                             Text(
                               s.shortAddress,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: c.textMuted, fontSize: 11.5, height: 1.25),
+                              style: TextStyle(color: c.mutedForeground, fontSize: 12, height: 1.25),
                             ),
                           ],
                         ),

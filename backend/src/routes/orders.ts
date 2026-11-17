@@ -11,7 +11,6 @@ const router = Router();
 router.post('/', orderPlacementRateLimiter, optionalAuth, orderController.placeOrder);
 router.get('/my', authenticate, requireActiveCustomer, orderController.getMyOrders);
 router.get('/takeaway-queue', authenticate, requirePermission('ORDERS', 'read'), orderController.listTakeawayQueue);
-router.get('/queue-counts', authenticate, requirePermission('ORDERS', 'read'), orderController.getQueueCounts);
 router.get('/cashier-activity', authenticate, requirePermission('ORDERS', 'read'), orderController.getCashierActivity);
 router.put('/takeaway-queue/reorder', authenticate, requirePermission('ORDERS', 'update'), requireBranchOrderWrite, orderController.reorderTakeawayQueueHandler);
 router.post('/:id/confirm-payment', orderTrackRateLimiter, optionalAuth, orderController.confirmPaymentReturn);

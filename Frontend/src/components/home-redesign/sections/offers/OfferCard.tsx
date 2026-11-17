@@ -135,6 +135,7 @@ export function OfferCard({ offer }: { offer: Offer }) {
           width={offer.secondImage.width}
           height={offer.secondImage.height}
           sizes="120px"
+          unoptimized
           data-offers-product
           className={cn(
             // Capped like the main image; cut-outs (about 0.6 wide per 1 tall) are unaffected.
@@ -156,6 +157,7 @@ export function OfferCard({ offer }: { offer: Offer }) {
               width={offer.image.width}
               height={offer.image.height}
               sizes="160px"
+              unoptimized
               data-offers-product
               className={cn(
                 "h-auto max-h-full w-[min(100%,calc(var(--u)*27))] object-contain drop-shadow-[0_14px_16px_rgb(15_33_71/0.25)] transition-[rotate] duration-300",
@@ -170,6 +172,7 @@ export function OfferCard({ offer }: { offer: Offer }) {
             width={offer.image.width}
             height={offer.image.height}
             sizes="140px"
+            unoptimized
             data-offers-product
             className={cn(
               // Placed and sized as in the prototype, which was drawn for tall product cut-outs. The max width

@@ -1,7 +1,7 @@
 # Google Play — sensitive permission declarations
 
 Copy-paste answers for Play Console → **App content** (and the review notes) for
-Bing Chun Delivery (`com.bingchun.bing_chun_driver`). Keep this in sync with
+Bing Chun Delivery (`com.bringit.driver`). Keep this in sync with
 `android/app/src/main/AndroidManifest.xml`.
 
 The app is used only by Bing Chun delivery staff, who sign in with a staff PIN.

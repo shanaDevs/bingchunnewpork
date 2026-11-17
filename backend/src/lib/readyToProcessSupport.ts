@@ -1,6 +1,5 @@
 import {
   computePlatformProviderReceivableLkr,
-  computePlatformProviderReceivableLkrFromBreakdownCents,
   type PlatformProviderReceivableLkr,
 } from '@bingchun/settlement';
 import { parseSharedPromoFromBreakdown } from './sharedPromoContribution';
@@ -66,14 +65,8 @@ export function combinePlatformProviderReceivableLkr(
   const paybackEnabled = breakdowns.some((b) => paybackEnabledFromBreakdown(b));
   const gatewayRatePct = periodLkrs[0]?.gatewayRatePct ?? 1.9;
 
-  const perPeriodLkrs = breakdowns.map((b) =>
-    computePlatformProviderReceivableLkrFromBreakdownCents(
-      (b ?? {}) as Parameters<typeof computePlatformProviderReceivableLkrFromBreakdownCents>[0],
-    ),
-  );
-
   const sum = (pick: (l: PlatformProviderReceivableLkr) => number) =>
-    perPeriodLkrs.reduce((acc, l) => acc + pick(l), 0);
+    periodLkrs.reduce((acc, l) => acc + pick(l), 0);
 
   return computePlatformProviderReceivableLkr({
     commissionFeeLkr: sum((l) => l.commissionFeeLkr),
@@ -108,33 +101,8 @@ export async function loadEnrichedApprovedUnsettledWithdrawals(): Promise<
     }
   }
 
-  const firstIds = rows
-    .filter(({ withdrawal: w }) => w.cycleStage === 'FIRST')
-    .map(({ withdrawal: w }) => w.id);
-
-  const completedFirstPairIds = new Set<string>();
-  if (firstIds.length > 0) {
-    const pairedSeconds = await prisma.storeWithdrawal.findMany({
-      where: {
-        cycleStage: 'SECOND',
-        cyclePairId: { in: firstIds },
-        status: 'APPROVED',
-      },
-      select: { cyclePairId: true },
-    });
-    for (const row of pairedSeconds) {
-      if (row.cyclePairId) completedFirstPairIds.add(row.cyclePairId);
-    }
-  }
-
-  const eligibleRows = rows.filter(({ withdrawal: w }) => {
-    if (w.cycleStage === 'SECOND') return true;
-    if (w.cycleStage === 'FIRST') return completedFirstPairIds.has(w.id);
-    return true;
-  });
-
   return Promise.all(
-    eligibleRows.map(async ({ storeId, withdrawal: w }) => {
+    rows.map(async ({ storeId, withdrawal: w }) => {
       const platformProviderReceivable = w.breakdown
         ? await resolveStoredPlatformProviderReceivable(w.breakdown)
         : await resolveStoredPlatformProviderReceivable({});

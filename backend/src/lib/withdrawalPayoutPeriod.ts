@@ -191,52 +191,11 @@ export function getPayoutPeriodEndDate(startDateStr: string): string {
 }
 
 /** Day after the latest non-rejected withdrawal period end, or null for first request. */
-function periodStartDate(ymd: string): Date {
-  return new Date(`${ymd.slice(0, 10)}T00:00:00.000Z`);
-}
-
-function periodEndInclusiveDate(ymd: string): Date {
-  return new Date(`${ymd.slice(0, 10)}T23:59:59.999Z`);
-}
-
-export async function findInReviewWithdrawalForPeriod(
-  storeId: string,
-  periodFrom: string,
-  periodTo: string,
-) {
-  return prisma.storeWithdrawal.findFirst({
-    where: {
-      storeId,
-      status: 'IN_REVIEW',
-      periodFrom: periodStartDate(periodFrom),
-      periodTo: periodEndInclusiveDate(periodTo),
-    },
-  });
-}
-
-/** Existing branch payout request for this exact window (draft or branch-requested). */
-export async function findCompletablePeriodWithdrawal(
-  storeId: string,
-  periodFrom: string,
-  periodTo: string,
-) {
-  const from = periodStartDate(periodFrom);
-  const to = periodEndInclusiveDate(periodTo);
-  return prisma.storeWithdrawal.findFirst({
-    where: {
-      storeId,
-      status: { in: ['IN_REVIEW', 'PENDING'] },
-      periodFrom: from,
-      periodTo: to,
-    },
-  });
-}
-
 export async function getNextPayoutStartDate(storeId: string): Promise<string | null> {
   const latest = await prisma.storeWithdrawal.findFirst({
     where: {
       storeId,
-      status: { in: ['PENDING', 'APPROVED', 'IN_REVIEW'] },
+      status: { in: ['PENDING', 'APPROVED'] },
       periodTo: { not: null },
     },
     orderBy: { periodTo: 'desc' },
@@ -245,10 +204,3 @@ export async function getNextPayoutStartDate(storeId: string): Promise<string | 
   if (!latest?.periodTo) return null;
   return dayAfterUtcDateStr(toUtcDateStr(latest.periodTo));
 }
-
-export {
-  determineNextPayoutCycleStage,
-  resolveCycleFromDate,
-  resolvePayoutCycleContext,
-} from './payoutCycle';
-export type { PayoutCycleStage, PayoutCycleContext } from './payoutCycle';

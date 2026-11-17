@@ -1,26 +1,11 @@
 {
   "name": "@bingchun/cup-sticker-agent",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Local Windows agent that prints cup stickers on Xprinter for the cashier PC",
-  "bin": {
-    "bingchun-cup-sticker-agent": "./server.mjs"
-  },
   "scripts": {
     "start": "node server.mjs",
-    "build:exe": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./build-exe.ps1",
     "test-print": "node -e \"fetch('http://127.0.0.1:9177/test',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(console.log).catch(e=>{console.error(e);process.exit(1)})\""
-  },
-  "pkg": {
-    "assets": [
-      "print-stickers.ps1",
-      "detect-printer.ps1",
-      "list-printers.ps1"
-    ],
-    "targets": [
-      "node18-win-x64"
-    ],
-    "outputPath": "dist"
   }
 }

@@ -33,3 +33,18 @@ class JobRefreshBus {
     if (jobId.trim().isNotEmpty) _droppedRides.add(jobId);
   }
 }
+
+/// Breakdown handover changes for the stranded rider, from the socket: admin assigned a
+/// replacement (`handoverRiderAssigned`) or the breakdown was cleared
+/// (`vehicleBreakdownCleared`). Emits the failed ride's job id.
+class BreakdownBus {
+  BreakdownBus._();
+
+  static final _events = StreamController<String>.broadcast();
+
+  static Stream<String> get events => _events.stream;
+
+  static void changed(String jobId) {
+    if (jobId.trim().isNotEmpty) _events.add(jobId);
+  }
+}

@@ -47,6 +47,14 @@ class DriverProfile {
   /// Socket branch-pool rooms from PATCH /delivery/me/duty when GET /me is unavailable.
   final List<String> branchPoolStoreIds;
 
+  /// Open vehicle breakdown: the rider stays OFF_DUTY and can't claim until it is cleared
+  /// (`POST /me/vehicle-fixed` or the handover back-on-road action). Null when none is open.
+  final OpenVehicleBreakdown? vehicleBreakdown;
+
+  /// Whether GET /me reported the `vehicleBreakdown` field at all (older backends don't);
+  /// when false the app falls back to guessing from ride history.
+  final bool vehicleBreakdownKnown;
+
   const DriverProfile({
     required this.id,
     required this.name,
@@ -74,10 +82,13 @@ class DriverProfile {
     this.activeRidePhase = 'NONE',
     this.canClaimMore = true,
     this.branchPoolStoreIds = const [],
+    this.vehicleBreakdown,
+    this.vehicleBreakdownKnown = false,
   });
 
   factory DriverProfile.fromJson(Json j) {
     final store = objOrNull(j, 'store');
+    final breakdown = objOrNull(j, 'vehicleBreakdown');
     return DriverProfile(
       id: str(j, 'id'),
       name: str(j, 'name'),
@@ -105,8 +116,12 @@ class DriverProfile {
       activeRidePhase: str(j, 'activeRidePhase', 'NONE'),
       canClaimMore: boolOf(j, 'canClaimMore', true),
       branchPoolStoreIds: DriverProfile.parseStringList(j, 'branchPoolStoreIds'),
+      vehicleBreakdown: breakdown == null ? null : OpenVehicleBreakdown.fromJson(breakdown),
+      vehicleBreakdownKnown: j.containsKey('vehicleBreakdown'),
     );
   }
+
+  bool get hasOpenBreakdown => vehicleBreakdown != null;
 
   static List<String> parseStringList(Json j, String key) {
     final raw = j[key];
@@ -124,6 +139,7 @@ class DriverProfile {
     List<String>? branchPoolStoreIds,
     String? licenseImageUrl,
     bool? hasLicenseImage,
+    bool clearVehicleBreakdown = false,
   }) {
     return DriverProfile(
       id: id,
@@ -152,6 +168,8 @@ class DriverProfile {
       activeRidePhase: activeRidePhase ?? this.activeRidePhase,
       canClaimMore: canClaimMore ?? this.canClaimMore,
       branchPoolStoreIds: branchPoolStoreIds ?? this.branchPoolStoreIds,
+      vehicleBreakdown: clearVehicleBreakdown ? null : vehicleBreakdown,
+      vehicleBreakdownKnown: vehicleBreakdownKnown,
     );
   }
 
@@ -164,15 +182,66 @@ class DriverProfile {
   }.where((id) => id.trim().isNotEmpty).toList();
 }
 
+/// `GET /delivery/me` → `vehicleBreakdown`: the rider's open breakdown.
+class OpenVehicleBreakdown {
+  final String id;
+
+  /// The ride that ended as VEHICLE_FAILURE.
+  final String jobId;
+  final String reportedAt;
+  final double? lat;
+  final double? lng;
+  final String? note;
+  final String? rideCode;
+
+  const OpenVehicleBreakdown({
+    required this.id,
+    required this.jobId,
+    required this.reportedAt,
+    this.lat,
+    this.lng,
+    this.note,
+    this.rideCode,
+  });
+
+  factory OpenVehicleBreakdown.fromJson(Json j) => OpenVehicleBreakdown(
+    id: str(j, 'id'),
+    jobId: str(j, 'jobId'),
+    reportedAt: str(j, 'reportedAt'),
+    lat: dblOrNull(j, 'lat'),
+    lng: dblOrNull(j, 'lng'),
+    note: strOrNull(j, 'note'),
+    rideCode: strOrNull(j, 'rideCode'),
+  );
+}
+
 class BranchOption {
   final String id;
   final String name;
   final String? city;
 
-  const BranchOption({required this.id, required this.name, this.city});
+  /// Street address, phone and open state — shown on the branch cards.
+  final String? addressLine;
+  final String? phone;
+  final bool isActive;
 
-  factory BranchOption.fromJson(Json j) =>
-      BranchOption(id: str(j, 'id'), name: str(j, 'name'), city: strOrNull(j, 'city'));
+  const BranchOption({
+    required this.id,
+    required this.name,
+    this.city,
+    this.addressLine,
+    this.phone,
+    this.isActive = true,
+  });
+
+  factory BranchOption.fromJson(Json j) => BranchOption(
+    id: str(j, 'id'),
+    name: str(j, 'name'),
+    city: strOrNull(j, 'city'),
+    addressLine: strOrNull(j, 'addressLine'),
+    phone: strOrNull(j, 'phone'),
+    isActive: boolOf(j, 'isActive', true),
+  );
 }
 
 /// Rider's own add/change/remove-branch request (super-admin review).
@@ -185,6 +254,7 @@ class DriverBranchRequest {
   final String status;
   final String? reason;
   final String? reviewNote;
+  final String? reviewedAt;
   final String? createdAt;
 
   const DriverBranchRequest({
@@ -196,6 +266,7 @@ class DriverBranchRequest {
     this.status = 'PENDING',
     this.reason,
     this.reviewNote,
+    this.reviewedAt,
     this.createdAt,
   });
 
@@ -208,6 +279,7 @@ class DriverBranchRequest {
     status: str(j, 'status', 'PENDING'),
     reason: strOrNull(j, 'reason'),
     reviewNote: strOrNull(j, 'reviewNote'),
+    reviewedAt: strOrNull(j, 'reviewedAt'),
     createdAt: strOrNull(j, 'createdAt'),
   );
 }
@@ -397,17 +469,33 @@ class RiderMeritSummary {
   );
 }
 
+/// Offer outcomes for a stats period, counted by the server (missed offers aren't tracked there).
+class RiderOfferStats {
+  final int accepted;
+  final int declined;
+  final int missed;
+
+  const RiderOfferStats({this.accepted = 0, this.declined = 0, this.missed = 0});
+
+  factory RiderOfferStats.fromJson(Json j) =>
+      RiderOfferStats(accepted: intOf(j, 'accepted'), declined: intOf(j, 'declined'), missed: intOf(j, 'missed'));
+}
+
 class RiderStats {
   final String periodKey;
   final RiderStatsTotals totals;
   final RiderRatingSummary rating;
   final RiderMeritSummary merit;
 
+  /// Null when talking to an older backend without offer counts.
+  final RiderOfferStats? offers;
+
   const RiderStats({
     this.periodKey = '7d',
     this.totals = const RiderStatsTotals(),
     this.rating = const RiderRatingSummary(),
     this.merit = const RiderMeritSummary(),
+    this.offers,
   });
 
   factory RiderStats.fromJson(Json j) => RiderStats(
@@ -415,6 +503,7 @@ class RiderStats {
     totals: RiderStatsTotals.fromJson(objOrNull(j, 'totals') ?? const {}),
     rating: RiderRatingSummary.fromJson(objOrNull(j, 'rating') ?? const {}),
     merit: RiderMeritSummary.fromJson(objOrNull(j, 'merit') ?? const {}),
+    offers: objOrNull(j, 'offers') == null ? null : RiderOfferStats.fromJson(objOrNull(j, 'offers')!),
   );
 
   /// True when the window holds nothing worth charting — drives the empty state.

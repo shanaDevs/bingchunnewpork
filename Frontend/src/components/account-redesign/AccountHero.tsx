@@ -151,8 +151,7 @@ function Customer({ user, onEdit }: { user: User; onEdit: () => void }) {
 function PhonePoints() {
   const { balance, spend, tiers, current, currentIndex, next } = useHappyPoints();
   const TierIcon = current ? tierLook(currentIndex, tiers.length).icon : Sparkles;
-  const spendValue = spend ?? 0;
-  const toNext = next && spend != null ? `LKR ${lkr(next.minSpendLkr - spendValue)} to ${next.name}` : null;
+  const toNext = next ? `LKR ${lkr(next.minSpendLkr - spend)} to ${next.name}` : null;
 
   return (
     <Link
@@ -174,11 +173,7 @@ function PhonePoints() {
           <Star className="size-5 fill-white text-snow drop-shadow-[0_1px_2px_rgb(160_110_0/0.45)]" />
         </span>
         <p className="flex min-w-0 flex-1 items-end gap-1.5">
-          {balance != null ? (
-            <CountUp value={balance} className="font-numeric text-[1.75rem] leading-none font-extrabold tracking-tight" />
-          ) : (
-            <span className="font-numeric text-[1.75rem] leading-none font-extrabold tracking-tight text-brand-400">…</span>
-          )}
+          <CountUp value={balance} className="font-numeric text-[1.75rem] leading-none font-extrabold tracking-tight" />
           <span className="pb-0.5 text-sm font-bold text-brand-600">pts</span>
         </p>
         <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-sun-300 px-2.5 py-1 text-xs font-bold whitespace-nowrap">
@@ -189,9 +184,9 @@ function PhonePoints() {
       </div>
 
       <div className="relative mt-3">
-        {next && toNext && spend != null ? (
+        {next && toNext ? (
           <>
-            <PointsBar value={spendValue} goal={next.minSpendLkr} label={toNext} tone="ice" className="h-2.5" />
+            <PointsBar value={spend} goal={next.minSpendLkr} label={toNext} tone="ice" className="h-2.5" />
             <p className="mt-1.5 text-xs font-semibold text-brand-800">{toNext}</p>
           </>
         ) : (

@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 import '../../core/feedback.dart';
 import '../../l10n/l10n.dart';
 import '../theme/bc_theme.dart';
-import 'scenery.dart';
+import 'qd_kit.dart';
 
 /// Shared building blocks for the active-run and order screens: gradient top bar,
 /// soft cards with an icon header, gradient/outline actions, and the run step tracker.
 
-/// Gradient header with rounded bottom corners, a round back button, title/subtitle,
-/// an optional trailing widget (status pill) and optional extra content underneath.
+/// QuickDrop-style detail header: brand surface, glass back circle, ink title,
+/// optional trailing status and extra content underneath.
 class BcDetailTopBar extends StatelessWidget {
   const BcDetailTopBar({super.key, required this.title, this.subtitle, this.trailing, this.bottom, this.onBack});
 
@@ -22,106 +22,96 @@ class BcDetailTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    const radius = BorderRadius.vertical(bottom: Radius.circular(28));
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        borderRadius: radius,
-        gradient: LinearGradient(
-          colors: [const Color(0xFF0B3EA8), c.brandDark, c.brand],
-          stops: const [0, 0.5, 1],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: c.brand.withValues(alpha: c.isDark ? 0.18 : 0.26),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: radius,
-        child: CustomPaint(
-          painter: HeroSwooshPainter(Colors.white.withValues(alpha: 0.07)),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(12, MediaQuery.paddingOf(context).top + 8, 16, 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+    // Plain QuickDrop app bar (white, hairline, centred title) unless extra header content
+    // (stepper / tags) needs the brand surface.
+    if (bottom == null) {
+      return QdAppBar(
+        title: title,
+        subtitle: subtitle,
+        onBack: onBack,
+        trailing: trailing == null ? null : _OnSurface(child: trailing!),
+      );
+    }
+    return QdBrandHeader(
+      padding: EdgeInsets.fromLTRB(14, MediaQuery.paddingOf(context).top + 6, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Material(
+                color: Colors.white.withValues(alpha: 0.2),
+                shape: CircleBorder(side: BorderSide(color: Colors.white.withValues(alpha: 0.28))),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: onBack ?? () => Navigator.of(context).maybePop(),
+                  child: Tooltip(
+                    message: tr('Back'),
+                    child: SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(Icons.arrow_back_rounded, color: c.heroTitle, size: 22),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Material(
-                      color: Colors.white.withValues(alpha: 0.16),
-                      shape: const CircleBorder(),
-                      clipBehavior: Clip.antiAlias,
-                      child: InkWell(
-                        onTap: onBack ?? () => Navigator.of(context).maybePop(),
-                        child: Tooltip(
-                          message: tr('Back'),
-                          child: const SizedBox(
-                            width: 42,
-                            height: 42,
-                            child: Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
-                          ),
-                        ),
-                      ),
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: BcType.title.copyWith(color: c.heroTitle, fontSize: 22, fontWeight: FontWeight.w800),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w800),
-                          ),
-                          if (subtitle != null) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              subtitle!,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.85),
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ],
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: c.heroSubtitle, fontSize: 13, fontWeight: FontWeight.w600),
                       ),
-                    ),
-                    if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+                    ],
                   ],
                 ),
-                if (bottom != null) ...[const SizedBox(height: 14), bottom!],
-              ],
-            ),
+              ),
+              if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+            ],
           ),
-        ),
+          if (bottom != null) ...[const SizedBox(height: 14), bottom!],
+        ],
       ),
     );
   }
 }
 
+class _OnSurface extends InheritedWidget {
+  const _OnSurface({required super.child});
+  static bool of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<_OnSurface>() != null;
+  @override
+  bool updateShouldNotify(_OnSurface old) => false;
+}
+
 /// Translucent pill for the top bar (status with a live dot).
 class BcTopBarPill extends StatelessWidget {
-  const BcTopBarPill({super.key, required this.label, this.dotColor = const Color(0xFF4ADE80)});
+  const BcTopBarPill({super.key, required this.label, this.dotColor});
   final String label;
-  final Color dotColor;
+  final Color? dotColor;
 
   @override
   Widget build(BuildContext context) {
+    final c = context.bc;
+    final dot = dotColor ?? c.success;
+    final onSurface = _OnSurface.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 6, 12, 6),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.16),
+        color: onSurface ? c.muted : Colors.white.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+        border: Border.all(color: onSurface ? c.border : Colors.white.withValues(alpha: 0.28)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -131,15 +121,12 @@ class BcTopBarPill extends StatelessWidget {
             height: 8,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: dotColor,
-              boxShadow: [BoxShadow(color: dotColor.withValues(alpha: 0.6), blurRadius: 6)],
+              color: dot,
+              boxShadow: [BoxShadow(color: dot.withValues(alpha: 0.6), blurRadius: 6)],
             ),
           ),
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
-          ),
+          Text(label, style: TextStyle(color: onSurface ? c.foreground : c.heroTitle, fontSize: 12, fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -151,7 +138,7 @@ class RunCard extends StatelessWidget {
   const RunCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(16),
+    this.padding = const EdgeInsets.all(12),
     this.borderColor,
     this.color,
   });
@@ -163,15 +150,14 @@ class RunCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
+    if (borderColor == null) return QdCard(padding: padding, color: color, child: child);
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: color ?? c.card,
-        borderRadius: BorderRadius.circular(BcRadius.card),
-        border: Border.all(color: borderColor ?? c.border, width: borderColor == null ? 1 : 1.4),
-        boxShadow: c.cardShadow.a == 0
-            ? null
-            : [BoxShadow(color: c.cardShadow, blurRadius: 16, offset: const Offset(0, 5))],
+        color: color ?? c.surface,
+        borderRadius: BorderRadius.circular(BcRadius.lg),
+        border: Border.all(color: borderColor!, width: 1.5),
+        boxShadow: bcShadow(c),
       ),
       child: child,
     );
@@ -205,8 +191,8 @@ class RunCardHeader extends StatelessWidget {
         Container(
           width: 44,
           height: 44,
-          decoration: BoxDecoration(color: bg ?? c.brandSubtle, borderRadius: BorderRadius.circular(14)),
-          child: Icon(icon, color: tint ?? c.brand, size: 22),
+          decoration: BoxDecoration(color: bg ?? c.primarySoft, borderRadius: BorderRadius.circular(BcRadius.md)),
+          child: Icon(icon, color: tint ?? c.primaryStrong, size: 22),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -215,11 +201,11 @@ class RunCardHeader extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: TextStyle(color: c.text, fontWeight: FontWeight.w800, fontSize: 16),
+                style: BcType.subtitle.copyWith(color: c.foreground),
               ),
               if (subtitle != null) ...[
                 const SizedBox(height: 2),
-                Text(subtitle!, style: TextStyle(color: c.textMuted, fontSize: 12.5, height: 1.35)),
+                Text(subtitle!, style: BcType.caption.copyWith(color: c.mutedForeground)),
               ],
             ],
           ),
@@ -266,17 +252,17 @@ class RunNote extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final col = color ?? c.brand;
+    final col = color ?? c.primaryStrong;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(color: col.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: col.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(BcRadius.md)),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, color: col, size: 18),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(text, style: TextStyle(color: c.text, fontSize: 12.5, height: 1.4)),
+            child: Text(text, style: TextStyle(color: c.foreground, fontSize: 13, height: 1.4)),
           ),
         ],
       ),
@@ -303,6 +289,8 @@ class RunPrimaryButton extends StatelessWidget {
   final bool enabled;
   final bool loading;
   final bool locked;
+
+  /// Optional override fill: the first colour is used as the pill fill.
   final List<Color>? colors;
 
   @override
@@ -310,23 +298,21 @@ class RunPrimaryButton extends StatelessWidget {
     final c = context.bc;
     final active = enabled && !loading && onPressed != null;
     final showLock = locked && !active && !loading;
-    final grad = colors ?? [c.brandLight, c.brand, c.brandDark];
-    final radius = BorderRadius.circular(BcRadius.button + 2);
-    final red = c.isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+    final fill = colors?.first ?? c.action;
+    final fg = colors == null ? c.actionForeground : Colors.white;
+    final radius = BorderRadius.circular(BcRadius.full);
+    final red = c.errorStrong;
     return AnimatedOpacity(
       duration: BcMotion.fast,
       opacity: active || loading || showLock ? 1 : 0.5,
       child: AnimatedContainer(
         duration: BcMotion.standard,
-        height: 52,
+        height: 54,
         decoration: BoxDecoration(
           borderRadius: radius,
-          gradient: showLock ? null : LinearGradient(colors: grad),
-          color: showLock ? red.withValues(alpha: 0.10) : null,
-          border: showLock ? Border.all(color: red.withValues(alpha: 0.35)) : null,
-          boxShadow: active
-              ? [BoxShadow(color: grad[1].withValues(alpha: 0.32), blurRadius: 14, offset: const Offset(0, 6))]
-              : null,
+          color: showLock ? c.errorSoftBg : fill,
+          border: showLock ? Border.all(color: c.error.withValues(alpha: 0.4)) : null,
+          boxShadow: active ? [BoxShadow(color: fill.withValues(alpha: 0.3), blurRadius: 14, offset: const Offset(0, 6))] : null,
         ),
         child: Material(
           type: MaterialType.transparency,
@@ -341,30 +327,20 @@ class RunPrimaryButton extends StatelessWidget {
                 : null,
             child: Center(
               child: loading
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                    )
+                  ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: fg))
                   : Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          showLock ? Icons.lock_outline_rounded : icon,
-                          color: showLock ? red : Colors.white,
-                          size: 19,
-                        ),
-                        const SizedBox(width: 8),
+                        if (showLock || icon != null) ...[
+                          Icon(showLock ? Icons.lock_outline_rounded : icon, color: showLock ? red : fg, size: 19),
+                          const SizedBox(width: 8),
+                        ],
                         Flexible(
                           child: Text(
                             label,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 15.5,
-                              fontWeight: FontWeight.w700,
-                              color: showLock ? red : Colors.white,
-                            ),
+                            style: BcType.button.copyWith(fontSize: 15, color: showLock ? red : fg),
                           ),
                         ),
                       ],
@@ -399,15 +375,15 @@ class RunOutlineButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final col = color ?? c.brand;
+    final col = color ?? c.primaryStrong;
     final active = enabled && onPressed != null;
     return Opacity(
       opacity: active ? 1 : 0.45,
       child: Material(
-        color: col.withValues(alpha: 0.06),
+        color: c.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(BcRadius.button),
-          side: BorderSide(color: col.withValues(alpha: 0.55), width: 1.3),
+          borderRadius: BorderRadius.circular(BcRadius.full),
+          side: BorderSide(color: col.withValues(alpha: 0.6), width: 1.5),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -440,73 +416,64 @@ class RunOutlineButton extends StatelessWidget {
   }
 }
 
-/// Pickup → Deliver → Return tracker for the active run hero. [step] is 0, 1 or 2.
+/// Pickup / Deliver / Return tracker (QuickDrop segmented stepper). [step] is 0, 1 or 2.
 class RunStepper extends StatelessWidget {
   const RunStepper({super.key, required this.step});
   final int step;
 
   @override
   Widget build(BuildContext context) {
+    final c = context.bc;
     final steps = [
       (Icons.storefront_rounded, tr('Pickup')),
       (Icons.two_wheeler_rounded, tr('Deliver')),
       (Icons.flag_rounded, tr('Return')),
     ];
-    Widget dot(int i) {
-      final done = i < step;
-      final current = i == step;
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedContainer(
-            duration: BcMotion.standard,
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: done || current ? Colors.white : Colors.white.withValues(alpha: 0.18),
-              border: current
-                  ? Border.all(
-                      color: Colors.white.withValues(alpha: 0.45),
-                      width: 4,
-                      strokeAlign: BorderSide.strokeAlignOutside,
-                    )
-                  : null,
-            ),
-            child: Icon(
-              done ? Icons.check_rounded : steps[i].$1,
-              size: 18,
-              color: done || current ? const Color(0xFF1A5CD4) : Colors.white.withValues(alpha: 0.8),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            steps[i].$2,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: current ? 1 : 0.75),
-              fontSize: 11.5,
-              fontWeight: current ? FontWeight.w800 : FontWeight.w600,
+    return Row(
+      children: [
+        for (var i = 0; i < steps.length; i++) ...[
+          if (i > 0) const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AnimatedContainer(
+                  duration: BcMotion.standard,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: i <= step ? c.heroTitle : c.heroTitle.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(
+                      i < step ? Icons.check_circle_rounded : steps[i].$1,
+                      size: 15,
+                      color: c.heroTitle.withValues(alpha: i == step ? 1 : 0.7),
+                    ),
+                    const SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        steps[i].$2,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: c.heroTitle.withValues(alpha: i == step ? 1 : 0.7),
+                          fontSize: 12,
+                          fontWeight: i == step ? FontWeight.w800 : FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ],
-      );
-    }
-
-    Widget line(int i) => Expanded(
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 20),
-        child: Container(
-          height: 3,
-          margin: const EdgeInsets.symmetric(horizontal: 6),
-          decoration: BoxDecoration(
-            color: i < step ? Colors.white : Colors.white.withValues(alpha: 0.25),
-            borderRadius: BorderRadius.circular(99),
-          ),
-        ),
-      ),
+      ],
     );
-
-    return Row(children: [dot(0), line(0), dot(1), line(1), dot(2)]);
   }
 }
 
@@ -528,7 +495,7 @@ class RunFactTile extends StatelessWidget {
           Container(
             width: 34,
             height: 34,
-            decoration: BoxDecoration(color: tint.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(11)),
+            decoration: BoxDecoration(color: tint.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(BcRadius.sm)),
             child: Icon(icon, color: tint, size: 18),
           ),
           const SizedBox(height: 8),
@@ -536,14 +503,14 @@ class RunFactTile extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text(
               value,
-              style: TextStyle(color: c.text, fontWeight: FontWeight.w800, fontSize: 15),
+              style: TextStyle(color: c.foreground, fontWeight: FontWeight.w800, fontSize: 15),
             ),
           ),
           Text(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: c.textMuted, fontSize: 11.5, fontWeight: FontWeight.w500),
+            style: TextStyle(color: c.mutedForeground, fontSize: 12, fontWeight: FontWeight.w500),
           ),
         ],
       ),

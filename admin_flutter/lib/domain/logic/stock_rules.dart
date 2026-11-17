@@ -1,8 +1,5 @@
 import '../entities/stock.dart';
 
-/// Prefill when weekly target is not configured — port of web `DEFAULT_WEEKLY_TARGET_QTY`.
-const defaultWeeklyTargetQty = 200;
-
 /// Stock classification — port of the web lib/stockApi.ts helpers.
 
 enum StockLevel { newProducts, inStock, lowStock, outOfStock, inactive }

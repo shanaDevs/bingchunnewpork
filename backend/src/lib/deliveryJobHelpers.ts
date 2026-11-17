@@ -26,12 +26,7 @@ import { invalidateJobRoute } from './routeCache';
 import { ensureDeliveryJobAdminCancellationsSchema, ensureDeliveryJobsTables } from './deliverySchema';
 import { getDeliveryJobsSqlRef } from './deliveryPg';
 import { lkrToDecimal } from './moneyDecimal';
-import { dateStringInColombo, todayDateRange, todayDateString } from './datetime';
-import {
-  buildNewJobBroadcastPayload,
-  buildNewJobPushFromBroadcast,
-} from './newJobBroadcast';
-import { sendPushToBranchDrivers } from './driverPush';
+import { todayDateRange } from './datetime';
 
 export const ACTIVE_JOB_STATUSES = [
   'SCHEDULED',
@@ -279,8 +274,7 @@ export async function promoteNextQueuedJob(driverId: string | null | undefined):
 export type JobVehicleFailurePin = {
   lat: number;
   lng: number;
-  /** Null when the pin is stored on the job (RETURNING with no leftover stops). */
-  orderId: string | null;
+  orderId: string;
 };
 
 export type JobRouteOriginStore = {
@@ -341,21 +335,8 @@ export async function fetchJobVehicleFailure(jobId: string): Promise<JobVehicleF
     orderBy: { createdAt: 'desc' },
     select: { lat: true, lng: true, orderId: true },
   });
-  if (attempt?.lat != null && attempt.lng != null) {
-    return { lat: attempt.lat, lng: attempt.lng, orderId: attempt.orderId };
-  }
-  const job = await prisma.deliveryJob.findUnique({
-    where: { id: jobId },
-    select: { status: true, completedLat: true, completedLng: true },
-  });
-  if (
-    job?.status === 'VEHICLE_FAILURE' &&
-    job.completedLat != null &&
-    job.completedLng != null
-  ) {
-    return { lat: job.completedLat, lng: job.completedLng, orderId: null };
-  }
-  return null;
+  if (attempt?.lat == null || attempt.lng == null) return null;
+  return { lat: attempt.lat, lng: attempt.lng, orderId: attempt.orderId };
 }
 
 /**
@@ -367,7 +348,7 @@ export async function recordVehicleFailureAndReleaseJob(opts: {
   jobId: string;
   driverId: string;
   storeId: string;
-  fromSequence?: number;
+  fromSequence: number;
   lat: number;
   lng: number;
   note?: string;
@@ -382,7 +363,7 @@ export async function recordVehicleFailureAndReleaseJob(opts: {
   const remaining = await prisma.deliveryJobOrder.findMany({
     where: {
       jobId: opts.jobId,
-      sequence: { gte: opts.fromSequence ?? 0 },
+      sequence: { gte: opts.fromSequence },
       order: { status: { in: ['READY', 'OUT_FOR_DELIVERY'] } },
     },
     orderBy: { sequence: 'asc' },
@@ -421,19 +402,13 @@ export async function recordVehicleFailureAndReleaseJob(opts: {
     where: { jobId: opts.jobId },
     select: { orderId: true, order: { select: { status: true, deliveryFee: true, cancelledAtStatus: true } } },
   });
-  const failedByOrder = await fetchLatestFailedAttemptsForJob(
-    opts.jobId,
-    allLinks.map((l) => l.orderId),
-  );
-  const { deliveredTotal } = creditedDeliveredTotals(allLinks, failedByOrder);
+  const { deliveredTotal } = creditedDeliveredTotals(allLinks, new Set(orderIds));
 
   await prisma.deliveryJob.update({
     where: { id: opts.jobId },
     data: {
       status: 'VEHICLE_FAILURE',
       completedAt: new Date(),
-      completedLat: opts.lat,
-      completedLng: opts.lng,
       totalDeliveryFees: lkrToDecimal(deliveredTotal),
     },
   });
@@ -486,67 +461,10 @@ export function isAdminDeliveryJobCancellable(
   return false;
 }
 
-/** HQ Close ride on today's ASSIGNED/QUEUED run before pickup — same gate as driver reject. */
-export function isAdminCloseReofferEligible(
-  job: { status: string; driverId: string | null; scheduledAt: Date },
-  domainStates: string[],
-  todayFrom: Date = todayDateRange().from,
-): boolean {
-  if (!job.driverId) return false;
-  if (job.status !== 'ASSIGNED' && job.status !== 'QUEUED') return false;
-  if (job.scheduledAt < todayFrom) return false;
-  return isRejectAllowed(domainStates);
-}
-
-/** Notify branch drivers about an unclaimed same-day job (after reject, admin re-offer, or re-ring). */
-export async function reofferDeliveryJobToBranchPool(
-  jobId: string,
-  opts: { forceRing?: boolean } = {},
-): Promise<void> {
-  const job = await prisma.deliveryJob.findUnique({
-    where: { id: jobId },
-    include: {
-      store: { select: { id: true, name: true, city: true, lat: true, lng: true } },
-      jobOrders: jobOrdersWithDetails,
-    },
-  });
-  if (!job || job.status !== 'SCHEDULED' || job.driverId) return;
-
-  const jobIsToday = dateStringInColombo(job.scheduledAt) === todayDateString();
-  if (!jobIsToday) return;
-
-  const forceRing = opts.forceRing ?? false;
-  const broadcastedAt = new Date();
-  const offer = buildNewJobBroadcastPayload(
-    {
-      id: job.id,
-      title: job.title,
-      status: 'SCHEDULED',
-      scheduledAt: job.scheduledAt,
-      storeId: job.storeId,
-      rideCode: job.rideCode,
-      totalCups: job.totalCups,
-      estimatedDistanceKm: job.estimatedDistanceKm,
-      estimatedMinutes: job.estimatedMinutes,
-      totalDistanceKm: job.totalDistanceKm,
-      totalDeliveryFees: job.totalDeliveryFees,
-      store: job.store,
-      jobOrders: job.jobOrders.map((jo) => ({ sequence: jo.sequence, order: jo.order })),
-    },
-    { broadcastedAt, ...(forceRing ? { forceRing: true } : {}) },
-  );
-  broadcastNewJob(job.storeId, offer);
-  sendPushToBranchDrivers(
-    job.storeId,
-    buildNewJobPushFromBroadcast(offer, forceRing ? { forceRing: true } : {}),
-  ).catch(() => {});
-}
-
 export type AdminCancelDeliveryJobResult = {
   jobId: string;
-  status: 'CANCELLED' | 'SCHEDULED';
+  status: 'CANCELLED';
   releasedDriverId: string | null;
-  reoffered: boolean;
 };
 
 /** Close a stuck delivery job as CANCELLED; orders keep their current status. */
@@ -586,78 +504,14 @@ export async function executeAdminCancelDeliveryJob(opts: {
 
   const failedAttempts = await prisma.deliveryAttempt.findMany({
     where: { jobId: opts.jobId, outcome: { not: 'DELIVERED' } },
-    select: {
-      jobId: true,
-      orderId: true,
-      outcome: true,
-      note: true,
-      attemptNo: true,
-      createdAt: true,
-    },
-    orderBy: [{ attemptNo: 'desc' }, { createdAt: 'desc' }],
+    select: { orderId: true },
+    distinct: ['orderId'],
   });
-  const failedByOrder = groupLatestFailedAttemptsByJob(failedAttempts).get(opts.jobId) ?? new Map();
-  const creditedLinks = job.jobOrders.map((jo) => ({
-    orderId: jo.orderId,
-    order: {
-      status: jo.order.status,
-      deliveryFee: jo.order.deliveryFee,
-      cancelledAtStatus: jo.order.cancelledAtStatus ?? null,
-    },
-  }));
-  const { deliveredTotal } = creditedDeliveredTotals(creditedLinks, failedByOrder);
+  const failedOrderIds = new Set(failedAttempts.map((a) => a.orderId));
+  const { deliveredTotal } = creditedDeliveredTotals(job.jobOrders, failedOrderIds);
 
   const previousStatus = job.status;
   const driverId = job.driverId;
-
-  const events = await prisma.deliveryEvent.findMany({
-    where: { jobId: opts.jobId },
-    select: { state: true },
-  });
-  const domainStates = events.map((e) => e.state as string);
-
-  if (isAdminCloseReofferEligible(job, domainStates, todayFrom) && driverId) {
-    await prisma.$transaction(async (tx) => {
-      const updated = await tx.deliveryJob.updateMany({
-        where: {
-          id: opts.jobId,
-          driverId,
-          status: { in: ['ASSIGNED', 'QUEUED'] },
-        },
-        data: {
-          driverId: null,
-          status: 'SCHEDULED',
-          assignedAt: null,
-          broadcastedAt: new Date(),
-        },
-      });
-      if (updated.count === 0) throw new AppError('Job could not be re-offered', 409);
-
-      const auditNote = `Admin closed ride (re-offered): ${opts.reason}`;
-      await tx.deliveryEvent.createMany({
-        data: job.jobOrders.map((jo) => ({
-          orderId: jo.orderId,
-          jobId: opts.jobId,
-          driverId,
-          state: 'PENDING_ASSIGNMENT' as const,
-          note: auditNote,
-        })),
-      });
-    }, { maxWait: 10_000, timeout: 30_000 });
-
-    await releaseDriverWhenIdle(driverId);
-    await promoteNextQueuedJob(driverId);
-    invalidateJobRoute(opts.jobId);
-    broadcastDeliveryJobUpdated(opts.storeId, { jobId: opts.jobId, status: 'SCHEDULED' });
-    await reofferDeliveryJobToBranchPool(opts.jobId, { forceRing: true });
-
-    return {
-      jobId: opts.jobId,
-      status: 'SCHEDULED',
-      releasedDriverId: driverId,
-      reoffered: true,
-    };
-  }
 
   await prisma.$transaction(async (tx) => {
     const updated = await tx.deliveryJob.updateMany({
@@ -706,14 +560,7 @@ export async function executeAdminCancelDeliveryJob(opts: {
   invalidateJobRoute(opts.jobId);
   broadcastDeliveryJobUpdated(opts.storeId, { jobId: opts.jobId, status: 'CANCELLED' });
 
-  await persistJobActualRouteFromGps(opts.jobId).catch((err) => {
-    logger.error('persistJobActualRouteFromGps failed after admin cancel', {
-      jobId: opts.jobId,
-      err,
-    });
-  });
-
-  return { jobId: opts.jobId, status: 'CANCELLED', releasedDriverId: driverId, reoffered: false };
+  return { jobId: opts.jobId, status: 'CANCELLED', releasedDriverId: driverId };
 }
 
 /** Flip the driver back to ONLINE once they hold no assigned/queued/in-progress/returning run. */
@@ -1221,11 +1068,8 @@ export {
   fetchLatestDriverLocation,
   parseActualRouteJson,
   simplifyGpsPath,
-  snapGpsPathForDisplay,
   isCreditedDelivery,
   groupFailedOrderIdsByJob,
-  groupLatestFailedAttemptsByJob,
-  buildJobHistoryOrderRows,
   creditedDeliveredTotals,
   deliveredOrderDeliveryFees,
   finalizeDeliveryJob,
@@ -1293,35 +1137,6 @@ export async function fetchOrderComplaintsByOrderIds(
     else byOrder.set(row.orderId, [summary]);
   }
   return byOrder;
-}
-
-export type FailedAttemptSummary = {
-  outcome: string;
-  note: string | null;
-};
-
-/** Latest non-delivered attempt per order on a job (for driver history / order detail). */
-export async function fetchLatestFailedAttemptsForJob(
-  jobId: string,
-  orderIds: string[],
-): Promise<Map<string, FailedAttemptSummary>> {
-  if (orderIds.length === 0) return new Map();
-  const rows = await prisma.deliveryAttempt.findMany({
-    where: {
-      orderId: { in: orderIds },
-      jobId,
-      outcome: { not: 'DELIVERED' },
-    },
-    select: { orderId: true, outcome: true, note: true, attemptNo: true, createdAt: true },
-    orderBy: [{ attemptNo: 'desc' }, { createdAt: 'desc' }],
-  });
-  const map = new Map<string, FailedAttemptSummary>();
-  for (const row of rows) {
-    if (!map.has(row.orderId)) {
-      map.set(row.orderId, { outcome: row.outcome, note: row.note });
-    }
-  }
-  return map;
 }
 
 /** Complaints this driver filed, grouped by order — for job/order detail payloads. */

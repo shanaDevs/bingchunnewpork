@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/bc_theme.dart';
 import '../../l10n/l10n.dart';
+import 'qd_kit.dart';
 
 /// White card with a hairline border and a soft drop shadow on light, border-only
 /// on dark — port of Surfaces.kt BcCard.
@@ -32,10 +33,8 @@ class BcCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: color ?? c.card,
         borderRadius: radius,
-        border: Border.all(color: borderColor ?? c.border),
-        boxShadow: c.cardShadow.a == 0
-            ? null
-            : [BoxShadow(color: c.cardShadow, blurRadius: 20, offset: const Offset(0, 6))],
+        border: borderColor != null || c.isDark ? Border.all(color: borderColor ?? c.border) : null,
+        boxShadow: bcShadow(c),
       ),
       child: Material(
         type: MaterialType.transparency,
@@ -56,43 +55,75 @@ class BcCard extends StatelessWidget {
   final c = context.bc;
   switch (status.toUpperCase()) {
     case 'SCHEDULED':
-      return (tr('Scheduled'), c.info);
+      return (tr('Scheduled'), c.primary);
     case 'ASSIGNED':
       return (tr('Assigned'), c.brand);
     case 'TO_OUTLET':
     case 'PICKUP':
       return (tr('Pickup'), c.info);
     case 'PICKED_UP':
-      return (tr('Picked up'), c.success);
+      return (tr('Picked up'), c.successStrong);
     case 'QUEUED':
       return (tr('Queued'), c.info);
     case 'IN_PROGRESS':
-      return (tr('On run'), c.accent);
+      return (tr('On run'), c.accentStrong);
     case 'RETURNING':
-      return (tr('Returning'), c.warning);
+      return (tr('Returning'), c.warningStrong);
     case 'COMPLETED':
-      return (tr('Completed'), c.success);
+      return (tr('Completed'), c.successStrong);
     case 'CANCELLED':
-      return (tr('Cancelled'), c.danger);
+      return (tr('Cancelled'), c.errorStrong);
     case 'VEHICLE_FAILURE':
-      return (tr('Vehicle failure'), c.danger);
+      return (tr('Vehicle failure'), c.errorStrong);
     case 'ABANDONED':
     case 'PARTIALLY_COMPLETED':
-      return (tr('Incomplete'), c.warning);
+      return (tr('Incomplete'), c.warningStrong);
     case 'DELIVERED':
-      return (tr('✓ Delivered'), c.success);
+      return (tr('✓ Delivered'), c.successStrong);
     case 'OUT_FOR_DELIVERY':
       return (tr('Out for delivery'), c.brand);
     case 'READY':
-      return (tr('Ready'), c.success);
+      return (tr('Ready'), c.successStrong);
     case 'NEXT':
       return (tr('Next'), c.brand);
     case 'FAILED':
     case 'DELIVERY_FAILED':
-      return (tr('Failed'), c.danger);
+      return (tr('Failed'), c.errorStrong);
     default:
       final s = status.replaceAll('_', ' ').toLowerCase();
-      return (s.isEmpty ? s : s[0].toUpperCase() + s.substring(1), c.textMuted);
+      return (s.isEmpty ? s : s[0].toUpperCase() + s.substring(1), c.mutedForeground);
+  }
+}
+
+/// Status → QdBadge tone.
+QdTone statusTone(String status) {
+  switch (status.toUpperCase()) {
+    case 'SCHEDULED':
+    case 'ASSIGNED':
+    case 'TO_OUTLET':
+    case 'PICKUP':
+    case 'QUEUED':
+    case 'OUT_FOR_DELIVERY':
+    case 'NEXT':
+      return QdTone.primary;
+    case 'PICKED_UP':
+    case 'COMPLETED':
+    case 'DELIVERED':
+    case 'READY':
+      return QdTone.success;
+    case 'IN_PROGRESS':
+      return QdTone.accent;
+    case 'RETURNING':
+    case 'ABANDONED':
+    case 'PARTIALLY_COMPLETED':
+      return QdTone.warning;
+    case 'CANCELLED':
+    case 'VEHICLE_FAILURE':
+    case 'FAILED':
+    case 'DELIVERY_FAILED':
+      return QdTone.error;
+    default:
+      return QdTone.neutral;
   }
 }
 
@@ -102,11 +133,12 @@ class StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (label, color) = statusLabel(context, status);
-    return InfoBadge(label, color: color);
+    final (label, _) = statusLabel(context, status);
+    return QdBadge(label, tone: statusTone(status));
   }
 }
 
+/// Soft pill in an arbitrary colour (QuickDrop badge look, flat tint without outline).
 class InfoBadge extends StatelessWidget {
   const InfoBadge(this.label, {super.key, this.color, this.icon});
 
@@ -116,22 +148,19 @@ class InfoBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final col = color ?? context.bc.brand;
+    final col = color ?? context.bc.primaryStrong;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: col.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(BcRadius.full),
-        border: Border.all(color: col.withValues(alpha: 0.30)),
-      ),
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(color: col.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(BcRadius.full)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (icon != null) ...[Icon(icon, size: 12, color: col), const SizedBox(width: 4)],
+          if (icon != null) ...[Icon(icon, size: 14, color: col), const SizedBox(width: 5)],
           Flexible(
             child: Text(
               label,
-              style: BcType.tiny.copyWith(color: col),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: col),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),

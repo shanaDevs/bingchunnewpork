@@ -1,4 +1,4 @@
-import { Bricolage_Grotesque, Caveat_Brush, Geist, Plus_Jakarta_Sans } from "next/font/google";
+import { Bricolage_Grotesque, Geist, Plus_Jakarta_Sans } from "next/font/google";
 
 // Body face for the home page (the rest of the app keeps its own).
 const homeSans = Geist({
@@ -18,9 +18,6 @@ const plusJakarta = Plus_Jakarta_Sans({
   variable: "--font-plus-jakarta",
   subsets: ["latin"],
 });
-
-/** Handwritten labels on the menu hero. */
-export const menuScript = Caveat_Brush({ weight: "400", subsets: ["latin"] });
 
 /** Class names that define the home page's font variables; put them on its outermost element. */
 export const homeFontVariables = `${homeSans.variable} ${bricolage.variable} ${plusJakarta.variable}`;

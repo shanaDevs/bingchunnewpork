@@ -1,37 +1,36 @@
-# Cup sticker agent (Windows 7 / 10 / 11)
+# Cup sticker agent (cashier PC)
 
-**No Node.js.** Uses a native **.NET 4** agent (`BingChunCupStickerAgent.exe`) so Windows 7 does not hit `EventSetInformation` / `ADVAPI32.dll` errors from Node 16/18/20.
+Prints one Bing Chun cup sticker per cup on the local **Xprinter** when the cashier accepts an order.
 
-## Cashier PC (including Windows 7)
+Because the admin site is HTTPS, the browser cannot call `http://127.0.0.1` directly (Chrome blocks it).  
+Instead:
 
-**Full manual steps:** see **`MANUAL-COPY-GUIDE.txt`** in this folder.
+1. Admin queues a print job on the server  
+2. This agent (running on the cashier PC) **polls** the server and prints locally  
 
-1. Copy the whole `cup-sticker-agent` folder (EXE files + optional `runtime\node`)  
-2. Run **`BingChunCupStickerSetup.exe`**  
-3. Select the sticker printer  
-4. Click **Save && Install agent**  
+## Setup (once per cashier PC)
 
-Needs **.NET Framework 4** (setup can download/install it).  
-Normal run uses **native agent** (no Node). `runtime\node` is Node **16** backup only.
+1. Plug in the Xprinter USB and confirm Windows shows **Xprinter XP-D35B** (or your model).
+2. On **this same PC** (not the cloud server), double-click `start.bat`.
+3. Leave that window open. It should log `polling .../cup-sticker-agent/claim`.
+4. Open admin → **Settings → Printer** → status should turn green → **Test print**.
 
-## Files that must be on the Win7 PC
-
-- `BingChunCupStickerSetup.exe` — printer picker GUI  
-- `BingChunCupStickerAgent.exe` — agent (poll + health HTTP)  
-- `print-stickers.exe` — prints labels  
-- `detect-printer.exe`  
-- `start.bat` / `install.bat` / `local.env` (created by setup)  
-- `MANUAL-COPY-GUIDE.txt` — copy instructions  
-- `runtime\node\` — optional portable **Node 16** (for backup / manual copy)  
-
-Do **not** put Node 18/20 on Windows 7 (ADVAPI32 / EventSetInformation error).
-
-## Build on a modern PC
+## Environment (optional)
 
 ```bat
-build-helpers.bat
+set BC_STICKER_API_URL=https://admin.bingchunsrilanka.com/api
+set BC_STICKER_SECRET=bingchun-cup-sticker-local
+set BC_STICKER_PRINTER=Xprinter XP-D35B
+set BC_STICKER_WIDTH_MM=40
+set BC_STICKER_HEIGHT_MM=30
+set BC_STICKER_STORE_ID=
+start.bat
 ```
 
-## Health
+`BC_STICKER_SECRET` must match the server `CUP_STICKER_AGENT_SECRET` (or the built-in default above).
 
-`http://127.0.0.1:9177/health` — includes `"native":true`
+## Local endpoints (optional debug)
+
+- `GET  http://127.0.0.1:9177/health`
+- `POST http://127.0.0.1:9177/test`
+- `POST http://127.0.0.1:9177/print`

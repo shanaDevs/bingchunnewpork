@@ -315,24 +315,6 @@ describe('getTopProducts', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('accepts categoryId and queries aggregated SQL', async () => {
-    mockTopProductCatalogue();
-    const req = createMockReq({
-      user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },
-      query: { categoryId: 'cat-milkshake', limit: '10' },
-    });
-    const res = createMockRes();
-
-    await getTopProducts(req, res, next);
-
-    expect(prisma.$queryRaw).toHaveBeenCalled();
-    expect(res.json).toHaveBeenCalledWith({
-      success: true,
-      data: expect.any(Array),
-    });
-    expect(next).not.toHaveBeenCalled();
-  });
-
   it('rejects date ranges wider than 92 days', async () => {
     const req = createMockReq({
       user: { sub: 'admin-1', type: 'admin', role: 'SYSTEM_ADMIN' },

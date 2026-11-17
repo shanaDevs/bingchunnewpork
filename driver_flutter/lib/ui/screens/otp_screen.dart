@@ -9,6 +9,7 @@ import '../../core/feedback.dart';
 import '../../core/format.dart';
 import '../../state/auth_controller.dart';
 import '../components/auth_kit.dart';
+import '../components/qd_kit.dart';
 import '../theme/bc_theme.dart';
 import 'rider_not_found_screen.dart';
 import '../../l10n/l10n.dart';
@@ -129,6 +130,8 @@ class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
     }
   }
 
+  String _clock(int s) => '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
@@ -137,28 +140,32 @@ class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
     final busy = auth.loading && !_resending;
 
     return BcAuthScaffold(
-      kicker: tr('Almost there!'),
-      subtitle: tr('Enter the code we texted you to open your delivery dashboard.'),
       onBack: () => Navigator.of(context).maybePop(),
-      badge: const BcAuthBadge(icon: Icons.sms_outlined),
-      card: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          BcAuthCardHeader(
-            title: tr('Verify Your Number'),
-            message: Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(text: tr('Enter the 6-digit code sent to\n')),
-                  TextSpan(
-                    text: phone,
-                    style: TextStyle(fontWeight: FontWeight.w700, color: c.text),
-                  ),
-                ],
+      hero: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 28, 16, 36),
+        child: BcAuthGreeting(
+          center: true,
+          title: tr('Enter the code'),
+          titleSize: 34,
+          subtitle: tr('We’ve sent a 6-digit code to'),
+          extra: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              phone,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: c.heroTitle,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ),
-          const SizedBox(height: 22),
+        ),
+      ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           _CodeBoxes(
             controller: _code,
             focusNode: _focus,
@@ -169,51 +176,66 @@ class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
               if (v.length == _codeLength) _verify();
             },
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           AnimatedSwitcher(
             duration: BcMotion.fast,
             child: Text(
               auth.error ?? tr('The code is valid for 10 minutes.'),
               key: ValueKey(auth.error),
               textAlign: TextAlign.center,
-              style: BcType.tiny.copyWith(color: auth.error != null ? c.danger : c.textMuted),
+              style: BcType.caption.copyWith(
+                fontSize: 14,
+                color: auth.error != null ? c.errorStrong : c.mutedForeground,
+              ),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
           ListenableBuilder(
             listenable: _code,
             builder: (context, _) => BcAuthButton(
-              label: busy ? tr('Verifying…') : tr('Verify & sign in'),
+              label: busy ? tr('Verifying…') : tr('Verify'),
+              icon: null,
               loading: busy,
               enabled: _code.text.length == _codeLength && !busy,
               onPressed: _verify,
             ),
           ),
           const SizedBox(height: 12),
-          Center(
-            child: _resendSeconds > 0
-                ? Padding(
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 6,
+            children: [
+              Text(tr('Didn’t receive the code?'), style: BcType.caption.copyWith(fontSize: 14, color: c.mutedForeground)),
+              if (_resendSeconds > 0)
+                Text(
+                  tr('Resend in {time}', {'time': _clock(_resendSeconds)}),
+                  style: BcType.caption.copyWith(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: c.primaryStrong,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                )
+              else if (_resending)
+                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: c.primaryStrong))
+              else
+                InkWell(
+                  onTap: busy ? null : () => _resend(auth),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     child: Text(
-                      tr('Resend code in {s}s', {'s': _resendSeconds}),
-                      style: BcType.caption.copyWith(color: c.textMuted),
+                      tr('Resend code'),
+                      style: BcType.caption.copyWith(fontSize: 14, fontWeight: FontWeight.w700, color: c.primaryStrong),
                     ),
-                  )
-                : TextButton.icon(
-                    onPressed: _resending || busy ? null : () => _resend(auth),
-                    icon: _resending
-                        ? SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: c.brand),
-                          )
-                        : Icon(Icons.refresh_rounded, size: 18, color: c.brand),
-                    label: Text(tr('Resend code'), style: BcType.button.copyWith(color: c.brand)),
                   ),
+                ),
+            ],
           ),
           TextButton(
             onPressed: () => Navigator.of(context).maybePop(),
-            child: Text(tr('Change mobile number'), style: BcType.caption.copyWith(color: c.textMuted)),
+            child: Text(tr('Change mobile number'), style: BcType.caption.copyWith(fontSize: 14, color: c.mutedForeground)),
           ),
         ],
       ),
@@ -244,7 +266,7 @@ class _CodeBoxes extends StatelessWidget {
     return GestureDetector(
       onTap: enabled ? focusNode.requestFocus : null,
       child: SizedBox(
-        height: 58,
+        height: 60,
         child: Stack(
           children: [
             ListenableBuilder(
@@ -252,14 +274,18 @@ class _CodeBoxes extends StatelessWidget {
               builder: (context, _) {
                 final text = controller.text;
                 return Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     for (var i = 0; i < _codeLength; i++) ...[
                       if (i > 0) const SizedBox(width: 8),
-                      Expanded(
-                        child: _box(
-                          c,
-                          digit: i < text.length ? text[i] : null,
-                          active: focusNode.hasFocus && i == text.length.clamp(0, _codeLength - 1),
+                      Flexible(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 52),
+                          child: _box(
+                            c,
+                            digit: i < text.length ? text[i] : null,
+                            active: focusNode.hasFocus && i == text.length.clamp(0, _codeLength - 1),
+                          ),
                         ),
                       ),
                     ],
@@ -296,26 +322,23 @@ class _CodeBoxes extends StatelessWidget {
 
   Widget _box(BcColors c, {required String? digit, required bool active}) {
     final borderColor = isError
-        ? c.danger
+        ? c.errorStrong
         : active
-        ? c.brand
+        ? c.primary
         : digit != null
-        ? c.brand.withValues(alpha: 0.45)
-        : c.inputBorder;
+        ? c.primary.withValues(alpha: 0.45)
+        : c.border;
     return AnimatedContainer(
       duration: BcMotion.fast,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: digit != null ? c.brandSubtle : c.surface,
-        borderRadius: BorderRadius.circular(BcRadius.button),
+        color: c.surface,
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: borderColor, width: active ? 2 : 1.2),
-        boxShadow: active
-            ? [BoxShadow(color: c.brand.withValues(alpha: 0.18), blurRadius: 10, offset: const Offset(0, 4))]
-            : null,
-      ),
+              ),
       child: Text(
         digit ?? '',
-        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: c.text),
+        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: c.foreground),
       ),
     );
   }

@@ -3,7 +3,6 @@
 import { Crown, Gem, Star, type LucideIcon } from "lucide-react";
 import { cn } from "@/components/home-redesign/lib/cn";
 import { LOYALTY_TIERS, type LoyaltyTier } from "@/lib/loyalty";
-import { useAuthStore } from "@/store/authStore";
 import { useLoyaltySummary } from "./accountData";
 
 /** The membership levels' icons and colours once reached, lowest level first (the admin may rename the levels). */
@@ -24,18 +23,15 @@ export function tierLook(index: number, count: number) {
 /**
  * The customer's points and membership from the backend (GET /loyalty/summary): `balance` the points they have,
  * `spend` what their orders came to (the levels go by it), the admin's `tiers` lowest first, the level reached
- * (`current`, null before the first) and the next one (null at the top). Undefined while loading (no flashing zero).
+ * (`current`, null before the first) and the next one (null at the top). Zero while it loads.
  */
 export function useHappyPoints() {
   const query = useLoyaltySummary();
   const summary = query.data;
-  const userPoints = useAuthStore((s) => s.user?.loyaltyPoints);
   const tiers: LoyaltyTier[] = [...(summary?.tiers?.length ? summary.tiers : LOYALTY_TIERS)].sort((a, b) => a.minSpendLkr - b.minSpendLkr);
-  const balance =
-    summary?.points ?? (query.isLoading ? undefined : userPoints ?? 0);
-  const spend = summary?.totalSpendLkr ?? (query.isLoading ? undefined : 0);
-  const spendValue = spend ?? 0;
-  const currentIndex = tiers.reduce((found, tier, index) => (spendValue >= tier.minSpendLkr ? index : found), -1);
+  const balance = summary?.points ?? 0;
+  const spend = summary?.totalSpendLkr ?? 0;
+  const currentIndex = tiers.reduce((found, tier, index) => (spend >= tier.minSpendLkr ? index : found), -1);
   return {
     summary,
     isLoading: query.isLoading,

@@ -42,15 +42,15 @@ class BcTextField extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.bc;
     OutlineInputBorder border(Color color, [double width = 1]) => OutlineInputBorder(
-      borderRadius: BorderRadius.circular(BcRadius.button),
+      borderRadius: BorderRadius.circular(14),
       borderSide: BorderSide(color: color, width: width),
     );
+    final multi = maxLines > 1 && !obscureText;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (label != null) ...[
-          // Brand-tinted field labels, as in the customer app.
-          Text(label!, style: BcType.label.copyWith(color: c.brand)),
+          Text(label!, style: BcType.caption.copyWith(fontWeight: FontWeight.w600, color: c.foreground)),
           const SizedBox(height: 6),
         ],
         TextField(
@@ -62,23 +62,24 @@ class BcTextField extends StatelessWidget {
           onChanged: onChanged,
           inputFormatters: inputFormatters,
           autofocus: autofocus,
-          cursorColor: c.brand,
-          style: BcType.body.copyWith(color: c.text),
+          cursorColor: c.primary,
+          style: BcType.body.copyWith(color: c.foreground),
           decoration: InputDecoration(
             hintText: placeholder,
-            hintStyle: BcType.body.copyWith(color: c.textMuted),
+            hintStyle: BcType.body.copyWith(color: c.subtleForeground),
             filled: true,
             fillColor: c.surface,
             suffixIcon: trailing,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            enabledBorder: border(isError ? c.danger : c.inputBorder),
-            focusedBorder: border(isError ? c.danger : c.brand, 2),
-            border: border(c.inputBorder),
+            constraints: multi ? null : const BoxConstraints(minHeight: 52),
+            contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: multi ? 14 : 15),
+            enabledBorder: border(isError ? c.error : c.border),
+            focusedBorder: border(isError ? c.error : c.primary, 2),
+            border: border(c.border),
           ),
         ),
         if (supportingText != null) ...[
           const SizedBox(height: 6),
-          Text(supportingText!, style: BcType.tiny.copyWith(color: isError ? c.danger : c.textMuted)),
+          Text(supportingText!, style: BcType.tiny.copyWith(color: isError ? c.errorStrong : c.mutedForeground)),
         ],
       ],
     );
@@ -181,21 +182,21 @@ class _BcPinBoxesState extends State<BcPinBoxes> with SingleTickerProviderStateM
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
                               color: c.surface,
-                              borderRadius: BorderRadius.circular(BcRadius.md),
+                              borderRadius: BorderRadius.circular(14),
                               border: Border.all(
                                 width: 1.5,
                                 color: widget.isError
-                                    ? c.danger
+                                    ? c.error
                                     : i < v.length
-                                    ? c.brand
+                                    ? c.primary
                                     : i == v.length
-                                    ? c.brandLight
+                                    ? c.primarySoft
                                     : c.border,
                               ),
                             ),
                             child: Text(
                               i < v.length ? (widget.masked ? '•' : v[i]) : '',
-                              style: BcType.title.copyWith(color: c.text),
+                              style: BcType.title.copyWith(color: c.foreground),
                             ),
                           ),
                         ),
@@ -215,10 +216,10 @@ class _BcPinBoxesState extends State<BcPinBoxes> with SingleTickerProviderStateM
               textAlign: TextAlign.end,
               style: BcType.tiny.copyWith(
                 color: widget.isError
-                    ? c.danger
+                    ? c.errorStrong
                     : v.length == n
-                    ? c.success
-                    : c.textMuted,
+                    ? c.successStrong
+                    : c.mutedForeground,
               ),
             ),
           ],
@@ -249,7 +250,7 @@ class BcSegmentedTabs extends StatelessWidget {
     return Container(
       height: 44,
       padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(BcRadius.full)),
+      decoration: BoxDecoration(color: c.muted, borderRadius: BorderRadius.circular(BcRadius.full)),
       child: LayoutBuilder(
         builder: (context, box) {
           final w = tabs.isEmpty ? 0.0 : box.maxWidth / tabs.length;
@@ -264,7 +265,7 @@ class BcSegmentedTabs extends StatelessWidget {
                 width: w,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: filled ? c.brand : c.brand.withValues(alpha: 0.18),
+                    color: filled ? c.primary : c.primarySoft,
                     borderRadius: BorderRadius.circular(BcRadius.full),
                   ),
                 ),
@@ -284,10 +285,10 @@ class BcSegmentedTabs extends StatelessWidget {
                             tabs[i],
                             style: BcType.label.copyWith(
                               color: i != selectedIndex
-                                  ? c.textMuted
+                                  ? c.mutedForeground
                                   : filled
-                                  ? c.onBrand
-                                  : c.brand,
+                                  ? c.primaryForeground
+                                  : c.primaryStrong,
                             ),
                           ),
                         ),
@@ -315,7 +316,7 @@ class TabPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.bc;
     return Material(
-      color: selected ? c.brand.withValues(alpha: 0.16) : c.surface,
+      color: selected ? c.primarySoft : c.muted,
       borderRadius: BorderRadius.circular(BcRadius.full),
       child: InkWell(
         borderRadius: BorderRadius.circular(BcRadius.full),
@@ -325,7 +326,7 @@ class TabPill extends StatelessWidget {
         },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-          child: Text(label, style: BcType.label.copyWith(color: selected ? c.brand : c.textMuted)),
+          child: Text(label, style: BcType.label.copyWith(color: selected ? c.primaryStrong : c.mutedForeground)),
         ),
       ),
     );

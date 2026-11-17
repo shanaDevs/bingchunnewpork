@@ -3,7 +3,6 @@ import JsonLd from '@/components/seo/JsonLd';
 import { productSchema } from '@/components/seo/schemas';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import { absoluteUrl, DEFAULT_DESCRIPTION, DEFAULT_OG_IMAGE, SITE_NAME } from '@/lib/seo';
-import { MenuRedesignShell } from '@/components/menu-redesign/MenuRedesignShell';
 import ProductClient from './ProductClient';
 
 type ProductMeta = {
@@ -90,9 +89,7 @@ export default async function ProductPage({ params }: PageProps) {
           })}
         />
       ) : null}
-      <MenuRedesignShell>
-        <ProductClient />
-      </MenuRedesignShell>
+      <ProductClient />
     </>
   );
 }

@@ -66,20 +66,6 @@ export function canAdminCancelDeliveryJob(job: {
   return false;
 }
 
-/** UI hint: today's ASSIGNED/QUEUED close releases the job to the pool and rings drivers. */
-export function willAdminCloseReofferJob(job: {
-  status: string;
-  driver?: { id?: string } | null;
-  scheduledAt?: string;
-  displayStatus?: string | null;
-}): boolean {
-  if (!job.driver?.id) return false;
-  if (job.status !== 'ASSIGNED' && job.status !== 'QUEUED') return false;
-  if (job.displayStatus) return false;
-  if (!job.scheduledAt) return false;
-  return job.scheduledAt.slice(0, 10) === todayDateString();
-}
-
 export function filterIncompleteJobsByReason<T extends { status: string; displayStatus?: string | null }>(
   jobs: T[],
   reason: string,

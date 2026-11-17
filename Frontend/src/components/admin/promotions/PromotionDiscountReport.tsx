@@ -112,7 +112,10 @@ export default function PromotionDiscountReport() {
             period={period}
             customRange={customRange}
             onPeriodChange={setPeriod}
-            onCustomRangeChange={setCustomRange}
+            onCustomRangeChange={(next) => {
+              setCustomRange(next);
+              if (next?.from && next?.to) setPeriod('custom');
+            }}
             compact
             showPresetDates
           />

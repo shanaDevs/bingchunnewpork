@@ -8,8 +8,6 @@ import { AppError } from '../middleware/errorHandler';
 const cartItemSchema = z.object({
   productId: z.string(),
   size: z.enum(['REGULAR', 'LARGE']).default('REGULAR'),
-  sugarLevel: z.enum(['FIFTY', 'HUNDRED']).optional().nullable(),
-  iceLevel: z.enum(['LESS_ICE', 'NORMAL_ICE']).optional().nullable(),
   toppingIds: z.array(z.string()).default([]),
   quantity: z.number().int().min(1).default(1),
 });
@@ -47,16 +45,11 @@ export async function addToCart(req: Request, res: Response, next: NextFunction)
       cart = await prisma.cart.create({ data: { userId } });
     }
 
-    const sugarLevel = data.sugarLevel ?? null;
-    const iceLevel = data.iceLevel ?? null;
-
     const existingItems = await prisma.cartItem.findMany({
       where: {
         cartId: cart.id,
         productId: data.productId,
         size: data.size,
-        sugarLevel,
-        iceLevel,
       },
       include: {
         toppings: true,
@@ -82,8 +75,6 @@ export async function addToCart(req: Request, res: Response, next: NextFunction)
           cartId: cart.id,
           productId: data.productId,
           size: data.size as 'REGULAR' | 'LARGE',
-          sugarLevel: sugarLevel ?? undefined,
-          iceLevel: iceLevel ?? undefined,
           quantity: data.quantity,
           unitPrice,
           toppings: data.toppingIds.length > 0 ? {

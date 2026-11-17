@@ -32,7 +32,6 @@ export function serializeEnrichedWalletRow<T extends StoreWallet>(
     currentBalance: number;
     availableBalance: number;
     allTimeAvailableBalanceCents?: number;
-    allTimeOnlineWalletCents?: number;
     _count?: { transactions: number };
     store?: T extends { store: infer S } ? S : unknown;
   },
@@ -45,9 +44,6 @@ export function serializeEnrichedWalletRow<T extends StoreWallet>(
     availableBalance: String(extras.availableBalance),
     ...(extras.allTimeAvailableBalanceCents != null
       ? { allTimeAvailableBalanceCents: String(extras.allTimeAvailableBalanceCents) }
-      : {}),
-    ...(extras.allTimeOnlineWalletCents != null
-      ? { allTimeOnlineWalletCents: String(extras.allTimeOnlineWalletCents) }
       : {}),
     _count: extras._count,
   };
@@ -62,9 +58,6 @@ export function serializeWalletSummary(summary: {
   totalWithdrawn: number;
   pendingWithdrawalTotal: number;
   availableBalance: number;
-  onlineWalletAvailableBalance: number;
-  allTimeAvailableBalanceCents: number;
-  allTimeOnlineWalletCents: number;
 }) {
   return {
     storeId: summary.storeId,
@@ -75,9 +68,6 @@ export function serializeWalletSummary(summary: {
     totalWithdrawn: String(summary.totalWithdrawn),
     pendingWithdrawalTotal: String(summary.pendingWithdrawalTotal),
     availableBalance: String(summary.availableBalance),
-    onlineWalletAvailableBalance: String(summary.onlineWalletAvailableBalance),
-    allTimeAvailableBalanceCents: String(summary.allTimeAvailableBalanceCents),
-    allTimeOnlineWalletCents: String(summary.allTimeOnlineWalletCents),
   };
 }
 

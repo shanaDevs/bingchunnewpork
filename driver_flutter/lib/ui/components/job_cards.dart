@@ -1,398 +1,118 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../../core/feedback.dart';
 import '../../core/format.dart';
-import '../../core/intents.dart';
 import '../../data/models/delivery_job.dart';
-import '../theme/bc_theme.dart';
-import 'driver_ops.dart';
-import 'surfaces.dart';
+import '../../data/models/driver.dart';
 import '../../l10n/l10n.dart';
+import '../theme/bc_theme.dart';
+import 'qd_brand.dart';
+import 'qd_kit.dart';
+import 'surfaces.dart';
 
-/// Home (Jobs tab) building blocks — port of JobsChrome.kt + JobCards.kt,
-/// restyled to the light "home" layout.
+/// Home (Jobs tab) building blocks — QuickDrop `HomeHero`, `ActiveJobOverview`,
+/// `AssignedBranches`, `LastShiftCard`, `WaitingForJobs`.
 
 String _greeting() {
   final h = DateTime.now().hour;
-  if (h < 12) return tr('Good morning,');
-  if (h < 17) return tr('Good afternoon,');
-  return tr('Good evening,');
+  final raw = h < 12 ? tr('Good morning,') : (h < 17 ? tr('Good afternoon,') : tr('Good evening,'));
+  final s = raw.replaceAll(RegExp(r'[,，\s]+$'), '');
+  if (L10n.isZh) return s;
+  return s
+      .split(' ')
+      .map((w) => w.isEmpty ? w : w[0].toUpperCase() + w.substring(1).toLowerCase())
+      .join(' ');
 }
 
-/// Creative home app bar: blue gradient with a wavy bottom edge, soft clouds and the
-/// rider mascot, avatar with an online dot, and white round bell / settings buttons.
+/// Tall brand hero: wordmark + bell, greeting and rider name beside the mascot, then the
+/// full-width duty slide switch.
 class HomeHeader extends StatelessWidget {
   const HomeHeader({
     super.key,
     required this.driverName,
-    required this.branchName,
-    required this.photoUrl,
-    required this.alertCount,
     required this.isOnline,
-    required this.onBranchTap,
-    required this.onNotificationsTap,
-    required this.onSettingsTap,
+    required this.onToggleDuty,
+    this.dutyLoading = false,
   });
 
   final String driverName;
-  final String branchName;
-  final String? photoUrl;
-  final int alertCount;
   final bool isOnline;
-  final VoidCallback onBranchTap;
-  final VoidCallback onNotificationsTap;
-  final VoidCallback onSettingsTap;
+  final bool dutyLoading;
+  final ValueChanged<bool> onToggleDuty;
 
   @override
   Widget build(BuildContext context) {
-    final c = context.bc;
-    final first = driverName.trim().split(' ').first;
-    final name = first.isEmpty ? 'Driver' : first[0].toUpperCase() + first.substring(1);
-    final top = MediaQuery.paddingOf(context).top;
-    return ClipPath(
-      clipper: _HeaderWaveClipper(),
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [c.brandDark, c.brand, c.brandLight],
-            stops: const [0, 0.55, 1],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+    final name = driverName.trim().isEmpty ? tr('Driver') : driverName.trim();
+    final parts = name.split(RegExp(r'\s+'));
+    final firstName = parts.first;
+    final restName = parts.skip(1).join(' ');
+    return QdBrandHeader(
+      tall: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const QdWordmark(inverse: true, size: QdWordmarkSize.sm),
+              const Spacer(),
+              const QdBellButton(),
+            ],
           ),
-        ),
-        child: Stack(
-          children: [
-            // Soft clouds along the bottom.
-            Positioned.fill(child: CustomPaint(painter: _CloudPainter())),
-            // Rider mascot under the buttons (bottom-right), clear of them.
-            Positioned(
-              right: 4,
-              bottom: 8,
-              child: IgnorePointer(
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _greeting(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: BcType.subtitle.copyWith(color: Colors.white.withValues(alpha: 0.9), fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    // First name large; remaining names on a smaller line so long names never shrink the title.
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        firstName,
+                        maxLines: 1,
+                        style: BcType.displayHero.copyWith(color: Colors.white),
+                      ),
+                    ),
+                    if (restName.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        restName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: BcType.subtitle.copyWith(color: Colors.white.withValues(alpha: 0.9), fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              IgnorePointer(
                 child: Image.asset(
                   'assets/images/rider_mascot.png',
-                  height: 96,
+                  height: 118,
                   fit: BoxFit.contain,
-                  semanticLabel: tr('Bing Chun rider'),
+                  semanticLabel: tr('Bring It rider'),
                 ),
-              ),
-            ),
-            Padding(
-              padding: EdgeInsets.fromLTRB(20, top + 10, 16, 72),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _OnlineAvatar(photoUrl: photoUrl, name: name, online: isOnline),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(_greeting(), style: TextStyle(fontSize: 13.5, color: Colors.white.withValues(alpha: 0.9))),
-                        Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                            height: 1.15,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        InkWell(
-                          onTap: onBranchTap,
-                          borderRadius: BorderRadius.circular(8),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 2),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.location_on_outlined, size: 16, color: Colors.white),
-                                const SizedBox(width: 4),
-                                Flexible(
-                                  child: Text(
-                                    branchName.isEmpty ? tr('Branch') : branchName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.95)),
-                                  ),
-                                ),
-                                const SizedBox(width: 2),
-                                const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: Colors.white),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  _RoundIconButton(
-                    icon: Icons.notifications_none_rounded,
-                    tooltip: tr('Notifications'),
-                    badge: alertCount,
-                    onTap: onNotificationsTap,
-                  ),
-                  const SizedBox(width: 10),
-                  _RoundIconButton(icon: Icons.settings_outlined, tooltip: tr('Settings'), onTap: onSettingsTap),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _OnlineAvatar extends StatelessWidget {
-  const _OnlineAvatar({required this.photoUrl, required this.name, required this.online});
-  final String? photoUrl;
-  final String name;
-  final bool online;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(2.5),
-          decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white),
-          child: DriverAvatar(profilePhotoUrl: photoUrl, initials: name, size: 56, textSize: 22),
-        ),
-        Positioned(
-          right: 1,
-          bottom: 1,
-          child: Container(
-            width: 16,
-            height: 16,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: online ? const Color(0xFF22C55E) : c.disabled,
-              border: Border.all(color: Colors.white, width: 2.5),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _HeaderWaveClipper extends CustomClipper<Path> {
-  @override
-  Path getClip(Size size) {
-    final w = size.width;
-    final h = size.height;
-    return Path()
-      ..lineTo(0, h - 26)
-      ..cubicTo(w * 0.22, h - 4, w * 0.42, h - 2, w * 0.58, h - 18)
-      ..cubicTo(w * 0.74, h - 34, w * 0.88, h - 40, w, h - 22)
-      ..lineTo(w, 0)
-      ..close();
-  }
-
-  @override
-  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
-}
-
-class _CloudPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final far = Paint()..color = Colors.white.withValues(alpha: 0.10);
-    final near = Paint()..color = Colors.white.withValues(alpha: 0.18);
-    // Distant cloud bank
-    canvas.drawPath(
-      Path()
-        ..moveTo(w * 0.30, h)
-        ..quadraticBezierTo(w * 0.38, h - 46, w * 0.50, h - 34)
-        ..quadraticBezierTo(w * 0.60, h - 66, w * 0.74, h - 44)
-        ..quadraticBezierTo(w * 0.86, h - 72, w, h - 50)
-        ..lineTo(w, h)
-        ..close(),
-      far,
-    );
-    // Closer puffs
-    canvas.drawPath(
-      Path()
-        ..moveTo(w * 0.42, h)
-        ..quadraticBezierTo(w * 0.50, h - 30, w * 0.60, h - 22)
-        ..quadraticBezierTo(w * 0.70, h - 42, w * 0.82, h - 26)
-        ..quadraticBezierTo(w * 0.92, h - 40, w, h - 24)
-        ..lineTo(w, h)
-        ..close(),
-      near,
-    );
-    // A couple of small sparkles
-    final dot = Paint()..color = Colors.white.withValues(alpha: 0.35);
-    canvas.drawCircle(Offset(w * 0.47, h * 0.30), 2, dot);
-    canvas.drawCircle(Offset(w * 0.55, h * 0.52), 1.5, dot);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _RoundIconButton extends StatelessWidget {
-  const _RoundIconButton({required this.icon, required this.tooltip, required this.onTap, this.badge = 0});
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-  final int badge;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Material(
-          color: Colors.white,
-          shape: const CircleBorder(),
-          elevation: 3,
-          shadowColor: const Color(0x33000000),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            child: Tooltip(
-              message: tooltip,
-              child: SizedBox(width: 46, height: 46, child: Icon(icon, color: c.brand, size: 23)),
-            ),
-          ),
-        ),
-        if (badge > 0)
-          Positioned(
-            top: -4,
-            right: -4,
-            child: Container(
-              constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-              padding: const EdgeInsets.symmetric(horizontal: 5),
-              decoration: BoxDecoration(
-                color: c.danger,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                badge > 9 ? '9+' : '$badge',
-                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-/// Duty panel: power badge, "You are Online", a real switch, and the active-run count.
-class BcDutyDock extends StatelessWidget {
-  const BcDutyDock({
-    super.key,
-    required this.isOnline,
-    required this.activeCount,
-    required this.onToggleDuty,
-    this.loading = false,
-    this.newJobPulse = false,
-  });
-
-  final bool isOnline;
-  final int activeCount;
-  final ValueChanged<bool> onToggleDuty;
-  final bool loading;
-  final bool newJobPulse;
-
-  static const _green = Color(0xFF22C55E);
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.bc;
-    final on = isOnline;
-    final tint = on ? (c.isDark ? const Color(0xFF0E2A1E) : const Color(0xFFE9FBF1)) : c.surfacePill;
-    return AnimatedContainer(
-      duration: BcMotion.standard,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(BcRadius.card + 4),
-        gradient: LinearGradient(colors: [tint, c.card], stops: const [0, 0.62]),
-        border: Border.all(color: on ? _green.withValues(alpha: 0.22) : c.border),
-        boxShadow: c.cardShadow.a == 0
-            ? null
-            : [BoxShadow(color: c.cardShadow, blurRadius: 20, offset: const Offset(0, 6))],
-      ),
-      padding: const EdgeInsets.fromLTRB(14, 14, 16, 14),
-      child: Row(
-        children: [
-          // Power badge
-          AnimatedContainer(
-            duration: BcMotion.standard,
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: on ? _green : c.disabled,
-              boxShadow: on
-                  ? [BoxShadow(color: _green.withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 4))]
-                  : null,
-            ),
-            child: const Icon(Icons.power_settings_new_rounded, color: Colors.white, size: 26),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(tr('You are'), style: TextStyle(fontSize: 11.5, color: c.textMuted)),
-                Text(
-                  on ? tr('Online') : tr('Offline'),
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.text, height: 1.2),
-                ),
-                Text(
-                  on ? tr('Ready for cup runs') : tr('Switch on to get runs'),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11.5, color: c.textMuted),
-                ),
-              ],
-            ),
-          ),
-          if (loading)
-            SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: _green))
-          else
-            Switch(
-              value: on,
-              onChanged: onToggleDuty,
-              activeThumbColor: Colors.white,
-              activeTrackColor: _green,
-              inactiveThumbColor: Colors.white,
-              inactiveTrackColor: c.disabled,
-              trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
-            ),
-          const SizedBox(width: 10),
-          Container(width: 1, height: 52, color: c.border),
-          const SizedBox(width: 14),
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: c.brandSubtle),
-            child: Icon(Icons.two_wheeler_rounded, color: c.brand, size: 24),
-          ),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$activeCount',
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: c.text, height: 1.1),
-              ),
-              Text(
-                activeCount == 1 ? tr('Active run') : tr('Active runs'),
-                style: TextStyle(fontSize: 11.5, color: c.textMuted),
               ),
             ],
+          ),
+          const SizedBox(height: 14),
+          QdSlideToggle(
+            online: isOnline,
+            busy: dutyLoading,
+            onGoOnline: () => onToggleDuty(true),
+            onGoOffline: () => onToggleDuty(false),
           ),
         ],
       ),
@@ -400,7 +120,7 @@ class BcDutyDock extends StatelessWidget {
   }
 }
 
-/// Section title with a count bubble and a trailing caption.
+/// Section title with an optional count badge and trailing caption.
 class SectionHeader extends StatelessWidget {
   const SectionHeader({super.key, required this.title, required this.count, required this.trailing, this.info = false});
 
@@ -412,95 +132,201 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final accent = info ? c.info : c.brand;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 26, 4, 12),
+      padding: const EdgeInsets.fromLTRB(2, 16, 2, 8),
       child: Row(
         children: [
-          Text(
-            title,
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: c.text),
-          ),
+          Text(title, style: BcType.section.copyWith(color: c.foreground)),
           if (count > 0) ...[
-            const SizedBox(width: 10),
-            Container(
-              width: 30,
-              height: 30,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(color: accent.withValues(alpha: 0.12), shape: BoxShape.circle),
-              child: Text(
-                '$count',
-                style: TextStyle(fontSize: 13, color: accent, fontWeight: FontWeight.w700),
-              ),
-            ),
+            const SizedBox(width: 8),
+            QdBadge('$count', tone: info ? QdTone.neutral : QdTone.primary),
           ],
           const Spacer(),
-          Text(trailing, style: TextStyle(fontSize: 12, color: c.textMuted)),
+          Text(trailing, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: c.mutedForeground)),
         ],
       ),
     );
   }
 }
 
-/// Filled circle marker used on the route preview (pin = branch, flag = customer).
-class _RouteMarker extends StatelessWidget {
-  const _RouteMarker({required this.icon, required this.color});
-  final IconData icon;
-  final Color color;
+enum PillKind { primary, outline, danger, soft, call, accent, error }
 
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 34,
-    height: 34,
-    decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-    child: Icon(icon, color: Colors.white, size: 18),
-  );
-}
+/// Full-radius action button: filled with c.action (primary), outlined, danger outline or soft.
+class PillButton extends StatelessWidget {
+  const PillButton({
+    super.key,
+    required this.label,
+    required this.onTap,
+    this.icon,
+    this.trailingIcon,
+    this.kind = PillKind.primary,
+    this.loading = false,
+    this.height = 52,
+  });
 
-class _MetricCell extends StatelessWidget {
-  const _MetricCell({required this.icon, required this.label, required this.value, this.accent = false});
-  final IconData icon;
   final String label;
-  final String value;
-  final bool accent;
+  final VoidCallback? onTap;
+  final IconData? icon;
+  final IconData? trailingIcon;
+  final PillKind kind;
+  final bool loading;
+  final double height;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(icon, color: c.brand, size: 24),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(label, style: TextStyle(fontSize: 11, color: c.textMuted)),
-              const SizedBox(height: 1),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  value,
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: accent ? c.brand : c.text),
-                ),
-              ),
-            ],
+    final enabled = onTap != null && !loading;
+    final (bg, fg, border) = switch (kind) {
+      PillKind.primary => (c.action, c.actionForeground, null),
+      PillKind.soft => (c.primarySoft, c.primaryStrong, null),
+      PillKind.outline => (Colors.transparent, c.foreground, c.border),
+      PillKind.danger => (Colors.transparent, c.errorStrong, c.error.withValues(alpha: 0.5)),
+      PillKind.call => (c.call, c.callForeground, null),
+      PillKind.accent => (c.accent, c.accentForeground, null),
+      PillKind.error => (c.error, c.errorForeground, null),
+    };
+    final radius = BorderRadius.circular(BcRadius.full);
+    return Opacity(
+      opacity: onTap == null ? 0.5 : 1,
+      child: Material(
+        color: bg,
+        shape: RoundedRectangleBorder(borderRadius: radius, side: border == null ? BorderSide.none : BorderSide(color: border, width: 1.4)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: enabled
+              ? () {
+                  BcFeedback.tap();
+                  onTap!();
+                }
+              : null,
+          child: SizedBox(
+            height: height,
+            child: Center(
+              child: loading
+                  ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: fg))
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (icon != null) ...[Icon(icon, size: 20, color: fg), const SizedBox(width: 8)],
+                        Flexible(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: fg),
+                          ),
+                        ),
+                        if (trailingIcon != null) ...[const SizedBox(width: 6), Icon(trailingIcon, size: 20, color: fg)],
+                      ],
+                    ),
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MetaItem extends StatelessWidget {
+  const _MetaItem({required this.icon, required this.label, this.highlight = false});
+  final IconData icon;
+  final String label;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final fg = highlight ? c.highlightForeground : c.mutedForeground;
+    return Container(
+      padding: highlight ? const EdgeInsets.symmetric(horizontal: 10, vertical: 4) : EdgeInsets.zero,
+      decoration: highlight ? BoxDecoration(color: c.highlight, borderRadius: BorderRadius.circular(BcRadius.full)) : null,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: fg),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, fontWeight: highlight ? FontWeight.w700 : FontWeight.w500, color: fg),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Segmented stop progress bar.
+class SegmentedProgress extends StatelessWidget {
+  const SegmentedProgress({super.key, required this.completed, required this.total, this.done = false, this.onBrand = false});
+  final int completed;
+  final int total;
+  final bool done;
+
+  /// White-on-blue variant for use over the brand gradient.
+  final bool onBrand;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final n = total < 1 ? 1 : total;
+    return Row(
+      children: [
+        for (var i = 0; i < n; i++) ...[
+          if (i > 0) const SizedBox(width: 4),
+          Expanded(
+            child: AnimatedContainer(
+              duration: BcMotion.standard,
+              height: 6,
+              decoration: BoxDecoration(
+                color: onBrand
+                    ? Colors.white.withValues(alpha: i < completed ? 0.95 : 0.28)
+                    : i < completed
+                    ? (done ? c.success : c.primary)
+                    : c.muted,
+                borderRadius: BorderRadius.circular(99),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
 }
 
+/// Leg of an active run, as shown on its Home card.
+enum _RidePhase { pickup, delivering, returning }
+
 class ActiveJobCard extends StatelessWidget {
-  const ActiveJobCard({super.key, required this.job, required this.detail, required this.onOpen});
+  const ActiveJobCard({
+    super.key,
+    required this.job,
+    required this.detail,
+    required this.onOpen,
+    this.onNavigate,
+    this.onViewDetails,
+    this.onReportIssue,
+  });
 
   final JobSummary job;
   final DeliveryJobDetail? detail;
+
+  /// Opens the live run (dashboard) — "Continue" and the next-stop panel.
   final VoidCallback onOpen;
+
+  /// "Navigate to order N" and the next-delivery panel: opens the run already heading to
+  /// that order, so the map doesn't ask for the same tap again. Falls back to [onOpen].
+  final VoidCallback? onNavigate;
+
+  /// Opens the Job Details page — "Details", "View all" and the order rows.
+  /// Falls back to [onOpen] when not set.
+  final VoidCallback? onViewDetails;
+
+  /// Shows the "Report an issue" button when set.
+  final VoidCallback? onReportIssue;
 
   @override
   Widget build(BuildContext context) {
@@ -517,195 +343,505 @@ class ActiveJobCard extends StatelessWidget {
         xs.firstWhere((s) => s != null && s.trim().isNotEmpty, orElse: () => fallback)!;
     final customerName = firstNonBlank([activeOrder?.customerName, preview?.customerName], tr('Customer'));
     final customerAddress = firstNonBlank([activeOrder?.shortAddress, preview?.shortAddress], tr('Delivery address'));
-    final customerPhone = activeOrder?.customerPhone.trim() ?? '';
 
-    final destLat = activeOrder?.lat ?? detail?.store.lat ?? 6.8344;
-    final destLng = activeOrder?.lng ?? detail?.store.lng ?? 79.8653;
-    final estMinutes = (job.estimatedMinutes ?? 0) > 0
-        ? job.estimatedMinutes!
-        : ((activeOrder?.estimatedMinutes ?? 0) > 0 ? activeOrder!.estimatedMinutes : 18);
-    final distanceKm = (job.estimatedDistanceKm ?? 0) > 0 ? job.estimatedDistanceKm! : 5.2;
 
-    Future<void> call() async {
-      BcFeedback.tap();
-      final messenger = ScaffoldMessenger.of(context);
-      if (customerPhone.isEmpty) {
-        messenger.showSnackBar(SnackBar(content: Text(tr('No customer phone available'))));
-        return;
-      }
-      final err = await Intents.dial(customerPhone);
-      if (err != null) messenger.showSnackBar(SnackBar(content: Text(err)));
-    }
+    // Which leg of the run this card is on. A rider can hold a finished ride (heading back
+    // to the branch) and a freshly accepted one at the same time, so each card must say
+    // which it is without opening it. Uses the job status too when the detail isn't loaded.
+    final status = detail?.status ?? job.status;
+    final orderTotal = orders.isEmpty ? job.orderCount : orders.length;
+    final allDone = detail != null && orders.isNotEmpty && orders.every((o) => !o.isPending);
+    final phase = (status == 'RETURNING' || allDone)
+        ? _RidePhase.returning
+        : (detail?.pickedUp ?? status == 'IN_PROGRESS')
+        ? _RidePhase.delivering
+        : _RidePhase.pickup;
+    final returning = phase == _RidePhase.returning;
+    final beforePickup = phase == _RidePhase.pickup;
+    final pickedUp = !beforePickup;
+    final deliveredCount = detail?.deliveredCount ?? 0;
+    final totalStops = orderTotal + 1;
+    final completedStops = returning ? totalStops : (pickedUp ? 1 : 0) + deliveredCount;
+    final stepLabel = switch (phase) {
+      _RidePhase.pickup => tr('Pickup'),
+      _RidePhase.delivering => tr('Delivery'),
+      _RidePhase.returning => tr('All delivered'),
+    };
+    final (phaseLabel, phaseIcon, phaseSoft, phaseInk) = switch (phase) {
+      _RidePhase.pickup => (tr('New ride – Pickup required'), Icons.storefront_rounded, c.warningSoft, c.warningStrong),
+      _RidePhase.delivering => (tr('Delivery in progress'), Icons.local_shipping_rounded, c.primarySoft, c.primaryStrong),
+      _RidePhase.returning => (
+        tr('Delivery completed – Return to branch'),
+        Icons.assignment_turned_in_rounded,
+        c.successSoft,
+        c.successStrong,
+      ),
+    };
+    final nextOrderIndex = ([...orders]..sort((a, b) => a.sequence.compareTo(b.sequence))).indexWhere((o) => o.isPending);
+    final earn = detail?.totalDeliveryFees ?? job.totalDeliveryFees;
 
-    Future<void> navigate() async {
-      BcFeedback.tap();
-      final messenger = ScaffoldMessenger.of(context);
-      final err = await Intents.navigateTo(destLat, destLng, label: customerName);
-      if (err != null) messenger.showSnackBar(SnackBar(content: Text(err)));
-    }
+    final viewDetails = onViewDetails ?? onOpen;
+    final shown = orders.take(3).toList();
+    final rideLabel = Format.rideIdLabel(job.rideCode, job.id).replaceFirst('·', '•');
 
-    return BcCard(
-      padding: const EdgeInsets.all(18),
-      onTap: () {
-        BcFeedback.tap();
-        onOpen();
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(color: c.successSubtle, borderRadius: BorderRadius.circular(99)),
-                child: Text(
-                  job.status.replaceAll('_', ' '),
-                  style: TextStyle(fontSize: 11, color: c.success, fontWeight: FontWeight.w800, letterSpacing: 0.4),
-                ),
-              ),
-              const Spacer(),
-              Flexible(
-                flex: 3,
-                child: Text(
-                  Format.rideIdLabel(job.rideCode, job.id).replaceFirst('·', '•'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.end,
-                  style: TextStyle(fontSize: 12, color: c.textMuted, fontWeight: FontWeight.w500),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _RouteStop(
-            marker: _RouteMarker(icon: Icons.location_on, color: c.brand),
-            title: storeTitle,
-            subtitle: storeAddress,
-          ),
-          Container(
-            margin: const EdgeInsets.only(left: 16),
-            width: 1.5,
-            height: 18,
-            color: c.textMuted.withValues(alpha: 0.5),
-          ),
-          _RouteStop(
-            marker: _RouteMarker(icon: Icons.flag_rounded, color: c.success),
-            title: customerName,
-            subtitle: customerAddress,
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-            decoration: BoxDecoration(color: c.surfacePill, borderRadius: BorderRadius.circular(14)),
-            child: IntrinsicHeight(
+    return QdCard(
+      padding: EdgeInsets.zero,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(BcRadius.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 0. Phase band: tells a returning ride apart from a new pickup at a glance.
+            Container(
+              color: phaseSoft,
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
               child: Row(
                 children: [
+                  Icon(phaseIcon, size: 20, color: phaseInk),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: _MetricCell(
-                      icon: Icons.schedule_rounded,
-                      label: tr('ETA'),
-                      value: tr('{n} min', {'n': estMinutes}),
+                    child: Text(
+                      phaseLabel,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: phaseInk),
                     ),
                   ),
-                  VerticalDivider(width: 1, thickness: 1, color: c.border),
-                  Expanded(
-                    child: _MetricCell(
-                      icon: Icons.route_outlined,
-                      label: tr('Distance'),
-                      value: '${distanceKm % 1 == 0 ? distanceKm.toStringAsFixed(1) : distanceKm} km',
+                ],
+              ),
+            ),
+            // 1. Job summary + progress; tap opens the full job.
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                BcFeedback.tap();
+                viewDetails();
+              },
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                tr('Active job').toUpperCase(),
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1, color: phaseInk),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                rideLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: BcType.subtitle.copyWith(color: c.foreground),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (earn > 0) ...[
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                tr('You earn').toUpperCase(),
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 1, color: c.mutedForeground),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(Format.money(earn), style: BcType.subtitle.copyWith(color: c.successStrong)),
+                            ],
+                          ),
+                        ],
+                      ],
                     ),
-                  ),
-                  if (job.totalDeliveryFees > 0) ...[
-                    VerticalDivider(width: 1, thickness: 1, color: c.border),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Flexible(child: _MetaItem(icon: Icons.storefront_outlined, label: storeTitle, highlight: true)),
+                        const SizedBox(width: 14),
+                        _MetaItem(
+                          icon: Icons.inventory_2_outlined,
+                          label: trn(orderTotal, '{n} order', '{n} orders'),
+                        ),
+                        // A fixed gap (not a Spacer) so the branch chip gets all the free width.
+                        const SizedBox(width: 10),
+                        Text(tr('Details'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.primary)),
+                        Icon(Icons.chevron_right_rounded, size: 18, color: c.primary),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SegmentedProgress(completed: completedStops, total: totalStops, done: allDone),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            tr('{done} of {total} stops', {'done': completedStops, 'total': totalStops}),
+                            style: TextStyle(fontSize: 13, color: c.mutedForeground),
+                          ),
+                        ),
+                        Text(
+                          stepLabel,
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: phaseInk),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // 2. Next stop highlight.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              // Pickup and return both head to the branch; the eyebrow says why.
+              child: NextStopPanel(
+                icon: returning
+                    ? Icons.keyboard_return_rounded
+                    : (beforePickup ? Icons.storefront_outlined : Icons.place_outlined),
+                eyebrow: returning
+                    ? tr('Return to branch')
+                    : (beforePickup ? tr('Next stop · Pickup') : tr('Next delivery')),
+                title: beforePickup || returning ? storeTitle : customerName,
+                subtitle: beforePickup || returning ? storeAddress : customerAddress,
+                onTap: () {
+                  BcFeedback.tap();
+                  (phase == _RidePhase.delivering ? (onNavigate ?? onOpen) : onOpen)();
+                },
+              ),
+            ),
+            // 3. Orders preview.
+            if (shown.isNotEmpty) ...[
+              Divider(height: 1, thickness: 1, color: c.border),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
+                child: Row(
+                  children: [
                     Expanded(
-                      child: _MetricCell(
-                        icon: Icons.account_balance_wallet_outlined,
-                        label: tr('Earnings'),
-                        value: Format.money(job.totalDeliveryFees),
-                        accent: true,
+                      child: Text(
+                        tr('Orders ({n})', {'n': orders.length}),
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.foreground),
                       ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        BcFeedback.tap();
+                        viewDetails();
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(tr('View all'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.primary)),
+                          Icon(Icons.chevron_right_rounded, size: 18, color: c.primary),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              for (var i = 0; i < shown.length; i++) ...[
+                if (i > 0) Divider(height: 1, thickness: 1, indent: 20, endIndent: 20, color: c.border),
+                _OrderRow(order: shown[i], onTap: viewDetails),
+              ],
+              const SizedBox(height: 4),
+            ],
+            // 4. Actions.
+            Divider(height: 1, thickness: 1, color: c.border),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Opens the in-app active run (map + route); its directions icon hands off to Google Maps.
+                  // One primary action that follows the job's current step.
+                  if (returning)
+                    PillButton(
+                      label: tr('Return to branch'),
+                      icon: Icons.keyboard_return_rounded,
+                      onTap: onOpen,
+                    )
+                  else
+                    PillButton(
+                      label: beforePickup
+                          ? tr('Navigate to pickup')
+                          : (nextOrderIndex >= 0
+                              ? tr('Navigate to order {n}', {'n': nextOrderIndex + 1})
+                              : tr('Navigate')),
+                      icon: Icons.navigation_outlined,
+                      onTap: beforePickup ? onOpen : (onNavigate ?? onOpen),
+                    ),
+                  if (onReportIssue != null) ...[
+                    const SizedBox(height: 12),
+                    PillButton(
+                      label: tr('Report an issue'),
+                      icon: Icons.warning_amber_rounded,
+                      kind: PillKind.danger,
+                      onTap: onReportIssue,
                     ),
                   ],
                 ],
               ),
             ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                flex: 10,
-                child: SizedBox(
-                  height: 52,
-                  child: OutlinedButton.icon(
-                    onPressed: call,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: c.brand,
-                      side: BorderSide(color: c.brand, width: 1.4),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    icon: const Icon(Icons.call_rounded, size: 22),
-                    label: Text(tr('Call'), style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 12,
-                child: SizedBox(
-                  height: 52,
-                  child: FilledButton.icon(
-                    onPressed: navigate,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: c.brand,
-                      foregroundColor: c.onBrand,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    icon: const Icon(Icons.navigation_outlined, size: 22),
-                    label: Text(tr('Navigate'), style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-class _RouteStop extends StatelessWidget {
-  const _RouteStop({required this.marker, required this.title, required this.subtitle});
-  final Widget marker;
+class NextStopPanel extends StatelessWidget {
+  const NextStopPanel({super.key, required this.icon, required this.eyebrow, required this.title, required this.subtitle, required this.onTap});
+  final IconData icon;
+  final String eyebrow;
   final String title;
   final String subtitle;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    return Row(
-      children: [
-        marker,
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final ink = c.highlightForeground;
+    return Material(
+      color: c.highlight,
+      borderRadius: BorderRadius.circular(BcRadius.md),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(11),
+          child: Row(
             children: [
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700, color: c.text),
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: c.inverse),
+                child: Icon(icon, size: 22, color: c.inverseForeground),
               ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12.5, color: c.textMuted),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      eyebrow.toUpperCase(),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1, color: ink.withValues(alpha: 0.7)),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: ink),
+                    ),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: ink.withValues(alpha: 0.75)),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OrderRow extends StatelessWidget {
+  const _OrderRow({required this.order, required this.onTap});
+  final JobOrder order;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final unpaid = order.isFailed || order.status == 'CANCELLED';
+    final notable = order.isDelivered || unpaid;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        child: Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: c.primarySoft),
+              child: Text('${order.sequence}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: c.primaryStrong)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: order.customerName.trim().isEmpty ? tr('Customer') : order.customerName,
+                      style: TextStyle(fontWeight: FontWeight.w700, color: c.foreground),
+                    ),
+                    TextSpan(text: ' · ${order.city}', style: TextStyle(color: c.mutedForeground)),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 14),
+              ),
+            ),
+            if (notable) ...[
+              const SizedBox(width: 8),
+              StatusChip(order.isFailed ? 'DELIVERY_FAILED' : order.status),
+            ],
+            const SizedBox(width: 8),
+            Text(
+              Format.money(order.deliveryFee),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: unpaid ? c.mutedForeground : c.foreground,
+                decoration: unpaid ? TextDecoration.lineThrough : null,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Branches this rider takes jobs from.
+class AssignedBranchesCard extends StatelessWidget {
+  const AssignedBranchesCard({super.key, required this.branches, this.homeStoreId, this.onTap});
+
+  final List<StoreRef> branches;
+  final String? homeStoreId;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        QdSectionTitle(tr('Assigned branches'), topGap: 4),
+        QdCard(
+          padding: EdgeInsets.zero,
+          child: branches.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(tr('No branches assigned yet.'), style: TextStyle(fontSize: 14, color: c.mutedForeground)),
+                )
+              : Column(
+                  children: [
+                    for (var i = 0; i < branches.length; i++) ...[
+                      if (i > 0) Divider(height: 1, thickness: 1, color: c.border),
+                      InkWell(
+                        onTap: onTap,
+                        borderRadius: BorderRadius.circular(BcRadius.lg),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(color: c.primarySoft, borderRadius: BorderRadius.circular(BcRadius.md)),
+                                child: Icon(Icons.storefront_outlined, size: 20, color: c.primaryStrong),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      Format.shortBranchName(branches[i].name),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: c.foreground),
+                                    ),
+                                    if ((branches[i].city ?? '').trim().isNotEmpty)
+                                      Text(
+                                        branches[i].city!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(fontSize: 13, color: c.mutedForeground),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              if (branches[i].id == homeStoreId) QdBadge(tr('Home branch'), tone: QdTone.success, dot: true),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Most recent completed shift (shown while offline).
+class LastShiftCard extends StatelessWidget {
+  const LastShiftCard({super.key, required this.shift});
+
+  final DriverShiftEntry? shift;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.bc;
+    final s = shift;
+    final start = Format.toLocal(s?.startedAt);
+    final end = Format.toLocal(s?.endedAt);
+    final timeFmt = DateFormat('h:mm a', L10n.dateLocale);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        QdSectionTitle(tr('Last shift'), topGap: 4),
+        QdCard(
+          child: (s == null || start == null)
+              ? Text(tr('No shifts yet.'), style: TextStyle(fontSize: 14, color: c.mutedForeground))
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      DateFormat('EEE, MMM d', L10n.dateLocale).format(start),
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.foreground),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${timeFmt.format(start)}${end == null ? '' : ' – ${timeFmt.format(end)}'}',
+                      style: TextStyle(fontSize: 13, color: c.mutedForeground),
+                    ),
+                    const SizedBox(height: 14),
+                    Divider(height: 1, thickness: 1, color: c.border),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Icon(Icons.schedule_rounded, size: 20, color: c.primary),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              Format.duration(s.durationMinutes),
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.foreground),
+                            ),
+                            Text(tr('Duration'), style: TextStyle(fontSize: 12, color: c.mutedForeground)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
         ),
       ],
     );
@@ -737,13 +873,14 @@ class ScheduledJobCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    return BcCard(
-      padding: const EdgeInsets.all(18),
+    return QdCard(
+      padding: const EdgeInsets.all(12),
+      outlined: alerting,
+      color: null,
       onTap: () {
         BcFeedback.tap();
         onOpen();
       },
-      borderColor: alerting ? c.brand.withValues(alpha: 0.6) : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -751,12 +888,12 @@ class ScheduledJobCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(color: c.brandSubtle, borderRadius: BorderRadius.circular(14)),
-                child: Icon(Icons.local_cafe_outlined, color: c.brand, size: 28),
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(color: c.primarySoft, borderRadius: BorderRadius.circular(BcRadius.md)),
+                child: Icon(Icons.local_cafe_outlined, color: c.primaryStrong, size: 26),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -765,21 +902,28 @@ class ScheduledJobCard extends StatelessWidget {
                       Format.deliverySummary(job.orderCount, job.totalCups),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.text),
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.foreground),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Text(
                       [job.storeName, job.storeCity].where((s) => s.trim().isNotEmpty).join(' • '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 13, color: c.textMuted),
+                      style: TextStyle(fontSize: 13, color: c.mutedForeground),
                     ),
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Icon(Icons.calendar_today_outlined, size: 13, color: c.textMuted),
+                        Icon(Icons.calendar_today_outlined, size: 13, color: c.mutedForeground),
                         const SizedBox(width: 5),
-                        Text(Format.jobDateTime(job.scheduledAt), style: TextStyle(fontSize: 13, color: c.textMuted)),
+                        Flexible(
+                          child: Text(
+                            Format.jobDateTime(job.scheduledAt),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 13, color: c.mutedForeground),
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -789,87 +933,30 @@ class ScheduledJobCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(color: c.infoSubtle, borderRadius: BorderRadius.circular(99)),
-                    child: Text(
-                      tr('SCHEDULED'),
-                      style: TextStyle(fontSize: 10.5, color: c.info, fontWeight: FontWeight.w800, letterSpacing: 0.3),
-                    ),
-                  ),
+                  QdBadge(tr('SCHEDULED'), tone: QdTone.primary),
                   const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Text(
-                        Format.money(job.totalDeliveryFees),
-                        style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: c.brand),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(Icons.chevron_right, color: c.textMuted, size: 20),
-                    ],
+                  Text(
+                    Format.money(job.totalDeliveryFees),
+                    style: BcType.section.copyWith(color: c.successStrong),
                   ),
                 ],
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          Material(
-            color: claimEnabled ? c.brand : c.brandSubtle,
-            borderRadius: BorderRadius.circular(12),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: claimEnabled && !claiming
-                  ? () {
-                      BcFeedback.tap();
-                      onClaim();
-                    }
-                  : null,
-              child: SizedBox(
-                height: 50,
-                child: Center(
-                  child: claiming
-                      ? SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: c.onBrand),
-                        )
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              claimEnabled ? Icons.bolt_rounded : Icons.description_outlined,
-                              size: 19,
-                              color: claimEnabled ? c.onBrand : c.brand,
-                            ),
-                            const SizedBox(width: 8),
-                            Flexible(
-                              child: Text(
-                                claimEnabled ? tr('Claim cup run') : (disabledLabel ?? tr('Go online to claim')),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 13.5,
-                                  color: claimEnabled ? c.onBrand : c.brand,
-                                  fontWeight: claimEnabled ? FontWeight.w700 : FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Icon(Icons.chevron_right, size: 18, color: claimEnabled ? c.onBrand : c.brand),
-                          ],
-                        ),
-                ),
-              ),
-            ),
+          const SizedBox(height: 14),
+          PillButton(
+            label: claimEnabled ? tr('Claim cup run') : (disabledLabel ?? tr('Go online to claim')),
+            icon: claimEnabled ? Icons.bolt_rounded : null,
+            kind: claimEnabled ? PillKind.primary : PillKind.soft,
+            loading: claiming,
+            height: 48,
+            onTap: claimEnabled ? onClaim : null,
           ),
           if (alerting) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             TextButton(
               onPressed: onSilence,
-              child: Text(
-                tr('Silence alert'),
-                style: TextStyle(color: c.brand, fontWeight: FontWeight.w600),
-              ),
+              child: Text(tr('Silence alert'), style: TextStyle(color: c.primary, fontWeight: FontWeight.w700)),
             ),
           ],
         ],
@@ -878,8 +965,8 @@ class ScheduledJobCard extends StatelessWidget {
   }
 }
 
-/// Empty queue: no box — a centred mascot with slow "radar" rings, the message, and a
-/// status pill (waiting for runs when online, a nudge to go online otherwise).
+/// Empty queue: QuickDrop "waiting for jobs" card with a radar pulse when online, or a
+/// nudge to go online otherwise.
 class NoOtherJobsCard extends StatefulWidget {
   const NoOtherJobsCard({super.key, this.isOnline = true});
   final bool isOnline;
@@ -903,141 +990,63 @@ class _NoOtherJobsCardState extends State<NoOtherJobsCard> with SingleTickerProv
     final c = context.bc;
     final reduced = MediaQuery.of(context).disableAnimations;
     final online = widget.isOnline;
-    final ring = online ? c.brand : c.textMuted;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+    final ring = online ? c.primary : c.mutedForeground;
+    const size = 112.0;
+    return QdCard(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
       child: Column(
         children: [
           SizedBox(
-            width: 220,
-            height: 200,
+            width: size,
+            height: size,
             child: AnimatedBuilder(
               animation: _radar,
               builder: (_, child) => Stack(
                 alignment: Alignment.center,
                 children: [
                   if (online && !reduced)
-                    for (final phase in [0.0, 0.33, 0.66])
+                    for (final phase in [0.0, 0.5])
                       Builder(
                         builder: (_) {
                           final t = (_radar.value + phase) % 1.0;
+                          final d = size * (0.5 + 0.5 * t);
                           return Opacity(
-                            opacity: (1 - t) * 0.35,
-                            child: Container(
-                              width: 120 + 96 * t,
-                              height: 120 + 96 * t,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(color: ring, width: 1.5),
-                              ),
-                            ),
+                            opacity: 0.35 * (1 - t),
+                            child: Container(width: d, height: d, decoration: BoxDecoration(shape: BoxShape.circle, color: ring)),
                           );
                         },
                       ),
                   child!,
                 ],
               ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Container(
-                    width: 150,
-                    height: 150,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(colors: [ring.withValues(alpha: 0.16), ring.withValues(alpha: 0.04)]),
-                    ),
-                  ),
-                  Opacity(
-                    opacity: online ? 1 : 0.55,
-                    child: Image.asset('assets/images/rider_mascot.png', height: 104, fit: BoxFit.contain),
-                  ),
-                  Positioned(
-                    left: 4,
-                    top: 44,
-                    child: _FloatChip(icon: Icons.local_cafe_rounded, color: const Color(0xFFE11D48)),
-                  ),
-                  Positioned(
-                    right: 4,
-                    top: 30,
-                    child: _FloatChip(icon: Icons.location_on_rounded, color: c.brand),
-                  ),
-                  Positioned(
-                    right: 10,
-                    bottom: 22,
-                    child: _FloatChip(icon: Icons.inventory_2_rounded, color: c.success),
-                  ),
-                ],
+              child: Container(
+                width: size * 0.5,
+                height: size * 0.5,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: online ? c.primarySoft : c.muted),
+                child: Icon(online ? Icons.radar_rounded : Icons.power_settings_new_rounded, size: 34, color: ring),
               ),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
           Text(
-            tr('Queue is clear'),
+            online ? tr('Waiting for jobs') : tr('Queue is clear'),
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: c.text),
+            style: BcType.subtitle.copyWith(color: c.foreground),
           ),
           const SizedBox(height: 6),
           Text(
-            tr('New cup runs will appear here automatically.'),
+            online ? tr('New cup runs will appear here automatically.') : tr('Go online to receive jobs'),
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14, color: c.textMuted, height: 1.4),
+            style: TextStyle(fontSize: 14, color: c.mutedForeground, height: 1.4),
           ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.fromLTRB(10, 7, 14, 7),
-            decoration: BoxDecoration(
-              color: (online ? c.success : c.warning).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(99),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (online)
-                  AnimatedBuilder(
-                    animation: _radar,
-                    builder: (_, _) => Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: c.success.withValues(alpha: reduced ? 1 : 0.45 + 0.55 * (1 - _radar.value)),
-                      ),
-                    ),
-                  )
-                else
-                  Icon(Icons.power_settings_new_rounded, size: 14, color: c.warning),
-                const SizedBox(width: 7),
-                Text(
-                  online ? tr('Waiting for new runs') : tr('Go online to receive jobs'),
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: online ? c.success : c.warning),
-                ),
-              ],
-            ),
+          const SizedBox(height: 14),
+          QdBadge(
+            online ? tr('Waiting for new runs') : tr('Offline'),
+            tone: online ? QdTone.success : QdTone.neutral,
+            dot: true,
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Small white floating icon bubble around the empty-state mascot.
-class _FloatChip extends StatelessWidget {
-  const _FloatChip({required this.icon, required this.color});
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 34,
-      height: 34,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: context.bc.card,
-        boxShadow: const [BoxShadow(color: Color(0x220A2647), blurRadius: 10, offset: Offset(0, 3))],
-      ),
-      child: Icon(icon, size: 17, color: color),
     );
   }
 }

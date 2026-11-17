@@ -16,22 +16,6 @@ const DEFAULT_ANDROID =
   'https://play.google.com/store/apps/details?id=com.bingchun.customer';
 const DEFAULT_IOS = 'https://apps.apple.com/app/bing-chun/id0000000000';
 
-/** Placeholder or empty store URLs should not open an external store listing. */
-export function isPublishedStoreUrl(url: string | null | undefined): boolean {
-  const trimmed = url?.trim() ?? '';
-  if (!trimmed) return false;
-  // Built-in placeholders used until real App Store / Play listings exist.
-  if (/id0000000000/i.test(trimmed)) return false;
-  if (/id=com\.bingchun\.customer(?:&|$)/i.test(trimmed)) return false;
-  if (trimmed === DEFAULT_ANDROID || trimmed === DEFAULT_IOS) return false;
-  try {
-    const parsed = new URL(trimmed);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 export function detectClientPlatform(): ClientPlatform {
   if (typeof window === 'undefined') return 'desktop';
   const ua = navigator.userAgent || '';

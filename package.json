@@ -22,8 +22,6 @@
     "dev:payments": "npm run dev -w @bingchun/payment-service",
     "dev:notify": "npm run dev -w @bingchun/notification-service",
     "dev:cup-stickers": "node tools/cup-sticker-agent/server.mjs",
-    "dev:cashier-desktop": "npm --prefix tools/cashier-desktop start",
-    "build:cashier-desktop": "npm --prefix tools/cashier-desktop run dist",
     "dev:mobile": "cd mobile && ..\\scripts\\flutter.cmd run",
     "dev:driver-android": "cd driver_android && gradlew.bat installDebug",
     "dev:customer": "cd customer_mobile && ..\\scripts\\flutter.cmd run --dart-define=API_BASE=https://bing-chung-b.mp.dartcodes.com",

@@ -1,5 +1,3 @@
-import { AppError } from '../middleware/errorHandler';
-import { prisma } from './prisma';
 import { ensureAdminMoneyDecimalColumns } from './moneyDecimalSchema';
 import {
   addColumnIfMissing,
@@ -13,64 +11,6 @@ import {
 let ensured = false;
 let proofUrlWidened = false;
 let inFlight: Promise<void> | null = null;
-let inReviewEnumReady = false;
-let inReviewEnumInFlight: Promise<void> | null = null;
-
-async function withdrawalStatusHasInReview(): Promise<boolean> {
-  const rows = await prisma.$queryRaw<{ ready: boolean }[]>`
-    SELECT EXISTS (
-      SELECT 1
-      FROM pg_enum e
-      JOIN pg_type t ON e.enumtypid = t.oid
-      WHERE t.typname = 'WithdrawalStatus'
-        AND e.enumlabel = 'IN_REVIEW'
-    ) AS ready
-  `;
-  return rows[0]?.ready === true;
-}
-
-async function applyWithdrawalInReviewSchemaPatch(): Promise<void> {
-  await execSql(`ALTER TYPE "WithdrawalStatus" ADD VALUE IF NOT EXISTS 'IN_REVIEW'`).catch(
-    () => undefined,
-  );
-  await execSql(`
-    CREATE UNIQUE INDEX IF NOT EXISTS "withdrawal_one_active_period"
-      ON "store_withdrawals" ("storeId", "periodFrom", "periodTo")
-      WHERE "status" IN ('IN_REVIEW', 'PENDING', 'APPROVED')
-        AND "periodFrom" IS NOT NULL
-        AND "periodTo" IS NOT NULL
-  `);
-}
-
-/**
- * Payout drafts query `status = IN_REVIEW`. Fail fast with a clear message when the enum
- * value is missing and runtime DDL patches are disabled (production).
- */
-export function ensureWithdrawalInReviewEnumReady(): Promise<void> {
-  if (inReviewEnumReady) return Promise.resolve();
-  if (!inReviewEnumInFlight) {
-    inReviewEnumInFlight = (async () => {
-      if (await withdrawalStatusHasInReview()) {
-        inReviewEnumReady = true;
-        return;
-      }
-      if (!runtimeSchemaPatchesAllowed()) {
-        throw new AppError(
-          'Database is missing WithdrawalStatus IN_REVIEW. Apply the latest Prisma migration (npm run prisma:migrate -w @bingchun/db).',
-          503,
-        );
-      }
-      await applyWithdrawalInReviewSchemaPatch();
-      if (!(await withdrawalStatusHasInReview())) {
-        throw new AppError('Could not add WithdrawalStatus IN_REVIEW to the database.', 503);
-      }
-      inReviewEnumReady = true;
-    })().finally(() => {
-      inReviewEnumInFlight = null;
-    });
-  }
-  return inReviewEnumInFlight;
-}
 
 /** Ensure store_withdrawals table and wallet cache columns exist (idempotent). */
 export function ensureWithdrawalSchema(): Promise<void> {
@@ -132,9 +72,6 @@ async function runEnsureWithdrawalSchema(): Promise<void> {
       'store_wallets migration incomplete: totalEarnings/totalWithdrawn columns missing',
     );
   }
-
-  await applyWithdrawalInReviewSchemaPatch();
-  inReviewEnumReady = true;
 
   await ensureAdminMoneyDecimalColumns();
   ensured = true;

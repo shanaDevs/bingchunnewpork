@@ -98,7 +98,7 @@ class _DeviceLockOverlayState extends State<DeviceLockOverlay> with SingleTicker
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final red = c.isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+    final red = c.error;
     final reduced = MediaQuery.of(context).disableAnimations;
     final top = MediaQuery.paddingOf(context).top;
     final bottom = MediaQuery.paddingOf(context).bottom;
@@ -123,7 +123,7 @@ class _DeviceLockOverlayState extends State<DeviceLockOverlay> with SingleTicker
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      c.brand.withValues(alpha: c.isDark ? 0.22 : 0.14),
+                      c.primaryStrong.withValues(alpha: c.isDark ? 0.22 : 0.14),
                       c.background,
                     ],
                   ),
@@ -145,10 +145,10 @@ class _DeviceLockOverlayState extends State<DeviceLockOverlay> with SingleTicker
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        tr('Bing Chun Delivery'),
+                        tr('Bring It Rider'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: c.text, fontSize: 15, fontWeight: FontWeight.w800),
+                        style: TextStyle(color: c.foreground, fontSize: 15, fontWeight: FontWeight.w800),
                       ),
                     ),
                     const BcLanguageSwitch(),
@@ -226,13 +226,13 @@ class _DeviceLockOverlayState extends State<DeviceLockOverlay> with SingleTicker
                 Text(
                   tr('Rider App locked'),
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: c.text, fontSize: 24, fontWeight: FontWeight.w800),
+                  style: TextStyle(color: c.foreground, fontSize: 24, fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   tr('Turn these on to keep receiving and tracking rides.'),
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: c.textMuted, fontSize: 14, height: 1.45),
+                  style: TextStyle(color: c.mutedForeground, fontSize: 14, height: 1.45),
                 ),
                 const SizedBox(height: 22),
                 RunCard(
@@ -272,12 +272,12 @@ class _DeviceLockOverlayState extends State<DeviceLockOverlay> with SingleTicker
                 Center(
                   child: TextButton.icon(
                     onPressed: _checking ? null : _recheck,
-                    style: TextButton.styleFrom(foregroundColor: c.brand),
+                    style: TextButton.styleFrom(foregroundColor: c.primaryStrong),
                     icon: _checking
                         ? SizedBox(
                             width: 16,
                             height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: c.brand),
+                            child: CircularProgressIndicator(strokeWidth: 2, color: c.primaryStrong),
                           )
                         : const Icon(Icons.refresh_rounded, size: 18),
                     label: Text(
@@ -310,7 +310,7 @@ class _LocationDisclosureState extends State<_LocationDisclosure> {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final body = TextStyle(color: c.textMuted, fontSize: 13, height: 1.45);
+    final body = TextStyle(color: c.mutedForeground, fontSize: 13, height: 1.45);
     Widget point(String text) => Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Row(
@@ -327,7 +327,7 @@ class _LocationDisclosureState extends State<_LocationDisclosure> {
         const SizedBox(height: 8),
         Text(
           tr(
-            'Bing Chun Delivery collects your location while you are on duty, '
+            'Bring It Rider collects your location while you are on duty, '
             'even when the app is closed or not in use, to:',
           ),
           style: body,
@@ -353,24 +353,24 @@ class _LocationDisclosureState extends State<_LocationDisclosure> {
           borderRadius: BorderRadius.circular(16),
           onTap: () => setState(() => _expanded = !_expanded),
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Icon(Icons.privacy_tip_outlined, color: c.brand, size: 20),
+                    Icon(Icons.privacy_tip_outlined, color: c.primaryStrong, size: 20),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        tr('How Bing Chun Delivery uses your location'),
-                        style: TextStyle(color: c.text, fontSize: 15, fontWeight: FontWeight.w700),
+                        tr('How Bring It Rider uses your location'),
+                        style: TextStyle(color: c.foreground, fontSize: 15, fontWeight: FontWeight.w700),
                       ),
                     ),
                     AnimatedRotation(
                       turns: _expanded ? 0.5 : 0,
                       duration: const Duration(milliseconds: 200),
-                      child: Icon(Icons.expand_more_rounded, color: c.textMuted),
+                      child: Icon(Icons.expand_more_rounded, color: c.mutedForeground),
                     ),
                   ],
                 ),
@@ -407,7 +407,7 @@ class _RequirementRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.bc;
-    final red = c.isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+    final red = c.error;
     final tint = ok ? c.success : red;
     return Padding(
       padding: const EdgeInsets.all(12),
@@ -426,10 +426,10 @@ class _RequirementRow extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: TextStyle(color: c.text, fontSize: 15, fontWeight: FontWeight.w700),
+                  style: TextStyle(color: c.foreground, fontSize: 15, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 2),
-                Text(subtitle, style: TextStyle(color: c.textMuted, fontSize: 12.5, height: 1.3)),
+                Text(subtitle, style: TextStyle(color: c.mutedForeground, fontSize: 12.5, height: 1.3)),
               ],
             ),
           ),

@@ -19,26 +19,19 @@ import { aggregateTopRefundBranches } from '../lib/refundAnalytics';
 import { getOutgoingFlowsForRange, sumJasonInvestedLkrForRange } from '../lib/walletAnalysis';
 import { prisma } from '../lib/prisma';
 import { decimalFieldToCentsNumber } from '../lib/moneyDecimal';
-import { walletBalanceCents, withdrawalAmountCents } from '../lib/walletApiMoney';
+import { walletBalanceCents } from '../lib/walletApiMoney';
 import { normalizeProductImageUrl, productImageUrl } from '../lib/productImages';
 import {
   enrichOrdersWithAddonPayments,
   fetchOrderAddonMap,
-  fetchSummarizedPaidOrderRevenue,
-  paidOrderPayablesCreditCents,
   platformItemSalesLkr,
   summarizeRevenueChannelsLkr,
 } from '../lib/walletRevenue';
-import { aggregatePaidPayoutPeriodExpensesCents } from '../lib/paidPayoutPeriodExpenses';
-import {
-  computeAllTimeAvailableBalanceCents,
-  computeBranchPayablesSummary,
-} from '../lib/walletService';
+import { computeBranchPayablesSummary } from '../lib/walletService';
 import { requireBranchStoreId, resolveBranchStoreId, isBranchScopedRole } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { success } from '../utils/apiResponse';
 import { dateStringInColombo, formatDateTime } from '../lib/datetime';
-import { getCommissionSlabs } from '../lib/appSchema';
 import { resolveCustomerDisplayName } from '../lib/customerName';
 import { promiseAllLimited } from '../utils/promiseAllLimited';
 import { analyticsCacheKey, withAnalyticsCache } from '../lib/analyticsResponseCache';
@@ -58,17 +51,7 @@ import {
   summarizeRevenueChannelsForScope,
   type PaidSalesScope,
 } from '../lib/dashboardOrderAggregates';
-import { resolveOptionalReportDayRange, resolveReportDayRange } from '../lib/reportQueryRange';
-import { resolveStoredRejectReason } from '../lib/orderCancel';
-import { buildPayoutStatementFromBreakdown } from '../lib/invoice/payoutStatement';
-import {
-  computeMergedPeriodSummary,
-  loadPayoutPeriodItems,
-  PAYOUT_PERIODS_CACHE_TTL_MS,
-} from '../lib/walletControllerSupport';
-import type { PayoutCycleContext } from '../lib/payoutCycle';
-import { tableHasColumn } from '../lib/schemaPatch';
-import { ensureWithdrawalInReviewEnumReady } from '../lib/withdrawalSchema';
+import { resolveReportDayRange } from '../lib/reportQueryRange';
 import {
   assertMaxDateSpan,
   chartBucketLabel,
@@ -1602,7 +1585,6 @@ export async function getBrandAnalytics(req: Request, res: Response, next: NextF
     );
     let periodCommission = 0;
     let gatewayFee = 0;
-    const commissionSlabs = await getCommissionSlabs();
 
     const branchPerformance = stores.map((store) => {
       const storeOrders = periodOrders.filter((order) => order.storeId === store.id);
@@ -1611,9 +1593,6 @@ export async function getBrandAnalytics(req: Request, res: Response, next: NextF
       const breakdown = accumulateSettlementBreakdown(
         storeOrders as BranchOrderForAnalytics[],
         windowBase,
-        undefined,
-        undefined,
-        commissionSlabs,
       );
       const commission = sumBreakdownCommission(breakdown);
       const providerFee = sumBreakdownProviderFee(breakdown);
@@ -1819,7 +1798,7 @@ async function loadBrandBranchPerformance(selectedRange: { gte: Date; lte: Date 
     1,
   );
 
-  const [stores, periodOrders, monthlyBaseOrders, commissionSlabs] = await Promise.all([
+  const [stores, periodOrders, monthlyBaseOrders] = await Promise.all([
     prisma.store.findMany({
       where: { isActive: true },
       select: { id: true, name: true, city: true, district: true },
@@ -1855,7 +1834,6 @@ async function loadBrandBranchPerformance(selectedRange: { gte: Date; lte: Date 
         storeId: true,
       },
     }),
-    getCommissionSlabs(),
   ]);
 
   const periodBaseLookup = buildPeriodBaseLookup(monthlyBaseOrders);
@@ -1868,9 +1846,6 @@ async function loadBrandBranchPerformance(selectedRange: { gte: Date; lte: Date 
       const breakdown = accumulateSettlementBreakdown(
         storeOrders as BranchOrderForAnalytics[],
         windowBase,
-        undefined,
-        undefined,
-        commissionSlabs,
       );
       const commission = sumBreakdownCommission(breakdown);
       const providerFee = sumBreakdownProviderFee(breakdown);
@@ -2000,10 +1975,7 @@ export async function getBrandBranchPerformance(req: Request, res: Response, nex
       },
     });
 
-    const [periodBaseLookup, commissionSlabs] = await Promise.all([
-      Promise.resolve(buildPeriodBaseLookup(monthlyBaseOrders)),
-      getCommissionSlabs(),
-    ]);
+    const periodBaseLookup = buildPeriodBaseLookup(monthlyBaseOrders);
     const previousGrossMap = new Map(
       previousGrossByStore.map((row) => [row.storeId, row._sum.total ?? 0]),
     );
@@ -2025,9 +1997,6 @@ export async function getBrandBranchPerformance(req: Request, res: Response, nex
         const breakdown = accumulateSettlementBreakdown(
           storeOrders as BranchOrderForAnalytics[],
           windowBase,
-          undefined,
-          undefined,
-          commissionSlabs,
         );
         const commission = sumBreakdownCommission(breakdown);
         const providerFee = sumBreakdownProviderFee(breakdown);
@@ -2471,7 +2440,6 @@ export async function getBranchAnalytics(req: Request, res: Response, next: Next
       settlements,
       pendingSettlementCount,
       storeWallet,
-      commissionSlabs,
     ] = await Promise.all([
       prisma.order.findMany({
         where: paidPeriodWhere,
@@ -2537,7 +2505,6 @@ export async function getBranchAnalytics(req: Request, res: Response, next: Next
         where: { storeId },
         select: { lastSettledAt: true },
       }),
-      getCommissionSlabs(),
     ]);
 
     const paidSalesScope: PaidSalesScope = {
@@ -2565,9 +2532,6 @@ export async function getBranchAnalytics(req: Request, res: Response, next: Next
     const settlementBreakdown = accumulateSettlementBreakdown(
       periodOrders as BranchOrderForAnalytics[],
       windowBase,
-      undefined,
-      undefined,
-      commissionSlabs,
     );
     const periodCommission = sumBreakdownCommission(settlementBreakdown);
     const gatewayFee = sumBreakdownProviderFee(settlementBreakdown);
@@ -2577,7 +2541,7 @@ export async function getBranchAnalytics(req: Request, res: Response, next: Next
       periodBaseLookup[storePeriodKey(storeId, now)] ??
       periodBaseLookup[Object.keys(periodBaseLookup).sort().pop() ?? ''] ??
       0;
-    const slabInfo = buildSlabInfo(currentPeriodBase, commissionSlabs);
+    const slabInfo = buildSlabInfo(currentPeriodBase);
 
     const orderSummaryChart = buildOrderSummaryChart(periodOrders, period, selectedRange);
     const orderModeChart = buildOrderModeChart(periodOrders, period, selectedRange);
@@ -2826,7 +2790,6 @@ export async function getTopProducts(req: Request, res: Response, next: NextFunc
     const query = z
       .object({
         orderMode: z.enum(['ALL', 'DELIVERY', 'TAKEAWAY']).optional().default('ALL'),
-        categoryId: z.string().optional(),
         sortBy: z.enum(['top', 'least']).optional().default('top'),
         metric: z.enum(['quantity', 'revenue']).optional().default('quantity'),
         from: dateOnlySchema.optional(),
@@ -2857,14 +2820,12 @@ export async function getTopProducts(req: Request, res: Response, next: NextFunc
              SUM(oi."totalPrice") AS revenue
       FROM order_items oi
       INNER JOIN orders o ON o.id = oi."orderId"
-      INNER JOIN products p ON p.id = oi."productId"
       WHERE o."paymentStatus" = 'PAID'
         AND o.status <> 'CANCELLED'
         AND o."createdAt" >= ${createdAt.gte}
         AND o."createdAt" <= ${createdAt.lte}
         ${query.storeId ? Prisma.sql`AND o."storeId" = ${query.storeId}` : Prisma.empty}
         ${query.orderMode !== 'ALL' ? Prisma.sql`AND o."orderMode" = ${query.orderMode}` : Prisma.empty}
-        ${query.categoryId ? Prisma.sql`AND p."categoryId" = ${query.categoryId}` : Prisma.empty}
       GROUP BY oi."productId", oi."productName", o."orderMode"
     `;
 
@@ -3135,21 +3096,12 @@ export async function getTopCustomers(req: Request, res: Response, next: NextFun
   }
 }
 
-const CUSTOMER_LOYALTY_THRESHOLD_MIN = 2;
-const CUSTOMER_LOYALTY_THRESHOLD_MAX = 9_999;
-
 export async function getCustomerLoyalty(req: Request, res: Response, next: NextFunction) {
   try {
     const query = z
       .object({
         customerType: z.enum(['ALL', 'NEW', 'LOYAL']).optional().default('ALL'),
-        loyaltyThreshold: z.coerce
-          .number()
-          .int()
-          .min(CUSTOMER_LOYALTY_THRESHOLD_MIN)
-          .max(CUSTOMER_LOYALTY_THRESHOLD_MAX)
-          .optional()
-          .default(CUSTOMER_LOYALTY_THRESHOLD_MIN),
+        loyaltyThreshold: z.coerce.number().int().min(2).max(100).optional().default(2),
         from: dateOnlySchema.optional(),
         to: dateOnlySchema.optional(),
         storeId: z.string().optional(),
@@ -3351,6 +3303,12 @@ export async function getOrderFulfillment(req: Request, res: Response, next: Nex
   }
 }
 
+const CANCEL_REASON_LABELS: Record<string, string> = {
+  OUT_OF_STOCK: 'Item Out of Stock / Unavailable',
+  CUSTOMER_REQUEST: 'Customer Requested Cancellation',
+  PAYMENT_OR_SYSTEM_ISSUE: 'Payment or System Issue / Duplicate Order',
+};
+
 export async function getOrderCancellations(req: Request, res: Response, next: NextFunction) {
   try {
     const query = z
@@ -3385,17 +3343,13 @@ export async function getOrderCancellations(req: Request, res: Response, next: N
         cancelledBy: true,
         createdAt: true,
         store: { select: { name: true } },
-        user: { select: { name: true, phone: true } },
+        user: { select: { name: true } },
         guestName: true,
-        guestPhone: true,
         statusEvents: {
           where: { status: 'CANCELLED' },
           select: { note: true, createdAt: true },
           orderBy: { createdAt: 'desc' },
           take: 1,
-        },
-        refund: {
-          select: { cancellationReason: true, customReasonText: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -3408,6 +3362,9 @@ export async function getOrderCancellations(req: Request, res: Response, next: N
       const cancelledByMatch = note.match(/cancelled by[:\s]+([^|.]+)/i);
       const cancelledByFromNote = cancelledByMatch?.[1]?.trim()
         || (note.toLowerCase().includes('customer') ? 'Customer' : note ? 'Staff' : 'System');
+      const cancelReasonLabel = order.cancelReason
+        ? CANCEL_REASON_LABELS[order.cancelReason] ?? order.cancelReason
+        : note || (order.status === 'CANCELLED' ? 'Order cancelled' : 'Payment refunded');
 
       return {
         orderId: order.id,
@@ -3417,22 +3374,8 @@ export async function getOrderCancellations(req: Request, res: Response, next: N
         paymentMethod: order.paymentMethod,
         refundStatus: order.paymentStatus === 'REFUNDED' ? 'Refunded' : order.paymentStatus === 'PAID' ? 'Not Refunded' : order.paymentStatus,
         cancelledBy: order.cancelledBy ?? cancelledByFromNote,
-        reason: resolveStoredRejectReason({
-          cancelReason: order.cancelReason,
-          cancelledBy: order.cancelledBy,
-          cancellationNote: note,
-          paymentStatus: order.paymentStatus,
-          status: order.status,
-          refundCancellationReason: order.refund?.cancellationReason,
-          refundCustomReasonText: order.refund?.customReasonText,
-        }),
-        customerName: resolveCustomerDisplayName({
-          guestName: order.guestName,
-          userName: order.user?.name,
-          phone: order.guestPhone ?? order.user?.phone,
-          fallback: '—',
-        }),
-        customerPhone: order.guestPhone?.trim() || order.user?.phone?.trim() || '—',
+        reason: cancelReasonLabel,
+        customerName: order.user?.name ?? order.guestName ?? '—',
         createdAt: order.createdAt,
       };
     });
@@ -3447,187 +3390,6 @@ export async function getOrderCancellations(req: Request, res: Response, next: N
   }
 }
 
-function centsToReportLkr(cents: number) {
-  return Math.round(cents) / 100;
-}
-
-function settlementSheetFromChannelBreakdown(breakdown: unknown) {
-  const channels = normalizeStoredSettlementBreakdown(breakdown);
-  const channelRows = Object.values(channels);
-  const grossSales = channelRows.reduce((sum, c) => sum + (c.revenueSubtotal ?? 0), 0);
-  const slabCommission = sumBreakdownCommission(channels);
-  const providerFees = sumBreakdownProviderFee(channels);
-  const convenienceFees = sumBreakdownConvenienceFee(channels);
-  const deliveryFees = channelRows.reduce(
-    (sum, c) => sum + (c.deliveryFeeTotal ?? 0) + (c.payhereDeliveryFee ?? 0),
-    0,
-  );
-  const weightedRate =
-    grossSales > 0 ? Math.round((slabCommission / grossSales) * 10000) / 100 : 0;
-  const offlineCollected = (['pickupCash', 'pickupCard'] as const).reduce((sum, key) => {
-    const row = channels[key];
-    return sum + (row?.grossSalesTotal ?? row?.revenueSubtotal ?? 0) + (row?.deliveryFeeTotal ?? 0);
-  }, 0);
-  const netBranchShare = Math.max(0, grossSales + deliveryFees - providerFees - slabCommission);
-  return {
-    grossSales,
-    totalDeliveryFees: deliveryFees,
-    payhereFees: providerFees,
-    dartcodesCommission: slabCommission,
-    lockedSlabRate: weightedRate,
-    convenienceFeesCollected: convenienceFees,
-    totalDartcodesRevenue: slabCommission + convenienceFees,
-    netBranchShare,
-    offlineCollected,
-    finalPayoutAmount: Math.max(0, netBranchShare - offlineCollected),
-  };
-}
-
-type SettlementSheetRow = {
-  id: string;
-  statementRef: string;
-  branchName: string;
-  cycleFrom: Date;
-  cycleTo: Date;
-  grossSales: number;
-  totalDeliveryFees: number;
-  payhereFees: number;
-  dartcodesCommission: number;
-  lockedSlabRate: number;
-  convenienceFeesCollected: number;
-  totalDartcodesRevenue: number;
-  netBranchShare: number;
-  offlineCollected: number;
-  finalPayoutAmount: number;
-  payoutStatus: string;
-  settlementStatus: string;
-};
-
-function asBreakdownRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-}
-
-function cycleContextFromBreakdown(breakdown: unknown): PayoutCycleContext | undefined {
-  const raw = asBreakdownRecord(breakdown);
-  if (raw.cycleStage !== 'FIRST' && raw.cycleStage !== 'SECOND') return undefined;
-  return {
-    cycleStage: raw.cycleStage,
-    cycleFrom: typeof raw.cycleFrom === 'string' ? raw.cycleFrom : undefined,
-    cycleTo: typeof raw.cycleTo === 'string' ? raw.cycleTo : undefined,
-  };
-}
-
-function payoutPeriodOverlapsRange(
-  periodFrom: string,
-  periodTo: string,
-  reportRange: { gte: Date; lte: Date } | null,
-) {
-  if (!reportRange) return true;
-  const from = new Date(`${periodFrom}T00:00:00.000Z`);
-  const to = new Date(`${periodTo}T00:00:00.000Z`);
-  return from <= reportRange.lte && to >= reportRange.gte;
-}
-
-function settlementSheetRowFromSnapshot(input: {
-  id: string;
-  statementRef: string;
-  branchName: string;
-  cycleFrom: Date;
-  cycleTo: Date;
-  breakdown: unknown;
-  amountCents: number;
-  payoutStatus: string;
-  settlementStatus: string;
-}): SettlementSheetRow {
-  const statement = buildPayoutStatementFromBreakdown(input.breakdown, input.amountCents);
-  const raw = asBreakdownRecord(input.breakdown);
-  const fromChannels = settlementSheetFromChannelBreakdown(raw.channelBreakdown);
-  const grossSales =
-    statement.totalSaleCents > 0
-      ? centsToReportLkr(statement.totalSaleCents)
-      : fromChannels.grossSales;
-  const totalDeliveryFees =
-    typeof raw.deliveryFee === 'number'
-      ? centsToReportLkr(raw.deliveryFee)
-      : fromChannels.totalDeliveryFees;
-  const payhereFees =
-    statement.gatewayFeeCents > 0
-      ? centsToReportLkr(statement.gatewayFeeCents)
-      : fromChannels.payhereFees;
-  const dartcodesCommission =
-    statement.commissionCents > 0
-      ? centsToReportLkr(statement.commissionCents)
-      : fromChannels.dartcodesCommission;
-  const convenienceFeesCollected =
-    typeof raw.convenienceFee === 'number'
-      ? centsToReportLkr(raw.convenienceFee)
-      : fromChannels.convenienceFeesCollected;
-  const netBranchShare = Math.max(
-    0,
-    grossSales + totalDeliveryFees - payhereFees - dartcodesCommission,
-  );
-
-  return {
-    id: input.id,
-    statementRef: input.statementRef,
-    branchName: input.branchName,
-    cycleFrom: input.cycleFrom,
-    cycleTo: input.cycleTo,
-    grossSales,
-    totalDeliveryFees,
-    payhereFees,
-    dartcodesCommission,
-    lockedSlabRate:
-      grossSales > 0 ? Math.round((dartcodesCommission / grossSales) * 10000) / 100 : 0,
-    convenienceFeesCollected,
-    totalDartcodesRevenue: dartcodesCommission + convenienceFeesCollected,
-    netBranchShare,
-    offlineCollected: fromChannels.offlineCollected,
-    finalPayoutAmount: centsToReportLkr(input.amountCents),
-    payoutStatus: input.payoutStatus,
-    settlementStatus: input.settlementStatus,
-  };
-}
-
-async function loadCommissionSettlementsForSheet(
-  storeId: string | undefined,
-  reportRange: { gte: Date; lte: Date } | null,
-) {
-  const hasLinkColumn = await tableHasColumn('commission_settlements', 'storeWithdrawalId');
-  return prisma.commissionSettlement.findMany({
-    where: {
-      ...(storeId ? { storeId } : {}),
-      status: { not: 'REJECTED' },
-      ...(reportRange
-        ? {
-            OR: [
-              { periodFrom: { lte: reportRange.lte }, periodTo: { gte: reportRange.gte } },
-              { createdAt: { gte: reportRange.gte, lte: reportRange.lte } },
-            ],
-          }
-        : {}),
-    },
-    include: {
-      store: { select: { name: true, city: true } },
-      ...(hasLinkColumn
-        ? {
-            storeWithdrawal: {
-              select: {
-                id: true,
-                amount: true,
-                status: true,
-                breakdown: true,
-                isAdvance: true,
-              },
-            },
-          }
-        : {}),
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 200,
-  });
-}
-
 export async function getSettlementReports(req: Request, res: Response, next: NextFunction) {
   try {
     const parsed = z
@@ -3638,116 +3400,81 @@ export async function getSettlementReports(req: Request, res: Response, next: Ne
       })
       .parse(req.query);
     const branchStoreId = await resolveBranchStoreId(req);
-    if (isBranchScopedRole(req.user?.role) && !branchStoreId && !parsed.storeId) {
-      throw new AppError('Branch not linked to your account', 403);
-    }
     const storeId = branchStoreId ?? parsed.storeId;
-    const reportRange = resolveOptionalReportDayRange(parsed.from, parsed.to, 366);
+    const reportRange = resolveReportDayRange(parsed.from, parsed.to);
 
-    const rows: SettlementSheetRow[] = [];
-    const coveredWithdrawalIds = new Set<string>();
-
-    if (storeId) {
-      const [items, store] = await Promise.all([
-        withAnalyticsCache(
-          analyticsCacheKey(['wallet-payout-periods', storeId]),
-          () => loadPayoutPeriodItems(storeId),
-          PAYOUT_PERIODS_CACHE_TTL_MS,
-        ),
-        prisma.store.findUnique({ where: { id: storeId }, select: { name: true } }),
-      ]);
-      const branchName = store?.name ?? 'Branch';
-
-      for (const item of items) {
-        if (!payoutPeriodOverlapsRange(item.periodFrom, item.periodTo, reportRange)) continue;
-        const withdrawal = item.withdrawal;
-        let breakdown: unknown = withdrawal?.breakdown ?? item.breakdown;
-        if (!withdrawal) {
-          breakdown = await computeMergedPeriodSummary(
-            storeId,
-            item.periodFrom,
-            item.summaryThrough ?? item.periodTo,
-            cycleContextFromBreakdown(item.breakdown),
-          );
-        } else {
-          coveredWithdrawalIds.add(withdrawal.id);
-        }
-        const amountCents = withdrawal ? withdrawalAmountCents(withdrawal) : item.amountCents;
-        rows.push(
-          settlementSheetRowFromSnapshot({
-            id: item.key,
-            statementRef:
-              withdrawal?.invoiceRef || item.key.replace(/^(wd-|period-)/, '').slice(0, 12).toUpperCase(),
-            branchName,
-            cycleFrom: new Date(`${item.periodFrom}T00:00:00.000Z`),
-            cycleTo: new Date(`${item.periodTo}T00:00:00.000Z`),
-            breakdown,
-            amountCents,
-            payoutStatus: item.status,
-            settlementStatus: withdrawal?.status ?? item.status,
-          }),
-        );
-      }
-    } else {
-      await ensureWithdrawalInReviewEnumReady();
-      const withdrawals = await prisma.storeWithdrawal.findMany({
-        where: {
-          status: { in: ['PENDING', 'APPROVED', 'IN_REVIEW'] },
-          periodFrom: reportRange ? { not: null, lte: reportRange.lte } : { not: null },
-          periodTo: reportRange ? { not: null, gte: reportRange.gte } : { not: null },
+    const settlements = await prisma.commissionSettlement.findMany({
+      where: {
+        ...(storeId ? { storeId } : {}),
+        createdAt: { gte: reportRange.gte, lte: reportRange.lte },
+        status: { not: 'REJECTED' },
+      },
+      include: {
+        store: { select: { name: true, city: true } },
+        storeWithdrawal: {
+          select: {
+            amount: true,
+            status: true,
+            breakdown: true,
+            isAdvance: true,
+          },
         },
-        include: {
-          store: { select: { name: true } },
-        },
-        orderBy: { periodTo: 'desc' },
-        take: 200,
-      });
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
 
-      for (const withdrawal of withdrawals) {
-        if (!withdrawal.periodFrom || !withdrawal.periodTo) continue;
-        coveredWithdrawalIds.add(withdrawal.id);
-        const amountCents = withdrawalAmountCents(withdrawal);
-        rows.push(
-          settlementSheetRowFromSnapshot({
-            id: withdrawal.id,
-            statementRef: withdrawal.invoiceRef || withdrawal.id.slice(0, 8).toUpperCase(),
-            branchName: withdrawal.store.name,
-            cycleFrom: withdrawal.periodFrom,
-            cycleTo: withdrawal.periodTo,
-            breakdown: withdrawal.breakdown,
-            amountCents,
-            payoutStatus: withdrawal.status === 'APPROVED' ? 'PAID' : withdrawal.status,
-            settlementStatus: withdrawal.status,
-          }),
-        );
-      }
-    }
+    const rows = settlements.map((settlement) => {
+      const breakdown = normalizeStoredSettlementBreakdown(settlement.breakdown);
+      const channels = Object.values(breakdown);
+      const grossSales = channels.reduce((sum, c) => sum + (c.revenueSubtotal ?? 0), 0);
+      const slabCommission = sumBreakdownCommission(breakdown);
+      const providerFees = sumBreakdownProviderFee(breakdown);
+      const convenienceFees = sumBreakdownConvenienceFee(breakdown);
+      const deliveryFees = channels.reduce(
+        (sum, c) => sum + (c.deliveryFeeTotal ?? 0) + (c.payhereDeliveryFee ?? 0),
+        0,
+      );
+      const weightedRate =
+        grossSales > 0 ? Math.round((slabCommission / grossSales) * 10000) / 100 : 0;
 
-    const settlements = await loadCommissionSettlementsForSheet(storeId, reportRange);
-    for (const settlement of settlements) {
-      const linked = 'storeWithdrawal' in settlement ? settlement.storeWithdrawal : null;
-      const linkedId = linked?.id;
-      if (linkedId && coveredWithdrawalIds.has(linkedId)) continue;
+      const offlineChannels = ['pickupCash', 'pickupCard'] as const;
+      const offlineCollected = offlineChannels.reduce((sum, key) => {
+        const row = breakdown[key];
+        return sum + (row?.grossSalesTotal ?? row?.revenueSubtotal ?? 0) + (row?.deliveryFeeTotal ?? 0);
+      }, 0);
 
-      const mapped = settlementSheetFromChannelBreakdown(settlement.breakdown);
+      const netBranchShare = Math.max(
+        0,
+        grossSales + deliveryFees - providerFees - slabCommission,
+      );
+      const finalPayout = Math.max(0, netBranchShare - offlineCollected);
       const payoutStatus =
-        linked?.status ?? (settlement.status === 'VERIFIED' ? 'SETTLED' : settlement.status);
+        settlement.storeWithdrawal?.status ??
+        (settlement.status === 'VERIFIED' ? 'SETTLED' : settlement.status);
 
-      rows.push({
+      return {
         id: settlement.id,
         statementRef: settlement.statementRef,
         branchName: settlement.store.name,
         cycleFrom: settlement.periodFrom,
         cycleTo: settlement.periodTo,
-        ...mapped,
+        grossSales,
+        totalDeliveryFees: deliveryFees,
+        payhereFees: providerFees,
+        dartcodesCommission: slabCommission,
+        lockedSlabRate: weightedRate,
+        convenienceFeesCollected: convenienceFees,
+        totalDartcodesRevenue: slabCommission + convenienceFees,
+        netBranchShare,
+        offlineCollected,
+        finalPayoutAmount: finalPayout,
         payoutStatus,
         settlementStatus: settlement.status,
-      });
-    }
+      };
+    });
 
-    rows.sort((a, b) => b.cycleTo.getTime() - a.cycleTo.getTime());
-
-    return success(res, { settlements: rows.slice(0, 200), count: rows.length });
+    return success(res, { settlements: rows, count: rows.length });
   } catch (err) {
     next(err);
   }
@@ -3770,73 +3497,45 @@ export async function getWalletLedger(req: Request, res: Response, next: NextFun
     query.from = reportRange.from;
     query.to = reportRange.to;
 
-    const paidOrderWhere = {
-      ...(query.storeId ? { storeId: query.storeId } : {}),
-      paymentStatus: 'PAID' as const,
-      status: { not: 'CANCELLED' as const },
-    };
+    let broughtForward = 0;
+    if (query.storeId && query.from) {
+      const [priorTxns, priorSettlements] = await Promise.all([
+        prisma.walletTransaction.findMany({
+          where: {
+            storeId: query.storeId,
+            createdAt: { lt: reportRange.gte },
+          },
+          select: { amount: true },
+        }),
+        prisma.commissionSettlement.findMany({
+          where: {
+            storeId: query.storeId,
+            createdAt: { lt: reportRange.gte },
+          },
+          select: { totalCommission: true },
+        }),
+      ]);
+      broughtForward = Math.round(
+        priorTxns.reduce((sum, t) => sum + decimalFieldToCentsNumber(t.amount) / 100, 0) * 100,
+      ) / 100;
+      broughtForward -= Math.round(
+        priorSettlements.reduce(
+          (sum, s) => sum + decimalFieldToCentsNumber(s.totalCommission) / 100,
+          0,
+        ) * 100,
+      ) / 100;
+    }
 
-    const [priorPayables, transactions, paidOrders] = await Promise.all([
-      query.storeId && query.from
-        ? Promise.all([
-            fetchSummarizedPaidOrderRevenue({
-              storeId: query.storeId,
-              createdAt: { lt: reportRange.gte },
-            }),
-            prisma.storeWithdrawal.findMany({
-              where: {
-                storeId: query.storeId,
-                status: 'APPROVED',
-                createdAt: { lt: reportRange.gte },
-              },
-              select: { amount: true, breakdown: true },
-            }),
-          ]).then(([priorRevenue, priorWithdrawals]) => {
-            const priorPaid = aggregatePaidPayoutPeriodExpensesCents(
-              priorWithdrawals.map((row) => ({
-                amountCents: withdrawalAmountCents(row),
-                breakdown: row.breakdown,
-              })),
-            );
-            const channels = priorRevenue.commissionChannelRevenue.channelRevenueCents;
-            return (
-              computeAllTimeAvailableBalanceCents(
-                channels.pickupOnlineIn,
-                channels.deliveryOnlineIn,
-                priorPaid.branchReceivableExcludingJasonCents,
-              ) / 100
-            );
-          })
-        : Promise.resolve(0),
-      prisma.walletTransaction.findMany({
-        where: {
-          ...(query.storeId ? { storeId: query.storeId } : {}),
-          createdAt: { gte: reportRange.gte, lte: reportRange.lte },
-        },
-        include: {
-          store: { select: { name: true } },
-        },
-        orderBy: { createdAt: 'asc' },
-      }),
-      prisma.order.findMany({
-        where: {
-          ...paidOrderWhere,
-          createdAt: { gte: reportRange.gte, lte: reportRange.lte },
-        },
-        select: {
-          id: true,
-          storeId: true,
-          createdAt: true,
-          orderMode: true,
-          paymentMethod: true,
-          subtotal: true,
-          discount: true,
-          store: { select: { name: true } },
-        },
-      }),
-    ]);
-
-    const broughtForward = Math.round(priorPayables * 100) / 100;
+    const transactions = await prisma.walletTransaction.findMany({
+      where: {
+        ...(query.storeId ? { storeId: query.storeId } : {}),
+        createdAt: { gte: reportRange.gte, lte: reportRange.lte },
+      },
+      include: {
+        store: { select: { name: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
 
     const settlements = query.storeId
       ? await prisma.commissionSettlement.findMany({
@@ -3855,7 +3554,6 @@ export async function getWalletLedger(req: Request, res: Response, next: NextFun
       storeId: string;
       branchName: string;
       creditTotal: number;
-      onlineCreditTotal: number;
       orderIds: Set<string>;
       txnCount: number;
       sortAt: number;
@@ -3876,6 +3574,9 @@ export async function getWalletLedger(req: Request, res: Response, next: NextFun
       txnType?: string;
     };
 
+    const dayKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
     const labelForTxn = (type: string, amountLkr: number) => {
       if (type === 'ORDER_PAYMENT' || type === 'ORDER_ADDON_PAYMENT') {
         return 'Customer Payment (Inflow)';
@@ -3893,45 +3594,37 @@ export async function getWalletLedger(req: Request, res: Response, next: NextFun
     const isOrderCreditType = (type: string) =>
       type === 'ORDER_PAYMENT' || type === 'ORDER_ADDON_PAYMENT';
 
-    const isJasonInvestmentAdjustment = (description: string | null | undefined) =>
-      !!description && /jason|shared promo platform contribution/i.test(description);
-
     const dailyCredits = new Map<string, DailyOrderCredit>();
-    for (const order of paidOrders) {
-      const credit = paidOrderPayablesCreditCents(order);
-      if (credit.totalCents <= 0) continue;
-      const day = dateStringInColombo(order.createdAt);
-      const key = `${order.storeId}|${day}`;
-      let bucket = dailyCredits.get(key);
-      if (!bucket) {
-        const dayStart = startOfDayColombo(day);
-        bucket = {
-          day,
-          date: dayStart,
-          storeId: order.storeId,
-          branchName: order.store.name,
-          creditTotal: 0,
-          onlineCreditTotal: 0,
-          orderIds: new Set<string>(),
-          txnCount: 0,
-          sortAt: dayStart.getTime(),
-        };
-        dailyCredits.set(key, bucket);
-      }
-      bucket.creditTotal += credit.totalCents / 100;
-      bucket.onlineCreditTotal += credit.onlineCents / 100;
-      bucket.orderIds.add(order.id);
-      bucket.txnCount += 1;
-    }
-
     const otherRows: DeductionOrOtherRow[] = [];
 
     for (const txn of transactions) {
       const amountLkr = decimalFieldToCentsNumber(txn.amount) / 100;
+      const day = dayKey(txn.createdAt);
 
-      if (isOrderCreditType(txn.type)) continue;
-      if (txn.type === 'ADJUSTMENT' && isJasonInvestmentAdjustment(txn.description)) continue;
+      if (isOrderCreditType(txn.type) && amountLkr > 0) {
+        const key = `${txn.storeId}|${day}`;
+        let bucket = dailyCredits.get(key);
+        if (!bucket) {
+          bucket = {
+            day,
+            date: startOfDay(txn.createdAt),
+            storeId: txn.storeId,
+            branchName: txn.store.name,
+            creditTotal: 0,
+            orderIds: new Set<string>(),
+            txnCount: 0,
+            // Place daily credit summary before same-day deductions (start of day)
+            sortAt: startOfDay(txn.createdAt).getTime(),
+          };
+          dailyCredits.set(key, bucket);
+        }
+        bucket.creditTotal += amountLkr;
+        bucket.txnCount += 1;
+        if (txn.orderId) bucket.orderIds.add(txn.orderId);
+        continue;
+      }
 
+      // Non-order deductions and any other non-order wallet movements stay as individual rows
       const isInflow = amountLkr >= 0;
       otherRows.push({
         date: txn.createdAt,
@@ -3988,7 +3681,6 @@ export async function getWalletLedger(req: Request, res: Response, next: NextFun
       branchName: string;
       debit: number;
       credit: number;
-      balanceDelta: number;
       orderCount: number | null;
       description: string | null;
       sortAt: number;
@@ -3998,43 +3690,33 @@ export async function getWalletLedger(req: Request, res: Response, next: NextFun
     };
 
     const mixed: LedgerBuildRow[] = [
-      ...Array.from(dailyCredits.values()).map((bucket, index) => {
-        const credit = Math.round(bucket.creditTotal * 100) / 100;
-        const onlineCredit = Math.round(bucket.onlineCreditTotal * 100) / 100;
-        return {
-          date: bucket.date,
-          referenceId: `DAILY-${bucket.day}`,
-          transactionType: 'Order Credits (Daily Total)',
-          branchName: bucket.branchName,
-          debit: 0,
-          credit,
-          // Running balance follows All-Time Available (online item sales).
-          balanceDelta: onlineCredit,
-          orderCount: bucket.orderIds.size > 0 ? bucket.orderIds.size : bucket.txnCount,
-          description: `Daily order credits (${bucket.txnCount} payments)`,
-          sortAt: bucket.sortAt,
-          sortTie: index,
-        };
-      }),
-      ...otherRows.map((row, index) => {
-        const debit = Math.round(row.debit * 100) / 100;
-        const credit = Math.round(row.credit * 100) / 100;
-        return {
-          date: row.date,
-          referenceId: row.referenceId,
-          transactionType: row.transactionType,
-          branchName: row.branchName,
-          debit,
-          credit,
-          balanceDelta: credit - debit,
-          orderCount: null as number | null,
-          description: row.description,
-          sortAt: row.sortAt,
-          transactionId: row.transactionId,
-          txnType: row.txnType,
-          sortTie: 1_000_000 + index,
-        };
-      }),
+      ...Array.from(dailyCredits.values()).map((bucket, index) => ({
+        date: bucket.date,
+        referenceId: `DAILY-${bucket.day}`,
+        transactionType: 'Order Credits (Daily Total)',
+        branchName: bucket.branchName,
+        debit: 0,
+        credit: Math.round(bucket.creditTotal * 100) / 100,
+        orderCount: bucket.orderIds.size > 0 ? bucket.orderIds.size : bucket.txnCount,
+        description: `Daily order credits (${bucket.txnCount} payments)`,
+        sortAt: bucket.sortAt,
+        sortTie: index,
+      })),
+      ...otherRows.map((row, index) => ({
+        date: row.date,
+        referenceId: row.referenceId,
+        transactionType: row.transactionType,
+        branchName: row.branchName,
+        debit: Math.round(row.debit * 100) / 100,
+        credit: Math.round(row.credit * 100) / 100,
+        orderCount: null as number | null,
+        description: row.description,
+        sortAt: row.sortAt,
+        transactionId: row.transactionId,
+        txnType: row.txnType,
+        // After daily credit summary for the same timestamp ranking
+        sortTie: 1_000_000 + index,
+      })),
     ];
 
     mixed.sort((a, b) => {
@@ -4047,39 +3729,21 @@ export async function getWalletLedger(req: Request, res: Response, next: NextFun
       .map((row) => row.transactionId!);
 
     const withdrawalByTxnId = new Map<string, string>();
-    const payoutBalanceDeltaByTxnId = new Map<string, number>();
     if (payoutTxnIds.length > 0) {
       const withdrawals = await prisma.storeWithdrawal.findMany({
         where: { walletTransactionId: { in: payoutTxnIds } },
-        select: { id: true, walletTransactionId: true, amount: true, breakdown: true },
+        select: { id: true, walletTransactionId: true },
       });
-      // Display debit stays the full payout; running balance excludes Jason's investment.
       for (const withdrawal of withdrawals) {
-        if (!withdrawal.walletTransactionId) continue;
-        withdrawalByTxnId.set(withdrawal.walletTransactionId, withdrawal.id);
-        const rowPaid = aggregatePaidPayoutPeriodExpensesCents([
-          {
-            amountCents: withdrawalAmountCents(withdrawal),
-            breakdown: withdrawal.breakdown,
-          },
-        ]);
-        payoutBalanceDeltaByTxnId.set(
-          withdrawal.walletTransactionId,
-          -(rowPaid.branchReceivableExcludingJasonCents / 100),
-        );
-      }
-    }
-
-    for (const row of mixed) {
-      if (row.txnType === 'PAYOUT' && row.transactionId) {
-        const delta = payoutBalanceDeltaByTxnId.get(row.transactionId);
-        if (delta != null) row.balanceDelta = Math.round(delta * 100) / 100;
+        if (withdrawal.walletTransactionId) {
+          withdrawalByTxnId.set(withdrawal.walletTransactionId, withdrawal.id);
+        }
       }
     }
 
     let running = broughtForward;
     const rows = mixed.map((row) => {
-      running += row.balanceDelta;
+      running += row.credit - row.debit;
       const transactionId = row.transactionId;
       const withdrawalId =
         transactionId && row.txnType === 'PAYOUT'

@@ -34,7 +34,6 @@ import {
   buildPeriodBaseLookup,
   buildPeriodSlabInfoList,
   buildSlabInfo,
-  serializeCommissionSlabsForApi,
   computeAllTimeCommission,
   emptyCommissionBreakdown,
   getEffectiveRate,
@@ -52,7 +51,6 @@ import {
   type ChannelBreakdown,
   type ChannelSettlementRow,
   type SlabInfo,
-  type CommissionSlab,
 } from '../lib/commission';
 import {
   enrichOrdersWithAddonPayments,
@@ -61,10 +59,9 @@ import {
   summarizePlatformSalesLkr,
 } from '../lib/walletRevenue';
 import { getWalletSummary, getOrCreateWallet } from '../lib/walletService';
-import { getCommissionSlabs, getConvenienceFeeRates } from '../lib/appSchema';
+import { getConvenienceFeeRates } from '../lib/appSchema';
 import { generateCommissionSettlementInvoice } from '../lib/withdrawalInvoice';
-import { todayDateString } from '../lib/datetime';
-import { payoutReviewDisplayRange } from '../lib/payoutReviewNames';
+import { dateStringInColombo, todayDateString } from '../lib/datetime';
 import {
   calendarMonthFromPeriodFrom,
   combinePlatformProviderReceivableLkr,
@@ -72,19 +69,7 @@ import {
   loadEnrichedApprovedUnsettledWithdrawals,
   sumSharedPromoPlatformLkrFromBreakdowns,
 } from '../lib/readyToProcessSupport';
-import {
-  loadPlatformPayoutReceivableDetail,
-  loadSettlementPlatformReceivableDetail,
-} from '../lib/settlementPlatformReceivable';
-import {
-  fetchApprovedBranchPayoutWithdrawals,
-  mapApprovedWithdrawalToBranchPayoutRow,
-  mapApprovedWithdrawalToPlatformPayoutRow,
-  mergeBranchPayoutHistoryRows,
-  paginatePayoutHistoryRows,
-  PAYMENT_HISTORY_PAYOUT_DEFAULT_LIMIT,
-} from '../lib/paymentHistoryBranchPayouts';
-import { paginationQuerySchema } from '../lib/httpSchemas';
+import { loadSettlementPlatformReceivableDetail } from '../lib/settlementPlatformReceivable';
 import { platformProviderSettlementInvoiceApiPath } from '../lib/invoice/refs';
 import {
   computeNetCommissionSettlementDebitCents,
@@ -98,7 +83,7 @@ const PROMOTION_PAYBACK_SELECT = {
   platformPaybackReversedAt: true,
 } as const;
 
-const querySchema = paginationQuerySchema.extend({
+const querySchema = z.object({
   storeId: z.string().min(1).optional(),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -210,7 +195,6 @@ const SETTLEMENT_PAYOUT_SELECT = {
   periodTo: true,
   storeWithdrawalId: true,
   store: { select: { name: true } },
-  storeWithdrawal: { select: { breakdown: true } },
 } as const;
 
 const SETTLEMENT_PLATFORM_PAYOUT_SELECT = {
@@ -235,29 +219,25 @@ function slabInfoForPeriod(
   to: string,
   periodBaseLookup: Record<string, number>,
   periodSubtotal: number,
-  slabs: readonly CommissionSlab[],
-): { monthlyBase: number; effectiveRate: number; slabIndex: number; slabs: ReturnType<typeof serializeCommissionSlabsForApi> } {
+): { monthlyBase: number; effectiveRate: number; slabIndex: number } {
   const periodKeys = periodsInRange(from, to);
-  const serializedSlabs = serializeCommissionSlabsForApi(slabs);
   if (periodKeys.length === 1) {
     let periodBase = 0;
     for (const storeId of storeIds) {
       periodBase += periodBaseLookup[`${storeId}|${periodKeys[0]!}`] ?? 0;
     }
-    const info = buildSlabInfo(periodBase, slabs);
+    const info = buildSlabInfo(periodBase);
     return {
       monthlyBase: info.monthlyBase,
       effectiveRate: info.effectiveRate,
       slabIndex: info.slabIndex,
-      slabs: serializedSlabs,
     };
   }
-  const info = buildSlabInfo(periodSubtotal, slabs);
+  const info = buildSlabInfo(periodSubtotal);
   return {
     monthlyBase: info.monthlyBase,
     effectiveRate: info.effectiveRate,
     slabIndex: info.slabIndex,
-    slabs: serializedSlabs,
   };
 }
 
@@ -313,7 +293,6 @@ async function resolveLinkedWithdrawalRecord(
       status: true,
       periodFrom: true,
       periodTo: true,
-      cycleStage: true,
     },
   });
 
@@ -332,23 +311,6 @@ async function resolveLinkedWithdrawalRecord(
   }
   if (!withdrawal.periodFrom || !withdrawal.periodTo) {
     throw new AppError('Withdrawal payout period is not set', 400);
-  }
-
-  if (withdrawal.cycleStage === 'FIRST') {
-    const pairedSecond = await prisma.storeWithdrawal.findFirst({
-      where: {
-        cycleStage: 'SECOND',
-        cyclePairId: withdrawal.id,
-        status: 'APPROVED',
-      },
-      select: { id: true },
-    });
-    if (!pairedSecond) {
-      throw new AppError(
-        'Platform provider payment becomes available only after the second 15-day payout in this cycle is completed.',
-        400,
-      );
-    }
   }
 
   return {
@@ -462,17 +424,14 @@ async function fetchSettlementNetRows(storeId: string) {
 }
 
 async function computeStorePendingDues(storeId: string): Promise<number> {
-  const [paidOrders, commissionSlabs] = await Promise.all([
-    prisma.order.findMany({
-      where: { storeId, paymentStatus: 'PAID', status: { not: 'CANCELLED' } },
-      select: COMMISSION_ORDER_SELECT,
-    }),
-    getCommissionSlabs(),
-  ]);
+  const paidOrders = await prisma.order.findMany({
+    where: { storeId, paymentStatus: 'PAID', status: { not: 'CANCELLED' } },
+    select: COMMISSION_ORDER_SELECT,
+  });
   const periodBaseLookup = buildPeriodBaseLookup(
     paidOrders.map((order) => ({ ...order, storeId })),
   );
-  const allTimeCommission = computeAllTimeCommission(paidOrders, periodBaseLookup, commissionSlabs);
+  const allTimeCommission = computeAllTimeCommission(paidOrders, periodBaseLookup);
   const allTimePayback = await computeAllTimePlatformPaybackLkr(storeId);
   const settlements = await fetchSettlementNetRows(storeId);
   return computePendingDuesLkr({
@@ -492,7 +451,7 @@ async function computeStorePendingDuesBatch(
   const result = new Map<string, number>();
   if (storeIds.length === 0) return result;
 
-  const [paidOrders, settlements, paybackRows, commissionSlabs] = await Promise.all([
+  const [paidOrders, settlements, paybackRows] = await Promise.all([
     prisma.order.findMany({
       where: {
         storeId: { in: storeIds },
@@ -515,7 +474,6 @@ async function computeStorePendingDuesBatch(
         order: { paymentStatus: 'PAID', status: { not: 'CANCELLED' } },
       },
     }),
-    getCommissionSlabs(),
   ]);
 
   const ordersByStore = new Map<string, typeof paidOrders>();
@@ -547,11 +505,7 @@ async function computeStorePendingDuesBatch(
     const periodBaseLookup = buildPeriodBaseLookup(
       storeOrders.map((order) => ({ ...order, storeId })),
     );
-    const allTimeCommission = computeAllTimeCommission(
-      storeOrders,
-      periodBaseLookup,
-      commissionSlabs,
-    );
+    const allTimeCommission = computeAllTimeCommission(storeOrders, periodBaseLookup);
     const allTimePayback = paybackByStore.get(storeId) ?? 0;
     const storeSettlements = settlementsByStore.get(storeId) ?? [];
     result.set(
@@ -597,18 +551,9 @@ async function createSettlementForStore(params: {
     params.from,
     params.to,
   );
-  const [convenienceFeeRates, commissionSlabs] = await Promise.all([
-    getConvenienceFeeRates(),
-    getCommissionSlabs(),
-  ]);
+  const convenienceFeeRates = await getConvenienceFeeRates();
   const windowBase = periodBaseLookup[`${params.storeId}|window`] ?? sumCommissionableBase(orders);
-  const breakdown = accumulateSettlementBreakdown(
-    orders,
-    windowBase,
-    convenienceFeeRates,
-    undefined,
-    commissionSlabs,
-  );
+  const breakdown = accumulateSettlementBreakdown(orders, windowBase, convenienceFeeRates);
   const totalCommission = sumBreakdownCommission(breakdown);
   const totalProviderFee = sumBreakdownProviderFee(breakdown);
   const periodPlatformPayback = sumOrdersPlatformPaybackLkr(orders);
@@ -701,7 +646,6 @@ function formatSettlementPreview(
   to: string,
   breakdown: Record<CommissionChannel, ChannelSettlementRow>,
   windowBase: number,
-  slabs: readonly CommissionSlab[],
   orders?: Array<{
     id?: string;
     total: number;
@@ -718,8 +662,7 @@ function formatSettlementPreview(
 ) {
   const totalCommission = sumBreakdownCommission(breakdown);
   const totalProviderFee = sumBreakdownProviderFee(breakdown);
-  const slabInfo = buildSlabInfo(windowBase, slabs);
-  const serializedSlabs = serializeCommissionSlabsForApi(slabs);
+  const slabInfo = buildSlabInfo(windowBase);
 
   return {
     period: { from, to },
@@ -733,7 +676,6 @@ function formatSettlementPreview(
       monthlyBase: slabInfo.monthlyBase,
       effectiveRate: slabInfo.effectiveRate,
       slabIndex: slabInfo.slabIndex,
-      slabs: serializedSlabs,
     },
     monthlySlabInfo: [
       {
@@ -741,7 +683,6 @@ function formatSettlementPreview(
         monthlyBase: slabInfo.monthlyBase,
         effectiveRate: slabInfo.effectiveRate,
         slabIndex: slabInfo.slabIndex,
-        slabs: serializedSlabs,
       },
     ],
   };
@@ -809,24 +750,7 @@ type SettlementPayoutRow = {
   periodTo: Date;
   storeWithdrawalId?: string | null;
   store: { name: string };
-  storeWithdrawal?: { breakdown: unknown } | null;
 };
-
-function displayedSettlementPeriod(settlement: SettlementPayoutRow): { from: string; to: string } {
-  const from = toDateStr(settlement.periodFrom);
-  const to = toDateStr(settlement.periodTo);
-  const breakdown = settlement.storeWithdrawal?.breakdown;
-  const cycle =
-    breakdown && typeof breakdown === 'object'
-      ? (breakdown as { cycleStage?: string | null; cycleFrom?: string | null })
-      : null;
-  return payoutReviewDisplayRange({
-    from,
-    to,
-    cycleStage: cycle?.cycleStage,
-    cycleFrom: cycle?.cycleFrom,
-  });
-}
 
 function mapSettlementToPayout(
   settlement: SettlementPayoutRow,
@@ -841,11 +765,9 @@ function mapSettlementToPayout(
   const grossCommissionLkr = decimalFieldToCentsNumber(settlement.totalCommission) / 100;
   const netAmountLkr = grossCommissionLkr - paybackLkr;
   const receipt = serializeSettlementReceiptFields(settlement.receiptUrl, settlement.storeId);
-  const period = displayedSettlementPeriod(settlement);
 
   return {
     id: settlement.id,
-    payoutSource: 'commissionSettlement' as const,
     statementRef: settlement.statementRef,
     paidAt: settlement.createdAt.toISOString(),
     amount: netAmountLkr,
@@ -859,8 +781,8 @@ function mapSettlementToPayout(
     invoiceRef: settlement.invoiceRef ?? undefined,
     invoiceUrl: settlement.invoiceUrl ?? undefined,
     status: settlement.status,
-    periodFrom: period.from,
-    periodTo: period.to,
+    periodFrom: dateStringInColombo(settlement.periodFrom),
+    periodTo: dateStringInColombo(settlement.periodTo),
     storeWithdrawalId,
     isAdvance,
     storeName: settlement.store.name,
@@ -886,7 +808,6 @@ async function mapSettlementToPlatformPayout(
     amount: platformReceivable,
     platformReceivable,
     platformInvoiceUrl: platformProviderSettlementInvoiceApiPath(settlement.id),
-    platformReceivableSettlementId: settlement.id,
   };
 }
 
@@ -943,18 +864,11 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
   try {
     await ensureCommissionSettlementTable();
 
-    const {
-      from: queryFrom,
-      to: queryTo,
-      page: payoutHistoryPage,
-      limit: payoutHistoryLimit,
-    } = querySchema.parse(req.query);
+    const { from: queryFrom, to: queryTo } = querySchema.parse(req.query);
     const { from, to } = parsePeriodQuery(queryFrom, queryTo);
     const viewingCurrentMonth = isCurrentMonthPeriod(from, to);
 
     const storeIds = await resolveStoreIds(req);
-    const commissionSlabs = await getCommissionSlabs();
-    const serializedSlabs = serializeCommissionSlabsForApi(commissionSlabs);
     if (storeIds.length === 0) {
       return res.json({
         success: true,
@@ -963,30 +877,17 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
           totalSettled: 0,
           thisMonthCommission: 0,
           currentMonthBase: 0,
-          currentMonthRate: getEffectiveRate(0, commissionSlabs),
+          currentMonthRate: getEffectiveRate(0),
           breakdown: emptyCommissionBreakdown(),
           monthlyBreakdown: emptyCommissionBreakdown(),
           slabInfo: {
             monthlyBase: 0,
-            effectiveRate: getEffectiveRate(0, commissionSlabs),
+            effectiveRate: getEffectiveRate(0),
             slabIndex: 0,
-            slabs: serializedSlabs,
           },
           period: { from, to, isCurrentMonth: viewingCurrentMonth },
           payouts: [],
           platformPayouts: [],
-          payoutsPagination: {
-            page: payoutHistoryPage,
-            limit: payoutHistoryLimit,
-            total: 0,
-            pages: 1,
-          },
-          platformPayoutsPagination: {
-            page: payoutHistoryPage,
-            limit: payoutHistoryLimit,
-            total: 0,
-            pages: 1,
-          },
         },
       });
     }
@@ -994,8 +895,7 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
     const { fromDate, toDate } = periodQueryToUtcBounds(from, to);
     const includePlatformPayoutHistory = req.user?.role === 'SYSTEM_ADMIN';
 
-    const [paidOrders, periodSettlements, allTimeSettlementRows, approvedWithdrawals] =
-      await Promise.all([
+    const [paidOrders, periodSettlements, allTimeSettlementRows] = await Promise.all([
       prisma.order.findMany({
         where: { storeId: { in: storeIds }, paymentStatus: 'PAID' },
         select: COMMISSION_ORDER_SELECT,
@@ -1015,7 +915,6 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
         where: { storeId: { in: storeIds }, status: { not: 'REJECTED' } },
         select: { totalCommission: true, platformPaybackAmount: true },
       }),
-      fetchApprovedBranchPayoutWithdrawals(storeIds, fromDate, toDate),
     ]);
 
     const settlements = periodSettlements;
@@ -1037,16 +936,8 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
     );
 
     const periodBaseLookup = buildPeriodBaseLookup(paidOrders);
-    const breakdown = accumulateCommissionBreakdownMultiMonth(
-      paidOrders,
-      periodBaseLookup,
-      commissionSlabs,
-    );
-    const allTimeCommission = computeAllTimeCommission(
-      paidOrders,
-      periodBaseLookup,
-      commissionSlabs,
-    );
+    const breakdown = accumulateCommissionBreakdownMultiMonth(paidOrders, periodBaseLookup);
+    const allTimeCommission = computeAllTimeCommission(paidOrders, periodBaseLookup);
 
     const periodOrders = paidOrders.filter((o) => {
       const d = toDateStr(new Date(o.createdAt));
@@ -1056,18 +947,10 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
     const periodBreakdown = accumulateCommissionBreakdownMultiMonth(
       periodOrders,
       periodBaseLookup,
-      commissionSlabs,
     );
     const periodCommission = sumBreakdownCommission(periodBreakdown);
     const periodSubtotal = sumBreakdownRevenue(periodBreakdown);
-    const slabInfo = slabInfoForPeriod(
-      storeIds,
-      from,
-      to,
-      periodBaseLookup,
-      periodSubtotal,
-      commissionSlabs,
-    );
+    const slabInfo = slabInfoForPeriod(storeIds, from, to, periodBaseLookup, periodSubtotal);
 
     const totalSettled =
       allTimeSettlementRows.reduce(
@@ -1090,43 +973,15 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
             })),
           });
 
-    const settlementPayouts = settlements.map((s) => mapSettlementToPayout(s, advanceByWithdrawalId));
-    const linkedSettlementWithdrawalIds = new Set(
-      settlements
-        .map((s) => s.storeWithdrawalId)
-        .filter((id): id is string => !!id),
-    );
-    const withdrawalBranchPayouts = approvedWithdrawals.map(mapApprovedWithdrawalToBranchPayoutRow);
-    const mergedBranchPayouts = mergeBranchPayoutHistoryRows(
-      settlementPayouts,
-      withdrawalBranchPayouts,
-      linkedSettlementWithdrawalIds,
-    );
+    const payouts = settlements.map((s) => mapSettlementToPayout(s, advanceByWithdrawalId));
 
-    const mergedPlatformPayouts = includePlatformPayoutHistory
-      ? mergeBranchPayoutHistoryRows(
-          (
-            await Promise.all(
-              settlements.map((s) => mapSettlementToPlatformPayout(s, advanceByWithdrawalId)),
-            )
-          ).filter((row): row is NonNullable<typeof row> => row != null),
-          (
-            await Promise.all(
-              approvedWithdrawals.map((w) => mapApprovedWithdrawalToPlatformPayoutRow(w)),
-            )
-          ).filter((row): row is NonNullable<typeof row> => row != null),
-          linkedSettlementWithdrawalIds,
-        )
+    const platformPayouts = includePlatformPayoutHistory
+      ? (
+          await Promise.all(
+            settlements.map((s) => mapSettlementToPlatformPayout(s, advanceByWithdrawalId)),
+          )
+        ).filter((row): row is NonNullable<typeof row> => row != null)
       : [];
-
-    const historyLimit = payoutHistoryLimit || PAYMENT_HISTORY_PAYOUT_DEFAULT_LIMIT;
-    const { items: payouts, pagination: payoutsPagination } = paginatePayoutHistoryRows(
-      mergedBranchPayouts,
-      payoutHistoryPage,
-      historyLimit,
-    );
-    const { items: platformPayouts, pagination: platformPayoutsPagination } =
-      paginatePayoutHistoryRows(mergedPlatformPayouts, payoutHistoryPage, historyLimit);
 
     res.json({
       success: true,
@@ -1142,8 +997,6 @@ export async function getPaymentHistory(req: Request, res: Response, next: NextF
         period: { from, to, isCurrentMonth: viewingCurrentMonth },
         payouts,
         platformPayouts,
-        payoutsPagination,
-        platformPayoutsPagination,
       },
     });
   } catch (err) {
@@ -1160,24 +1013,15 @@ export async function getSettlementPreview(req: Request, res: Response, next: Ne
 
     const orders = await fetchPaidOrdersInRange(storeId, from, to);
     const periodBaseLookup = await fetchPeriodBaseLookupForSettlement(storeId, from, to);
-    const [convenienceFeeRates, commissionSlabs] = await Promise.all([
-      getConvenienceFeeRates(),
-      getCommissionSlabs(),
-    ]);
+    const convenienceFeeRates = await getConvenienceFeeRates();
     const windowBase = periodBaseLookup[`${storeId}|window`] ?? sumCommissionableBase(orders);
-    const breakdown = accumulateSettlementBreakdown(
-      orders,
-      windowBase,
-      convenienceFeeRates,
-      undefined,
-      commissionSlabs,
-    );
+    const breakdown = accumulateSettlementBreakdown(orders, windowBase, convenienceFeeRates);
     const addonMap = await fetchOrderAddonMap(orders.map((order) => order.id));
     const enrichedOrders = enrichOrdersWithAddonPayments(orders, addonMap);
 
     res.json({
       success: true,
-      data: formatSettlementPreview(from, to, breakdown, windowBase, commissionSlabs, enrichedOrders),
+      data: formatSettlementPreview(from, to, breakdown, windowBase, enrichedOrders),
     });
   } catch (err) {
     next(err);
@@ -1217,18 +1061,9 @@ export async function submitSettlement(req: Request, res: Response, next: NextFu
 
     const orders = await fetchPaidOrdersInRange(storeId, data.from, data.to);
     const periodBaseLookup = await fetchPeriodBaseLookupForSettlement(storeId, data.from, data.to);
-    const [convenienceFeeRates, commissionSlabs] = await Promise.all([
-      getConvenienceFeeRates(),
-      getCommissionSlabs(),
-    ]);
+    const convenienceFeeRates = await getConvenienceFeeRates();
     const windowBase = periodBaseLookup[`${storeId}|window`] ?? sumCommissionableBase(orders);
-    const breakdown = accumulateSettlementBreakdown(
-      orders,
-      windowBase,
-      convenienceFeeRates,
-      undefined,
-      commissionSlabs,
-    );
+    const breakdown = accumulateSettlementBreakdown(orders, windowBase, convenienceFeeRates);
     const addonMap = await fetchOrderAddonMap(orders.map((order) => order.id));
     const enrichedOrders = enrichOrdersWithAddonPayments(orders, addonMap);
 
@@ -1236,14 +1071,7 @@ export async function submitSettlement(req: Request, res: Response, next: NextFu
       success: true,
       data: {
         ...mapSettlementStatement(settlement),
-        ...formatSettlementPreview(
-          data.from,
-          data.to,
-          breakdown,
-          windowBase,
-          commissionSlabs,
-          enrichedOrders,
-        ),
+        ...formatSettlementPreview(data.from, data.to, breakdown, windowBase, enrichedOrders),
       },
     });
   } catch (err) {
@@ -1277,7 +1105,7 @@ export async function listPendingAllHandler(req: Request, res: Response, next: N
       storeIds.map((storeId) => getWalletSummary(storeId)),
     );
 
-    const [unsettledByStore, overlappingSettlements, periodOrders, convenienceFeeRates, commissionSlabs] =
+    const [unsettledByStore, overlappingSettlements, periodOrders, convenienceFeeRates] =
       await Promise.all([
         groupAllUnsettledWithdrawalsByStoreId(),
         prisma.commissionSettlement.findMany({
@@ -1301,7 +1129,6 @@ export async function listPendingAllHandler(req: Request, res: Response, next: N
             })
           : Promise.resolve([]),
         getConvenienceFeeRates(),
-        getCommissionSlabs(),
       ]);
 
     const overlappingStoreIds = new Set(overlappingSettlements.map((row) => row.storeId));
@@ -1331,13 +1158,7 @@ export async function listPendingAllHandler(req: Request, res: Response, next: N
 
           // Same window base as fetchPeriodBaseLookupForSettlement, without a second orders query.
           const windowBase = sumCommissionableBase(orders);
-          const breakdown = accumulateSettlementBreakdown(
-            orders,
-            windowBase,
-            convenienceFeeRates,
-            undefined,
-            commissionSlabs,
-          );
+          const breakdown = accumulateSettlementBreakdown(orders, windowBase, convenienceFeeRates);
           const periodCommission = sumBreakdownCommission(breakdown);
           const periodConvenienceFee = sumBreakdownConvenienceFee(breakdown);
           const periodPlatformPayback = sumOrdersPlatformPaybackLkr(orders);
@@ -1595,7 +1416,6 @@ export async function bulkSettleHandler(req: Request, res: Response, next: NextF
 
     const results: Array<{
       storeId: string;
-      withdrawalId: string;
       storeName: string;
       success: boolean;
       statementRef?: string;
@@ -1614,7 +1434,6 @@ export async function bulkSettleHandler(req: Request, res: Response, next: NextF
       if (!store) {
         results.push({
           storeId: item.storeId,
-          withdrawalId: item.withdrawalId,
           storeName: item.storeId,
           success: false,
           error: 'Store not found',
@@ -1639,7 +1458,6 @@ export async function bulkSettleHandler(req: Request, res: Response, next: NextF
 
         results.push({
           storeId: store.id,
-          withdrawalId: item.withdrawalId,
           storeName: store.name,
           success: true,
           statementRef: settlement.statementRef,
@@ -1649,7 +1467,6 @@ export async function bulkSettleHandler(req: Request, res: Response, next: NextF
       } catch (err) {
         results.push({
           storeId: store.id,
-          withdrawalId: item.withdrawalId,
           storeName: store.name,
           success: false,
           error: err instanceof AppError ? err.message : 'Settlement failed',
@@ -1678,7 +1495,7 @@ export async function getSettlementPlatformReceivable(
     const id = z.string().uuid().parse(req.params.id);
     const storeIds = await resolveStoreIds(req);
 
-    const data = await loadPlatformPayoutReceivableDetail(id, storeIds);
+    const data = await loadSettlementPlatformReceivableDetail(id, storeIds);
     res.json({ success: true, data });
   } catch (err) {
     next(err);
@@ -1726,18 +1543,7 @@ export async function getSettlementReceiptUrl(req: Request, res: Response, next:
       select: { id: true, storeId: true, receiptUrl: true },
     });
 
-    if (!settlement) {
-      const storeScope =
-        storeIds.length === 1 ? { storeId: storeIds[0] } : { storeId: { in: storeIds } };
-      const withdrawal = await prisma.storeWithdrawal.findFirst({
-        where: { id, ...storeScope },
-        select: { proofUrl: true },
-      });
-      if (!withdrawal) throw new AppError('Settlement not found', 404);
-      const access = await buildProofAccessResponse(withdrawal.proofUrl);
-      res.json({ success: true, data: access });
-      return;
-    }
+    if (!settlement) throw new AppError('Settlement not found', 404);
 
     const resolved = resolveSettlementReceiptUrl(settlement.receiptUrl, settlement.storeId);
     const access = await buildProofAccessResponse(resolved);

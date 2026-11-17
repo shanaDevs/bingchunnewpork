@@ -144,7 +144,7 @@ export default function AdminDeliveryClassificationPanel({ adminFetch, autoClass
       qc.invalidateQueries({ queryKey: ['admin-delivery-jobs-active'] });
       qc.invalidateQueries({ queryKey: ['admin-delivery-jobs-completed'] });
       qc.invalidateQueries({ queryKey: ['admin-orders'] });
-      qc.invalidateQueries({ queryKey: ['admin-orders-queue-counts'] });
+      qc.invalidateQueries({ queryKey: ['admin-orders-count'] });
       qc.invalidateQueries({ queryKey: ['admin-delivery-pending-orders'] });
       toast.success('Delivery job created');
       setRouteModalOpen(false);

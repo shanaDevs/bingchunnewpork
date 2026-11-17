@@ -90,10 +90,10 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
         elevation: 0,
         leading: IconButton(
           tooltip: tr('Back'),
-          icon: Icon(Icons.arrow_back_rounded, color: c.text),
+          icon: Icon(Icons.arrow_back_rounded, color: c.foreground),
           onPressed: () => Navigator.of(context).pop(false),
         ),
-        title: Text(tr('App PIN'), style: BcType.section.copyWith(color: c.text)),
+        title: Text(tr('App PIN'), style: BcType.section.copyWith(color: c.foreground)),
         centerTitle: true,
       ),
       body: SafeArea(
@@ -110,10 +110,10 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
                     Container(
                       width: 72,
                       height: 72,
-                      decoration: BoxDecoration(color: c.brandSubtle, shape: BoxShape.circle),
+                      decoration: BoxDecoration(color: c.primarySoft, shape: BoxShape.circle),
                       child: Icon(
                         _confirming ? Icons.verified_user_outlined : Icons.pin_outlined,
-                        color: c.brand,
+                        color: c.primaryStrong,
                         size: 34,
                       ),
                     ),
@@ -126,7 +126,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
                           Text(
                             _confirming ? tr('Confirm your PIN') : tr('Create a 4-digit PIN'),
                             textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: c.text),
+                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: c.foreground),
                           ),
                           const SizedBox(height: 8),
                           Text(
@@ -134,7 +134,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
                                 ? tr('Enter the same PIN again to turn on the app lock.')
                                 : tr("You'll enter this PIN each time you open the app."),
                             textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 13.5, height: 1.45, color: c.textMuted),
+                            style: TextStyle(fontSize: 13.5, height: 1.45, color: c.mutedForeground),
                           ),
                         ],
                       ),
@@ -150,7 +150,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
                           _error ?? '',
                           key: ValueKey(_error),
                           textAlign: TextAlign.center,
-                          style: BcType.caption.copyWith(color: c.danger, fontWeight: FontWeight.w600),
+                          style: BcType.caption.copyWith(color: c.errorStrong, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ),
@@ -178,7 +178,7 @@ class _StepIndicator extends StatelessWidget {
       child: AnimatedContainer(
         duration: BcMotion.standard,
         height: 5,
-        decoration: BoxDecoration(color: on ? c.brand : c.border, borderRadius: BorderRadius.circular(99)),
+        decoration: BoxDecoration(color: on ? c.primaryStrong : c.border, borderRadius: BorderRadius.circular(99)),
       ),
     );
     return Column(
@@ -187,7 +187,7 @@ class _StepIndicator extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           tr('Step {step} of 2', {'step': step}),
-          style: BcType.tiny.copyWith(color: c.textMuted),
+          style: BcType.tiny.copyWith(color: c.mutedForeground),
         ),
       ],
     );

@@ -6,8 +6,7 @@ import L from 'leaflet';
 import { getApiBaseUrl } from '@/lib/apiBase';
 
 const OSM_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-const OSM_ATTR =
-  '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>';
+const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 
 type MapsNamespace = {
   Map?: unknown;
@@ -161,69 +160,45 @@ async function loadGoogleMutantLayer(map: L.Map): Promise<L.Layer | null> {
   return googleMutant({ type: 'roadmap', maxZoom: 21 }).addTo(map);
 }
 
-/**
- * Attach the Google basemap to a plain Leaflet map (or fall back to OSM).
- * Prefer Maps JavaScript API (GoogleMutant) so browser-restricted keys still show
- * Google tiles when Map Tiles API createSession returns 403 on the server.
- * Returns a cleanup that removes the layer.
- */
-export async function attachAppMapBasemap(
-  map: L.Map,
-  options?: { cancelled?: () => boolean },
-): Promise<() => void> {
-  let layer: L.Layer | null = null;
-  const cancelled = () => options?.cancelled?.() === true;
-
-  const useOsm = (reason?: string) => {
-    if (cancelled() || layer) return;
-    if (reason) {
-      console.warn('[maps] Using OpenStreetMap basemap fallback:', reason);
-    }
-    layer = L.tileLayer(OSM_URL, { attribution: OSM_ATTR, maxZoom: 19 }).addTo(map);
-  };
-
-  try {
-    // 1) Google Maps JS API via Leaflet.GoogleMutant (works with HTTP-referrer keys)
-    const mutantLayer = await loadGoogleMutantLayer(map);
-    if (cancelled()) return () => undefined;
-    if (mutantLayer) {
-      layer = mutantLayer;
-    } else {
-      // 2) Server Map Tiles session (needs a key allowed for tile.googleapis.com)
-      const serverTiles = await readServerMapTiles();
-      if (cancelled()) return () => undefined;
-      if (serverTiles) layer = addGoogleTileLayer(map, serverTiles);
-      else useOsm('no browser key and server tiles unavailable');
-    }
-  } catch (err) {
-    console.error('Google map basemap failed', err);
-    useOsm(err instanceof Error ? err.message : 'google basemap error');
-  }
-
-  return () => {
-    if (layer) {
-      map.removeLayer(layer);
-      layer = null;
-    }
-  };
-}
-
-/** Basemap for every Leaflet map. Uses Maps JS API, then server map tiles, then OSM. */
+/** Basemap for every Leaflet map. Uses server map tiles, then Maps JS API, then OSM. */
 export default function AppMapTiles() {
   const map = useMap();
 
   useEffect(() => {
     let cancelled = false;
-    let cleanup: (() => void) | undefined;
+    let layer: L.Layer | null = null;
 
-    void attachAppMapBasemap(map, { cancelled: () => cancelled }).then((detach) => {
-      if (cancelled) detach();
-      else cleanup = detach;
-    });
+    const useOsm = () => {
+      if (cancelled || layer) return;
+      layer = L.tileLayer(OSM_URL, { attribution: OSM_ATTR, maxZoom: 19 }).addTo(map);
+    };
+
+    void (async () => {
+      try {
+        const serverTiles = await readServerMapTiles();
+        if (cancelled) return;
+        if (serverTiles) {
+          layer = addGoogleTileLayer(map, serverTiles);
+          return;
+        }
+
+        const mutantLayer = await loadGoogleMutantLayer(map);
+        if (cancelled) return;
+        if (mutantLayer) {
+          layer = mutantLayer;
+          return;
+        }
+
+        useOsm();
+      } catch (err) {
+        console.error('Google map basemap failed', err);
+        useOsm();
+      }
+    })();
 
     return () => {
       cancelled = true;
-      cleanup?.();
+      if (layer) map.removeLayer(layer);
     };
   }, [map]);
 
