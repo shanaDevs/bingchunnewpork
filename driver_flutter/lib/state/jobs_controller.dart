@@ -81,6 +81,13 @@ Future<DriverFix> requireFix(AppContainer c) async {
 /// (ASSIGNED / IN_PROGRESS / QUEUED). The API would otherwise accept it as QUEUED.
 /// Checks the server so a ride claimed from another surface (alert card, notification) counts.
 Future<void> ensureNoUnfinishedRide(AppContainer c, {String? claimingJobId}) async {
+  // An open vehicle breakdown blocks every claim path (job list, alert card, notification).
+  // The server refuses too; a failed lookup leaves the decision to it.
+  DriverProfile? me;
+  try {
+    me = await c.authRepository.getMe();
+  } catch (_) {}
+  if (me != null && me.hasOpenBreakdown) throw StateError(vehicleBreakdownOpenMessage());
   final held = await c.jobsRepository.listJobs();
   if (held.any((j) => j.id != claimingJobId && _blockingStatuses.contains(j.status))) {
     throw StateError(tr('Finish your current delivery before claiming another job'));
@@ -263,17 +270,18 @@ class JobsController extends ChangeNotifier {
       profile = p;
       banner = (p != null && !p.isOnline) ? tr('Go online to receive jobs') : null;
       _emit();
-      if (p != null && p.isOnline) {
-        _ensureSocketPool(p);
-        _c.alertService.start();
-      } else if (p != null && p.hasOpenBreakdown) {
-        // The server put the rider OFF_DUTY with an open breakdown (from any report path):
-        // stop ringing for new jobs and idle GPS, but keep the socket for handover updates.
+      if (p != null && p.hasOpenBreakdown) {
+        // An open breakdown blocks new work even if the server still says ONLINE
+        // (e.g. a breakdown opened before the duty change): stop ringing for new jobs
+        // and idle GPS, but keep the socket for handover updates.
         if (_c.alertService.isRunning) {
           await _c.alertService.stop();
           await _c.locationTracker.stop();
         }
         _c.deliverySocket.connect();
+      } else if (p != null && p.isOnline) {
+        _ensureSocketPool(p);
+        _c.alertService.start();
       }
     } catch (e) {
       loading = false;
@@ -471,6 +479,11 @@ class JobsController extends ChangeNotifier {
 
   /// Returns true when the claimed job is live (not queued) so the caller can open it.
   Future<bool> claim(String jobId) async {
+    if (profile?.hasOpenBreakdown ?? false) {
+      error = vehicleBreakdownOpenMessage();
+      _emit();
+      return false;
+    }
     if (!isOnline) {
       error = tr('Go online to claim jobs');
       _emit();
