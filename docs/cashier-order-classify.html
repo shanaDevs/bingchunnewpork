@@ -168,6 +168,40 @@
     table.catalog th { background: #f3e6d6; }
     table.catalog tr:nth-child(even) td { background: #fffaf3; }
     .pair { margin: 6px 8px 6px 0; }
+    ol.steps {
+      margin: 8px 0 4px;
+      padding: 0;
+      list-style: none;
+      counter-reset: step;
+    }
+    ol.steps li {
+      counter-increment: step;
+      position: relative;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px 12px 52px;
+      margin: 0 0 10px;
+    }
+    ol.steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--brand);
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 28px;
+      text-align: center;
+    }
+    ol.steps li strong { display: block; margin-bottom: 4px; }
   </style>
 </head>
 <body>
@@ -179,7 +213,7 @@
         the system looks at each customer on the map, draws one cut through the shop,
         and makes two rider runs. Those runs are named from the compass:
         North, North-East, East, South-East, South, South-West, West, or North-West.
-        This page has a picture for every pair.
+        Section 4 is the exact server algorithm. The rest of the page has a picture for every pair.
       </p>
     </div>
   </header>
@@ -255,7 +289,11 @@
 
     <section>
       <h2>3. Who goes into classify?</h2>
-      <p>Only some orders are used. Others are skipped.</p>
+      <p>
+        Only some orders are used. Others are skipped.
+        Classify is scoped to <b>this shop only</b>. Orders are loaded <b>oldest first</b>.
+        Cups = how many drinks are on the order (item quantities), not how many customers.
+      </p>
       <div class="grid-2">
         <div class="box yes">
           <h3>In the grouping</h3>
@@ -269,14 +307,105 @@
           <h3>Left out</h3>
           <p>Still preparing, or already out for delivery</p>
           <p>Takeaway / dine-in (not delivery)</p>
-          <p>Already given to a rider</p>
-          <p>No map pin — cashier must fix the address first</p>
+          <p>Already on a job that is Scheduled, Assigned, or In progress</p>
+          <p>No map pin — listed as <b>unlocated</b>; cashier must fix the address first</p>
         </div>
       </div>
     </section>
 
     <section>
-      <h2>4. Compass diagram — direction from the shop</h2>
+      <h2>4. The algorithm the server follows</h2>
+      <p>
+        The cashier never types a compass name. After they tap Classify, the server
+        groups READY orders with a pin, then the app shows run cards. Route order is
+        calculated after grouping, from the shop.
+      </p>
+      <ol class="steps">
+        <li>
+          <strong>Choose Manual or Directional</strong>
+          Count cups on located orders. Under 10 cups → one cluster labelled
+          <span class="run m">All deliveries (manual)</span>
+          No compass names. At 10 cups or more → continue to the cut.
+        </li>
+        <li>
+          <strong>Cut the map into two opposite halves</strong>
+          The shop pin is the centre. Each house gets a bearing (0° North, 90° East, 180° South, 270° West).
+          The server tries each house’s bearing as a cut through the shop and keeps the cut that
+          most evenly splits <b>how many orders</b> into two 180° halves (not equal cups).
+          Houses above the shop are not always North — today’s pins choose the cut.
+        </li>
+        <li>
+          <strong>Name each half from average direction</strong>
+          The average bearing of that half (circular mean) is mapped to the nearest of eight labels:
+          North, North-East, East, South-East, South, South-West, West, North-West.
+          You never get all eight at once — at most two halves. An empty half is not shown.
+          If houses sit in a corner of a half, names may not look perfectly opposite
+          (for example North with South-East). The cut is still two semicircles.
+        </li>
+        <li>
+          <strong>Pack each half into rider bags</strong>
+          Default 20 cups per rider (the shop can change this). Each half is packed separately,
+          oldest first: if the next order would go over the cap, it starts a new run.
+          An order is never split. A 25-cup house is one oversized run.
+          Overflow names look like <span class="run n">North run 1</span>
+          <span class="run n">North run 2</span>
+        </li>
+        <li>
+          <strong>Preview the road, then create the job</strong>
+          Stops in a run are ordered from the shop. The cashier previews the path and creates the job
+          so a rider can claim it. They can ignore auto-classify and tick orders by hand,
+          as long as they stay under the cup limit.
+        </li>
+      </ol>
+      <h3>Typical outcomes</h3>
+      <table class="catalog">
+        <tr><th>Situation</th><th>What the cashier sees</th></tr>
+        <tr>
+          <td>1–9 cups in total</td>
+          <td><span class="run m">All deliveries (manual)</span> One mixed list</td>
+        </tr>
+        <tr>
+          <td>10+ cups, houses north and south of the shop</td>
+          <td><span class="run n">North</span> <span class="run s">South</span></td>
+        </tr>
+        <tr>
+          <td>10+ cups, houses left and right</td>
+          <td><span class="run e">East</span> <span class="run w">West</span></td>
+        </tr>
+        <tr>
+          <td>10+ cups on a diagonal</td>
+          <td><span class="run ne">North-East</span> <span class="run sw">South-West</span>
+            or <span class="run nw">North-West</span> <span class="run se">South-East</span></td>
+        </tr>
+        <tr>
+          <td>Most houses on one side</td>
+          <td>One busy run and one small run. Counts do not have to be equal.</td>
+        </tr>
+        <tr>
+          <td>Every house almost the same direction</td>
+          <td>One named run only. The empty half is hidden.</td>
+        </tr>
+        <tr>
+          <td>A half has more than 20 cups</td>
+          <td>Extra numbered bags on that side, e.g. North run 1 and North run 2</td>
+        </tr>
+        <tr>
+          <td>One order over 20 cups</td>
+          <td>That house stays one run. A customer is never split across riders.</td>
+        </tr>
+        <tr>
+          <td>Missing map pin</td>
+          <td><span class="run x">unlocated</span> Fix the address, then classify again.</td>
+        </tr>
+        <tr>
+          <td>Job already created for those orders</td>
+          <td>They drop out of the next classify.</td>
+        </tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>5. Compass diagram — direction from the shop</h2>
       <p>
         The shop pin is the center. For every customer, the system asks:
         “If I stand at the shop and look at this house, which way am I facing?”
@@ -313,7 +442,7 @@
     </section>
 
     <section>
-      <h2>5. The cut-line diagram — how North vs South is chosen</h2>
+      <h2>6. The cut-line diagram — how North vs South is chosen</h2>
       <p>
         It is <b>not</b> “every house above the shop is always North”.
         The system tries a cut through the shop and picks the cut that
@@ -346,7 +475,7 @@
     </section>
 
     <section>
-      <h2>6. Cup packing diagram — one rider bag</h2>
+      <h2>7. Cup packing diagram — one rider bag</h2>
       <p>
         After the two halves exist, each half is packed oldest-first into bags of
         <b>20 cups</b> (or whatever max-cups setting is). An order is never cut in half.
@@ -376,7 +505,7 @@
     </section>
 
     <section>
-      <h2>7. Scenarios — tap one and look at the map</h2>
+      <h2>8. Scenarios — tap one and look at the map</h2>
       <p>
         Classify always makes <b>two opposite halves</b>. The name of each half is
         whichever of the eight compass labels matches that half’s average direction.
@@ -633,7 +762,7 @@
     </section>
 
     <section>
-      <h2>8. Cashier screen flow</h2>
+      <h2>9. Cashier screen flow</h2>
       <p>What a person does on the cashier app, in order.</p>
       <div class="diagram">
         <svg viewBox="0 0 900 150" width="100%" aria-label="Cashier steps">
@@ -665,7 +794,7 @@
     </section>
 
     <section>
-      <h2>9. Try the cup number</h2>
+      <h2>10. Try the cup number</h2>
       <p>Type a total cup count. This only shows Manual vs Directional. Real grouping still needs map pins.</p>
       <label for="cups">Total ready cups</label>
       <input id="cups" type="number" min="0" value="15" />
@@ -674,7 +803,7 @@
     </section>
 
     <section>
-      <h2>10. Every situation that can happen</h2>
+      <h2>11. Every situation that can happen</h2>
       <p>
         This is the full list. If it is not here, classify does not do it.
         Cups below use the default rider bag of <b>20</b>. Settings can change that number.

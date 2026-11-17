@@ -1,4 +1,4 @@
-import { getGoogleMapsApiKey } from '../lib/googleMapsKey';
+import { getGoogleMapsServerApiKey } from '../lib/googleMapsKey';
 import { logger } from '../utils/logger';
 import { haversineKm } from '../utils/geo';
 import { nearestDeliveryArea, searchDeliveryAreas } from '../data/deliveryAreas';
@@ -287,7 +287,7 @@ function placesComponents(components: PlacesComponent[] | undefined): AddressCom
 }
 
 async function placesRequest<T>(path: string, fieldMask: string, init?: RequestInit): Promise<T | null> {
-  const key = await getGoogleMapsApiKey();
+  const key = await getGoogleMapsServerApiKey();
   if (!key) return null;
   try {
     const res = await fetch(`https://places.googleapis.com/v1/${path}`, {
@@ -410,7 +410,7 @@ class GoogleMapsAdapter implements MapsAdapter {
   }
 
   async getDistance(origin: LatLng, dest: LatLng): Promise<DistanceResult> {
-    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin.lat},${origin.lng}&destinations=${dest.lat},${dest.lng}&key=${await getGoogleMapsApiKey()}`;
+    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin.lat},${origin.lng}&destinations=${dest.lat},${dest.lng}&key=${await getGoogleMapsServerApiKey()}`;
     const res = await fetch(url);
     const data = await res.json() as {
       rows?: { elements?: { distance?: { value: number }; duration?: { value: number } }[] }[];
@@ -427,7 +427,7 @@ const googleMaps = new GoogleMapsAdapter();
 const osmMaps = new OsmMapsAdapter();
 
 async function activeMapsAdapter(): Promise<MapsAdapter> {
-  const key = await getGoogleMapsApiKey();
+  const key = await getGoogleMapsServerApiKey();
   return key ? googleMaps : osmMaps;
 }
 
@@ -486,7 +486,7 @@ function decodePolyline(encoded: string): LatLng[] {
 
 /** Google map tiles for the customer map, or OpenStreetMap when no key is saved. */
 export async function getCustomerMapTiles(): Promise<{ provider: 'google' | 'osm'; url: string; attribution: string }> {
-  const key = await getGoogleMapsApiKey();
+  const key = await getGoogleMapsServerApiKey();
   if (!key) return OSM_TILES;
 
   const now = Date.now();
@@ -534,7 +534,7 @@ export async function getCustomerMapTiles(): Promise<{ provider: 'google' | 'osm
 /** Driving path from the Google Directions API. Null lets the map draw a straight line. */
 export async function getDrivingPath(points: LatLng[]): Promise<LatLng[] | null> {
   if (points.length < 2) return null;
-  const key = await getGoogleMapsApiKey();
+  const key = await getGoogleMapsServerApiKey();
   if (!key) return null;
 
   const origin = points[0];
@@ -568,7 +568,7 @@ export async function getDrivingPath(points: LatLng[]): Promise<LatLng[] | null>
 
 /** Coordinates for a Google Place selected from customer address search. */
 export async function getPlaceLocation(placeId: string): Promise<(LatLng & { address: string }) | null> {
-  const key = await getGoogleMapsApiKey();
+  const key = await getGoogleMapsServerApiKey();
   if (!key || !placeId || placeId.startsWith('area_') || placeId.startsWith('osm_')) return null;
 
   try {
