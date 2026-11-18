@@ -208,27 +208,31 @@ export async function getDeliveryWalletSummary(from?: string, to?: string): Prom
     });
   }
 
-  const branches: DeliveryWalletBranchRow[] = stores.map((store) => {
-    const active = activeByStore.get(store.id) ?? emptyFee();
-    const late = lateByStore.get(store.id) ?? emptyFee();
-    const grossDeliveryFee = active.amount + late.amount;
-    const net = computeDeliveryWalletNet({
-      grossDeliveryFee,
-      cardGrossDeliveryFee: active.cardAmount + late.cardAmount,
-      platformFeeRate,
-      gatewayFeeRate,
-    });
-    return {
-      storeId: store.id,
-      storeName: store.name,
-      fromActiveOrders: active.amount,
-      fromLateCancels: late.amount,
-      grossDeliveryFee,
-      orderCount: active.count,
-      lateCancelCount: late.count,
-      ...net,
-    };
-  });
+  const branches: DeliveryWalletBranchRow[] = stores
+    .map((store) => {
+      const active = activeByStore.get(store.id) ?? emptyFee();
+      const late = lateByStore.get(store.id) ?? emptyFee();
+      const grossDeliveryFee = active.amount + late.amount;
+      const net = computeDeliveryWalletNet({
+        grossDeliveryFee,
+        cardGrossDeliveryFee: active.cardAmount + late.cardAmount,
+        platformFeeRate,
+        gatewayFeeRate,
+      });
+      return {
+        storeId: store.id,
+        storeName: store.name,
+        fromActiveOrders: active.amount,
+        fromLateCancels: late.amount,
+        grossDeliveryFee,
+        orderCount: active.count,
+        lateCancelCount: late.count,
+        ...net,
+      };
+    })
+    .filter(
+      (row) => row.grossDeliveryFee > 0 || row.orderCount > 0 || row.lateCancelCount > 0,
+    );
 
   const fromActiveOrders = branches.reduce((sum, row) => sum + row.fromActiveOrders, 0);
   const fromLateCancels = branches.reduce((sum, row) => sum + row.fromLateCancels, 0);

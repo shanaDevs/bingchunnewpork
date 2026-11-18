@@ -63,6 +63,10 @@ import {
 import {
   filterPayoutRowsForDisplay,
 } from '@/components/admin/paymentHistoryPayoutFilter';
+import AdminTablePagination from '@/components/admin/AdminTablePagination';
+import { paginateClientList } from '@/lib/pagination';
+
+const PAYOUT_HISTORY_PAGE_SIZE = 25;
 
 type PayoutRow = {
   id: string;
@@ -442,6 +446,28 @@ export default function PaymentHistoryContent({
     showPlatformPayoutHistoryTab && payoutHistoryView === 'platform'
       ? filteredPlatformPayouts
       : filteredPayouts;
+
+  const payoutListPage = useMemo(
+    () => paginateClientList(activePayoutRows, payoutHistoryPage, PAYOUT_HISTORY_PAGE_SIZE),
+    [activePayoutRows, payoutHistoryPage],
+  );
+  const payoutTablePagination =
+    payoutListPage.totalPages > 1 ? payoutListPage : null;
+  const pagedPayoutRows = payoutListPage.slice;
+
+  useEffect(() => {
+    setPayoutHistoryPage(1);
+  }, [
+    activePayoutRows.length,
+    payoutHistoryView,
+    payoutMonth,
+    payoutDateFrom,
+    payoutDateTo,
+    periodFrom,
+    periodTo,
+    effectiveStoreId,
+  ]);
+
   const payoutAmountColumnLabel =
     showPlatformPayoutHistoryTab && payoutHistoryView === 'platform'
       ? 'Platform receivable'
@@ -798,7 +824,7 @@ export default function PaymentHistoryContent({
             </thead>
             <tbody>
               {tableLoading && <PaymentHistoryTableSkeleton colSpan={payoutTableColSpan} />}
-              {!tableLoading && !isError && activePayoutRows.length === 0 && (
+              {!tableLoading && !isError && pagedPayoutRows.length === 0 && activePayoutRows.length === 0 && (
                 <tr>
                   <td colSpan={payoutTableColSpan} className="px-4 py-8 text-center">
                     <div className="mx-auto flex max-w-md flex-col items-center gap-2 text-[var(--color-text-muted)]">
@@ -830,7 +856,7 @@ export default function PaymentHistoryContent({
                 </tr>
               )}
               {!tableLoading &&
-                activePayoutRows.map((row) => {
+                pagedPayoutRows.map((row) => {
                 const isSelected =
                   selectedPayoutId === row.id ||
                   (row.periodFrom === periodFrom && row.periodTo === periodTo);

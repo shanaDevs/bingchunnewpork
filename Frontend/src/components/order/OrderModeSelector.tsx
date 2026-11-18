@@ -33,6 +33,8 @@ import { findCartItemsUnavailableAt } from '@/lib/branchCartConflicts';
 import { resolveProductImageUrl } from '@/lib/productImageUrl';
 import { cn } from '@/components/home-redesign/lib/cn';
 import {
+  DEFAULT_CLOSE_TIME,
+  DEFAULT_OPEN_TIME,
   ORDER_FLOW_FOCUS_RING,
   formatOrderFlowDistance,
   formatOrderFlowHour,

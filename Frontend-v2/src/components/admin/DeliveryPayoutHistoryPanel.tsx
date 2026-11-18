@@ -22,6 +22,7 @@ import {
   type DeliveryPayoutHistoryRow,
 } from '@/lib/deliveryPayoutTypes';
 import { buildPageList } from '@/lib/pagination';
+import { formatPayoutPeriodDate } from '@/lib/datetime';
 import { formatMoney } from '@/lib/receipt';
 
 type Props = {
@@ -332,7 +333,7 @@ export default function DeliveryPayoutHistoryPanel({ onBack }: Props) {
                   className="border-b border-[var(--color-navy-border)]/60 last:border-0"
                 >
                   <td className="px-4 py-3 whitespace-nowrap text-[var(--color-text)]">
-                    {formatPeriodDate(row.periodFrom)} – {formatPeriodDate(row.periodTo)}
+                    {formatPayoutPeriodDate(row.periodFrom)} – {formatPayoutPeriodDate(row.periodTo)}
                   </td>
                   <td className="px-4 py-3 font-semibold tabular-nums text-[var(--color-text)]">
                     {formatMoney(row.amountLkr ?? row.amount)}

@@ -71,6 +71,11 @@ export type WithdrawalBreakdown = {
   branchOwnedPromoDiscountTotal?: number;
   /** PLATFORM-ownership promotion discounts in period (cents). Display snapshot only. */
   platformOwnedPromoDiscountTotal?: number;
+  cycleStage?: 'FIRST' | 'SECOND';
+  cycleFrom?: string;
+  cyclePairId?: string;
+  priorOnlineWalletAmountCents?: number;
+  remainingOnlineWalletAmount?: number;
 };
 
 const WITHDRAWAL_REQUIRED_NUMBER_KEYS = [
@@ -149,6 +154,19 @@ export function parseWithdrawalBreakdown(value: unknown): WithdrawalBreakdown | 
   if (channelBreakdownRaw && typeof channelBreakdownRaw === 'object') {
     result.channelBreakdown = normalizeSettlementBreakdown(channelBreakdownRaw);
   }
+  if (o.cycleStage === 'FIRST' || o.cycleStage === 'SECOND') {
+    result.cycleStage = o.cycleStage;
+  }
+  if (typeof o.cycleFrom === 'string' && o.cycleFrom.length > 0) {
+    result.cycleFrom = o.cycleFrom;
+  }
+  if (typeof o.cyclePairId === 'string' && o.cyclePairId.length > 0) {
+    result.cyclePairId = o.cyclePairId;
+  }
+  const priorOnline = coerceBreakdownNumber(o.priorOnlineWalletAmountCents);
+  if (priorOnline != null) result.priorOnlineWalletAmountCents = priorOnline;
+  const remainingOnline = coerceBreakdownNumber(o.remainingOnlineWalletAmount);
+  if (remainingOnline != null) result.remainingOnlineWalletAmount = remainingOnline;
   return result;
 }
 
@@ -495,6 +513,21 @@ export function withdrawalBreakdownToLkr(b: WithdrawalBreakdown) {
       ? convenienceRaw / 100
       : Math.max(0, Math.round((onlineWallet - commission - gateway - net) * 100) / 100);
 
+  const extended = b as WithdrawalBreakdown & {
+    remainingOnlineWalletAmount?: number;
+    priorOnlineWalletAmountCents?: number;
+    cycleStage?: 'FIRST' | 'SECOND';
+    cycleFrom?: string;
+  };
+  const remainingOnlineWalletLkr =
+    extended.remainingOnlineWalletAmount != null
+      ? extended.remainingOnlineWalletAmount / 100
+      : undefined;
+  const priorOnlineWalletAmountLkr =
+    extended.priorOnlineWalletAmountCents != null
+      ? extended.priorOnlineWalletAmountCents / 100
+      : undefined;
+
   return {
     grossAmount: gross,
     deliveryFee: delivery,
@@ -504,6 +537,10 @@ export function withdrawalBreakdownToLkr(b: WithdrawalBreakdown) {
     gatewayBase: (b.gatewayBase ?? onlineWalletRaw) / 100,
     convenienceFee: convenience,
     netAmount: net,
+    remainingOnlineWalletLkr,
+    priorOnlineWalletAmountLkr,
+    cycleStage: extended.cycleStage,
+    cycleFrom: extended.cycleFrom,
     platformPaybackTotal: (b.platformPaybackTotal ?? 0) / 100,
     periodDiscountsTotal: (b.periodDiscountsTotal ?? 0) / 100,
     periodLoyaltyDiscountTotal: (b.periodLoyaltyDiscountTotal ?? 0) / 100,

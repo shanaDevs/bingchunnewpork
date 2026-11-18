@@ -14,6 +14,7 @@ import {
 } from '../lib/paymentSettings';
 import { ensureAppSchema, getConvenienceFeeRates, getConvenientFeeRate, getGatewayFeeRate, getDeliveryPlatformFeeRate, setDeliveryPlatformFeeRate, getMaxCupsPerRider, invalidatePickupOrderEditSettingsCache, invalidateGatewayFeeRateCache, invalidateDeliveryPlatformFeeRateCache, setMaxCupsPerRider, getAppDownloadSettings, setAppDownloadSettings, getWeeklyResetDay, setWeeklyResetDay, getSpinSettings, setSpinSettings, getCancelWindowMinutes, setCancelWindowMinutes, invalidateCancelWindowMinutesCache, getBranchCompletionRadiusM, setBranchCompletionRadiusM } from '../lib/appSchema';
 import { getGoogleMapsApiKey, setGoogleMapsApiKey } from '../lib/googleMapsKey';
+import { COMMISSION_SLABS } from '../lib/commission';
 import { parseSpinCriteria, parseSpinDisplay } from '../lib/spinDisplay';
 import {
   getActiveCancelReasons,
@@ -243,8 +244,7 @@ export async function updateAdminMessagingSettings(req: Request, res: Response, 
 export async function getAppSettings(_req: Request, res: Response, next: NextFunction) {
   try {
     await ensureAppSchema();
-    googleMapsApiKey = await getGoogleMapsApiKey();
-    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, gatewayFeeRate, deliveryPlatformFeeRate, branchCompletionRadiusM, commissionSlabs, pickupMaxOrderAmount] = await Promise.all([
+    const [feeRates, row, maxCupsPerRider, , appDownload, weeklyResetDay, spinSettings, cancelWindowMinutes, gatewayFeeRate, deliveryPlatformFeeRate, branchCompletionRadiusM, commissionSlabs, pickupMaxOrderAmount, googleMapsApiKey] = await Promise.all([
       getConvenienceFeeRates(),
       prisma.appSetting.findUnique({ where: { id: 'default' } }),
       getMaxCupsPerRider(),
@@ -256,6 +256,9 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       getGatewayFeeRate(),
       getDeliveryPlatformFeeRate(),
       getBranchCompletionRadiusM(),
+      Promise.resolve(COMMISSION_SLABS),
+      Promise.resolve(PICKUP_ONLINE_PAYMENT_THRESHOLD),
+      getGoogleMapsApiKey(),
     ]);
     return success(res, {
       convenientFeeRate: feeRates.delivery,
@@ -291,7 +294,8 @@ export async function getAppSettings(_req: Request, res: Response, next: NextFun
       spinRequireLogin: spinSettings.requireLogin,
       spinDisplay: spinSettings.display,
       cancelWindowMinutes,
-      googleMapsApiKey: await getGoogleMapsApiKey(),
+      pickupMaxOrderAmount,
+      googleMapsApiKey,
     });
   } catch (err) {
     next(err);

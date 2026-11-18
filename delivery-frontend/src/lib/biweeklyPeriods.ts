@@ -52,16 +52,18 @@ export function getPayoutPeriodEndDate(startDateStr: string): string {
 }
 
 export function formatBiweeklyPeriodLabel(from: string, to: string): string {
+  const fromYmd = from.slice(0, 10);
+  const toYmd = to.slice(0, 10);
   const fmt = (d: string, withYear: boolean) =>
     formatDate(`${d}T12:00:00`, {
       day: 'numeric',
       month: 'short',
       ...(withYear ? { year: 'numeric' } : {}),
     });
-  const sameYear = from.slice(0, 4) === to.slice(0, 4);
+  const sameYear = fromYmd.slice(0, 4) === toYmd.slice(0, 4);
   return sameYear
-    ? `${fmt(from, false)} – ${fmt(to, true)}`
-    : `${fmt(from, true)} – ${fmt(to, true)}`;
+    ? `${fmt(fromYmd, false)} – ${fmt(toYmd, true)}`
+    : `${fmt(fromYmd, true)} – ${fmt(toYmd, true)}`;
 }
 
 export function periodValueKey(from: string, to: string): string {

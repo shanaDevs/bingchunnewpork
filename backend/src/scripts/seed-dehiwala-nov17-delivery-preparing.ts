@@ -379,7 +379,7 @@ async function main() {
 
   const line = await prisma.orderItem.findFirst({
     where: { orderId },
-    select: { productName: true, sugarLevel: true, iceLevel: true, quantity: true },
+    select: { productName: true, quantity: true },
   });
   const final = await prisma.order.findUniqueOrThrow({
     where: { id: orderId },
@@ -399,7 +399,7 @@ async function main() {
       `LKR ${final.total}  ${final.createdAt.toISOString()}`,
   );
   console.log(
-    `   Line: ${line?.productName} x${line?.quantity}  sugar=${line?.sugarLevel}  ice=${line?.iceLevel}`,
+    `   Line: ${line?.productName} x${line?.quantity}`,
   );
 }
 

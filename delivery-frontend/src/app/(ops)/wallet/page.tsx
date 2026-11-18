@@ -34,6 +34,7 @@ import { DeliveryWalletUnlockProvider } from '@/components/admin/DeliveryWalletU
 import DeliveryWalletPinOverlay from '@/components/admin/DeliveryWalletPinOverlay';
 import { getAdminSession, isSuperAdmin } from '@/lib/adminAuth';
 import { hasMenuReadAccess } from '@/lib/adminPermissions';
+import { formatPayoutPeriodDate } from '@/lib/datetime';
 import { formatMoney, formatMoneyAmount } from '@/lib/receipt';
 import { KPI_BOLD } from '@/lib/dashboardTheme';
 import DashboardKpiCard from '@/components/admin/DashboardKpiCard';
@@ -767,22 +768,18 @@ function DeliveryWalletPageContent() {
 
   const liveNetHint =
     liveFrom && liveTo
-      ? `${
-          payoutInfo?.liveAfterApproved
-            ? `${formatDateOnly(liveFrom)} – ${formatDateOnly(liveTo)}`
-            : `First delivery – ${formatDateOnly(liveTo)}`
-        }. Includes today (not yet payable).${
+      ? `Current unpaid cycle ${formatDateOnly(liveFrom)} – ${formatDateOnly(liveTo)} (through today; paid periods excluded).${
           payoutInfo?.maxEndDate
-            ? ` Payable through ${formatDateOnly(payoutInfo.maxEndDate)}.`
+            ? ` Completed periods payable through ${formatDateOnly(payoutInfo.maxEndDate)}.`
             : ''
         }`
-      : 'After last approved payout. Includes today (not yet payable).';
+      : 'Current unpaid payout cycle through today. Paid periods are excluded.';
 
   const periodCaption =
     period === 'live'
       ? liveEmpty
         ? 'No delivery fees yet.'
-        : 'Gross, fees, and branches for the live window.'
+        : 'Gross, fees, and branches for the current unpaid cycle (paid periods excluded).'
       : period === 'all'
         ? 'All-time totals. Refunds use complete or reject time.'
         : walletFrom && walletTo
@@ -1108,7 +1105,7 @@ function DeliveryWalletPageContent() {
                   {payoutRows.map((row) => (
                     <tr key={row.id} className="border-b border-navy-border/60 last:border-0">
                       <td className="px-4 py-3 text-white sm:px-5">
-                        {formatPeriodDate(row.periodFrom)} – {formatPeriodDate(row.periodTo)}
+                        {formatPayoutPeriodDate(row.periodFrom)} – {formatPayoutPeriodDate(row.periodTo)}
                       </td>
                       <td className="px-4 py-3 font-semibold text-white">{formatMoney(row.amount)}</td>
                       <td className="px-4 py-3">

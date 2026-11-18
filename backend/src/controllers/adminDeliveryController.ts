@@ -39,6 +39,7 @@ import {
   visibleJobOrderLinksForDeliveryJob,
   jobPickedUpForList,
   mapListJobOrderStops,
+  deliveryStateFromOrderStatusForList,
 } from '../lib/deliveryJobHelpers';
 import { jobHasPickedUp } from '../lib/liveDriverTracking';
 import { optimizeDeliveryStops, type RouteStop } from '../lib/routeOptimizer';
@@ -1567,7 +1568,7 @@ export async function listLiveDrivers(req: Request, res: Response, next: NextFun
         dutyStatus: true,
         vehicleNumber: true,
         storeId: true,
-        store: { select: { id: true, name: true } },
+        store: { select: { id: true, name: true, lat: true, lng: true } },
         driverLocations: {
           orderBy: { recordedAt: 'desc' },
           take: 10,

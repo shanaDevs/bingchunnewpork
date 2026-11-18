@@ -212,6 +212,11 @@ export async function openPlatformProviderSettlementInvoice(settlementId: string
   );
 }
 
+/** Draft payout invoice saved before approval — same access rules as withdrawal invoices. */
+export async function openPayoutDraftInvoice(invoiceUrl: string | null | undefined): Promise<void> {
+  await openWithdrawalInvoice(invoiceUrl);
+}
+
 export async function openWithdrawalInvoice(invoiceUrl: string | null | undefined): Promise<void> {
   if (!invoiceUrl) throw new Error('No invoice available');
 

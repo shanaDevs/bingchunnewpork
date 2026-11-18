@@ -14,6 +14,7 @@ export type SlabInfo = {
   monthlyBase: number;
   effectiveRate: number;
   slabIndex: number;
+  slabs?: readonly CommissionSlab[];
 };
 
 export type MonthlySlabInfo = SlabInfo & { month: string };
@@ -30,6 +31,12 @@ export function commissionableSubtotal(order: {
   return Math.max(0, order.subtotal - (order.discount ?? 0) - (order.loyaltyDiscount ?? 0));
 }
 
+export function resolveCommissionSlabs(
+  slabs?: readonly CommissionSlab[] | null,
+): readonly CommissionSlab[] {
+  return slabs?.length ? slabs : COMMISSION_SLABS;
+}
+
 export function getSlabIndex(monthlyBase: number): number {
   for (let i = 0; i < COMMISSION_SLABS.length; i++) {
     if (monthlyBase <= COMMISSION_SLABS[i].upTo) return i;
@@ -37,8 +44,15 @@ export function getSlabIndex(monthlyBase: number): number {
   return COMMISSION_SLABS.length - 1;
 }
 
-export function getEffectiveRate(monthlyBase: number): number {
-  return COMMISSION_SLABS[getSlabIndex(monthlyBase)].rate;
+export function getEffectiveRate(
+  monthlyBase: number,
+  slabs?: readonly CommissionSlab[] | null,
+): number {
+  const tiers = resolveCommissionSlabs(slabs);
+  for (let i = 0; i < tiers.length; i++) {
+    if (monthlyBase <= tiers[i].upTo) return tiers[i].rate;
+  }
+  return tiers[tiers.length - 1].rate;
 }
 
 export function buildSlabInfo(monthlyBase: number): SlabInfo {
