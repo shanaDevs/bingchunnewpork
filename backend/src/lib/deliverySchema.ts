@@ -9,7 +9,12 @@ import {
   tableExists,
 } from './schemaPatch';
 import { AppError } from '../middleware/errorHandler';
-import { deliverySchemaTableSql, primeDeliverySqlRefs, qualifiedPhysicalTable } from './deliveryPg';
+import {
+  deliverySchemaTableSql,
+  invalidatePhysicalTableCache,
+  primeDeliverySqlRefs,
+  qualifiedPhysicalTable,
+} from './deliveryPg';
 import { DELIVERY_PG_SCHEMA } from '@bingchun/db';
 
 let deliveryJobsReady = false;
@@ -163,13 +168,26 @@ export async function ensureDeliveryJobsTables(): Promise<void> {
   deliveryJobsReady = true;
 }
 
+async function tableExistsInSchema(schema: string, table: string): Promise<boolean> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
+    `SELECT COUNT(*) AS cnt FROM information_schema.tables
+     WHERE table_schema = $1 AND table_name = $2`,
+    schema,
+    table,
+  );
+  return Number(rows[0]?.cnt ?? 0) > 0;
+}
+
 export async function ensureVehicleBreakdownSchema(): Promise<void> {
   if (vehicleBreakdownsReady) return;
 
+  await primeDeliverySqlRefs();
+  const tableRef = deliverySchemaTableSql('vehicle_breakdowns');
   const jobsRef = await deliverySchemaTableSql('delivery_jobs');
-  if (!(await tableExists('vehicle_breakdowns'))) {
+
+  if (!(await tableExistsInSchema(DELIVERY_PG_SCHEMA, 'vehicle_breakdowns'))) {
     await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS ${await qualifiedPhysicalTable('vehicle_breakdowns')} (
+      CREATE TABLE IF NOT EXISTS ${tableRef} (
         "id" TEXT NOT NULL,
         "driverId" TEXT NOT NULL,
         "jobId" TEXT NOT NULL,
@@ -190,17 +208,35 @@ export async function ensureVehicleBreakdownSchema(): Promise<void> {
           FOREIGN KEY ("jobId") REFERENCES ${jobsRef}("id") ON DELETE CASCADE ON UPDATE CASCADE
       )
     `);
-    await createIndexIfMissing(
-      'vehicle_breakdowns',
-      'vehicle_breakdowns_driverId_fixedAt_idx',
-      'driverId, fixedAt',
-    );
-    await createIndexIfMissing(
-      'vehicle_breakdowns',
-      'vehicle_breakdowns_storeId_reportedAt_idx',
-      'storeId, reportedAt',
-    );
   }
+
+  if (await tableExistsInSchema('public', 'vehicle_breakdowns')) {
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO ${tableRef} (
+        "id", "driverId", "jobId", "storeId", "reportedAt", "reportedLat", "reportedLng",
+        "note", "fixedAt", "fixedById", "fixedByRole", "fixedComment", "createdAt"
+      )
+      SELECT
+        "id", "driverId", "jobId", "storeId", "reportedAt", "reportedLat", "reportedLng",
+        "note", "fixedAt", "fixedById", "fixedByRole", "fixedComment", "createdAt"
+      FROM public."vehicle_breakdowns"
+      ON CONFLICT ("id") DO NOTHING
+    `);
+    await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS public."vehicle_breakdowns"`);
+  }
+
+  invalidatePhysicalTableCache('vehicle_breakdowns');
+
+  await createIndexIfMissing(
+    'vehicle_breakdowns',
+    'vehicle_breakdowns_driverId_fixedAt_idx',
+    'driverId, fixedAt',
+  );
+  await createIndexIfMissing(
+    'vehicle_breakdowns',
+    'vehicle_breakdowns_storeId_reportedAt_idx',
+    'storeId, reportedAt',
+  );
 
   vehicleBreakdownsReady = true;
 }

@@ -8,6 +8,7 @@ export const DELIVERY_PHYSICAL_TABLES = new Set([
   'delivery_jobs',
   'delivery_job_orders',
   'delivery_payouts',
+  'delivery_payout_due_reviews',
   'delivery_access_logs',
   'driver_locations',
   'driver_shifts',
@@ -80,6 +81,10 @@ export async function qualifiedPhysicalTable(tableName: string): Promise<string>
   const ref = `"${schema.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`;
   tableRefCache.set(tableName, ref);
   return ref;
+}
+
+export function invalidatePhysicalTableCache(tableName: string): void {
+  tableRefCache.delete(tableName);
 }
 
 /** Post-migration target schema (for CREATE TABLE when table does not exist yet). */

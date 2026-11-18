@@ -39,6 +39,11 @@ vi.mock('../../src/lib/deliveryPayoutService', () => ({
   attachDeliveryPayoutProof: vi.fn(),
   rejectDeliveryPayout: vi.fn(),
   cancelDeliveryPayout: vi.fn(),
+  getDeliveryPayoutById: vi.fn(),
+}));
+
+vi.mock('../../src/lib/settlementProofAccess', () => ({
+  buildProofAccessResponse: vi.fn(),
 }));
 
 vi.mock('../../src/lib/settlementProofUpload', () => ({
@@ -58,9 +63,11 @@ import {
   approveDeliveryPayout,
   attachDeliveryPayoutProof,
   createDeliveryPayout,
+  getDeliveryPayoutById,
   getLiveDeliveryWalletRange,
   payDeliveryPayout,
 } from '../../src/lib/deliveryPayoutService';
+import { buildProofAccessResponse } from '../../src/lib/settlementProofAccess';
 import {
   optionalSettlementProofUpload,
   requireSettlementProofUpload,
@@ -74,6 +81,7 @@ import {
   attachDeliveryPayoutProofHandler,
   createDeliveryPayoutHandler,
   downloadDeliveryPayoutStatementZipHandler,
+  getDeliveryPayoutProofUrlHandler,
   getDeliveryPayoutStatementHandler,
   getDeliveryWalletHandler,
   payDeliveryPayoutHandler,
@@ -299,6 +307,72 @@ describe('deliveryWalletController', () => {
       expect(renderDeliveryPayoutStatementZip).toHaveBeenCalledWith(['a', 'b']);
       expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/zip');
       expect(res.send).toHaveBeenCalledWith(Buffer.from('PK'));
+    });
+  });
+
+  describe('getDeliveryPayoutProofUrlHandler', () => {
+    it('returns presigned proof access for delivery admin', async () => {
+      vi.mocked(getDeliveryPayoutById).mockResolvedValue({
+        id: 'payout-1',
+        proofUrl: 'settlements/delivery/slip.pdf',
+      } as never);
+      vi.mocked(buildProofAccessResponse).mockResolvedValue({
+        url: 'https://spaces.example/slip.pdf?sig=1',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      });
+      const res = createMockRes();
+      await getDeliveryPayoutProofUrlHandler(
+        createMockReq({
+          user: { sub: 'admin-1', type: 'admin', role: 'DELIVERY_ADMIN' },
+          params: { id: 'payout-1' },
+        }),
+        res,
+        createMockNext(),
+      );
+      expect(getDeliveryPayoutById).toHaveBeenCalledWith('payout-1');
+      expect(buildProofAccessResponse).toHaveBeenCalledWith('settlements/delivery/slip.pdf');
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          url: 'https://spaces.example/slip.pdf?sig=1',
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        },
+      });
+    });
+
+    it('propagates 404 when payout is missing', async () => {
+      vi.mocked(getDeliveryPayoutById).mockResolvedValue(null);
+      const next = createMockNext();
+      await getDeliveryPayoutProofUrlHandler(
+        createMockReq({
+          user: { sub: 'admin-1', type: 'admin', role: 'DELIVERY_ADMIN' },
+          params: { id: 'missing' },
+        }),
+        createMockRes(),
+        next,
+      );
+      expect(thrownError(next).statusCode).toBe(404);
+      expect(buildProofAccessResponse).not.toHaveBeenCalled();
+    });
+
+    it('propagates 404 when no proof is on file', async () => {
+      vi.mocked(getDeliveryPayoutById).mockResolvedValue({
+        id: 'payout-1',
+        proofUrl: null,
+      } as never);
+      vi.mocked(buildProofAccessResponse).mockRejectedValue(
+        new AppError('No payment proof on file', 404),
+      );
+      const next = createMockNext();
+      await getDeliveryPayoutProofUrlHandler(
+        createMockReq({
+          user: { sub: 'admin-1', type: 'admin', role: 'DELIVERY_ADMIN' },
+          params: { id: 'payout-1' },
+        }),
+        createMockRes(),
+        next,
+      );
+      expect(thrownError(next).statusCode).toBe(404);
     });
   });
 

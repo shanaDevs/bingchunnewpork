@@ -8,9 +8,11 @@ import {
 } from './moneyDecimal';
 import {
   getDeliveryPayoutById,
+  listDeliveryPayoutsDue,
   type DeliveryPayoutDbRow,
 } from './deliveryPayoutService';
-import { toUtcDateStr } from './deliveryPayoutMath';
+import { DATE_RE, toUtcDateStr } from './deliveryPayoutMath';
+import { isDeliveryPayoutDueInReview } from './deliveryPayoutDueReview';
 import {
   deliveryPayoutStatementDownloadFilename,
   deliveryPayoutStatementZipEntryPath,
@@ -66,6 +68,8 @@ export async function buildDeliveryPayoutStatementInput(
     paidAt: row.createdAt,
     amountLkr: Number.isFinite(amountLkr) ? amountLkr : summary.netForDelivery,
     paymentMethod: row.paymentMethod ?? null,
+    checkNumber: row.checkNumber ?? null,
+    checkDate: row.checkDate ?? null,
     summary,
   };
 }
@@ -108,4 +112,50 @@ export async function renderDeliveryPayoutStatementZip(ids: string[]): Promise<B
 
   files.sort((a, b) => a.path.localeCompare(b.path));
   return buildStoredZip(files);
+}
+
+function periodToDates(from: string, to: string): { periodFrom: Date; periodTo: Date } {
+  return {
+    periodFrom: new Date(`${from}T00:00:00.000Z`),
+    periodTo: new Date(`${to}T23:59:59.999Z`),
+  };
+}
+
+export async function renderDeliveryPayoutDueStatement(
+  periodFrom: string,
+  periodTo: string,
+): Promise<{ buffer: Buffer; filename: string }> {
+  const from = periodFrom.slice(0, 10);
+  const to = periodTo.slice(0, 10);
+  if (!DATE_RE.test(from) || !DATE_RE.test(to)) {
+    throw new AppError('Invalid payout period', 400);
+  }
+
+  const due = await listDeliveryPayoutsDue();
+  const dueRow = due.find((row) => row.periodFrom === from && row.periodTo === to);
+  if (!dueRow) {
+    throw new AppError('This delivery payout period is not in the due list', 404);
+  }
+
+  const inReview = await isDeliveryPayoutDueInReview(from, to);
+  if (!inReview) {
+    throw new AppError('Save as draft before downloading the payout statement', 400);
+  }
+
+  const summary = await getDeliveryWalletSummary(from, to);
+  const dates = periodToDates(from, to);
+  const input: DeliveryPayoutStatementInput = {
+    payoutId: `due-${from}-${to}`,
+    status: 'DUE',
+    statusLabel: 'In review',
+    periodFrom: dates.periodFrom,
+    periodTo: dates.periodTo,
+    paidAt: new Date(),
+    amountLkr: summary.netForDelivery,
+    paymentMethod: null,
+    summary,
+  };
+  const buffer = await renderDeliveryPayoutStatementToBuffer(input);
+  const filename = deliveryPayoutStatementDownloadFilename(from, to);
+  return { buffer, filename };
 }

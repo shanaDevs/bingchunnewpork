@@ -15,7 +15,7 @@ import {
 } from '@/lib/deliveryPayoutTypes';
 import DeliveryWalletPayoutCalculation from '@/components/admin/DeliveryWalletPayoutCalculation';
 import DeliveryPayoutPaymentCell from '@/components/admin/DeliveryPayoutPaymentCell';
-import { openPayoutProofById } from '@/lib/adminProtectedFile';
+import { openDeliveryPayoutProof } from '@/lib/deliveryPayoutProof';
 
 type Props = {
   open: boolean;
@@ -232,7 +232,7 @@ export default function DeliveryApprovePayoutModal({
                         <button
                           type="button"
                           onClick={() => {
-                            void openPayoutProofById('deliveryPayout', payout.id).catch((err) => {
+                            void openDeliveryPayoutProof(payout.id, unlockToken).catch((err) => {
                               toast.error(
                                 err instanceof Error ? err.message : 'Could not open payment proof',
                               );

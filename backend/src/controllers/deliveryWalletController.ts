@@ -39,12 +39,28 @@ import {
 } from '../lib/settlementProofUpload';
 import { parseSettlementCheckDate } from '../lib/walletControllerSupport';
 import {
+  renderDeliveryPayoutDueStatement,
   renderDeliveryPayoutStatementForId,
   renderDeliveryPayoutStatementZip,
 } from '../lib/deliveryPayoutStatement';
+import {
+  listDeliveryPayoutDueReviews,
+  setDeliveryPayoutDueReview,
+} from '../lib/deliveryPayoutDueReview';
 
 const deliveryPayoutStatementZipSchema = z.object({
   ids: z.array(z.string().min(1)).min(1).max(40),
+});
+
+const deliveryPayoutDueReviewBodySchema = z.object({
+  periodFrom: z.string().regex(DATE_RE),
+  periodTo: z.string().regex(DATE_RE),
+  inReview: z.boolean(),
+});
+
+const deliveryPayoutDueStatementQuerySchema = z.object({
+  periodFrom: z.string().regex(DATE_RE),
+  periodTo: z.string().regex(DATE_RE),
 });
 
 function attachmentDisposition(filename: string): string {
@@ -186,6 +202,51 @@ export async function listDeliveryPayoutsDueHandler(req: Request, res: Response,
   }
 }
 
+export async function listDeliveryPayoutDueReviewsHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    await requireSystemAdminFromRequest(req);
+    const items = await listDeliveryPayoutDueReviews();
+    return success(res, items);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function setDeliveryPayoutDueReviewHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = await requireSystemAdminFromRequest(req);
+    const body = deliveryPayoutDueReviewBodySchema.parse(req.body ?? {});
+    await setDeliveryPayoutDueReview({
+      periodFrom: body.periodFrom,
+      periodTo: body.periodTo,
+      inReview: body.inReview,
+      adminId: user.sub!,
+    });
+    return success(res, { ok: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getDeliveryPayoutDueStatementHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    await requireSystemAdminFromRequest(req);
+    const { periodFrom, periodTo } = deliveryPayoutDueStatementQuerySchema.parse(req.query);
+    const file = await renderDeliveryPayoutDueStatement(periodFrom, periodTo);
+    sendAttachment(res, file.buffer, 'application/pdf', file.filename);
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function listDeliveryPayoutsHandler(req: Request, res: Response, next: NextFunction) {
   try {
     const page = req.query.page ? parseInt(String(req.query.page), 10) : 1;
@@ -229,7 +290,6 @@ export async function getDeliveryPayoutStatementHandler(req: Request, res: Respo
 
 export async function getDeliveryPayoutProofUrlHandler(req: Request, res: Response, next: NextFunction) {
   try {
-    await requireSystemAdminFromRequest(req);
     const id = String(req.params.id);
     const payout = await getDeliveryPayoutById(id);
     if (!payout) throw new AppError('Payout not found', 404);

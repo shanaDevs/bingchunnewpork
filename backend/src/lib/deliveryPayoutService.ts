@@ -555,6 +555,12 @@ export async function payDeliveryPayout(params: {
     );
   }
 
+  const {
+    assertDeliveryPayoutDueInReview,
+    clearDeliveryPayoutDueReview,
+  } = await import('./deliveryPayoutDueReview');
+  await assertDeliveryPayoutDueInReview(payable.from, payable.to);
+
   const summary = payable.summary;
   if (summary.netForDelivery <= 0) {
     throw new AppError('No delivery amount available for this period', 400);
@@ -626,6 +632,7 @@ export async function payDeliveryPayout(params: {
       return mapPayoutRow(created);
     });
 
+    await clearDeliveryPayoutDueReview(payable.from, payable.to);
     invalidateAnalyticsCache(analyticsCacheKey(['delivery-payouts-due']));
     return row;
   } catch (err) {
