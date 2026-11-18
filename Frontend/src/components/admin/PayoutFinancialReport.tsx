@@ -14,6 +14,7 @@ import {
   OnlineWalletInfoPopover,
   RefundsInfoPopover,
   TotalSaleInfoPopover,
+  type PayoutFinancialReportJasonContext,
 } from '@/components/admin/payoutFinancialReportInfoPopovers';
 import {
   ReportRow,
@@ -25,6 +26,7 @@ import {
 type Props = {
   values: PayoutReportValues;
   className?: string;
+  jasonContext?: PayoutFinancialReportJasonContext;
 };
 
 export default function PayoutFinancialReport({ values, className = 'mb-4' }: Props) {

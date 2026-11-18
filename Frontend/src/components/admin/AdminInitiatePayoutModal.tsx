@@ -445,6 +445,9 @@ export default function AdminInitiatePayoutModal({
   const periodBreakdownLkr = periodNet ? withdrawalBreakdownToLkr(periodNet) : null;
   const rangeReady = isValidRange(dateFrom, dateTo);
   const periodInFuture = !!dateTo && dateTo > todayDateStr();
+  const displayDateFrom = dateFrom;
+  const displayDateTo = dateTo;
+  const displayPeriodDays = periodDays;
   const periodIncompleteState = resolvePayoutPeriodIncompleteState({
     periodFrom: displayDateFrom,
     periodTo: displayDateTo,

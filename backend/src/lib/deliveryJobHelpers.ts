@@ -402,7 +402,10 @@ export async function recordVehicleFailureAndReleaseJob(opts: {
     where: { jobId: opts.jobId },
     select: { orderId: true, order: { select: { status: true, deliveryFee: true, cancelledAtStatus: true } } },
   });
-  const { deliveredTotal } = creditedDeliveredTotals(allLinks, new Set(orderIds));
+  const failedByOrder = new Map(
+    orderIds.map((id) => [id, { outcome: 'VEHICLE_FAILURE', note: note ?? null }] as const),
+  );
+  const { deliveredTotal } = creditedDeliveredTotals(allLinks, failedByOrder);
 
   await prisma.deliveryJob.update({
     where: { id: opts.jobId },
@@ -502,13 +505,9 @@ export async function executeAdminCancelDeliveryJob(opts: {
     throw new AppError('This delivery job cannot be cancelled', 400);
   }
 
-  const failedAttempts = await prisma.deliveryAttempt.findMany({
-    where: { jobId: opts.jobId, outcome: { not: 'DELIVERED' } },
-    select: { orderId: true },
-    distinct: ['orderId'],
-  });
-  const failedOrderIds = new Set(failedAttempts.map((a) => a.orderId));
-  const { deliveredTotal } = creditedDeliveredTotals(job.jobOrders, failedOrderIds);
+  const cancelOrderIds = job.jobOrders.map((jo) => jo.orderId);
+  const failedByOrder = await fetchLatestFailedAttemptsForJob(opts.jobId, cancelOrderIds);
+  const { deliveredTotal } = creditedDeliveredTotals(job.jobOrders, failedByOrder);
 
   const previousStatus = job.status;
   const driverId = job.driverId;
@@ -1062,6 +1061,35 @@ export function adminJobOrdersInclude(jobId: string) {
   };
 }
 
+export type FailedAttemptSummary = {
+  outcome: string;
+  note: string | null;
+};
+
+/** Latest non-delivered attempt per order on a job (for driver history / order detail). */
+export async function fetchLatestFailedAttemptsForJob(
+  jobId: string,
+  orderIds: string[],
+): Promise<Map<string, FailedAttemptSummary>> {
+  if (orderIds.length === 0) return new Map();
+  const rows = await prisma.deliveryAttempt.findMany({
+    where: {
+      orderId: { in: orderIds },
+      jobId,
+      outcome: { not: 'DELIVERED' },
+    },
+    select: { orderId: true, outcome: true, note: true, attemptNo: true, createdAt: true },
+    orderBy: [{ attemptNo: 'desc' }, { createdAt: 'desc' }],
+  });
+  const map = new Map<string, FailedAttemptSummary>();
+  for (const row of rows) {
+    if (!map.has(row.orderId)) {
+      map.set(row.orderId, { outcome: row.outcome, note: row.note });
+    }
+  }
+  return map;
+}
+
 export type { LatLngPoint, JobGpsLocation, CreditedJobOrder } from '@bingchun/delivery-domain';
 export {
   fetchJobGpsLocations,
@@ -1074,6 +1102,8 @@ export {
   deliveredOrderDeliveryFees,
   finalizeDeliveryJob,
   persistJobActualRouteFromGps,
+  groupLatestFailedAttemptsByJob,
+  buildJobHistoryOrderRows,
 } from '@bingchun/delivery-domain';
 
 /**

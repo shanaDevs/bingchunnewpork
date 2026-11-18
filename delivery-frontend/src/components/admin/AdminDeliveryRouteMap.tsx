@@ -234,6 +234,7 @@ type Props = {
   pathOverlayLabel?: 'Actual' | 'Live';
   showLegend?: boolean;
   fullscreen?: boolean;
+  initialPathLayers?: { planned?: boolean; actual?: boolean };
 };
 
 export default function AdminDeliveryRouteMap({
@@ -251,6 +252,7 @@ export default function AdminDeliveryRouteMap({
   pathOverlayLabel = 'Actual',
   showLegend = false,
   fullscreen = false,
+  initialPathLayers,
 }: Props) {
   const returnStore = branchStore ?? route.store;
   const pathPoints: [number, number][] = useMemo(
@@ -264,6 +266,8 @@ export default function AdminDeliveryRouteMap({
         .map((p) => [p.lat, p.lng] as [number, number]),
     [actualPath],
   );
+  const plannedVisible = (initialPathLayers?.planned ?? true) && pathPoints.length >= 2;
+  const actualVisible = (initialPathLayers?.actual ?? true) && actualPathPoints.length >= 2;
   const boundsPoints: [number, number][] = useMemo(() => {
     const points: [number, number][] = [
       [route.store.lat, route.store.lng],
@@ -297,7 +301,10 @@ export default function AdminDeliveryRouteMap({
     returnStore.lat,
     returnStore.lng,
     route.stops,
+    pathPoints,
     actualPathPoints,
+    plannedVisible,
+    actualVisible,
     driverPosition,
     vehicleFailurePosition,
   ]);
@@ -310,15 +317,15 @@ export default function AdminDeliveryRouteMap({
 
   return (
     <div className={`delivery-map-wrap h-full w-full relative ${className}`}>
-      {showLegend && (actualPathPoints.length >= 2 || pathPoints.length >= 2) && (
+      {showLegend && (actualVisible || plannedVisible) && (
         <div className="route-map-legend" aria-label="Route legend">
-          {pathPoints.length >= 2 && (
+          {plannedVisible && (
             <span className="route-map-legend__item">
               <span className="route-map-legend__swatch route-map-legend__swatch--planned" aria-hidden />
               Planned
             </span>
           )}
-          {actualPathPoints.length >= 2 && (
+          {actualVisible && (
             <span className="route-map-legend__item">
               <span className="route-map-legend__swatch route-map-legend__swatch--actual" aria-hidden />
               {pathOverlayLabel}
@@ -356,7 +363,7 @@ export default function AdminDeliveryRouteMap({
             </Tooltip>
           </Circle>
         )}
-        {pathPoints.length >= 2 && (
+        {plannedVisible && (
           <Polyline
             positions={pathPoints}
             pathOptions={{
@@ -366,7 +373,7 @@ export default function AdminDeliveryRouteMap({
             }}
           />
         )}
-        {actualPathPoints.length >= 2 && (
+        {actualVisible && (
           <Polyline
             positions={actualPathPoints}
             pathOptions={{

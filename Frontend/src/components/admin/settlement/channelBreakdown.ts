@@ -286,6 +286,17 @@ export type OnlinePaymentsCollectedComponents = {
   totalLkr: number;
 };
 
+/** Payout 1 online-wallet walkthrough — item revenue subtotals only (excludes fees). */
+export function resolveFirstPayoutOnlineSubtotalComponents(breakdown: SettlementBreakdown): {
+  pickupSubtotalLkr: number;
+  deliverySubtotalLkr: number;
+} {
+  return {
+    pickupSubtotalLkr: breakdown.pickupOnline.revenueSubtotal ?? 0,
+    deliverySubtotalLkr: breakdown.deliveryOnline.revenueSubtotal ?? 0,
+  };
+}
+
 export function resolveOnlinePaymentsCollectedComponents(
   breakdown: SettlementBreakdown,
 ): OnlinePaymentsCollectedComponents {

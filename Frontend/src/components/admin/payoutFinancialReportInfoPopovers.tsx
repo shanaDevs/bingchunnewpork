@@ -11,6 +11,12 @@ import {
   SectionInfoPopover,
 } from '@/components/admin/payoutFinancialReportUi';
 
+export type PayoutFinancialReportJasonContext = {
+  jasonDeductionLkr: number;
+  jasonNetBalanceLkr: number | null;
+  jasonBalanceLoading: boolean;
+};
+
 export function DiscountDetailsInfoPopover({ values }: { values: PayoutReportValues }) {
   return (
     <SectionInfoPopover ariaLabel="Discount calculation details">
