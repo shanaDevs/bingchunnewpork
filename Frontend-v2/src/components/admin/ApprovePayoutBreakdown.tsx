@@ -3,9 +3,10 @@
 import type { ReactNode } from 'react';
 import { formatMoneyAmount } from '@/lib/receipt';
 import { hasPositiveLkr } from '@/components/admin/settlementTypes';
+import { inferPayoutCycleStage } from '@/components/admin/settlement/inferPayoutCycleStage';
 import {
   resolvePayoutReportValues,
-  resolveReportNetPayoutFinalPayLkr,
+  resolveFinalNetPayoutPayLkr,
   type PayoutBreakdownDisplayInput,
   type PayoutReportValues,
 } from '@/components/admin/resolvePayoutReportValues';
@@ -194,10 +195,10 @@ export default function ApprovePayoutBreakdown({
     showRejectedRefunds,
     showRefundSection,
     showPaybackDetails,
-    cycleStage,
   } = values;
 
-  const netPayoutFinalPayLkr = resolveReportNetPayoutFinalPayLkr(values);
+  const cycleStage = periodBreakdownLkr ? inferPayoutCycleStage(periodBreakdownLkr) : undefined;
+  const netPayoutFinalPayLkr = resolveFinalNetPayoutPayLkr(values);
   /** Payout 2 walkthrough already includes Jason before gateway — do not add it again. */
   const showJasonInClassicNet =
     hasPositiveLkr(sharedPromoJasonLkr) && cycleStage !== 'SECOND';

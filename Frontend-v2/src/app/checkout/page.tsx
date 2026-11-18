@@ -67,6 +67,10 @@ import { freeProductBenefitLabel, displayPaidSubtotal, showsFreeProductSummaryLi
 import { rewardDiscountForSubtotal } from '@/lib/promoSubtotalDiscount';
 import { cartItemsToPromoPayload } from '@/lib/promoCartLines';
 import CheckoutPointsRedeem from '@/components/checkout/CheckoutPointsRedeem';
+import { CheckoutRedesignShell } from '@/components/checkout-redesign/CheckoutRedesignShell';
+import { PageTitle, titleHighlight } from '@/components/checkout-redesign/PageTop';
+import { checkoutCopy } from '@/components/checkout-redesign/checkoutCopy';
+import { Container } from '@/components/home-redesign/ui/Container';
 import {
   calcCheckoutPointsRedeem,
   DEFAULT_LOYALTY_SETTINGS,
@@ -77,7 +81,7 @@ import {
 import { queryClient } from '@/lib/queryClient';
 import { invalidateCustomerOrderLists } from '@/lib/orderCache';
 
-const DEFAULT_OPEN_TIME = '09:00';
+const DEFAULT_OPEN_TIME = '08:00';
 const DEFAULT_CLOSE_TIME = '23:00';
 
 type SavedDeliveryInfo = NonNullable<ReturnType<typeof useCartStore.getState>['deliveryInfo']>;
@@ -512,6 +516,15 @@ function CheckoutPage() {
     const promo = usePromoStore.getState();
     const current = promo.reward;
     const claimCode = claim.claimCode.toUpperCase();
+
+    // Free delivery does nothing on pickup — leave the slot free for other offers.
+    if (orderMode === 'TAKEAWAY' && claim.offer.offerType === 'FREE_DELIVERY') {
+      if (current?.source === 'spin' && current.code?.toUpperCase() === claimCode) {
+        clearReward();
+      }
+      return;
+    }
+
     if (promo.skipAutoApply || promo.dismissedCodes.includes(claimCode)) return;
     if (current?.locked && current.source !== 'spin') return;
 
@@ -527,7 +540,7 @@ function CheckoutPage() {
     if (!current) {
       setReward(rewardFromSpinClaim(claim, sub, orderMode));
     }
-  }, [claim, orderMode, sub, setReward, pointsRedeemActive]);
+  }, [claim, orderMode, sub, setReward, clearReward, pointsRedeemActive]);
 
   useEffect(() => {
     if (!claim?.claimCode || rewardAutoTried.current) return;
@@ -962,19 +975,19 @@ function CheckoutPage() {
 
   if (!cartHydrated) {
     return (
-      <div className="min-h-[50vh] flex items-center justify-center">
-        <Loader2 className="animate-spin text-brand" size={28} />
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="animate-spin text-brand-600" size={28} />
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 w-full">
+    <Container className="checkout-redesign-panel w-full pt-8 pb-12 sm:pt-10 lg:pt-12 lg:pb-20">
       {paymentError && (
-        <div className="mb-4 p-4 rounded-xl border border-red-500/30 bg-red-500/10 text-sm">
-          <p className="font-semibold text-red-200">Payment failed</p>
-          <p className="text-red-100/90 mt-1">{paymentError}</p>
-          <p className="text-muted text-xs mt-2">Your items are still in your cup. Update details and pay again below.</p>
+        <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          <p className="font-semibold">Payment failed</p>
+          <p className="mt-1 text-rose-700/90">{paymentError}</p>
+          <p className="mt-2 text-xs text-rose-600/80">Your items are still in your bag. Update details and pay again below.</p>
         </div>
       )}
 
@@ -995,24 +1008,38 @@ function CheckoutPage() {
       )}
 
       {paymentConfig && !paymentConfig.onlineGatewayConfigured && paymentMethods.some((m) => m.id === 'PAYHERE') && (
-        <div className="mb-4 p-3 rounded-xl alert-error text-sm">
+        <div className="mb-4 rounded-2xl alert-error p-3 text-sm">
           Online payment is not available yet. Please try again later.
         </div>
       )}
 
-      <div className="flex items-center gap-3 mb-6 sm:mb-8">
-        <Link href="/cart" className="btn-outline p-2 shrink-0">
+      <div className="mb-6 flex items-start gap-3 sm:mb-8">
+        <Link
+          href="/cart"
+          className="mt-1 inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700 ring-1 ring-brand-100 ring-inset transition-colors hover:bg-brand-100"
+        >
           <ChevronLeft size={18} />
         </Link>
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-fg">Checkout</h1>
-          <p className="text-muted text-sm truncate">
-            {orderMode === 'DELIVERY' ? 'Delivery' : 'Takeaway'}
-          </p>
-        </div>
+        <PageTitle
+          className="mb-0 min-w-0 flex-1"
+          headline={
+            <>
+              {checkoutCopy.headlineBefore}
+              {titleHighlight(checkoutCopy.headlineHighlight)}
+            </>
+          }
+          intro={
+            <>
+              {checkoutCopy.intro}{' '}
+              <span className="font-semibold text-brand-700">
+                {orderMode === 'DELIVERY' ? 'Delivery' : 'Takeaway'}
+              </span>
+            </>
+          }
+        />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)] gap-5 sm:gap-8">
+      <div className="grid grid-cols-1 gap-5 sm:gap-8 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)]">
         <div className="space-y-4 sm:space-y-5">
           {/* Location / branch */}
           <div className="card p-4 sm:p-5">
@@ -1637,12 +1664,6 @@ function CheckoutPage() {
               />
             )}
 
-            {claim?.offer.offerType === 'FREE_DELIVERY' && orderMode === 'TAKEAWAY' && Boolean(reward) && (
-              <p className="text-xs text-amber-400 mt-2">
-                Switch to Delivery to use your free delivery reward.
-              </p>
-            )}
-
             <motion.button
               whileHover={{ scale: canSubmitOrder ? 1.02 : 1 }}
               whileTap={{ scale: canSubmitOrder ? 0.98 : 1 }}
@@ -1671,23 +1692,25 @@ function CheckoutPage() {
             )}
           </div>
 
-          <p className="text-xs text-center text-muted px-2">🔒 Secured checkout</p>
+          <p className="px-2 text-center text-xs text-slate-500">🔒 Secured checkout</p>
         </div>
       </div>
-    </div>
+    </Container>
   );
 }
 
 export default function CheckoutPageEntry() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-[50vh] flex items-center justify-center">
-          <Loader2 className="animate-spin text-brand" size={28} />
-        </div>
-      }
-    >
-      <CheckoutPage />
-    </Suspense>
+    <CheckoutRedesignShell>
+      <Suspense
+        fallback={
+          <div className="flex min-h-[50vh] items-center justify-center">
+            <Loader2 className="animate-spin text-brand-600" size={28} />
+          </div>
+        }
+      >
+        <CheckoutPage />
+      </Suspense>
+    </CheckoutRedesignShell>
   );
 }

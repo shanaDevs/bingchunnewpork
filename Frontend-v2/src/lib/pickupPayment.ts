@@ -18,3 +18,13 @@ export function filterCheckoutPaymentMethods<T extends { id: string }>(
   }
   return methods.filter((method) => method.id !== 'CASH_AT_COUNTER');
 }
+
+/** App-configured pickup online-payment threshold; null when unset or invalid. */
+export function activePickupMaxOrderAmount(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value) || value <= 0) return null;
+  return value;
+}
+
+export function pickupMaxOrderAmountToast(thresholdLkr: number): string {
+  return `Takeaway orders of LKR ${thresholdLkr.toLocaleString()} or more must be paid online.`;
+}

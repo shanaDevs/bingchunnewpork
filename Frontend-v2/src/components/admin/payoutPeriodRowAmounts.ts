@@ -104,6 +104,11 @@ function netPreviewToChannelPreview(
   };
 }
 
+/** Unpaid / in-progress cycles without a stored breakdown need live net-preview. */
+export function payoutPeriodRowNeedsLiveNetPreview(breakdown: unknown): boolean {
+  return parseWithdrawalBreakdown(breakdown) == null;
+}
+
 /** Same allocation fields as payout modals / PeriodPayoutSplitCards (display only). */
 export function resolvePayoutPeriodRowDisplayAmounts(params: {
   amountCents: number;

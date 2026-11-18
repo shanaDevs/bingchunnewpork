@@ -8,7 +8,6 @@ import { AppError } from '../middleware/errorHandler';
 import { syncAllSpinOffersToPromos, syncSpinOfferToPromo, deactivateSpinOfferPromo } from '../lib/spinOfferPromo';
 import { getSpinSettings, ensureAppSchema } from '../lib/appSchema';
 import { evaluateSpinAudienceRules } from '../lib/spinEligibilityRules';
-import { getPlatformLoyaltyCampaign, resolveLoyaltyCampaign, rollSpinPrizeWin } from '../lib/loyaltyCampaign';
 import { ensureSpinWheelSchema, isSpinOfferDeleted, markSpinOfferDeleted, notDeletedSpinOfferFilter } from '../lib/spinSchema';
 import {
   countActiveSpinOffersForStore,
@@ -456,39 +455,18 @@ export async function playSpin(req: Request, res: Response, next: NextFunction) 
     if (offersWithGifts.length < 2) throw new AppError('Spin wheel is not configured yet', 400);
 
     const prizeOffers = offersWithGifts.filter((o) => o.offerType !== 'NO_PRIZE');
-    const noPrizeOffers = offersWithGifts.filter((o) => o.offerType === 'NO_PRIZE');
 
     let won: (typeof offersWithGifts)[number];
     let isPrize: boolean;
 
+    // Results follow the admin spin win-rate weights (/admin/spin). finalizePractice (after a
+    // client practice spin) still guarantees a real prize, weighted among prize segments only.
     if (finalizePractice && prizeOffers.length > 0) {
       won = pickWeighted(prizeOffers);
       isPrize = true;
     } else {
-      const campaign = storeId
-        ? await resolveLoyaltyCampaign(storeId)
-        : await getPlatformLoyaltyCampaign();
-      const applyJourneyWinChance = Boolean(campaign?.offer3Enabled);
-
-      if (applyJourneyWinChance && campaign) {
-        const wonPrizeRoll = rollSpinPrizeWin(
-          campaign.offer3WinChanceNumerator,
-          campaign.offer3WinChanceDenominator,
-        );
-        if (wonPrizeRoll && prizeOffers.length > 0) {
-          won = pickWeighted(prizeOffers);
-          isPrize = true;
-        } else if (noPrizeOffers.length > 0) {
-          won = pickWeighted(noPrizeOffers);
-          isPrize = false;
-        } else {
-          won = offersWithGifts[0];
-          isPrize = false;
-        }
-      } else {
-        won = pickWeighted(offersWithGifts);
-        isPrize = won.offerType !== 'NO_PRIZE';
-      }
+      won = pickWeighted(offersWithGifts);
+      isPrize = won.offerType !== 'NO_PRIZE';
     }
 
     const offerIndex = offersWithGifts.findIndex((o) => o.id === won.id);

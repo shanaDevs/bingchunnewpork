@@ -37,6 +37,7 @@ export function useOrderTracking(reference: string, initial?: Order) {
   const [payingAgain, setPayingAgain] = useState(false);
   const modeRef = useRef<Order["orderMode"] | undefined>(initial?.orderMode);
   const statusRef = useRef<OrderStatus | null>(initial?.status ?? null);
+  const liveStatusRef = useRef<OrderStatus | null>(null);
   const celebratedRef = useRef(false);
   const codeToastedRef = useRef<string | null>(null);
 
@@ -66,6 +67,10 @@ export function useOrderTracking(reference: string, initial?: Order) {
     statusRef.current = order.status;
   }, [order]);
 
+  useEffect(() => {
+    liveStatusRef.current = liveStatus;
+  }, [liveStatus]);
+
   const endCelebration = useCallback(() => setCelebrating(false), []);
   const celebrate = useCallback(() => {
     if (celebratedRef.current) return;
@@ -73,17 +78,23 @@ export function useOrderTracking(reference: string, initial?: Order) {
     setCelebrating(true);
   }, []);
 
+  const refreshOrder = useCallback(() => {
+    // Swallow CancelledError when an in-flight refetch is aborted by a newer invalidation.
+    return queryClient.invalidateQueries({ queryKey: ["order", reference] }).catch(() => undefined);
+  }, [queryClient, reference]);
+
   const onLiveStatus = useCallback(
     (data: { status: OrderStatus }) => {
-      setLiveStatus((previous) => {
-        if (previous === data.status) return previous;
-        void queryClient.invalidateQueries({ queryKey: ["order", reference] });
-        const before = (previous ?? statusRef.current ?? "RECEIVED") as OrderStatus;
-        if (modeRef.current && isNewCompletionStatus(data.status, before, modeRef.current === "DELIVERY")) celebrate();
-        return data.status;
-      });
+      const previous = liveStatusRef.current ?? statusRef.current;
+      if (previous === data.status) return;
+      const before = (previous ?? "RECEIVED") as OrderStatus;
+      if (modeRef.current && isNewCompletionStatus(data.status, before, modeRef.current === "DELIVERY")) celebrate();
+      liveStatusRef.current = data.status;
+      setLiveStatus(data.status);
+      // Keep invalidation outside setState — side effects in updaters can surface CancelledError.
+      void refreshOrder();
     },
-    [queryClient, reference, celebrate],
+    [refreshOrder, celebrate],
   );
 
   const onPickupSoon = useCallback((data: { title?: string; message?: string }) => {
@@ -134,6 +145,7 @@ export function useOrderTracking(reference: string, initial?: Order) {
       if (detail.orderNumber !== reference && detail.orderNumber !== order.orderNumber && detail.orderId !== order.id) return;
       if (isNewCompletionStatus(detail.status, liveStatus ?? order.status, order.orderMode === "DELIVERY")) {
         celebrate();
+        liveStatusRef.current = detail.status;
         setLiveStatus(detail.status);
       }
     };
@@ -145,9 +157,10 @@ export function useOrderTracking(reference: string, initial?: Order) {
     mutationFn: ({ reason, customText }: { reason: string; customText?: string }) =>
       api.post(`/orders/${encodeURIComponent(reference)}/cancel`, { cancellationReason: reason, customReasonText: customText }, true),
     onSuccess: () => {
+      liveStatusRef.current = "CANCELLED";
       setLiveStatus("CANCELLED");
       patchOrderInQueryCache(queryClient, [reference, order?.id, order?.orderNumber], { orderId: order?.id, orderNumber: order?.orderNumber ?? reference, status: "CANCELLED" });
-      void queryClient.invalidateQueries({ queryKey: ["order", reference] });
+      void refreshOrder();
       invalidateCustomerOrderLists(queryClient);
       toast.success("Order cancelled");
     },
@@ -217,7 +230,7 @@ export function useOrderTracking(reference: string, initial?: Order) {
     cancelling: cancelMutation.isPending,
     payAgain,
     payingAgain,
-    refresh: () => queryClient.invalidateQueries({ queryKey: ["order", reference] }),
+    refresh: () => void refreshOrder(),
   };
 }
 

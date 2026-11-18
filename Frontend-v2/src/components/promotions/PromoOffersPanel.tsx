@@ -9,6 +9,7 @@ import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import {
   formatEligibleOfferBenefit,
+  isDeliveryOnlyOffer,
   isFreeProductPromoKind,
   isLoyaltyCampaignOffer,
   pickAutoApplyCandidate,
@@ -108,15 +109,18 @@ export default function PromoOffersPanel({
     const extra = (data?.offers ?? []).filter((o) => o.autoApply);
     const byCode = new Map<string, EligiblePromoOffer>();
     for (const offer of [...fromAuto, ...extra]) {
+      if (mode === 'TAKEAWAY' && isDeliveryOnlyOffer(offer)) continue;
       byCode.set(offer.code.toUpperCase(), offer);
     }
     return [...byCode.values()];
-  }, [data]);
+  }, [data, mode]);
 
   const eligibleOffers = useMemo(() => {
     const byCode = new Map<string, EligiblePromoOffer>();
     // Only offers the current cup actually qualifies for (from the eligibility API).
     for (const offer of [...(data?.offers ?? []), ...autoOffers]) {
+      // Pickup has no delivery fee — skip free/reduced delivery prizes.
+      if (mode === 'TAKEAWAY' && isDeliveryOnlyOffer(offer)) continue;
       byCode.set(offer.code.toUpperCase(), offer);
     }
 
@@ -126,7 +130,14 @@ export default function PromoOffersPanel({
       Boolean(spinCode) &&
       spinExpiresAt != null &&
       new Date(spinExpiresAt).getTime() > Date.now();
-    if (spinStillValid && spinCode && spinClaim && !byCode.has(spinCode)) {
+    const spinIsDeliveryOnly = spinClaim?.offer.offerType === 'FREE_DELIVERY';
+    if (
+      spinStillValid &&
+      spinCode &&
+      spinClaim &&
+      !byCode.has(spinCode) &&
+      !(mode === 'TAKEAWAY' && spinIsDeliveryOnly)
+    ) {
       byCode.set(
         spinCode,
         rewardToEligibleOffer(rewardFromSpinClaim(spinClaim, orderTotal, orderMode)),
@@ -137,13 +148,14 @@ export default function PromoOffersPanel({
     for (const parked of parkedRewards) {
       const code = parked.code.toUpperCase();
       if (byCode.has(code)) continue;
-      if (spinStillValid && code === spinCode) {
+      if (mode === 'TAKEAWAY' && isDeliveryOnlyOffer(parked)) continue;
+      if (spinStillValid && code === spinCode && !(mode === 'TAKEAWAY' && spinIsDeliveryOnly)) {
         byCode.set(code, rewardToEligibleOffer(parked));
       }
     }
 
     return [...byCode.values()];
-  }, [autoOffers, data, parkedRewards, spinClaim, orderTotal, orderMode]);
+  }, [autoOffers, data, parkedRewards, spinClaim, orderTotal, orderMode, mode]);
 
   /** Carousel: all eligible offers, minus the one currently on the cup. */
   const carouselOffers = useMemo(() => {
@@ -193,6 +205,17 @@ export default function PromoOffersPanel({
   useEffect(() => {
     onRewardChange?.(reward);
   }, [reward, onRewardChange]);
+
+  // Pickup: drop free/reduced delivery rewards — they have no value without a delivery fee.
+  useEffect(() => {
+    if (mode !== 'TAKEAWAY' || !reward) return;
+    const spinDelivery =
+      reward.source === 'spin' && spinClaim?.offer.offerType === 'FREE_DELIVERY';
+    if (!spinDelivery && !isDeliveryOnlyOffer(reward)) return;
+    clearReward();
+    setPromoInput('');
+    autoTriedKey.current = '';
+  }, [mode, reward, spinClaim, clearReward]);
 
   // Drop loyalty campaign offer if API says it's no longer eligible
   useEffect(() => {
@@ -311,10 +334,12 @@ export default function PromoOffersPanel({
     if (promoBlocked) return;
     if (orderTotal <= 0 && cartItems.length === 0) return;
 
-    const rankedAuto =
+    const rankedRaw =
       (data?.autoApplyOffers?.length ? data.autoApplyOffers : null) ??
       (data?.suggested ? [data.suggested] : null) ??
       autoOffers;
+    const rankedAuto =
+      mode === 'TAKEAWAY' ? rankedRaw.filter((o) => !isDeliveryOnlyOffer(o)) : rankedRaw;
     const pool = rankedAuto.length ? rankedAuto : eligibleOffers;
 
     const candidate =

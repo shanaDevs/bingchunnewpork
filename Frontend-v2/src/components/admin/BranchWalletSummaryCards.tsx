@@ -4,11 +4,7 @@ import { BarChart3, ChevronRight, HandCoins, Wallet } from 'lucide-react';
 import { DashSkel } from '@/components/admin/BranchDashboardSkeleton';
 import { formatMoneyAmount } from '@/lib/receipt';
 import { cn } from '@/lib/utils';
-import BranchReceivablePayoutCalc from '@/components/admin/BranchReceivablePayoutCalc';
-import {
-  branchReceivableExcludingJasonCents,
-  type PayoutPeriodExpensesCents,
-} from '@/components/admin/payoutPeriodRowAmounts';
+import type { PayoutPeriodExpensesCents } from '@/components/admin/payoutPeriodRowAmounts';
 import { usePaidPayoutPeriodExpenses } from '@/components/admin/usePaidPayoutPeriodExpenses';
 
 export type BranchWalletPayablesBreakdown = {
@@ -49,6 +45,7 @@ function centsToMoney(cents: number): string {
 }
 
 const ALL_TIME_HINT = 'All-time';
+const BRANCH_RECEIVABLE_HINT = 'Paid 15-day payouts';
 const PAYOUT_PERIOD_EXPENSE_HINT = 'Paid 15-day payouts';
 
 type Props = {
@@ -71,10 +68,7 @@ const EMPTY_PAID_PAYOUT_EXPENSES: PayoutPeriodExpensesCents = {
   netPlatformAmountCents: 0,
   gatewayFeeCents: 0,
   branchReceivableCents: 0,
-  branchReceivableExcludingJasonCents: 0,
-  jasonInvestmentCents: 0,
   totalExpensesCents: 0,
-  allTimeExpenseDeductionCents: 0,
 };
 
 function RevenueChannelKpiCard({
@@ -172,19 +166,12 @@ function PayablesRevenueSummaryCard({
 }
 
 function BranchReceivableCard({
-  jasonInvestmentCents,
-  branchReceivableExcludingJasonCents,
-  gatewayFeeCents,
+  branchReceivableCents,
   loading,
 }: {
-  jasonInvestmentCents: number;
-  branchReceivableExcludingJasonCents: number;
-  gatewayFeeCents: number;
+  branchReceivableCents: number;
   loading: boolean;
 }) {
-  const combinedReceivableCents = jasonInvestmentCents + branchReceivableExcludingJasonCents;
-  const beforeGatewayCents = combinedReceivableCents + Math.max(0, gatewayFeeCents);
-
   return (
     <section className="branch-wallet-receivable branch-wallet-payables__receivable">
       <HandCoins
@@ -193,25 +180,19 @@ function BranchReceivableCard({
         strokeWidth={1}
         className="branch-wallet-receivable__art"
       />
+      <div className="branch-wallet-receivable__icon" aria-hidden>
+        <HandCoins size={15} strokeWidth={2.25} />
+      </div>
       <div className="branch-wallet-receivable__body">
-        <BranchReceivablePayoutCalc
-          beforeGatewayCents={beforeGatewayCents}
-          gatewayFeeCents={gatewayFeeCents}
-          netPayoutCents={combinedReceivableCents}
-          loading={loading}
-        />
-        <div className="branch-wallet-receivable__split">
-          <div className="branch-wallet-receivable__split-item">
-            <p className="branch-wallet-receivable__split-label">Jason&apos;s Investment Amount</p>
-            <p className="branch-wallet-receivable__split-amount">
-              {loading ? (
-                <DashSkel className="h-4 w-24 max-w-full bg-blue-900/10" />
-              ) : (
-                centsToMoney(jasonInvestmentCents)
-              )}
-            </p>
-          </div>
-        </div>
+        <p className="branch-wallet-receivable__label">Branch Receivable</p>
+        <p className="branch-wallet-receivable__amount">
+          {loading ? (
+            <DashSkel className="h-7 w-40 max-w-full bg-blue-900/10" />
+          ) : (
+            centsToMoney(branchReceivableCents)
+          )}
+        </p>
+        <p className="branch-wallet-receivable__hint">{BRANCH_RECEIVABLE_HINT}</p>
       </div>
     </section>
   );
@@ -232,8 +213,8 @@ function PayablesExpensesSummaryCard({
 }) {
   const periodHint = fromPayoutPeriods ? PAYOUT_PERIOD_EXPENSE_HINT : undefined;
   return (
-    <section className="branch-wallet-payables-summary branch-wallet-payables-summary--expenses branch-wallet-payables__metric">
-      <div className="branch-wallet-payables-summary__head relative z-10 flex shrink-0 items-center gap-2">
+    <section className="branch-wallet-payables-summary branch-wallet-payables__metric">
+      <div className="relative z-10 flex items-center gap-2">
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-[#2563EB] dark:bg-[rgba(48,126,242,0.12)] dark:text-[#307ef2]">
           <BarChart3 size={14} strokeWidth={2.3} aria-hidden />
         </div>
@@ -242,12 +223,12 @@ function PayablesExpensesSummaryCard({
         </h2>
       </div>
 
-      <div className="branch-wallet-payables-summary__body mt-2 flex min-h-0 flex-1 flex-col">
+      <div className="mt-2 flex min-h-0 flex-1 flex-col">
         <p className="branch-wallet-payables-summary__total m-0 tabular-nums leading-[1.05] tracking-[-0.03em] text-slate-950 dark:text-fg">
           {loading ? <DashSkel className="h-8 w-48 max-w-full" /> : centsToMoney(totalExpensesCents)}
         </p>
 
-        <div className="branch-wallet-payables-summary__channels grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="mt-auto grid grid-cols-1 gap-2 pt-2 sm:grid-cols-2">
           <RevenueChannelKpiCard
             label="Net Platform Amount"
             amount={centsToMoney(platformCommissionCents)}
@@ -308,13 +289,6 @@ export default function BranchWalletSummaryCards({
   const branchReceivableCents = usePayoutPeriodExpenses
     ? (resolvedPaidExpenses?.branchReceivableCents ?? 0)
     : (payables?.branchReceivableCents ?? 0);
-  const jasonInvestmentCents = usePayoutPeriodExpenses
-    ? (resolvedPaidExpenses?.jasonInvestmentCents ?? 0)
-    : 0;
-  const branchReceivableExcludingJason = usePayoutPeriodExpenses
-    ? (resolvedPaidExpenses?.branchReceivableExcludingJasonCents ??
-      branchReceivableExcludingJasonCents(branchReceivableCents, jasonInvestmentCents))
-    : branchReceivableExcludingJasonCents(branchReceivableCents, jasonInvestmentCents);
   const totalExpensesCents = usePayoutPeriodExpenses
     ? (resolvedPaidExpenses?.totalExpensesCents ?? 0)
     : (payables?.totalExpensesCents ?? 0);
@@ -363,18 +337,16 @@ export default function BranchWalletSummaryCards({
       </div>
 
       <div className="branch-wallet-payables__row branch-wallet-payables__row--expenses">
-        <BranchReceivableCard
-          jasonInvestmentCents={jasonInvestmentCents}
-          branchReceivableExcludingJasonCents={branchReceivableExcludingJason}
-          gatewayFeeCents={gatewayFeeCents}
-          loading={cardLoading}
-        />
         <PayablesExpensesSummaryCard
           totalExpensesCents={totalExpensesCents}
           platformCommissionCents={platformCommissionCents}
           gatewayFeeCents={gatewayFeeCents}
           loading={cardLoading}
           fromPayoutPeriods={usePayoutPeriodExpenses}
+        />
+        <BranchReceivableCard
+          branchReceivableCents={branchReceivableCents}
+          loading={cardLoading}
         />
       </div>
     </div>

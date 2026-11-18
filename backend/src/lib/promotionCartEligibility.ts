@@ -143,10 +143,13 @@ function isFreeDeliveryPromo(params: {
   const code = (params.code || '').toUpperCase();
   return (
     kind === 'FREE_DELIVERY' ||
+    kind === 'REDUCED_DELIVERY' ||
+    kind === 'DELIVERY_ZONE' ||
     type === 'DELIVERY' ||
     type === 'FREE_DELIVERY' ||
     code === 'FREEDELIVERY' ||
-    code.includes('FREEDELIVERY')
+    code.includes('FREEDELIVERY') ||
+    code.includes('FREE-DELIVERY')
   );
 }
 

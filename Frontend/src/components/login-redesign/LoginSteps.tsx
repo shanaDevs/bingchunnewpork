@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowLeft, BadgeCheck, CircleAlert, Gift, Info, LoaderCircle, RotateCcw, ShieldCheck, UserPlus } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CircleAlert, Gift, LoaderCircle, RotateCcw, ShieldCheck, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { SocialLoginButtons } from "@/components/auth/SocialLoginButtons";
 import { cn } from "@/components/home-redesign/lib/cn";
 import type { OtpIntent } from "@/lib/otpIntent";
 import { authErrorMessage, displayPhone, groupLocalDigits, phoneFromLocalDigits, toLocalDigits } from "./loginHelpers";
@@ -38,9 +39,6 @@ const textField = cn(
 );
 const fieldFocus = "focus:bg-white focus:shadow-[0_0_0_4px_rgb(48_121_234/0.14)] focus:ring-brand-500";
 const fieldFocusInvalid = "focus:shadow-[0_0_0_4px_rgb(244_63_94/0.12)] focus:ring-rose-400";
-/** A small note inside a step (the referral invite, Google coming soon). */
-const noteBox = "flex items-start gap-2 rounded-xl bg-cream-50 px-3 py-2.5 text-left text-xs leading-relaxed text-slate-700 ring-1 ring-cream-200 ring-inset";
-
 /** For a step title's highlighted words: blue on a tilted yellow marker swipe, as in the homepage headings. */
 function TitleHighlight({ children }: { children: ReactNode }) {
   return (
@@ -48,18 +46,6 @@ function TitleHighlight({ children }: { children: ReactNode }) {
       <span aria-hidden="true" className="absolute inset-x-0 bottom-[0.1em] -z-10 h-[0.5em] -rotate-2 rounded-full bg-sun-300" />
       {children}
     </span>
-  );
-}
-
-/** Google's "G", in its four colours. */
-function GoogleLogo({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 48 48" aria-hidden="true" className={className}>
-      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-    </svg>
   );
 }
 
@@ -92,9 +78,8 @@ function ErrorText({ id, children }: { id?: string; children: ReactNode }) {
  * 1. The mobile number, after a fixed +94 chip. Typing is grouped as 77 123 4567; Send Code checks it's a valid
  * Sri Lankan number (lib/phone's rule) and hands on the app's 07XXXXXXXX form to `onSubmit`, which asks the
  * backend for the SMS (and throws if it can't: the reason shows under the field). The same step serves sign-in
- * and sign-up: the backend makes the account for a new number. Below it, "Continue with Google": FOR NOW ONLY
- * THE DESIGN, as Google sign-in isn't wired up yet; pressing it says so. Ends with the way out for guests:
- * ordering never needs an account.
+ * and sign-up: the backend makes the account for a new number. Below it, real Google Identity sign-in.
+ * Ends with the way out for guests: ordering never needs an account.
  */
 export function PhoneStep({
   digits,
@@ -119,7 +104,6 @@ export function PhoneStep({
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [sending, setSending] = useState(false);
-  const [googleSoon, setGoogleSoon] = useState(false);
 
   // As the step appears if asked, and after each failed try (the shake remounts the field).
   useEffect(() => {
@@ -140,7 +124,6 @@ export function PhoneStep({
     if (!phone) return fail("Enter a valid Sri Lankan mobile number, e.g. 77 123 4567.", true);
     setSending(true);
     setError(null);
-    setGoogleSoon(false);
     mood("cheer");
     try {
       await onSubmit(phone);
@@ -226,25 +209,7 @@ export function PhoneStep({
         or
         <span className="h-px flex-1 bg-linear-to-l from-transparent to-slate-200" />
       </p>
-      {/* PLACEHOLDER: Google sign-in isn't wired to the backend yet (the team will add it), so this only says so. */}
-      <button
-        type="button"
-        onClick={() => setGoogleSoon(true)}
-        disabled={sending}
-        aria-describedby={googleSoon ? `${id}-google` : undefined}
-        className={secondaryButton}
-      >
-        <GoogleLogo className="size-5" />
-        Continue with Google
-      </button>
-      <div aria-live="polite">
-        {googleSoon && (
-          <p id={`${id}-google`} className={cn(noteBox, "mt-2")}>
-            <Info className="mt-px size-3.5 shrink-0 text-brand-600" aria-hidden="true" />
-            <span>Google sign-in is coming soon. For now, sign in with your mobile number.</span>
-          </p>
-        )}
-      </div>
+      <SocialLoginButtons redirectTo="/" disabled={sending} />
 
       {/* Guest checkout stays open: an account is never needed to order. */}
       <p className="mt-4 text-center text-[0.8125rem] text-slate-500 mid:mt-6">

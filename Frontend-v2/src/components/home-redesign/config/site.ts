@@ -16,6 +16,15 @@ export const mainNav: NavItem[] = [
   { label: "Locations", href: "/stores" },
 ];
 
+/** Whether a nav item is the current section: its page or a nested route (e.g. /menu/[id]). */
+export function isCurrentNav(href: string, pathname: string): boolean {
+  if (href === pathname) return true;
+  if (href === "/") return pathname === "/";
+  if (pathname.startsWith(`${href}/`)) return true;
+  if (href === "/menu" && pathname.startsWith("/product/")) return true;
+  return false;
+}
+
 export type FooterLinkGroup = {
   title: string;
   links: NavItem[];
@@ -53,7 +62,7 @@ export const contactInfo = {
     { label: "071 511 8888", href: "tel:+94715118888" },
     { label: "071 511 7777", href: "tel:+94715117777" },
   ],
-  hours: "Open Daily: 9 AM - 11 PM",
+  hours: "Open Daily: 8 AM - 11 PM",
 } as const;
 
 export const socialLinks = [

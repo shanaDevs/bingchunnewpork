@@ -190,6 +190,27 @@ export interface EligiblePromosResponse {
   loyaltySpin?: SpinEligibility['loyaltySpin'];
 }
 
+/** Free / reduced delivery — only useful on delivery orders. */
+export function isDeliveryOnlyOffer(offer: {
+  freeDelivery?: boolean;
+  promotionKind?: string | null;
+  discountType?: string | null;
+  code?: string | null;
+  label?: string | null;
+}): boolean {
+  if (offer.freeDelivery) return true;
+  const kind = (offer.promotionKind || '').toUpperCase();
+  if (kind === 'FREE_DELIVERY' || kind === 'REDUCED_DELIVERY' || kind === 'DELIVERY_ZONE') {
+    return true;
+  }
+  const type = (offer.discountType || '').toUpperCase();
+  if (type === 'DELIVERY' || type === 'FREE_DELIVERY') return true;
+  const code = (offer.code || '').toUpperCase();
+  if (code.includes('FREEDELIVERY') || code.includes('FREE-DELIVERY')) return true;
+  const label = (offer.label || '').toLowerCase();
+  return label.includes('free delivery');
+}
+
 export function formatEligibleOfferBenefit(offer: EligiblePromoOffer): string {
   if (offer.giftProduct?.name) return `Free ${offer.giftProduct.name}`;
   if (offer.giftLabel) return offer.giftLabel;
