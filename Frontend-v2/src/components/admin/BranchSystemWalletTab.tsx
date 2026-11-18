@@ -68,12 +68,6 @@ export default function BranchSystemWalletTab({
         walletBalance={walletBalance}
         availableBalance={availableBalance}
         refreshSignal={payoutPeriodsRefresh}
-        withdrawals={withdrawals}
-        withdrawalsLoading={withdrawalsLoading}
-        withdrawalStoreNames={storeNames}
-        withdrawalPagination={withdrawalPagination}
-        onWithdrawalPageChange={onPageChange}
-        onViewWithdrawal={onViewWithdrawal}
       />
     </>
   );

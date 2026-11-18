@@ -107,30 +107,35 @@ const CONNECT_SRC = buildConnectSrc();
 
 const GOOGLE_MAPS_HOSTS =
   'https://maps.googleapis.com https://maps.gstatic.com https://tile.googleapis.com';
+/** Google Identity Services (Sign in with Google button + FedCM iframe). */
+const GOOGLE_IDENTITY_HOSTS =
+  'https://accounts.google.com https://apis.google.com https://www.gstatic.com';
+const GOOGLE_SCRIPT_HOSTS = `${GOOGLE_MAPS_HOSTS} ${GOOGLE_IDENTITY_HOSTS}`;
+const GOOGLE_FRAME_HOSTS = `${GOOGLE_MAPS_HOSTS} ${GOOGLE_IDENTITY_HOSTS}`;
 
 const SHOP_CSP = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'self'",
-  `frame-src 'self' ${GOOGLE_MAPS_HOSTS}`,
+  `frame-src 'self' ${GOOGLE_FRAME_HOSTS}`,
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline' https:",
-  `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${GOOGLE_MAPS_HOSTS}`,
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${GOOGLE_SCRIPT_HOSTS}`,
   `worker-src 'self' blob: ${GOOGLE_MAPS_HOSTS}`,
   `connect-src ${CONNECT_SRC}`,
 ].join('; ');
 
 const ADMIN_SCRIPT_SRC =
-  `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${GOOGLE_MAPS_HOSTS}`;
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${GOOGLE_SCRIPT_HOSTS}`;
 
 const ADMIN_CSP_PARTS = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'self'",
-  `frame-src 'self' ${GOOGLE_MAPS_HOSTS}`,
+  `frame-src 'self' ${GOOGLE_FRAME_HOSTS}`,
   "form-action 'self'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https:",

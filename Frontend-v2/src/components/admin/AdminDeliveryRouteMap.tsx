@@ -149,6 +149,7 @@ function RouteMapView({
   highlightedStopKey,
   boundsPoints,
   fitNonce,
+  fullscreen,
   driverPosition,
   vehicleFailurePosition,
 }: {
@@ -157,6 +158,7 @@ function RouteMapView({
   highlightedStopKey?: string | null;
   boundsPoints: [number, number][];
   fitNonce?: number;
+  fullscreen?: boolean;
   driverPosition?: { lat: number; lng: number };
   vehicleFailurePosition?: { lat: number; lng: number };
 }) {
@@ -208,9 +210,10 @@ function RouteMapView({
         map.setView(points[0], 15, { animate: false });
         return;
       }
-      map.fitBounds(L.latLngBounds(points), { padding: [72, 72], animate: true });
+      const pad = fullscreen ? 96 : 72;
+      map.fitBounds(L.latLngBounds(points), { padding: [pad, pad], animate: true });
     });
-  }, [highlightedStopKey, route, returnStore.lat, returnStore.lng, map, fitNonce]);
+  }, [highlightedStopKey, route, returnStore.lat, returnStore.lng, map, fitNonce, fullscreen]);
 
   return null;
 }
@@ -230,6 +233,8 @@ type Props = {
   vehicleFailurePosition?: { lat: number; lng: number };
   pathOverlayLabel?: 'Actual' | 'Live';
   showLegend?: boolean;
+  fullscreen?: boolean;
+  initialPathLayers?: { planned?: boolean; actual?: boolean };
 };
 
 export default function AdminDeliveryRouteMap({
@@ -246,6 +251,8 @@ export default function AdminDeliveryRouteMap({
   vehicleFailurePosition,
   pathOverlayLabel = 'Actual',
   showLegend = false,
+  fullscreen = false,
+  initialPathLayers,
 }: Props) {
   const returnStore = branchStore ?? route.store;
   const pathPoints: [number, number][] = useMemo(
@@ -259,6 +266,8 @@ export default function AdminDeliveryRouteMap({
         .map((p) => [p.lat, p.lng] as [number, number]),
     [actualPath],
   );
+  const plannedVisible = (initialPathLayers?.planned ?? true) && pathPoints.length >= 2;
+  const actualVisible = (initialPathLayers?.actual ?? true) && actualPathPoints.length >= 2;
   const boundsPoints: [number, number][] = useMemo(() => {
     const points: [number, number][] = [
       [route.store.lat, route.store.lng],
@@ -292,7 +301,10 @@ export default function AdminDeliveryRouteMap({
     returnStore.lat,
     returnStore.lng,
     route.stops,
+    pathPoints,
     actualPathPoints,
+    plannedVisible,
+    actualVisible,
     driverPosition,
     vehicleFailurePosition,
   ]);
@@ -305,15 +317,15 @@ export default function AdminDeliveryRouteMap({
 
   return (
     <div className={`delivery-map-wrap h-full w-full relative ${className}`}>
-      {showLegend && (actualPathPoints.length >= 2 || pathPoints.length >= 2) && (
+      {showLegend && (actualVisible || plannedVisible) && (
         <div className="route-map-legend" aria-label="Route legend">
-          {pathPoints.length >= 2 && (
+          {plannedVisible && (
             <span className="route-map-legend__item">
               <span className="route-map-legend__swatch route-map-legend__swatch--planned" aria-hidden />
               Planned
             </span>
           )}
-          {actualPathPoints.length >= 2 && (
+          {actualVisible && (
             <span className="route-map-legend__item">
               <span className="route-map-legend__swatch route-map-legend__swatch--actual" aria-hidden />
               {pathOverlayLabel}
@@ -322,10 +334,7 @@ export default function AdminDeliveryRouteMap({
         </div>
       )}
       <MapContainer center={center} zoom={13} scrollWheelZoom className="h-full w-full">
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        <AppMapTiles />
         <MapResizeTrigger trigger={fitNonce} />
         <RouteMapView
           route={route}
@@ -333,6 +342,7 @@ export default function AdminDeliveryRouteMap({
           highlightedStopKey={highlightedStopKey}
           boundsPoints={boundsPoints}
           fitNonce={fitNonce}
+          fullscreen={fullscreen}
           driverPosition={driverPosition}
           vehicleFailurePosition={vehicleFailurePosition}
         />
@@ -353,7 +363,7 @@ export default function AdminDeliveryRouteMap({
             </Tooltip>
           </Circle>
         )}
-        {pathPoints.length >= 2 && (
+        {plannedVisible && (
           <Polyline
             positions={pathPoints}
             pathOptions={{
@@ -363,7 +373,7 @@ export default function AdminDeliveryRouteMap({
             }}
           />
         )}
-        {actualPathPoints.length >= 2 && (
+        {actualVisible && (
           <Polyline
             positions={actualPathPoints}
             pathOptions={{

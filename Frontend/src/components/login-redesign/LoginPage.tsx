@@ -154,7 +154,7 @@ type Welcome = { name: string; isNew: boolean };
  *
  * A friend's referral code (?ref=, kept by /account/register's redirect) goes with the request and the verify,
  * as the old register page sent it. Once signed in it says welcome and goes on to the homepage; anyone already
- * signed in when the page opens goes straight there. "Continue with Google" is only the design for now.
+ * signed in when the page opens goes straight there. Google sign-in uses Google Identity Services via SocialLoginButtons.
  *
  * Layout: the redesigned header and phone bottom nav (no footer); a compact white card with the current step,
  * centred on the site's blue backdrop, with a soft glow behind it and the mango drink (CUP) in the bottom-left

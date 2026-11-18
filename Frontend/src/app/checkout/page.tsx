@@ -516,6 +516,15 @@ function CheckoutPage() {
     const promo = usePromoStore.getState();
     const current = promo.reward;
     const claimCode = claim.claimCode.toUpperCase();
+
+    // Free delivery does nothing on pickup — leave the slot free for other offers.
+    if (orderMode === 'TAKEAWAY' && claim.offer.offerType === 'FREE_DELIVERY') {
+      if (current?.source === 'spin' && current.code?.toUpperCase() === claimCode) {
+        clearReward();
+      }
+      return;
+    }
+
     if (promo.skipAutoApply || promo.dismissedCodes.includes(claimCode)) return;
     if (current?.locked && current.source !== 'spin') return;
 
@@ -531,7 +540,7 @@ function CheckoutPage() {
     if (!current) {
       setReward(rewardFromSpinClaim(claim, sub, orderMode));
     }
-  }, [claim, orderMode, sub, setReward, pointsRedeemActive]);
+  }, [claim, orderMode, sub, setReward, clearReward, pointsRedeemActive]);
 
   useEffect(() => {
     if (!claim?.claimCode || rewardAutoTried.current) return;
@@ -1653,12 +1662,6 @@ function CheckoutPage() {
                   setUsePointsRaw(points);
                 }}
               />
-            )}
-
-            {claim?.offer.offerType === 'FREE_DELIVERY' && orderMode === 'TAKEAWAY' && Boolean(reward) && (
-              <p className="text-xs text-amber-400 mt-2">
-                Switch to Delivery to use your free delivery reward.
-              </p>
             )}
 
             <motion.button

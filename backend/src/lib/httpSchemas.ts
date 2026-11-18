@@ -56,5 +56,6 @@ export const payhereNotifyBodySchema = z.object({
 });
 
 export const loyaltySummaryQuerySchema = z.object({
-  storeId: z.string().uuid().optional(),
+  /** Branch ids include legacy slugs such as `store-bing-chun---moratuwa`, not only UUIDs. */
+  storeId: z.string().min(1).max(128).optional(),
 });

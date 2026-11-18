@@ -9,6 +9,7 @@ import {
   getProductOrderableQty,
 } from '@/lib/productAvailability';
 import { getBranchOrderingOpenFromCart } from '@/hooks/useBranchOrderingHours';
+import type { IceLevel, SugarLevel } from '@/lib/drinkOptions';
 
 export type ProductSize = 'REGULAR' | 'LARGE';
 export type OrderMode = 'DELIVERY' | 'TAKEAWAY';
@@ -21,6 +22,8 @@ export interface LocalCartItem {
   quantity: number;
   unitPrice: number;
   fulfillmentStore?: { id: string; name: string; distanceKm?: number };
+  iceLevel?: IceLevel | null;
+  sugarLevel?: SugarLevel | null;
 }
 
 export interface AddItemResult {

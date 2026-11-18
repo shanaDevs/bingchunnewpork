@@ -13,6 +13,7 @@ export function useApplySpinClaim(
   const { claim, hydrate } = useSpinStore();
   const reward = usePromoStore((s) => s.reward);
   const setReward = usePromoStore((s) => s.setReward);
+  const clearReward = usePromoStore((s) => s.clearReward);
   const skipAutoApply = usePromoStore((s) => s.skipAutoApply);
   const dismissedCodes = usePromoStore((s) => s.dismissedCodes);
 
@@ -22,6 +23,14 @@ export function useApplySpinClaim(
 
   useEffect(() => {
     if (!claim?.claimCode) return;
+
+    // Free delivery has no value on pickup — don't apply (and clear if already on the cup).
+    if (orderMode === 'TAKEAWAY' && claim.offer.offerType === 'FREE_DELIVERY') {
+      if (reward?.source === 'spin' && reward.code.toUpperCase() === claim.claimCode.toUpperCase()) {
+        clearReward();
+      }
+      return;
+    }
 
     const next = rewardFromSpinClaim(claim, orderTotal, orderMode);
     const spinCode = next.code.toUpperCase();
@@ -46,5 +55,5 @@ export function useApplySpinClaim(
 
     if (reward && reward.source !== 'spin') return;
     setReward(next);
-  }, [claim, orderTotal, orderMode, reward, setReward, skipAutoApply, dismissedCodes]);
+  }, [claim, orderTotal, orderMode, reward, setReward, clearReward, skipAutoApply, dismissedCodes]);
 }

@@ -98,41 +98,50 @@ function buildConnectSrc(): string {
     /* ignore */
   }
   if (process.env.NODE_ENV !== 'production') {
-    parts.push('http://localhost:*', 'ws://localhost:*');
+    parts.push('http://localhost:*', 'ws://localhost:*', 'http://127.0.0.1:*');
   }
   return parts.join(' ');
 }
 
 const CONNECT_SRC = buildConnectSrc();
 
+const GOOGLE_MAPS_HOSTS =
+  'https://maps.googleapis.com https://maps.gstatic.com https://tile.googleapis.com';
+/** Google Identity Services (Sign in with Google button + FedCM iframe). */
+const GOOGLE_IDENTITY_HOSTS =
+  'https://accounts.google.com https://apis.google.com https://www.gstatic.com';
+const GOOGLE_SCRIPT_HOSTS = `${GOOGLE_MAPS_HOSTS} ${GOOGLE_IDENTITY_HOSTS}`;
+const GOOGLE_FRAME_HOSTS = `${GOOGLE_MAPS_HOSTS} ${GOOGLE_IDENTITY_HOSTS}`;
+
 const SHOP_CSP = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'self'",
+  `frame-src 'self' ${GOOGLE_FRAME_HOSTS}`,
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline' https:",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${GOOGLE_SCRIPT_HOSTS}`,
+  `worker-src 'self' blob: ${GOOGLE_MAPS_HOSTS}`,
   `connect-src ${CONNECT_SRC}`,
 ].join('; ');
 
 const ADMIN_SCRIPT_SRC =
-  process.env.NODE_ENV === 'production'
-    ? "script-src 'self' 'unsafe-inline'"
-    : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${GOOGLE_SCRIPT_HOSTS}`;
 
 const ADMIN_CSP_PARTS = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'self'",
-  "frame-src 'none'",
+  `frame-src 'self' ${GOOGLE_FRAME_HOSTS}`,
   "form-action 'self'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline' https:",
   ADMIN_SCRIPT_SRC,
+  `worker-src 'self' blob: ${GOOGLE_MAPS_HOSTS}`,
   `connect-src ${CONNECT_SRC}`,
 ];
 if (process.env.NODE_ENV === 'production') {
@@ -225,6 +234,8 @@ const nextConfig: NextConfig = {
     }
 
     rules.push(
+      // Local cup-sticker agent must NOT be rewritten to the backend.
+      // Handled by src/app/cup-sticker-agent/[...path]/route.ts (and /api fallback in prod).
       { source: '/api/:path*', destination: `${apiOrigin}/api/:path*` },
       { source: '/socket.io/:path*', destination: `${apiOrigin}/socket.io/:path*` },
       // Delivery Service proxy — additive, only used once callers opt into

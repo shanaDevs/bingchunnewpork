@@ -39,13 +39,20 @@ export function useMe() {
   return query;
 }
 
+/** Branch ids may be UUIDs or legacy slugs (`store-bing-chun---moratuwa`); skip empty / junk values. */
+function loyaltyStoreQuery(storeId: string | null | undefined): string {
+  const id = storeId?.trim();
+  if (!id || id === "undefined" || id === "null") return "";
+  return `?storeId=${encodeURIComponent(id)}`;
+}
+
 /** Points, membership levels, journey and history (GET /loyalty/summary), for the branch the cart is ordering from, as on the old rewards page. */
 export function useLoyaltySummary() {
   const signedIn = useSignedIn();
   const storeId = useCartStore((s) => s.getFulfillmentStoreId());
   return useQuery<LoyaltySummary>({
     queryKey: ["loyalty-summary", storeId ?? ""],
-    queryFn: () => api.get(`/loyalty/summary${storeId ? `?storeId=${encodeURIComponent(storeId)}` : ""}`, true),
+    queryFn: () => api.get(`/loyalty/summary${loyaltyStoreQuery(storeId)}`, true),
     enabled: signedIn,
     staleTime: 30_000,
     retry: 1,

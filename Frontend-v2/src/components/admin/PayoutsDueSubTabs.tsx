@@ -6,21 +6,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import PayoutsDuePanel, { type PayoutDueRow } from '@/components/admin/PayoutsDuePanel';
 import DeliveryPayoutsDuePanel from '@/components/admin/DeliveryPayoutsDuePanel';
-import DeliveryPayoutsPaidPanel from '@/components/admin/DeliveryPayoutsPaidPanel';
 import DeliveryPayoutPayModal from '@/components/admin/DeliveryPayoutPayModal';
-import DeliveryApprovePayoutModal from '@/components/admin/DeliveryApprovePayoutModal';
 import DeliveryWalletPinOverlay from '@/components/admin/DeliveryWalletPinOverlay';
 import { DeliveryWalletUnlockProvider } from '@/components/admin/DeliveryWalletUnlockContext';
 import { deliveryWalletFetch, unlockDeliveryWallet } from '@/lib/deliveryWalletApi';
-import type { DeliveryPayoutDueRow, DeliveryPayoutHistoryRow } from '@/lib/deliveryPayoutTypes';
+import type { DeliveryPayoutDueRow } from '@/lib/deliveryPayoutTypes';
 
 type Props = {
-  branchListEnabled?: boolean;
-  dueStoreId?: string | null;
+  branchRows: PayoutDueRow[];
+  branchLoading?: boolean;
+  branchLoadingMore?: boolean;
   onViewBranchDue: (row: PayoutDueRow) => void;
   onReviewBranchDue: (row: PayoutDueRow) => void;
   onDeliveryDueCountChange?: (count: number) => void;
-  onBranchDueCountChange?: (count: number) => void;
 };
 
 async function fetchDeliveryPayoutsDue(unlockToken: string): Promise<DeliveryPayoutDueRow[]> {
@@ -28,12 +26,12 @@ async function fetchDeliveryPayoutsDue(unlockToken: string): Promise<DeliveryPay
 }
 
 export default function PayoutsDueSubTabs({
-  branchListEnabled = true,
-  dueStoreId = null,
+  branchRows,
+  branchLoading,
+  branchLoadingMore,
   onViewBranchDue,
   onReviewBranchDue,
   onDeliveryDueCountChange,
-  onBranchDueCountChange,
 }: Props) {
   const queryClient = useQueryClient();
   const [deliverySubTab, setDeliverySubTab] = useState<'branch' | 'delivery'>('branch');
@@ -44,8 +42,6 @@ export default function PayoutsDueSubTabs({
   const [pinSubmitting, setPinSubmitting] = useState(false);
   const [payTarget, setPayTarget] = useState<DeliveryPayoutDueRow | null>(null);
   const [viewTarget, setViewTarget] = useState<DeliveryPayoutDueRow | null>(null);
-  const [paidViewTarget, setPaidViewTarget] = useState<DeliveryPayoutHistoryRow | null>(null);
-  const [deliveryInnerTab, setDeliveryInnerTab] = useState<'due' | 'paid'>('due');
 
   const deliveryQueryEnabled = Boolean(unlockToken) && deliverySubTab === 'delivery';
 
@@ -81,13 +77,8 @@ export default function PayoutsDueSubTabs({
     ]);
   }
 
-  const [branchCount, setBranchCount] = useState(0);
+  const branchCount = branchRows.length;
   const deliveryCount = unlockToken ? deliveryDue.length : 0;
-
-  function handleBranchDueCountChange(count: number) {
-    setBranchCount(count);
-    onBranchDueCountChange?.(count);
-  }
 
   useEffect(() => {
     onDeliveryDueCountChange?.(unlockToken ? deliveryDue.length : 0);
@@ -131,11 +122,11 @@ export default function PayoutsDueSubTabs({
 
         <TabsContent value="branch" className="mt-0 outline-none">
           <PayoutsDuePanel
-            enabled={branchListEnabled}
-            storeId={dueStoreId}
+            rows={branchRows}
+            loading={branchLoading}
+            loadingMore={branchLoadingMore}
             onView={onViewBranchDue}
             onReviewAndPay={onReviewBranchDue}
-            onTotalChange={handleBranchDueCountChange}
           />
         </TabsContent>
 
@@ -163,50 +154,13 @@ export default function PayoutsDueSubTabs({
             />
           ) : (
             <DeliveryWalletUnlockProvider token={unlockToken}>
-              <div className="space-y-3">
-                <div className="inline-flex h-8 w-fit items-center justify-start gap-0.5 overflow-y-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setDeliveryInnerTab('due')}
-                    className={cn(
-                      'inline-flex h-8 flex-none items-center rounded-md px-3 text-[12px] font-semibold shadow-none',
-                      deliveryInnerTab === 'due'
-                        ? 'text-[var(--color-brand,#307ef2)]'
-                        : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
-                    )}
-                  >
-                    Due
-                    {deliveryCount > 0 && (
-                      <span className="ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold !text-white">
-                        {deliveryCount}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeliveryInnerTab('paid')}
-                    className={cn(
-                      'inline-flex h-8 flex-none items-center rounded-md px-3 text-[12px] font-semibold shadow-none',
-                      deliveryInnerTab === 'paid'
-                        ? 'text-[var(--color-brand,#307ef2)]'
-                        : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
-                    )}
-                  >
-                    Paid
-                  </button>
-                </div>
-                {deliveryInnerTab === 'due' ? (
-                  <DeliveryPayoutsDuePanel
-                    rows={deliveryDue}
-                    loading={deliveryLoading}
-                    unlockToken={unlockToken}
-                    onView={(row) => setViewTarget(row)}
-                    onReviewAndPay={(row) => setPayTarget(row)}
-                  />
-                ) : (
-                  <DeliveryPayoutsPaidPanel onView={(row) => setPaidViewTarget(row)} />
-                )}
-              </div>
+              <DeliveryPayoutsDuePanel
+                rows={deliveryDue}
+                loading={deliveryLoading}
+                unlockToken={unlockToken}
+                onView={(row) => setViewTarget(row)}
+                onReviewAndPay={(row) => setPayTarget(row)}
+              />
               {viewTarget && (
                 <DeliveryPayoutPayModal
                   open
@@ -221,14 +175,6 @@ export default function PayoutsDueSubTabs({
                   due={payTarget}
                   onClose={() => setPayTarget(null)}
                   onCompleted={refreshDeliveryDue}
-                />
-              )}
-              {paidViewTarget && (
-                <DeliveryApprovePayoutModal
-                  open
-                  payout={paidViewTarget}
-                  readOnly
-                  onClose={() => setPaidViewTarget(null)}
                 />
               )}
             </DeliveryWalletUnlockProvider>
