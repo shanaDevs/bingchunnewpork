@@ -21,8 +21,10 @@ import { throwIfVehicleBreakdownDomainError } from '../lib/vehicleBreakdownError
 import {
   RIDER_LICENSE_IMAGE_ENDPOINT_TIMEOUT_MS,
   RIDER_LICENSE_PRESIGN_TIMEOUT_MS,
+  uploadDriverAsset,
   viewableLicenseImageUrlWithTimeout,
 } from '../lib/spaces';
+import { assertAllowedImageUpload } from '../middleware/upload';
 import { meritStatusBand } from '../lib/meritPoints';
 import { computeRiderStats, isRiderStatsPeriod } from '@bingchun/delivery-domain';
 import { deriveDriverJobFlags, DRIVER_HELD_JOB_STATUSES } from '../lib/deliveryJobHelpers';
@@ -213,6 +215,34 @@ export async function getMyLicenseImage(req: Request, res: Response, next: NextF
       throw new AppError('Could not prepare licence image', 503, 'LICENSE_SIGN_FAILED');
     }
     return success(res, { licenseImageUrl, hasLicenseImage: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Upload profile photo for the logged-in rider (PATCH /delivery/me/profile-photo). */
+export async function patchMyProfilePhoto(req: Request, res: Response, next: NextFunction) {
+  try {
+    const driverId = req.user!.sub;
+    const driver = await prisma.adminUser.findFirst({
+      where: { id: driverId, role: { name: 'DELIVERY_DRIVER' } },
+      select: { id: true },
+    });
+    if (!driver) throw new AppError('Driver not found', 404);
+
+    const file = req.file;
+    if (!file) throw new AppError('Profile photo is required', 400);
+    assertAllowedImageUpload(file);
+
+    const profilePhotoUrl = await uploadDriverAsset(
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+      'profile',
+    );
+    await patchDriverOpsProfile(driverId, { profilePhotoUrl });
+
+    return success(res, { profilePhotoUrl });
   } catch (err) {
     next(err);
   }

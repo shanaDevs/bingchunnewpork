@@ -1,11 +1,19 @@
 import { Router } from 'express';
 import { authenticate, requireDeliveryDriver } from '../middleware/auth';
+import { driverImageUpload } from '@bingchun/backend/dist/middleware/upload';
 import * as meController from '../controllers/meController';
 
 const router = Router();
 
 router.get('/', authenticate, requireDeliveryDriver, meController.getMe);
 router.get('/license-image', authenticate, requireDeliveryDriver, meController.getMyLicenseImage);
+router.patch(
+  '/profile-photo',
+  authenticate,
+  requireDeliveryDriver,
+  driverImageUpload.single('profilePhoto'),
+  meController.patchMyProfilePhoto,
+);
 router.patch('/duty', authenticate, requireDeliveryDriver, meController.updateDuty);
 router.post('/vehicle-fixed', authenticate, requireDeliveryDriver, meController.markMyVehicleFixed);
 router.post('/fcm-token', authenticate, requireDeliveryDriver, meController.updateFcmToken);

@@ -419,6 +419,7 @@ const REQUESTS: Record<string, unknown> = {
   'POST /api/notifications/read-order': { orderId: ID.order },
   'POST /api/admin/notifications/read-order': { orderId: ID.order },
   'PATCH /api/delivery/me/duty': { onDuty: true },
+  'PATCH /api/delivery/me/profile-photo': '(multipart form field: profilePhoto)',
   'POST /api/delivery/me/fcm-token': { token: 'fcm-device-token', platform: 'android' },
   'POST /api/delivery/me/complaints': { orderId: ID.order, message: 'Customer was not at the gate' },
   'POST /api/delivery/me/branch-requests': { toStoreId: ID.store, note: 'Can cover Nugegoda this evening' },

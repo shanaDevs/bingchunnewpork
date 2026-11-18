@@ -1208,13 +1208,41 @@ export async function getJobRoute(req: Request, res: Response, next: NextFunctio
   }
 }
 
-const driverStatusSchema = z.object({
-  status: z.enum(['OUT_FOR_DELIVERY', 'DELIVERED', 'DELIVERY_FAILED']),
-  note: z.string().optional(),
-  otp: z.string().optional(),
-  lat: z.number().min(-90).max(90).optional(),
-  lng: z.number().min(-180).max(180).optional(),
-});
+const OUTCOMES = [
+  'CUSTOMER_UNREACHABLE',
+  'WRONG_ADDRESS',
+  'REFUSED',
+  'PAYMENT_FAILED',
+  'OTHER',
+] as const;
+
+const driverStatusSchema = z
+  .object({
+    status: z.enum(['OUT_FOR_DELIVERY', 'DELIVERED', 'DELIVERY_FAILED']),
+    note: z.string().max(250).optional(),
+    otp: z.string().optional(),
+    outcome: z.enum(OUTCOMES).optional(),
+    lat: z.number().min(-90).max(90).optional(),
+    lng: z.number().min(-180).max(180).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.status !== 'DELIVERY_FAILED') return;
+    const outcome = data.outcome ?? (data.note ? mapFailureNoteToOutcome(data.note) : undefined);
+    if (!outcome) {
+      ctx.addIssue({ code: 'custom', message: 'Failure outcome is required', path: ['outcome'] });
+      return;
+    }
+    if (outcome === 'OTHER') {
+      const note = (data.note || '').trim();
+      if (note.length < 1) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Reason is required when outcome is Other',
+          path: ['note'],
+        });
+      }
+    }
+  });
 
 /** Issue a fresh delivery code and send it to the customer (SMS + app notification). */
 export async function resendOrderOtp(req: Request, res: Response, next: NextFunction) {
@@ -1244,7 +1272,8 @@ export async function updateJobOrderStatus(req: Request, res: Response, next: Ne
     const driverId = req.user!.sub;
     const accessibleStoreIds = await requireAccessibleStores(driverId, req.user!.storeId);
 
-    const { status, note, otp, lat, lng } = driverStatusSchema.parse(req.body);
+    const body = driverStatusSchema.parse(req.body);
+    const { status, note, otp, lat, lng } = body;
     const orderId = req.params.orderId as string;
 
     const link = await prisma.deliveryJobOrder.findFirst({
@@ -1273,7 +1302,7 @@ export async function updateJobOrderStatus(req: Request, res: Response, next: Ne
         throw new AppError(`Cannot report failure from ${existing.status}`, 400);
       }
       const prior = await prisma.deliveryAttempt.count({ where: { orderId, jobId: link.jobId } });
-      const outcome = mapFailureNoteToOutcome(note);
+      const outcome = (body.outcome ?? mapFailureNoteToOutcome(note)) as DeliveryAttemptOutcome;
       await prisma.deliveryAttempt.create({
         data: {
           orderId,

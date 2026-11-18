@@ -6,6 +6,7 @@ import * as driverSelfController from '../controllers/driverSelfController';
 import * as driverNotificationController from '../controllers/driverNotificationController';
 import * as deliveryLocationsController from '../controllers/deliveryLocationsController';
 import { deliveryProxy } from '../middleware/deliveryProxy';
+import { driverImageUpload } from '../middleware/upload';
 
 const router = Router();
 
@@ -16,6 +17,13 @@ router.use(deliveryProxy);
 
 router.get('/me', authenticate, requireDeliveryDriver, driverSelfController.getMe);
 router.get('/me/license-image', authenticate, requireDeliveryDriver, driverSelfController.getMyLicenseImage);
+router.patch(
+  '/me/profile-photo',
+  authenticate,
+  requireDeliveryDriver,
+  driverImageUpload.single('profilePhoto'),
+  driverSelfController.patchMyProfilePhoto,
+);
 router.patch('/me/duty', authenticate, requireDeliveryDriver, driverSelfController.updateDuty);
 router.post('/me/vehicle-fixed', authenticate, requireDeliveryDriver, driverSelfController.markMyVehicleFixed);
 router.post('/me/fcm-token', authenticate, requireDeliveryDriver, driverSelfController.updateFcmToken);
