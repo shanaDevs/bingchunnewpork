@@ -74,6 +74,7 @@ export default function PayoutsDueSubTabs({
   async function refreshDeliveryDue() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['delivery-payouts-due'] }),
+      queryClient.invalidateQueries({ queryKey: ['delivery-payout-due-reviews'] }),
       queryClient.invalidateQueries({ queryKey: ['delivery-wallet-payouts'] }),
       queryClient.invalidateQueries({ queryKey: ['delivery-wallet'] }),
       queryClient.invalidateQueries({ queryKey: ['delivery-payout-preview-info'] }),
@@ -198,6 +199,7 @@ export default function PayoutsDueSubTabs({
                   <DeliveryPayoutsDuePanel
                     rows={deliveryDue}
                     loading={deliveryLoading}
+                    unlockToken={unlockToken}
                     onView={(row) => setViewTarget(row)}
                     onReviewAndPay={(row) => setPayTarget(row)}
                   />

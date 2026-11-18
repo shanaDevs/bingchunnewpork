@@ -18,6 +18,11 @@ vi.mock('../../src/lib/deliveryWalletService', () => ({
   getDeliveryWalletSummary: vi.fn(),
 }));
 
+vi.mock('../../src/lib/deliveryPayoutDueReview', () => ({
+  assertDeliveryPayoutDueInReview: vi.fn().mockResolvedValue(undefined),
+  clearDeliveryPayoutDueReview: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { prisma } from '../../src/lib/prisma';
 import { getDeliveryWalletSummary } from '../../src/lib/deliveryWalletService';
 import {
@@ -249,6 +254,37 @@ describe('createDeliveryPayout', () => {
     await expect(
       createDeliveryPayout({ periodDays: 15, requestedById: 'admin-1' }),
     ).rejects.toMatchObject({ message: expect.not.stringContaining('proof') });
+  });
+});
+
+describe('payDeliveryPayout draft gate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(prisma.order.findFirst).mockResolvedValue({
+      createdAt: new Date('2026-08-01T00:00:00.000Z'),
+    } as never);
+    vi.mocked(prisma.refund.findFirst).mockResolvedValue(null);
+    vi.mocked(getDeliveryWalletSummary).mockResolvedValue(summaryFixture as never);
+  });
+
+  it('blocks pay when period is not saved as draft', async () => {
+    const { assertDeliveryPayoutDueInReview } = await import('../../src/lib/deliveryPayoutDueReview');
+    vi.mocked(assertDeliveryPayoutDueInReview).mockRejectedValueOnce(
+      Object.assign(new Error('Save this payout period as draft before continuing'), { statusCode: 400 }),
+    );
+
+    const windows = await listElapsedDeliveryPayoutWindows(1);
+    const target = windows[0];
+    if (!target) return;
+
+    await expect(
+      payDeliveryPayout({
+        periodFrom: target.from,
+        paymentMethod: 'BANK_TRANSFER',
+        proofUrl: 'https://example.com/slip.pdf',
+        adminId: 'admin-1',
+      }),
+    ).rejects.toMatchObject({ statusCode: 400 });
   });
 });
 

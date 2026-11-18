@@ -1527,6 +1527,19 @@ model DeliveryPayout {
   @@map("delivery_payouts")
 }
 
+model DeliveryPayoutDueReview {
+  periodFrom DateTime @db.Date
+  periodTo   DateTime @db.Date
+  markedById String
+  createdAt  DateTime @default(now())
+
+  @@id([periodFrom, periodTo])
+  @@index([periodTo])
+  @@schema("delivery")
+
+  @@map("delivery_payout_due_reviews")
+}
+
 model WalletTransaction {
   id            String                  @id @default(uuid())
   storeId       String

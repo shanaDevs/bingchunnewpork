@@ -54,6 +54,24 @@ router.get(
   deliveryWalletController.listDeliveryPayoutsDueHandler,
 );
 router.get(
+  '/delivery-wallet/payout-due-reviews',
+  requireSystemAdmin,
+  requireDeliveryWalletUnlock,
+  deliveryWalletController.listDeliveryPayoutDueReviewsHandler,
+);
+router.put(
+  '/delivery-wallet/payout-due-reviews',
+  requireSystemAdmin,
+  requireDeliveryWalletUnlock,
+  deliveryWalletController.setDeliveryPayoutDueReviewHandler,
+);
+router.get(
+  '/delivery-wallet/payouts-due/statement',
+  requireSystemAdmin,
+  requireDeliveryWalletUnlock,
+  deliveryWalletController.getDeliveryPayoutDueStatementHandler,
+);
+router.get(
   '/delivery-wallet/payouts',
   requirePermission('DELIVERY_WALLET', 'read'),
   requireDeliveryWalletUnlock,
@@ -73,7 +91,7 @@ router.get(
 );
 router.get(
   '/delivery-wallet/payouts/:id/proof-url',
-  requireSystemAdmin,
+  requirePermission('DELIVERY_WALLET', 'read'),
   requireDeliveryWalletUnlock,
   deliveryWalletController.getDeliveryPayoutProofUrlHandler,
 );

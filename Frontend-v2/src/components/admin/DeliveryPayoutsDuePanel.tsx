@@ -1,10 +1,21 @@
 'use client';
 
-import { Bike, CheckCircle, Loader2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bike, CheckCircle, FileText, Loader2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { formatMoney } from '@/lib/receipt';
 import { formatBiweeklyPeriodLabel } from '@/lib/biweeklyPeriods';
 import { cn } from '@/lib/utils';
 import type { DeliveryPayoutDueRow } from '@/lib/deliveryPayoutTypes';
+import {
+  deliveryPayoutDueReviewKey,
+  downloadDeliveryPayoutDueStatement,
+  fetchDeliveryPayoutDueReviews,
+  formatDeliveryPayoutReviewDraftError,
+  setDeliveryPayoutDueReview,
+  type DeliveryPayoutDueReviewMark,
+} from '@/lib/deliveryPayoutDueReview';
 
 type PropsBase = {
   rows: DeliveryPayoutDueRow[];
@@ -13,8 +24,28 @@ type PropsBase = {
 };
 
 type Props =
-  | (PropsBase & { allowPay?: true; onReviewAndPay: (row: DeliveryPayoutDueRow) => void })
-  | (PropsBase & { allowPay: false; onReviewAndPay?: never });
+  | (PropsBase & {
+      allowPay?: true;
+      unlockToken: string;
+      onReviewAndPay: (row: DeliveryPayoutDueRow) => void;
+    })
+  | (PropsBase & {
+      allowPay: false;
+      unlockToken?: string;
+      onReviewAndPay?: never;
+    })
+  | (PropsBase & {
+      allowPay?: true;
+      unlockToken?: never;
+      onReviewAndPay: (row: DeliveryPayoutDueRow) => void;
+    });
+
+function reviewMark(row: DeliveryPayoutDueRow): DeliveryPayoutDueReviewMark {
+  return {
+    periodFrom: row.periodFrom.slice(0, 10),
+    periodTo: row.periodTo.slice(0, 10),
+  };
+}
 
 export default function DeliveryPayoutsDuePanel({
   rows,
@@ -22,10 +53,73 @@ export default function DeliveryPayoutsDuePanel({
   onView,
   onReviewAndPay,
   allowPay = true,
+  unlockToken,
 }: Props) {
+  const queryClient = useQueryClient();
+  const reviewWorkflow = allowPay && Boolean(unlockToken);
+  const [reviewBusyKey, setReviewBusyKey] = useState<string | null>(null);
+  const [downloadBusyKey, setDownloadBusyKey] = useState<string | null>(null);
+
+  const reviewsQuery = useQuery({
+    queryKey: ['delivery-payout-due-reviews', unlockToken],
+    queryFn: () => fetchDeliveryPayoutDueReviews(unlockToken!),
+    enabled: reviewWorkflow,
+    staleTime: 15_000,
+  });
+
+  const inReviewKeys = useMemo(
+    () => new Set((reviewsQuery.data ?? []).map((mark) => deliveryPayoutDueReviewKey(mark))),
+    [reviewsQuery.data],
+  );
+
   const count = rows.length;
   const platformFeePercent = rows[0]?.platformFeePercent;
   const gatewayFeePercent = rows[0]?.gatewayFeePercent;
+  const reviewsReady = !reviewWorkflow || reviewsQuery.isSuccess;
+  const reviewsError = reviewWorkflow && reviewsQuery.isError;
+
+  async function toggleReview(row: DeliveryPayoutDueRow, next: boolean) {
+    if (!unlockToken) return;
+    if (next && !row.payable) {
+      toast.error(formatDeliveryPayoutReviewDraftError('Only the earliest due delivery period can be saved as draft.'));
+      return;
+    }
+    const mark = reviewMark(row);
+    const key = deliveryPayoutDueReviewKey(mark);
+    const previous = reviewsQuery.data ?? [];
+    setReviewBusyKey(key);
+    queryClient.setQueryData<DeliveryPayoutDueReviewMark[]>(
+      ['delivery-payout-due-reviews', unlockToken],
+      (current = []) => {
+        let updated = [...current];
+        updated = updated.filter((item) => deliveryPayoutDueReviewKey(item) !== key);
+        if (next) updated.push(mark);
+        return updated;
+      },
+    );
+    try {
+      await setDeliveryPayoutDueReview(unlockToken, mark, next);
+    } catch (err) {
+      queryClient.setQueryData(['delivery-payout-due-reviews', unlockToken], previous);
+      const message = err instanceof Error ? err.message : 'Could not update review status';
+      toast.error(formatDeliveryPayoutReviewDraftError(message));
+    } finally {
+      setReviewBusyKey(null);
+    }
+  }
+
+  async function handleDownload(row: DeliveryPayoutDueRow) {
+    if (!unlockToken) return;
+    const key = deliveryPayoutDueReviewKey(reviewMark(row));
+    setDownloadBusyKey(key);
+    try {
+      await downloadDeliveryPayoutDueStatement(unlockToken, row.periodFrom, row.periodTo);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not download the payout statement');
+    } finally {
+      setDownloadBusyKey(null);
+    }
+  }
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--color-navy-border)] bg-[var(--color-card)]">
@@ -60,9 +154,14 @@ export default function DeliveryPayoutsDuePanel({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left text-xs">
+            <table className="w-full min-w-[1080px] text-left text-xs">
               <thead>
                 <tr className="border-b border-[var(--color-navy-border)] bg-[var(--color-input-bg)]/50 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                  {reviewWorkflow && (
+                    <th className="px-3 py-2.5 font-semibold" scope="col">
+                      Draft
+                    </th>
+                  )}
                   <th className="px-3 py-2.5 font-semibold">Partner</th>
                   <th className="px-3 py-2.5 font-semibold">Period</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Gross</th>
@@ -77,6 +176,9 @@ export default function DeliveryPayoutsDuePanel({
                   <th className="px-3 py-2.5 text-right font-semibold">Net due</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Orders</th>
                   <th className="px-3 py-2.5 text-right font-semibold">View</th>
+                  {reviewWorkflow && (
+                    <th className="px-3 py-2.5 text-right font-semibold">PDF</th>
+                  )}
                   {allowPay ? (
                     <th className="px-3 py-2.5 text-right font-semibold">Action</th>
                   ) : (
@@ -85,99 +187,162 @@ export default function DeliveryPayoutsDuePanel({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={`${row.periodFrom}-${row.periodTo}`}
-                    className="border-b border-[var(--color-navy-border)]/70 last:border-b-0 hover:bg-[var(--color-input-bg)]/40"
-                  >
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-2 font-medium text-[var(--color-text)]">
-                        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/12 text-sky-500">
-                          <Bike size={14} strokeWidth={2.25} />
-                        </span>
-                        Delivery Partner
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-[var(--color-text-muted)]">
-                      {formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo)}
-                      <span className="ml-1.5 text-[10px] font-semibold text-[var(--color-text)]">
-                        {row.days} days
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-[var(--color-text)]">
-                      {formatMoney(row.grossDeliveryFee)}
-                    </td>
-                    <td
-                      className="px-3 py-3 text-right tabular-nums text-[var(--color-text-muted)]"
-                      title={
-                        typeof row.platformFeePercent === 'number'
-                          ? `Platform fee (${row.platformFeePercent}%)`
-                          : undefined
-                      }
+                {rows.map((row) => {
+                  const key = deliveryPayoutDueReviewKey(reviewMark(row));
+                  const inReview = inReviewKeys.has(key);
+                  const reviewBusy = reviewBusyKey === key;
+                  const downloadBusy = downloadBusyKey === key;
+                  const payNote =
+                    !row.payable
+                      ? 'Pay earlier period first'
+                      : reviewsError
+                        ? 'Review status unavailable'
+                        : !reviewsReady
+                          ? 'Loading review status…'
+                          : !inReview
+                            ? 'Save as draft first'
+                            : null;
+
+                  return (
+                    <tr
+                      key={`${row.periodFrom}-${row.periodTo}`}
+                      className={cn(
+                        'border-b border-[var(--color-navy-border)]/70 last:border-b-0 hover:bg-[var(--color-input-bg)]/40',
+                        inReview && 'bg-amber-500/[0.06]',
+                      )}
                     >
-                      {typeof row.platformFee === 'number' ? formatMoney(row.platformFee) : '—'}
-                    </td>
-                    <td
-                      className="px-3 py-3 text-right tabular-nums text-[var(--color-text-muted)]"
-                      title={
-                        typeof row.gatewayFeePercent === 'number'
-                          ? `Gateway fee (${row.gatewayFeePercent}%)`
-                          : undefined
-                      }
-                    >
-                      {typeof row.gatewayFee === 'number' ? formatMoney(row.gatewayFee) : '—'}
-                    </td>
-                    <td className="px-3 py-3 text-right font-semibold tabular-nums text-[var(--color-text)]">
-                      {formatMoney(row.netForDelivery)}
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-[var(--color-text)]">
-                      {row.orderCount}
-                    </td>
-                    <td className="px-3 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => onView?.(row)}
-                        className={cn(
-                          'inline-flex items-center rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5',
-                          'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
-                        )}
-                      >
-                        View
-                      </button>
-                    </td>
-                    <td className="px-3 py-3 text-right">
-                      {allowPay ? (
-                        row.payable ? (
-                          <button
-                            type="button"
-                            onClick={() => onReviewAndPay?.(row)}
-                            className={cn(
-                              'inline-flex items-center rounded-lg border border-[var(--color-brand)] px-3 py-1.5',
-                              'text-xs font-semibold text-[var(--color-brand)] transition-colors hover:bg-[var(--color-brand-subtle)]',
-                            )}
-                          >
-                            Review & Pay
-                          </button>
-                        ) : (
-                          <span className="text-[10px] font-medium text-[var(--color-text-muted)]">
-                            Pay earlier period first
+                      {reviewWorkflow && (
+                        <td className="px-3 py-3">
+                          <input
+                            type="checkbox"
+                            checked={inReview}
+                            disabled={!reviewsReady || reviewBusy || (!inReview && !row.payable)}
+                            title={
+                              !inReview && !row.payable
+                                ? 'Only the earliest due period can be saved as draft'
+                                : undefined
+                            }
+                            aria-label="Save delivery payout as draft"
+                            onChange={(event) => void toggleReview(row, event.target.checked)}
+                            className="h-4 w-4 accent-[var(--color-brand)] disabled:cursor-not-allowed"
+                          />
+                        </td>
+                      )}
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-2 font-medium text-[var(--color-text)]">
+                          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/12 text-sky-500">
+                            <Bike size={14} strokeWidth={2.25} />
                           </span>
-                        )
-                      ) : (
-                        <span
+                          Delivery Partner
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap text-[var(--color-text-muted)]">
+                        {formatBiweeklyPeriodLabel(row.periodFrom, row.periodTo)}
+                        <span className="ml-1.5 text-[10px] font-semibold text-[var(--color-text)]">
+                          {row.days} days
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums text-[var(--color-text)]">
+                        {formatMoney(row.grossDeliveryFee)}
+                      </td>
+                      <td
+                        className="px-3 py-3 text-right tabular-nums text-[var(--color-text-muted)]"
+                        title={
+                          typeof row.platformFeePercent === 'number'
+                            ? `Platform fee (${row.platformFeePercent}%)`
+                            : undefined
+                        }
+                      >
+                        {typeof row.platformFee === 'number' ? formatMoney(row.platformFee) : '—'}
+                      </td>
+                      <td
+                        className="px-3 py-3 text-right tabular-nums text-[var(--color-text-muted)]"
+                        title={
+                          typeof row.gatewayFeePercent === 'number'
+                            ? `Gateway fee (${row.gatewayFeePercent}%)`
+                            : undefined
+                        }
+                      >
+                        {typeof row.gatewayFee === 'number' ? formatMoney(row.gatewayFee) : '—'}
+                      </td>
+                      <td className="px-3 py-3 text-right font-semibold tabular-nums text-[var(--color-text)]">
+                        {formatMoney(row.netForDelivery)}
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums text-[var(--color-text)]">
+                        {row.orderCount}
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => onView?.(row)}
                           className={cn(
-                            'text-[10px] font-semibold',
-                            row.payable
-                              ? 'text-emerald-400'
-                              : 'text-[var(--color-text-muted)]',
+                            'inline-flex items-center rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5',
+                            'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
                           )}
                         >
-                          {row.payable ? 'Ready to pay' : 'Earlier period pending'}
-                        </span>
+                          View
+                        </button>
+                      </td>
+                      {reviewWorkflow && (
+                        <td className="px-3 py-3 text-right">
+                          <button
+                            type="button"
+                            disabled={!inReview || downloadBusy}
+                            title={!inReview ? 'Save as draft first' : undefined}
+                            onClick={() => void handleDownload(row)}
+                            className={cn(
+                              'inline-flex items-center gap-1 rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5',
+                              'text-xs font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-input-bg)]',
+                              'disabled:cursor-not-allowed disabled:opacity-60',
+                            )}
+                          >
+                            {downloadBusy ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                              <FileText size={12} />
+                            )}
+                            PDF
+                          </button>
+                        </td>
                       )}
-                    </td>
-                  </tr>
-                ))}
+                      <td className="px-3 py-3 text-right">
+                        {allowPay ? (
+                          payNote == null ? (
+                            <button
+                              type="button"
+                              onClick={() => onReviewAndPay?.(row)}
+                              className={cn(
+                                'inline-flex items-center rounded-lg border border-[var(--color-brand)] px-3 py-1.5',
+                                'text-xs font-semibold text-[var(--color-brand)] transition-colors hover:bg-[var(--color-brand-subtle)]',
+                              )}
+                            >
+                              Review & Pay
+                            </button>
+                          ) : (
+                            <span
+                              className="inline-flex max-w-[9.5rem] flex-col items-end gap-0.5 text-[10px] font-medium text-[var(--color-text-muted)]"
+                              title={payNote}
+                            >
+                              <span className="rounded-lg border border-[var(--color-navy-border)] px-3 py-1.5 text-xs font-semibold opacity-50">
+                                Review & Pay
+                              </span>
+                              <span className="text-right">{payNote}</span>
+                            </span>
+                          )
+                        ) : (
+                          <span
+                            className={cn(
+                              'text-[10px] font-semibold',
+                              row.payable ? 'text-emerald-400' : 'text-[var(--color-text-muted)]',
+                            )}
+                          >
+                            {row.payable ? 'Ready to pay' : 'Earlier period pending'}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

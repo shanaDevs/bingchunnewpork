@@ -1,6 +1,6 @@
 import PDFDocument from 'pdfkit';
 import type PDFKit from 'pdfkit';
-import { settlementPaymentMethodLabel } from '../settlementPaymentMethod';
+import type { SettlementPaymentMethodKey } from '../settlementPaymentMethod';
 import {
   DARTCODES_ISSUER,
   INVOICE_COLORS as C,
@@ -9,7 +9,7 @@ import {
   INVOICE_SANS_BOLD as SANS_BOLD,
   INVOICE_SERIF as SERIF,
 } from './constants';
-import { formatSettlementPeriodLabel } from './format';
+import { formatInvoiceDate, formatSettlementPeriodLabel, paymentMethodLabel } from './format';
 import type { DeliveryWalletSummary } from '../deliveryWalletService';
 import { collectPdfBuffer } from './parsing';
 import {
@@ -91,6 +91,8 @@ export type DeliveryPayoutStatementInput = {
   paidAt: Date;
   amountLkr: number;
   paymentMethod: string | null;
+  checkNumber?: string | null;
+  checkDate?: Date | null;
   summary: DeliveryWalletSummary;
 };
 
@@ -151,7 +153,7 @@ export async function renderDeliveryPayoutStatementToBuffer(
     year: 'numeric',
   });
   const methodLabel = input.paymentMethod
-    ? settlementPaymentMethodLabel(String(input.paymentMethod))
+    ? paymentMethodLabel(input.paymentMethod as SettlementPaymentMethodKey)
     : '—';
 
   doc.fillColor(C.textMuted).font(SANS_BOLD).fontSize(7.5).text('DELIVERY PARTNER', marginX, y, {
@@ -167,6 +169,15 @@ export async function renderDeliveryPayoutStatementToBuffer(
   doc.text(`Status  ${input.statusLabel}`, marginX, y);
   y += 14;
   doc.text(`Payment method  ${methodLabel}`, marginX, y);
+  if (input.paymentMethod === 'CHECK') {
+    y += 14;
+    doc.text(`Cheque number  ${input.checkNumber?.trim() || '—'}`, marginX, y);
+    const checkDateLabel = input.checkDate ? formatInvoiceDate(input.checkDate) : null;
+    if (checkDateLabel) {
+      y += 14;
+      doc.text(`Cheque date  ${checkDateLabel}`, marginX, y);
+    }
+  }
   y += 22;
 
   doc.fillColor(C.navy).font(SERIF).fontSize(14).text('Summary', marginX, y);

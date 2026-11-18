@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from '@/lib/apiBase';
+import { withAdminCredentials } from '@/lib/adminSession';
 
 export const DELIVERY_WALLET_UNLOCK_HEADER = 'X-Delivery-Wallet-Unlock';
 
@@ -30,10 +31,13 @@ export async function deliveryWalletFetch<T = unknown>(
   if (options?.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
-  const res = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...options,
-    headers,
-  });
+  const res = await fetch(
+    `${getApiBaseUrl()}${path}`,
+    withAdminCredentials({
+      ...options,
+      headers,
+    }),
+  );
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(json.message || json.error || 'Request failed');

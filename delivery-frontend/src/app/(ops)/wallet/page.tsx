@@ -44,7 +44,7 @@ import DeliveryPayoutPaymentCell from '@/components/admin/DeliveryPayoutPaymentC
 import DeliveryPayoutPayModal from '@/components/admin/DeliveryPayoutPayModal';
 import CurrentDeliveryPayoutCycleCard from '@/components/admin/CurrentDeliveryPayoutCycleCard';
 import DeliveryPayoutsDuePanel from '@/components/admin/DeliveryPayoutsDuePanel';
-import { openPayoutProofById } from '@/lib/adminProtectedFile';
+import { openDeliveryPayoutProof } from '@/lib/deliveryPayoutProof';
 import {
   parseDeliveryPayoutBreakdown,
   type DeliveryCurrentPayoutCycle,
@@ -681,7 +681,7 @@ function DeliveryWalletPageContent() {
 
   async function openPayoutProof(row: DeliveryPayoutRow) {
     try {
-      await openPayoutProofById('deliveryPayout', row.id);
+      await openDeliveryPayoutProof(row.id, unlockToken);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not open payment proof');
     }
